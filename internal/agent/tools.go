@@ -7,12 +7,21 @@ import (
 
 	"charm.land/fantasy"
 
+	"github.com/nchapman/hivebot/internal/agent/tools"
 	"github.com/nchapman/hivebot/internal/hub"
 )
 
 // buildTools creates the set of fantasy tools available to this agent.
 func (a *Agent) buildTools() []fantasy.AgentTool {
 	return []fantasy.AgentTool{
+		// Core tools
+		tools.NewBashTool(a.workingDir),
+		tools.NewReadFileTool(),
+		tools.NewWriteFileTool(),
+		tools.NewListFilesTool(a.workingDir),
+		tools.NewFetchTool(),
+
+		// Swarm tools
 		a.toolListWorkers(),
 		a.toolDelegateTask(),
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -29,15 +30,17 @@ type Agent struct {
 	config         config.AgentConfig
 	agent          fantasy.Agent
 	swarm          *hub.Swarm
+	workingDir     string
 	logger         *slog.Logger
 	taskDispatcher TaskDispatchFunc
 }
 
 // Options configures how an agent connects to an LLM provider.
 type Options struct {
-	Provider ProviderType
-	APIKey   string
-	Model    string // overrides the model from agent config
+	Provider   ProviderType
+	APIKey     string
+	Model      string // overrides the model from agent config
+	WorkingDir string // working directory for file/bash tools
 }
 
 // New creates a new Hive agent from the given config, connecting it to
@@ -56,17 +59,33 @@ func New(ctx context.Context, cfg config.AgentConfig, swarm *hub.Swarm, opts Opt
 		return nil, fmt.Errorf("creating language model: %w", err)
 	}
 
-	a := &Agent{
-		config: cfg,
-		swarm:  swarm,
-		logger: logger,
+	workingDir := opts.WorkingDir
+	if workingDir == "" {
+		workingDir, _ = os.Getwd()
 	}
 
-	tools := a.buildTools()
+	a := &Agent{
+		config:     cfg,
+		swarm:      swarm,
+		workingDir: workingDir,
+		logger:     logger,
+	}
+
+	agentTools := a.buildTools()
+
+	// Build system prompt: agent prompt + skill instructions
+	systemPrompt := cfg.Prompt
+	if len(cfg.Skills) > 0 {
+		systemPrompt += "\n\n## Skills\n\n"
+		for _, skill := range cfg.Skills {
+			systemPrompt += fmt.Sprintf("### %s\n%s\n\n%s\n\n",
+				skill.Name, skill.Description, skill.Prompt)
+		}
+	}
 
 	a.agent = fantasy.NewAgent(lm,
-		fantasy.WithSystemPrompt(cfg.Prompt),
-		fantasy.WithTools(tools...),
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(agentTools...),
 	)
 
 	return a, nil
