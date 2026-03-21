@@ -1,0 +1,134 @@
+package tools
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestFetch_BasicGet(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("hello from server"))
+	}))
+	defer ts.Close()
+
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "200") {
+		t.Errorf("expected 200 status, got %q", content)
+	}
+	if !strings.Contains(content, "hello from server") {
+		t.Errorf("expected response body, got %q", content)
+	}
+	if !strings.Contains(content, "text/plain") {
+		t.Errorf("expected content type, got %q", content)
+	}
+}
+
+func TestFetch_JSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"key": "value"}`))
+	}))
+	defer ts.Close()
+
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, `"key"`) {
+		t.Errorf("expected JSON body, got %q", content)
+	}
+}
+
+func TestFetch_404(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "404") {
+		t.Errorf("expected 404 status, got %q", content)
+	}
+}
+
+func TestFetch_EmptyURL(t *testing.T) {
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": ""}`)
+	if !isErr {
+		t.Fatal("expected error for empty URL")
+	}
+	if !strings.Contains(content, "required") {
+		t.Errorf("expected 'required' error, got %q", content)
+	}
+}
+
+func TestFetch_InvalidURL(t *testing.T) {
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "not-a-url"}`)
+	if !isErr {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(content, "http") {
+		t.Errorf("expected URL scheme error, got %q", content)
+	}
+}
+
+func TestFetch_UnreachableHost(t *testing.T) {
+	// Use a closed server to fail fast instead of timing out
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	ts.Close() // immediately close so connection is refused
+
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if !isErr {
+		t.Fatal("expected error for unreachable host")
+	}
+	if !strings.Contains(content, "fetch failed") {
+		t.Errorf("expected 'fetch failed' error, got %q", content)
+	}
+}
+
+func TestFetch_LargeResponse(t *testing.T) {
+	// Return more than maxResponseBody bytes
+	big := strings.Repeat("x", maxResponseBody+1000)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(big))
+	}))
+	defer ts.Close()
+
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "truncated") {
+		t.Errorf("expected truncation notice, got length %d", len(content))
+	}
+}
+
+func TestFetch_ChecksUserAgent(t *testing.T) {
+	var gotUA string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	tool := NewFetchTool()
+	runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if gotUA != "Hive/1.0" {
+		t.Errorf("User-Agent = %q, want %q", gotUA, "Hive/1.0")
+	}
+}
