@@ -10,28 +10,38 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/hub"
+	"github.com/nchapman/hivebot/internal/transport"
 )
 
 // Server is the HTTP server for the Hive leader.
 type Server struct {
-	swarm  *hub.Swarm
-	webFS  fs.FS // embedded web UI files (nil = no UI serving)
-	mux    *http.ServeMux
-	logger *slog.Logger
+	swarm     *hub.Swarm
+	transport *transport.Server
+	agent     *agent.Agent // coordinator agent for chat (nil = no chat)
+	webFS     fs.FS        // embedded web UI files (nil = no UI serving)
+	mux       *http.ServeMux
+	logger    *slog.Logger
 }
 
 // NewServer creates a new API server. If webFS is non-nil, the web UI
 // will be served for any request that doesn't match an API route.
 func NewServer(swarm *hub.Swarm, logger *slog.Logger, webFS fs.FS) *Server {
 	s := &Server{
-		swarm:  swarm,
-		webFS:  webFS,
-		mux:    http.NewServeMux(),
-		logger: logger,
+		swarm:     swarm,
+		transport: transport.NewServer(swarm, logger),
+		webFS:     webFS,
+		mux:       http.NewServeMux(),
+		logger:    logger,
 	}
 	s.routes()
 	return s
+}
+
+// Transport returns the WebSocket transport server for wiring up task dispatch.
+func (s *Server) Transport() *transport.Server {
+	return s.transport
 }
 
 func (s *Server) routes() {
@@ -41,8 +51,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/workers", s.handleListWorkers)
 	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
 
-	// TODO: WebSocket endpoint for workers
-	// TODO: WebSocket endpoint for web UI chat
+	// WebSocket endpoint for worker connections
+	s.mux.HandleFunc("/ws/worker", s.transport.HandleWebSocket)
+
+	// WebSocket endpoint for web UI chat
+	s.mux.HandleFunc("/ws/chat", s.handleChat)
 
 	// Catch-all: serve web UI or 404
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

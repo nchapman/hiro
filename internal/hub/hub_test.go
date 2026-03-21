@@ -102,15 +102,10 @@ func TestSwarm_TaskLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok = s.GetTask("t1")
-	if !ok {
-		t.Fatal("expected task t1 after completion")
-	}
-	if got.Status != TaskCompleted {
-		t.Errorf("status = %q, want %q", got.Status, TaskCompleted)
-	}
-	if got.Result != "found the info" {
-		t.Errorf("result = %q, want %q", got.Result, "found the info")
+	// Completed tasks are evicted from the map
+	_, ok = s.GetTask("t1")
+	if ok {
+		t.Fatal("expected task t1 to be evicted after completion")
 	}
 
 	active = s.ActiveTasks()
@@ -126,15 +121,10 @@ func TestSwarm_FailTask(t *testing.T) {
 	if err := s.FailTask("t1", "timeout"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := s.GetTask("t1")
-	if !ok {
-		t.Fatal("expected task t1")
-	}
-	if got.Status != TaskFailed {
-		t.Errorf("status = %q, want %q", got.Status, TaskFailed)
-	}
-	if got.Error != "timeout" {
-		t.Errorf("error = %q, want %q", got.Error, "timeout")
+	// Failed tasks are evicted from the map
+	_, ok := s.GetTask("t1")
+	if ok {
+		t.Fatal("expected task t1 to be evicted after failure")
 	}
 }
 

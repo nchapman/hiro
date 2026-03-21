@@ -141,7 +141,8 @@ func (s *Swarm) GetTask(id string) (Task, bool) {
 	return *t, true
 }
 
-// CompleteTask marks a task as completed with a result.
+// CompleteTask marks a task as completed with a result and removes it
+// from the active task map.
 func (s *Swarm) CompleteTask(id, result string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,10 +153,12 @@ func (s *Swarm) CompleteTask(id, result string) error {
 	t.Status = TaskCompleted
 	t.Result = result
 	t.DoneAt = time.Now()
+	delete(s.tasks, id)
 	return nil
 }
 
-// FailTask marks a task as failed with an error.
+// FailTask marks a task as failed with an error and removes it
+// from the active task map.
 func (s *Swarm) FailTask(id, errMsg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,6 +169,7 @@ func (s *Swarm) FailTask(id, errMsg string) error {
 	t.Status = TaskFailed
 	t.Error = errMsg
 	t.DoneAt = time.Now()
+	delete(s.tasks, id)
 	return nil
 }
 

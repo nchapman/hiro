@@ -1,10 +1,45 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
+}
+
+interface ChatWireMessage {
+  type: 'message' | 'delta' | 'done' | 'error'
+  role?: 'user' | 'assistant'
+  content?: string
+}
+
+function useWebSocket() {
+  const wsRef = useRef<WebSocket | null>(null)
+  const [connected, setConnected] = useState(false)
+
+  const connect = useCallback((onMessage: (msg: ChatWireMessage) => void) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat`)
+
+    ws.onopen = () => setConnected(true)
+    ws.onclose = () => setConnected(false)
+    ws.onmessage = (e) => {
+      try {
+        onMessage(JSON.parse(e.data))
+      } catch { /* ignore malformed messages */ }
+    }
+
+    wsRef.current = ws
+    return () => ws.close()
+  }, [])
+
+  const send = useCallback((msg: ChatWireMessage) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg))
+    }
+  }, [])
+
+  return { connect, send, connected }
 }
 
 const styles = {
@@ -18,7 +53,16 @@ const styles = {
     borderBottom: '1px solid var(--border)',
     fontSize: 14,
     color: 'var(--text-muted)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
   },
+  statusDot: (connected: boolean) => ({
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    background: connected ? 'var(--green)' : 'var(--red)',
+  }),
   messages: {
     flex: 1,
     overflow: 'auto',
@@ -55,16 +99,16 @@ const styles = {
     resize: 'none' as const,
     fontFamily: 'inherit',
   },
-  send: {
+  send: (disabled: boolean) => ({
     padding: '10px 20px',
-    background: 'var(--accent)',
-    color: '#000',
+    background: disabled ? 'var(--bg-elevated)' : 'var(--accent)',
+    color: disabled ? 'var(--text-muted)' : '#000',
     border: 'none',
     borderRadius: 8,
     fontSize: 14,
     fontWeight: 600,
-    cursor: 'pointer',
-  },
+    cursor: disabled ? 'default' : 'pointer',
+  }),
   empty: {
     flex: 1,
     display: 'flex',
@@ -78,52 +122,97 @@ const styles = {
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+  const [streaming, setStreaming] = useState(false)
   const messagesEnd = useRef<HTMLDivElement>(null)
+  const streamingMsgId = useRef<string | null>(null)
+  const { connect, send, connected } = useWebSocket()
 
+  // Auto-scroll only when near the bottom
+  const messagesContainer = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    messagesEnd.current?.scrollIntoView({ behavior: 'smooth' })
+    const container = messagesContainer.current
+    if (!container) return
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+    if (isNearBottom) {
+      messagesEnd.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
 
-  const send = () => {
-    const text = input.trim()
-    if (!text) return
+  useEffect(() => {
+    return connect((msg) => {
+      switch (msg.type) {
+        case 'delta': {
+          // Append delta to the current streaming message
+          if (!streamingMsgId.current) {
+            const id = crypto.randomUUID()
+            streamingMsgId.current = id
+            setMessages(prev => [...prev, {
+              id,
+              role: 'assistant',
+              content: msg.content || '',
+              timestamp: new Date(),
+            }])
+          } else {
+            const id = streamingMsgId.current
+            setMessages(prev =>
+              prev.map(m => m.id === id
+                ? { ...m, content: m.content + (msg.content || '') }
+                : m
+              )
+            )
+          }
+          break
+        }
+        case 'done':
+          streamingMsgId.current = null
+          setStreaming(false)
+          break
+        case 'error':
+          streamingMsgId.current = null
+          setStreaming(false)
+          setMessages(prev => [...prev, {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `Error: ${msg.content}`,
+            timestamp: new Date(),
+          }])
+          break
+      }
+    })
+  }, [connect])
 
-    const userMsg: Message = {
+  const handleSend = () => {
+    const text = input.trim()
+    if (!text || streaming || !connected) return
+
+    setMessages(prev => [...prev, {
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
       timestamp: new Date(),
-    }
-    setMessages(prev => [...prev, userMsg])
+    }])
     setInput('')
-
-    // TODO: Send to backend via WebSocket and stream response
-    // For now, echo back a placeholder
-    setTimeout(() => {
-      const assistantMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: `[Hive is not connected to an LLM yet. You said: "${text}"]`,
-        timestamp: new Date(),
-      }
-      setMessages(prev => [...prev, assistantMsg])
-    }, 300)
+    setStreaming(true)
+    send({ type: 'message', content: text })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      send()
+      handleSend()
     }
   }
 
   return (
     <div style={styles.container}>
-      <div style={styles.header}>Swarm Chat</div>
+      <div style={styles.header}>
+        <span style={styles.statusDot(connected)} />
+        Swarm Chat {!connected && '(connecting...)'}
+      </div>
       {messages.length === 0 ? (
         <div style={styles.empty}>Send a message to start a conversation with the swarm.</div>
       ) : (
-        <div style={styles.messages}>
+        <div style={styles.messages} ref={messagesContainer}>
           {messages.map(msg => (
             <div key={msg.id} style={styles.message(msg.role)}>
               {msg.content}
@@ -138,10 +227,17 @@ export default function Chat() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message the swarm..."
+          placeholder={connected ? 'Message the swarm...' : 'Connecting...'}
+          disabled={!connected}
           rows={1}
         />
-        <button style={styles.send} onClick={send}>Send</button>
+        <button
+          style={styles.send(streaming || !connected)}
+          onClick={handleSend}
+          disabled={streaming || !connected}
+        >
+          {streaming ? '...' : 'Send'}
+        </button>
       </div>
     </div>
   )
