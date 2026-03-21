@@ -57,8 +57,8 @@ func TestSwarmStatusEndpoint(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body["swarm_code"] != "test-swarm" {
-		t.Errorf("swarm_code = %v, want %q", body["swarm_code"], "test-swarm")
+	if _, hasCode := body["swarm_code"]; hasCode {
+		t.Error("swarm_code should not be exposed in API response")
 	}
 	if body["worker_count"].(float64) != 1 {
 		t.Errorf("worker_count = %v, want 1", body["worker_count"])

@@ -101,7 +101,6 @@ func (s *Server) handleSwarmStatus(w http.ResponseWriter, r *http.Request) {
 	activeTasks := s.swarm.ActiveTasks()
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"swarm_code":   s.swarm.Code(),
 		"worker_count": len(workers),
 		"active_tasks": len(activeTasks),
 	})

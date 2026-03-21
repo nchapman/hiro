@@ -9,7 +9,6 @@ interface WorkerInfo {
 }
 
 interface SwarmStatus {
-  swarm_code: string
   worker_count: number
   active_tasks: number
 }
@@ -134,12 +133,6 @@ export default function Dashboard() {
         <div style={styles.stat}>
           <div style={styles.statLabel}>Active Tasks</div>
           <div style={styles.statValue}>{status?.active_tasks ?? '—'}</div>
-        </div>
-        <div style={styles.stat}>
-          <div style={styles.statLabel}>Swarm Code</div>
-          <div style={{ ...styles.statValue, fontSize: 16, fontFamily: 'monospace' }}>
-            {status?.swarm_code ?? '—'}
-          </div>
         </div>
       </div>
 

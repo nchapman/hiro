@@ -18,6 +18,14 @@ type Worker struct {
 	LastSeen    time.Time
 }
 
+// clone returns a deep copy of the worker, including the Skills slice.
+func (w *Worker) clone() Worker {
+	c := *w
+	c.Skills = make([]string, len(w.Skills))
+	copy(c.Skills, w.Skills)
+	return c
+}
+
 // HasSkill reports whether the worker advertises the given skill.
 func (w Worker) HasSkill(skill string) bool {
 	for _, s := range w.Skills {
@@ -96,28 +104,28 @@ func (s *Swarm) GetWorker(id string) (Worker, bool) {
 	if !ok {
 		return Worker{}, false
 	}
-	return *w, true
+	return w.clone(), true
 }
 
-// Workers returns a snapshot copy of all connected workers.
+// Workers returns a deep-copy snapshot of all connected workers.
 func (s *Swarm) Workers() []Worker {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]Worker, 0, len(s.workers))
 	for _, w := range s.workers {
-		result = append(result, *w)
+		result = append(result, w.clone())
 	}
 	return result
 }
 
-// FindWorkers returns copies of all workers that have the given skill.
+// FindWorkers returns deep copies of all workers that have the given skill.
 func (s *Swarm) FindWorkers(skill string) []Worker {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var result []Worker
 	for _, w := range s.workers {
 		if w.HasSkill(skill) {
-			result = append(result, *w)
+			result = append(result, w.clone())
 		}
 	}
 	return result

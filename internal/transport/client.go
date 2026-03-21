@@ -27,7 +27,8 @@ type Client struct {
 	handler     TaskHandler
 	logger      *slog.Logger
 	conn        *websocket.Conn
-	writeMu     sync.Mutex // serializes all writes to conn
+	writeMu     sync.Mutex     // serializes all writes to conn
+	taskWg      sync.WaitGroup // tracks in-flight task goroutines
 	agentID     string
 }
 
@@ -112,8 +113,10 @@ func (c *Client) Connect(ctx context.Context) error {
 		"swarm", reg.SwarmName,
 	)
 
-	// Enter message loop
-	return c.messageLoop(ctx)
+	// Enter message loop — wait for in-flight tasks to drain on exit
+	err = c.messageLoop(ctx)
+	c.taskWg.Wait()
+	return err
 }
 
 func (c *Client) messageLoop(ctx context.Context) error {
@@ -128,7 +131,11 @@ func (c *Client) messageLoop(ctx context.Context) error {
 
 		switch env.Type {
 		case TypeTaskRequest:
-			go c.handleTask(ctx, env)
+			c.taskWg.Add(1)
+			go func() {
+				defer c.taskWg.Done()
+				c.handleTask(ctx, env)
+			}()
 
 		case TypeHeartbeat:
 			c.write(ctx, Envelope{

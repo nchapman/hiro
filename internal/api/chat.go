@@ -61,12 +61,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			errMsg := ChatMessage{Type: "error", Content: err.Error()}
-			wsjson.Write(ctx, conn, errMsg)
+			if writeErr := wsjson.Write(ctx, conn, errMsg); writeErr != nil {
+				return
+			}
 			continue
 		}
 
 		// Signal end of response
 		done := ChatMessage{Type: "done", Role: "assistant"}
-		wsjson.Write(ctx, conn, done)
+		if err := wsjson.Write(ctx, conn, done); err != nil {
+			return
+		}
 	}
 }

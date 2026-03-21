@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -30,7 +32,12 @@ func run() error {
 		Level: slog.LevelInfo,
 	}))
 
-	swarmCode := envOr("HIVE_SWARM_CODE", "default")
+	swarmCode := os.Getenv("HIVE_SWARM_CODE")
+	if swarmCode == "" {
+		swarmCode = generateRandomCode()
+		logger.Warn("HIVE_SWARM_CODE not set — generated ephemeral code",
+			"code", swarmCode)
+	}
 	listenAddr := envOr("HIVE_ADDR", ":8080")
 	agentsDir := envOr("HIVE_AGENTS_DIR", "agents")
 	providerType := envOr("HIVE_PROVIDER", "anthropic")
@@ -81,10 +88,10 @@ func run() error {
 	}
 
 	httpServer := &http.Server{
-		Addr:    listenAddr,
-		Handler: srv,
-		// No read/write timeout — WebSocket connections are long-lived
-		IdleTimeout: 120 * time.Second,
+		Addr:              listenAddr,
+		Handler:           srv,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown
@@ -113,4 +120,12 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func generateRandomCode() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }

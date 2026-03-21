@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,8 @@ const (
 	maxDescriptionLen = 256
 	maxSkills         = 20
 	maxSkillNameLen   = 64
+	maxTaskResultLen  = 32768 // 32KB cap on task results sent to LLM
+	registrationTimeout = 10 * time.Second
 )
 
 // Server handles WebSocket connections from worker agents.
@@ -28,16 +31,24 @@ type Server struct {
 	swarm  *hub.Swarm
 	logger *slog.Logger
 
-	mu      sync.RWMutex
-	conns   map[string]*workerConn          // worker ID -> connection
-	pending map[string]chan taskResponse     // task ID -> result channel
+	mu      sync.Mutex
+	conns   map[string]*workerConn         // worker ID -> connection
+	pending map[string]chan taskResponse    // task ID -> result channel
 	tasks   map[string]map[string]struct{} // worker ID -> set of pending task IDs
 }
 
 type workerConn struct {
 	workerID string
 	conn     *websocket.Conn
+	writeMu  sync.Mutex // serializes all writes to conn
 	cancel   context.CancelFunc
+}
+
+// write serializes writes to the worker WebSocket connection.
+func (wc *workerConn) write(ctx context.Context, env Envelope) error {
+	wc.writeMu.Lock()
+	defer wc.writeMu.Unlock()
+	return wsjson.Write(ctx, wc.conn, env)
 }
 
 type taskResponse struct {
@@ -56,8 +67,7 @@ func NewServer(swarm *hub.Swarm, logger *slog.Logger) *Server {
 	}
 }
 
-// HandleWebSocket returns an http.HandlerFunc that upgrades connections
-// to WebSocket and manages the worker lifecycle.
+// HandleWebSocket upgrades connections to WebSocket and manages the worker lifecycle.
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -74,9 +84,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Conn, cancel context.CancelFunc) {
 	defer conn.CloseNow()
 
-	// First message must be a register message
+	// First message must be a register message — enforce a deadline
+	regCtx, regCancel := context.WithTimeout(ctx, registrationTimeout)
+	defer regCancel()
+
 	var env Envelope
-	if err := wsjson.Read(ctx, conn, &env); err != nil {
+	if err := wsjson.Read(regCtx, conn, &env); err != nil {
 		s.logger.Error("failed to read register message", "error", err)
 		return
 	}
@@ -99,9 +112,9 @@ func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Con
 		return
 	}
 
-	// Validate swarm code
-	if reg.SwarmCode != s.swarm.Code() {
-		s.logger.Warn("invalid swarm code", "got", reg.SwarmCode, "agent", reg.AgentName)
+	// Validate swarm code — constant-time comparison
+	if subtle.ConstantTimeCompare([]byte(reg.SwarmCode), []byte(s.swarm.Code())) != 1 {
+		s.logger.Warn("invalid swarm code attempt", "agent", reg.AgentName)
 		conn.Close(websocket.StatusPolicyViolation, "invalid swarm code")
 		return
 	}
@@ -155,7 +168,7 @@ func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Con
 	)
 
 	// Send registered confirmation
-	err = wsjson.Write(ctx, conn, Envelope{
+	err = wc.write(ctx, Envelope{
 		Type:      TypeRegistered,
 		ID:        uuid.New().String(),
 		InReplyTo: env.ID,
@@ -218,15 +231,31 @@ func (s *Server) handleTaskResult(workerID string, env Envelope) {
 		return
 	}
 
-	s.mu.Lock()
-	ch, ok := s.pending[result.TaskID]
-	delete(s.pending, result.TaskID)
-	if taskSet, exists := s.tasks[workerID]; exists {
-		delete(taskSet, result.TaskID)
+	// Truncate oversized results before they reach the LLM
+	if len(result.Result) > maxTaskResultLen {
+		result.Result = result.Result[:maxTaskResultLen] + "\n[truncated]"
 	}
+
+	// Verify task ownership — only accept results from the assigned worker
+	s.mu.Lock()
+	taskSet, workerExists := s.tasks[workerID]
+	if !workerExists {
+		s.mu.Unlock()
+		return
+	}
+	if _, owned := taskSet[result.TaskID]; !owned {
+		s.mu.Unlock()
+		s.logger.Warn("worker claimed result for unowned task",
+			"worker", workerID, "task", result.TaskID)
+		return
+	}
+
+	ch, hasPending := s.pending[result.TaskID]
+	delete(s.pending, result.TaskID)
+	delete(taskSet, result.TaskID)
 	s.mu.Unlock()
 
-	if ok {
+	if hasPending {
 		ch <- taskResponse{result: result.Result}
 	}
 
@@ -241,15 +270,26 @@ func (s *Server) handleTaskError(workerID string, env Envelope) {
 		return
 	}
 
+	// Verify task ownership
 	s.mu.Lock()
-	ch, ok := s.pending[taskErr.TaskID]
-	delete(s.pending, taskErr.TaskID)
-	if taskSet, exists := s.tasks[workerID]; exists {
-		delete(taskSet, taskErr.TaskID)
+	taskSet, workerExists := s.tasks[workerID]
+	if !workerExists {
+		s.mu.Unlock()
+		return
 	}
+	if _, owned := taskSet[taskErr.TaskID]; !owned {
+		s.mu.Unlock()
+		s.logger.Warn("worker claimed error for unowned task",
+			"worker", workerID, "task", taskErr.TaskID)
+		return
+	}
+
+	ch, hasPending := s.pending[taskErr.TaskID]
+	delete(s.pending, taskErr.TaskID)
+	delete(taskSet, taskErr.TaskID)
 	s.mu.Unlock()
 
-	if ok {
+	if hasPending {
 		ch <- taskResponse{err: fmt.Errorf("worker error: %s", taskErr.Error)}
 	}
 
@@ -265,21 +305,39 @@ func (s *Server) handleTaskProgress(env Envelope) {
 	s.logger.Info("task progress", "task_id", progress.TaskID, "message", progress.Message)
 }
 
+// cleanup removes a worker and fails all its pending tasks.
+// Collects state under lock, then calls Swarm methods outside the lock
+// to avoid ABBA deadlock (Server.mu → Swarm.mu vs Swarm.mu → Server.mu).
 func (s *Server) cleanup(workerID string) {
+	// Step 1: collect pending tasks and channels under Server.mu
+	type pendingTask struct {
+		taskID string
+		ch     chan taskResponse
+	}
+	var toFail []pendingTask
+
 	s.mu.Lock()
-	// Fail all pending tasks for this worker
 	if taskSet, ok := s.tasks[workerID]; ok {
 		for taskID := range taskSet {
+			pt := pendingTask{taskID: taskID}
 			if ch, pending := s.pending[taskID]; pending {
-				ch <- taskResponse{err: fmt.Errorf("worker disconnected")}
+				pt.ch = ch
 				delete(s.pending, taskID)
 			}
-			s.swarm.FailTask(taskID, "worker disconnected")
+			toFail = append(toFail, pt)
 		}
 		delete(s.tasks, workerID)
 	}
 	delete(s.conns, workerID)
 	s.mu.Unlock()
+
+	// Step 2: send errors and fail tasks outside the lock
+	for _, pt := range toFail {
+		if pt.ch != nil {
+			pt.ch <- taskResponse{err: fmt.Errorf("worker disconnected")}
+		}
+		s.swarm.FailTask(pt.taskID, "worker disconnected")
+	}
 
 	s.swarm.RemoveWorker(workerID)
 	s.logger.Info("worker cleaned up", "id", workerID)
@@ -288,9 +346,9 @@ func (s *Server) cleanup(workerID string) {
 // DispatchTask sends a task to a specific worker and blocks until the result
 // is available or the context is cancelled.
 func (s *Server) DispatchTask(ctx context.Context, worker hub.Worker, skill, prompt, taskContext string) (string, error) {
-	s.mu.RLock()
+	s.mu.Lock()
 	wc, ok := s.conns[worker.ID]
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	if !ok {
 		return "", fmt.Errorf("worker %q (%s) is not connected", worker.AgentName, worker.ID)
@@ -325,8 +383,8 @@ func (s *Server) DispatchTask(ctx context.Context, worker hub.Worker, skill, pro
 		s.mu.Unlock()
 	}()
 
-	// Send task request to worker
-	err := wsjson.Write(ctx, wc.conn, Envelope{
+	// Send task request to worker — uses per-connection write mutex
+	err := wc.write(ctx, Envelope{
 		Type:      TypeTaskRequest,
 		ID:        uuid.New().String(),
 		From:      "leader",
