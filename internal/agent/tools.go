@@ -17,6 +17,7 @@ func (a *Agent) buildTools() []fantasy.AgentTool {
 		// Core tools
 		tools.NewBashTool(a.workingDir),
 		tools.NewReadFileTool(),
+		tools.NewEditTool(),
 		tools.NewWriteFileTool(),
 		tools.NewListFilesTool(a.workingDir),
 		tools.NewFetchTool(),
