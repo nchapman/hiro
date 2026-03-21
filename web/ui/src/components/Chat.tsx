@@ -17,7 +17,7 @@ function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const onMessageRef = useRef<(msg: ChatWireMessage) => void>(() => {})
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
+  const reconnectTimer = useRef<number | undefined>(undefined)
 
   const connectWs = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -27,7 +27,7 @@ function useWebSocket() {
     ws.onclose = () => {
       setConnected(false)
       // Auto-reconnect after 3 seconds
-      reconnectTimer.current = setTimeout(connectWs, 3000)
+      reconnectTimer.current = window.setTimeout(connectWs, 3000)
     }
     ws.onmessage = (e) => {
       try {
