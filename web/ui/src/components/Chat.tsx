@@ -229,9 +229,14 @@ export default function Chat() {
         <div style={styles.messages} ref={messagesContainer}>
           {messages.map(msg => (
             <div key={msg.id} style={styles.message(msg.role)}>
-              {msg.content}
+              {msg.content || (msg.role === 'assistant' ? '...' : '')}
             </div>
           ))}
+          {streaming && !streamingMsgId.current && (
+            <div style={styles.message('assistant')}>
+              <span style={{ color: 'var(--text-muted)' }}>Thinking...</span>
+            </div>
+          )}
           <div ref={messagesEnd} />
         </div>
       )}
