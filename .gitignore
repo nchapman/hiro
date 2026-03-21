@@ -1,0 +1,29 @@
+# Binaries
+/hive
+/bin/
+*.exe
+
+# Build
+/dist/
+
+# Web UI
+/web/ui/node_modules/
+/web/ui/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Test
+coverage.out
+*.test
