@@ -79,9 +79,14 @@ func run() error {
 			// Wire task dispatch through the transport layer
 			coordinator.SetTaskDispatcher(srv.Transport().DispatchTask)
 
+			actualModel := cfg.Model
+			if modelOverride != "" {
+				actualModel = modelOverride
+			}
 			logger.Info("coordinator agent loaded",
 				"name", coordinator.Name(),
-				"model", cfg.Model,
+				"provider", providerType,
+				"model", actualModel,
 				"skills", len(cfg.Skills),
 			)
 
