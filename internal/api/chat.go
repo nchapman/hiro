@@ -37,6 +37,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// Each WebSocket connection gets its own conversation history
+	conv := agent.NewConversation()
+
 	for {
 		// Read user message
 		var msg ChatMessage
@@ -52,8 +55,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Stream response from agent — propagate write errors to abort early
-		_, err := s.agent.StreamChat(ctx, msg.Content, func(text string) error {
+		// Stream response from agent with conversation history
+		_, err := s.agent.StreamChat(ctx, conv, msg.Content, func(text string) error {
 			delta := ChatMessage{Type: "delta", Role: "assistant", Content: text}
 			b, _ := json.Marshal(delta)
 			return conn.Write(ctx, websocket.MessageText, b)

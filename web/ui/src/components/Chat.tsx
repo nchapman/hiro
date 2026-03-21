@@ -16,22 +16,36 @@ interface ChatWireMessage {
 function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
+  const onMessageRef = useRef<(msg: ChatWireMessage) => void>(() => {})
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
 
-  const connect = useCallback((onMessage: (msg: ChatWireMessage) => void) => {
+  const connectWs = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat`)
 
     ws.onopen = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
+    ws.onclose = () => {
+      setConnected(false)
+      // Auto-reconnect after 3 seconds
+      reconnectTimer.current = setTimeout(connectWs, 3000)
+    }
     ws.onmessage = (e) => {
       try {
-        onMessage(JSON.parse(e.data))
+        onMessageRef.current(JSON.parse(e.data))
       } catch { /* ignore malformed messages */ }
     }
 
     wsRef.current = ws
-    return () => ws.close()
   }, [])
+
+  const connect = useCallback((onMessage: (msg: ChatWireMessage) => void) => {
+    onMessageRef.current = onMessage
+    connectWs()
+    return () => {
+      clearTimeout(reconnectTimer.current)
+      wsRef.current?.close()
+    }
+  }, [connectWs])
 
   const send = useCallback((msg: ChatWireMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

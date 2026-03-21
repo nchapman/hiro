@@ -82,24 +82,24 @@ func (a *Agent) Config() config.AgentConfig {
 	return a.config
 }
 
-// Chat sends a message to the agent and returns the response text.
-func (a *Agent) Chat(ctx context.Context, prompt string) (string, error) {
-	result, err := a.agent.Generate(ctx, fantasy.AgentCall{
-		Prompt: prompt,
-	})
-	if err != nil {
-		return "", fmt.Errorf("agent generate: %w", err)
-	}
-	return result.Response.Content.Text(), nil
+// Conversation holds the message history for a multi-turn chat session.
+type Conversation struct {
+	Messages []fantasy.Message
 }
 
-// StreamChat sends a message to the agent and streams the response.
-// The onDelta callback is called with each text token as it arrives.
-// If onDelta returns an error, streaming stops and the error is propagated.
-// Returns the complete response text when done.
-func (a *Agent) StreamChat(ctx context.Context, prompt string, onDelta func(text string) error) (string, error) {
+// NewConversation creates a new empty conversation.
+func NewConversation() *Conversation {
+	return &Conversation{}
+}
+
+// StreamChat sends a message in the context of a conversation, streaming
+// the response token-by-token. The conversation history is automatically
+// updated with both the user message and the assistant's response.
+// If onDelta returns an error, streaming stops.
+func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt string, onDelta func(text string) error) (string, error) {
 	result, err := a.agent.Stream(ctx, fantasy.AgentStreamCall{
-		Prompt: prompt,
+		Prompt:   prompt,
+		Messages: conv.Messages,
 		OnTextDelta: func(id, text string) error {
 			if onDelta != nil {
 				return onDelta(text)
@@ -110,6 +110,13 @@ func (a *Agent) StreamChat(ctx context.Context, prompt string, onDelta func(text
 	if err != nil {
 		return "", fmt.Errorf("agent stream: %w", err)
 	}
+
+	// Accumulate messages from all steps into conversation history
+	conv.Messages = append(conv.Messages, fantasy.NewUserMessage(prompt))
+	for _, step := range result.Steps {
+		conv.Messages = append(conv.Messages, step.Messages...)
+	}
+
 	return result.Response.Content.Text(), nil
 }
 

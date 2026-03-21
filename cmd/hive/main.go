@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/config"
@@ -28,6 +30,9 @@ func main() {
 }
 
 func run() error {
+	// Load .env file if present (does not override existing env vars)
+	godotenv.Load()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
