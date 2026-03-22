@@ -16,6 +16,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
+	"github.com/nchapman/hivebot/internal/workspace"
 	"github.com/nchapman/hivebot/web"
 )
 
@@ -45,6 +46,11 @@ func run() error {
 	providerType := envOr("HIVE_PROVIDER", "anthropic")
 	apiKey := os.Getenv("HIVE_API_KEY")
 	modelOverride := os.Getenv("HIVE_MODEL")
+
+	// Initialize workspace directory structure and seed defaults
+	if err := workspace.Init(workspaceDir, logger); err != nil {
+		return fmt.Errorf("initializing workspace: %w", err)
+	}
 
 	webFS, err := web.DistFS()
 	if err != nil {
