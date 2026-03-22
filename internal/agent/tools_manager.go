@@ -51,6 +51,13 @@ func buildMemoryTools(instanceDir string) []fantasy.AgentTool {
 	}
 }
 
+// buildTodoTools returns a tool for managing the agent's todo list.
+func buildTodoTools(instanceDir string) []fantasy.AgentTool {
+	return []fantasy.AgentTool{
+		toolTodos(instanceDir),
+	}
+}
+
 // --- spawn_agent tool ---
 
 type spawnAgentInput struct {
@@ -365,6 +372,80 @@ func toolMemoryWrite(instanceDir string) fantasy.AgentTool {
 
 			return fantasy.NewTextResponse(
 				fmt.Sprintf("Memory updated (%d bytes). Changes will be reflected in your system prompt on the next turn.", len(input.Content))), nil
+		},
+	)
+}
+
+// --- todos tool ---
+
+type todosInput struct {
+	Todos []todoItem `json:"todos" description:"The complete updated todo list. Send the full list each time — items not included will be removed."`
+}
+
+type todoItem struct {
+	Content    string `json:"content"     description:"What needs to be done (imperative form, e.g. 'Set up database schema')."`
+	Status     string `json:"status"      description:"Task status: pending, in_progress, or completed."`
+	ActiveForm string `json:"active_form" description:"Present continuous form shown while in progress (e.g. 'Setting up database schema'). Optional."`
+}
+
+func toolTodos(instanceDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool("todos",
+		"Manage your task list. Send the complete updated list each time — you can add, remove, reorder, and update statuses in one call. Your tasks are shown in your system prompt so you always know what's next. Use this for multi-step work to track progress.",
+		func(ctx context.Context, input todosInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Read old todos for change tracking
+			oldTodos, _ := config.ReadTodos(instanceDir)
+			oldStatus := make(map[string]config.TodoStatus)
+			for _, t := range oldTodos {
+				oldStatus[t.Content] = t.Status
+			}
+
+			// Validate and convert
+			todos := make([]config.Todo, 0, len(input.Todos))
+			for _, item := range input.Todos {
+				switch config.TodoStatus(item.Status) {
+				case config.TodoStatusPending, config.TodoStatusInProgress, config.TodoStatusCompleted:
+				default:
+					return fantasy.NewTextErrorResponse(
+						fmt.Sprintf("invalid status %q for %q: must be pending, in_progress, or completed", item.Status, item.Content)), nil
+				}
+				todos = append(todos, config.Todo{
+					Content:    item.Content,
+					Status:     config.TodoStatus(item.Status),
+					ActiveForm: item.ActiveForm,
+				})
+			}
+
+			// Track changes
+			var justCompleted []string
+			var justStarted string
+			completed := 0
+			for _, t := range todos {
+				if t.Status == config.TodoStatusCompleted {
+					completed++
+					if oldStatus[t.Content] != config.TodoStatusCompleted {
+						justCompleted = append(justCompleted, t.Content)
+					}
+				}
+				if t.Status == config.TodoStatusInProgress && oldStatus[t.Content] != config.TodoStatusInProgress {
+					justStarted = t.Content
+				}
+			}
+
+			if err := config.WriteTodos(instanceDir, todos); err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("failed to write todos: %v", err)), nil
+			}
+
+			// Build response
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "Tasks updated: %d/%d completed.", completed, len(todos))
+			if len(justCompleted) > 0 {
+				fmt.Fprintf(&sb, " Completed: %s.", strings.Join(justCompleted, ", "))
+			}
+			if justStarted != "" {
+				fmt.Fprintf(&sb, " Started: %s.", justStarted)
+			}
+			return fantasy.NewTextResponse(sb.String()), nil
 		},
 	)
 }

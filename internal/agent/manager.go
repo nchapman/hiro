@@ -371,6 +371,7 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	var conv *Conversation
 	if cfg.Mode == config.ModePersistent {
 		opts.ExtraTools = append(opts.ExtraTools, buildMemoryTools(instDir)...)
+		opts.ExtraTools = append(opts.ExtraTools, buildTodoTools(instDir)...)
 
 		if opts.LM != nil {
 			historyPath := filepath.Join(instDir, "history.db")

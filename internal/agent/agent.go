@@ -239,6 +239,7 @@ func extractText(msg fantasy.Message) string {
 func (a *Agent) currentSystemPrompt() string {
 	identity := ""
 	memory := ""
+	todos := ""
 	if a.instanceDir != "" {
 		if id, err := config.ReadOptionalFile(filepath.Join(a.instanceDir, "identity.md")); err != nil {
 			a.logger.Warn("could not read identity.md", "error", err)
@@ -250,13 +251,18 @@ func (a *Agent) currentSystemPrompt() string {
 		} else {
 			memory = mem
 		}
+		if t, err := config.ReadTodos(a.instanceDir); err != nil {
+			a.logger.Warn("could not read todos.json", "error", err)
+		} else {
+			todos = config.FormatTodos(t)
+		}
 	}
-	return buildSystemPrompt(a.config, identity, memory)
+	return buildSystemPrompt(a.config, identity, memory, todos)
 }
 
 // buildSystemPrompt assembles the system prompt from the agent's config
-// and dynamic content. Order: soul → identity → memories → instructions → tools → skills.
-func buildSystemPrompt(cfg config.AgentConfig, identity, memory string) string {
+// and dynamic content. Order: soul → identity → memories → todos → instructions → tools → skills.
+func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string) string {
 	var p strings.Builder
 
 	if cfg.Soul != "" {
@@ -273,6 +279,12 @@ func buildSystemPrompt(cfg config.AgentConfig, identity, memory string) string {
 	if memory != "" {
 		p.WriteString("## Memories\n\n")
 		p.WriteString(memory)
+		p.WriteString("\n\n")
+	}
+
+	if todos != "" {
+		p.WriteString("## Current Tasks\n\n")
+		p.WriteString(todos)
 		p.WriteString("\n\n")
 	}
 
