@@ -11,9 +11,10 @@ Hive is a distributed AI agent platform written in Go. A single binary serves an
 ```bash
 make build        # Build web UI + Go binary (outputs ./hive)
 make build-dev    # Build Go binary without web UI (uses -tags dev)
-make test         # Run tests in Docker (builds test container)
-make test-local   # Run tests locally (no Docker, uses mock workers)
-make check        # test + go vet (in Docker)
+make test            # Run tests in Docker (builds test container)
+make test-local      # Run tests locally (no Docker, uses mock workers)
+make test-isolation  # Run UID isolation tests in Docker (requires user pool)
+make check           # test + go vet (in Docker)
 make web          # Build web UI only (cd web/ui && npm install && npm run build)
 make docker       # Docker build
 make proto        # Regenerate protobuf (requires protoc)
@@ -263,7 +264,7 @@ agents:
 | `/tools rm <agent>` | Clear override |
 | `/tools list [agent]` | Show overrides |
 
-**File filtering:** File tools hide `config.yaml` from agents (forbidden path filter) so they don't waste time on it. This is a convenience feature, not a security boundary — actual access control will be enforced at the OS level.
+**File filtering:** File tools hide `config.yaml` from agents (forbidden path filter) so they don't waste time on it. This is a convenience feature, not a security boundary — actual access control is enforced at the OS level via UID isolation (`config.yaml` is `0600` root-owned).
 
 ## Creating Agents at Runtime
 
@@ -292,5 +293,5 @@ Manager tools are scoped to the calling agent's descendants via `IsDescendant()`
 - gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing.
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
-- `make test` runs tests in Docker (`Dockerfile.test`). `make test-local` runs locally with mock workers.
+- `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
 - In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), workspace files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Outside Docker, isolation is disabled (no `hive-agents` group).

@@ -101,12 +101,14 @@ workspace/
 ## Development
 
 ```bash
-make build        # Build web UI + Go binary
-make build-dev    # Go binary only (no web UI, uses -tags dev)
-make test         # Run tests
-make check        # Tests + go vet
-make web          # Build web UI only
-make docker       # Docker build
+make build           # Build web UI + Go binary
+make build-dev       # Go binary only (no web UI, uses -tags dev)
+make test            # Run tests in Docker
+make test-local      # Run tests locally (mock workers, no Docker)
+make test-isolation  # Run UID isolation tests in Docker
+make check           # Tests + go vet (in Docker)
+make web             # Build web UI only
+make docker          # Docker build
 ```
 
 Run the web UI dev server with hot reload (proxies API calls to `localhost:8080`):
@@ -125,7 +127,14 @@ The Docker image is based on Ubuntu 24.04 and includes a full development enviro
 - **Utilities**: git, ripgrep, jq, curl, tree, and more
 - **Pre-installed**: typescript, eslint, prettier (Node); ruff, pytest, httpx (Python)
 
-Agents run as a non-root `hive` user. The container is the security boundary — agents have unrestricted access to the filesystem and can run any command inside it.
+The container is the primary security boundary. Inside it, each agent runs as a dedicated Unix user from a pre-created pool (64 users), providing defense-in-depth isolation:
+
+- **Session isolation**: Each agent's session directory (`sessions/<uuid>/`) is owned by its Unix user with `0700` permissions — agents cannot read each other's memory, history, or todos.
+- **Secrets protection**: `config.yaml` is owned by root with `0600` permissions — agents cannot read operator secrets.
+- **Collaborative workspace**: The workspace uses setgid (`2775`) so all agents can read and write shared files (agent definitions, code, etc.) via group membership.
+- **Control plane as root**: The control plane runs as root for UID switching; agents run as unprivileged users.
+
+Isolation is auto-detected at startup (enabled when the `hive-agents` group exists). Outside Docker, all processes run as the same user.
 
 ## License
 
