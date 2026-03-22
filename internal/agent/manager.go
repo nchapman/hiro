@@ -579,18 +579,7 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 		id := descendants[i]
 		m.mu.Lock()
 		deadRA, exists := m.agents[id]
-		delete(m.agents, id)
-		delete(m.children, id)
-		if exists && deadRA.info.ParentID != "" {
-			siblings := m.children[deadRA.info.ParentID]
-			updated := make([]string, 0, len(siblings))
-			for _, cid := range siblings {
-				if cid != id {
-					updated = append(updated, cid)
-				}
-			}
-			m.children[deadRA.info.ParentID] = updated
-		}
+		m.unregisterLocked(id, deadRA)
 		m.mu.Unlock()
 
 		if exists {
@@ -610,19 +599,7 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 func (m *Manager) removeAgent(id string) {
 	m.mu.Lock()
 	ra, ok := m.agents[id]
-	delete(m.agents, id)
-	delete(m.children, id)
-	// Remove from parent's children list.
-	if ok && ra.info.ParentID != "" {
-		siblings := m.children[ra.info.ParentID]
-		updated := make([]string, 0, len(siblings))
-		for _, cid := range siblings {
-			if cid != id {
-				updated = append(updated, cid)
-			}
-		}
-		m.children[ra.info.ParentID] = updated
-	}
+	m.unregisterLocked(id, ra)
 	m.mu.Unlock()
 
 	if !ok {
@@ -663,6 +640,23 @@ func (m *Manager) getAgent(id string) *runningAgent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.agents[id]
+}
+
+// unregisterLocked removes an agent from the registry and its parent's children
+// list. Must be called with m.mu held.
+func (m *Manager) unregisterLocked(id string, ra *runningAgent) {
+	delete(m.agents, id)
+	delete(m.children, id)
+	if ra != nil && ra.info.ParentID != "" {
+		siblings := m.children[ra.info.ParentID]
+		updated := make([]string, 0, len(siblings))
+		for _, cid := range siblings {
+			if cid != id {
+				updated = append(updated, cid)
+			}
+		}
+		m.children[ra.info.ParentID] = updated
+	}
 }
 
 // collectDescendants returns agentID plus all its descendants via BFS,

@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"charm.land/fantasy"
 )
@@ -31,10 +30,9 @@ func NewWriteFileTool(workingDir string) fantasy.AgentTool {
 			path := resolvePath(workingDir, params.Path)
 
 			// Create parent directories if needed
-			dir := filepath.Dir(path)
-			if err := os.MkdirAll(dir, 0777); err != nil {
+			if err := mkdirFor(path); err != nil {
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("error creating directory %s: %v", dir, err)), nil
+					fmt.Sprintf("error creating directory: %v", err)), nil
 			}
 
 			if err := os.WriteFile(path, []byte(params.Content), 0666); err != nil {

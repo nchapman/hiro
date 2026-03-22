@@ -145,5 +145,5 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(b)
+	_, _ = w.Write(b) // error is unreachable for in-memory responses; log if needed
 }

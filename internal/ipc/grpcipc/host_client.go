@@ -2,7 +2,6 @@ package grpcipc
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/nchapman/hivebot/internal/ipc"
@@ -119,9 +118,7 @@ func recvStream(stream grpc.ServerStreamingClient[pb.ChatEvent], onDelta func(st
 				}
 			}
 		case "done":
-			result = event.Content
-		case "error":
-			return "", fmt.Errorf("agent error: %s", event.Content)
+			return event.Content, nil
 		}
 	}
 }

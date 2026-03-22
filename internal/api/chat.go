@@ -56,7 +56,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("chat websocket accept failed", "error", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	ctx := r.Context()
 
@@ -95,7 +95,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 		onDelta := func(text string) error {
 			delta := ChatMessage{Type: "delta", Role: "assistant", Content: text}
-			b, _ := json.Marshal(delta)
+			b, err := json.Marshal(delta)
+			if err != nil {
+				return err
+			}
 			return conn.Write(ctx, websocket.MessageText, b)
 		}
 

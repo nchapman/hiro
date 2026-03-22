@@ -22,7 +22,7 @@ type MultiEditOperation struct {
 
 // MultiEditParams is the top-level parameter for the multiedit tool.
 type MultiEditParams struct {
-	FilePath string               `json:"file_path" description:"The absolute path to the file to modify."`
+	FilePath string               `json:"file_path" description:"Absolute or relative path to the file to modify."`
 	Edits    []MultiEditOperation `json:"edits"     description:"Array of edit operations to apply sequentially."`
 }
 

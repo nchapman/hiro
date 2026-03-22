@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
@@ -15,7 +14,7 @@ import (
 var editDescription string
 
 type EditParams struct {
-	FilePath   string `json:"file_path"              description:"The absolute path to the file to modify."`
+	FilePath   string `json:"file_path"              description:"Absolute or relative path to the file to modify."`
 	OldString  string `json:"old_string"             description:"The exact text to find and replace. Must match exactly including whitespace and indentation."`
 	NewString  string `json:"new_string"             description:"The replacement text."`
 	ReplaceAll bool   `json:"replace_all,omitempty"   description:"Replace all occurrences of old_string. Default false."`
@@ -50,11 +49,9 @@ func createFile(filePath, content string) (fantasy.ToolResponse, error) {
 			fmt.Sprintf("file already exists: %s (use old_string + new_string to edit it)", filePath)), nil
 	}
 
-	if dir := filepath.Dir(filePath); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0777); err != nil {
-			return fantasy.NewTextErrorResponse(
-				fmt.Sprintf("error creating directory: %v", err)), nil
-		}
+	if err := mkdirFor(filePath); err != nil {
+		return fantasy.NewTextErrorResponse(
+			fmt.Sprintf("error creating directory: %v", err)), nil
 	}
 
 	if err := os.WriteFile(filePath, []byte(content), 0666); err != nil {

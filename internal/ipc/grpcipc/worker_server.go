@@ -6,6 +6,8 @@ import (
 	"github.com/nchapman/hivebot/internal/ipc"
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // WorkerServer adapts an ipc.AgentWorker to the gRPC AgentWorkerServer interface.
@@ -32,7 +34,7 @@ func (s *WorkerServer) Chat(req *pb.ChatRequest, stream grpc.ServerStreamingServ
 
 	result, err := s.worker.Chat(ctx, req.Message, onDelta)
 	if err != nil {
-		return err
+		return status.Errorf(codes.Internal, "chat: %v", err)
 	}
 
 	return stream.Send(&pb.ChatEvent{Type: "done", Content: result})

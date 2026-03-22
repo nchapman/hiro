@@ -41,7 +41,7 @@ func (s *HostServer) SpawnAgent(req *pb.SpawnAgentRequest, stream grpc.ServerStr
 
 	result, err := s.mgr.SpawnSubagent(ctx, req.AgentName, req.Prompt, req.ParentId, onDelta)
 	if err != nil {
-		return err
+		return status.Errorf(codes.Internal, "spawn agent: %v", err)
 	}
 
 	return stream.Send(&pb.ChatEvent{Type: "done", Content: result})
@@ -50,7 +50,7 @@ func (s *HostServer) SpawnAgent(req *pb.SpawnAgentRequest, stream grpc.ServerStr
 func (s *HostServer) StartAgent(ctx context.Context, req *pb.StartAgentRequest) (*pb.StartAgentResponse, error) {
 	id, err := s.mgr.StartAgent(ctx, req.AgentName, req.ParentId)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "start agent: %v", err)
 	}
 	return &pb.StartAgentResponse{SessionId: id}, nil
 }
@@ -67,7 +67,7 @@ func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerS
 
 	result, err := s.mgr.SendMessage(ctx, req.AgentId, req.Message, onDelta)
 	if err != nil {
-		return err
+		return status.Errorf(codes.Internal, "send message: %v", err)
 	}
 
 	return stream.Send(&pb.ChatEvent{Type: "done", Content: result})
