@@ -48,19 +48,19 @@ RUN groupadd -g 10000 hive-agents \
 # hive-agents group and are group-writable for collaborative access.
 RUN mkdir -p /workspace && chown root:hive-agents /workspace && chmod 2775 /workspace
 
-# Install mise (tool version manager) and uv (Python package manager).
-# All mise state lives under /opt/mise — binary, tool installs, config,
-# and shims — so every user (root and agent UIDs) shares one installation.
+# Install mise (tool version manager). All mise state lives under /opt/mise —
+# binary, tool installs, config, cache, and shims — so every user (root and
+# agent UIDs) shares one installation. Shims on PATH resolve tools automatically.
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CONFIG_DIR=/opt/mise/config
+ENV MISE_CACHE_DIR=/opt/mise/cache
+ENV MISE_GLOBAL_CONFIG_FILE=/opt/mise/config/config.toml
 ENV MISE_INSTALL_PATH=/usr/local/bin/mise
 ENV PATH="/opt/mise/shims:${PATH}"
-RUN curl https://mise.run | sh \
-    && mise settings set activate_aggressive true
+RUN curl https://mise.run | sh
 
 # Install runtimes and tools via mise, plus common global packages.
-RUN mise use --global node@24 python@3.12 uv@latest \
-    && mise reshim \
+RUN mise use -g node@24 python@3.12 uv@latest \
     && npm install -g \
         typescript \
         ts-node \
@@ -73,7 +73,6 @@ RUN mise use --global node@24 python@3.12 uv@latest \
         pytest \
         ruff \
         httpx \
-    && mise reshim \
     && node --version && python3 --version && which eslint && which ruff
 
 # Make tool installations group-writable so agent users (hive-agents) can

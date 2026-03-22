@@ -156,6 +156,8 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 var forwardedEnvKeys = []string{
 	"MISE_DATA_DIR",
 	"MISE_CONFIG_DIR",
+	"MISE_CACHE_DIR",
+	"MISE_GLOBAL_CONFIG_FILE",
 }
 
 // buildIsolatedEnv constructs a minimal environment for an agent process

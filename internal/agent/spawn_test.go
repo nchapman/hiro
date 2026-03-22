@@ -59,6 +59,10 @@ func TestBuildIsolatedEnv_ForwardsMiseVars(t *testing.T) {
 			return "/opt/mise"
 		case "MISE_CONFIG_DIR":
 			return "/opt/mise/config"
+		case "MISE_CACHE_DIR":
+			return "/opt/mise/cache"
+		case "MISE_GLOBAL_CONFIG_FILE":
+			return "/opt/mise/config/config.toml"
 		}
 		return ""
 	}
@@ -66,11 +70,15 @@ func TestBuildIsolatedEnv_ForwardsMiseVars(t *testing.T) {
 	env := buildIsolatedEnv(cfg, getenv)
 	envMap := parseEnv(env)
 
-	if envMap["MISE_DATA_DIR"] != "/opt/mise" {
-		t.Errorf("MISE_DATA_DIR = %q, want /opt/mise", envMap["MISE_DATA_DIR"])
-	}
-	if envMap["MISE_CONFIG_DIR"] != "/opt/mise/config" {
-		t.Errorf("MISE_CONFIG_DIR = %q, want /opt/mise/config", envMap["MISE_CONFIG_DIR"])
+	for _, tc := range []struct{ key, want string }{
+		{"MISE_DATA_DIR", "/opt/mise"},
+		{"MISE_CONFIG_DIR", "/opt/mise/config"},
+		{"MISE_CACHE_DIR", "/opt/mise/cache"},
+		{"MISE_GLOBAL_CONFIG_FILE", "/opt/mise/config/config.toml"},
+	} {
+		if envMap[tc.key] != tc.want {
+			t.Errorf("%s = %q, want %q", tc.key, envMap[tc.key], tc.want)
+		}
 	}
 }
 
@@ -93,16 +101,19 @@ func TestBuildIsolatedEnv_NoExtraVars(t *testing.T) {
 			return "/opt/mise"
 		case "MISE_CONFIG_DIR":
 			return "/opt/mise/config"
+		case "MISE_CACHE_DIR":
+			return "/opt/mise/cache"
+		case "MISE_GLOBAL_CONFIG_FILE":
+			return "/opt/mise/config/config.toml"
 		}
 		return ""
 	}
 
 	env := buildIsolatedEnv(cfg, getenv)
 
-	// Should contain exactly: PATH, HOME, LANG, LC_ALL, HIVE_API_KEY,
-	// MISE_DATA_DIR, MISE_CONFIG_DIR — nothing else.
+	// Should contain exactly these vars — nothing else.
 	allowed := []string{"PATH", "HOME", "LANG", "LC_ALL", "HIVE_API_KEY",
-		"MISE_DATA_DIR", "MISE_CONFIG_DIR"}
+		"MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_GLOBAL_CONFIG_FILE"}
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")
 		if !slices.Contains(allowed, key) {
@@ -161,7 +172,7 @@ func TestBuildIsolatedEnv_PathIncludesMiseShims(t *testing.T) {
 
 func TestForwardedEnvKeys_ContainsMiseVars(t *testing.T) {
 	// Guard against accidentally removing mise vars from the forwarded list.
-	required := []string{"MISE_DATA_DIR", "MISE_CONFIG_DIR"}
+	required := []string{"MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_GLOBAL_CONFIG_FILE"}
 	for _, key := range required {
 		if !slices.Contains(forwardedEnvKeys, key) {
 			t.Errorf("forwardedEnvKeys missing %q", key)
