@@ -116,7 +116,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 - **`cmd/hive`** — Entry point. Loads config, starts manager, boots coordinator agent, runs HTTP server.
 - **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent`; `Manager` supervises lifecycles, provides manager tools, and serializes per-agent conversations.
-- **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, bash, glob, grep, list_files, fetch).
+- **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch).
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
 - **`internal/history`** — SQLite-backed conversation history with automatic LLM-driven compaction. `Engine` coordinates `Store` (persistence) + `Compactor` (summarization) + `Assemble` (context assembly within token budget).
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
@@ -126,7 +126,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 ## Agent Tools
 
-### Built-in Tools (all agents get these 8)
+### Built-in Tools (all agents get these 11)
 
 Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `internal/agent/tools/*.go`.
 
@@ -135,10 +135,13 @@ Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `int
 | `read_file` | Read file contents with line numbers | `path`, `offset`, `limit` | 64KB max output |
 | `write_file` | Write full content to file (creates dirs) | `path`, `content` | Full replacement only |
 | `edit` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
+| `multiedit` | Batch multiple edits to one file | `file_path`, `edits` (array of `{old_string, new_string, replace_all}`) | Edits applied sequentially; partial success supported |
 | `list_files` | List directory contents | `path`, `pattern` (glob) | Max 500 entries; skips node_modules, vendor, dist, .git, hidden dirs |
 | `glob` | Find files by glob pattern | `pattern`, `path` | Max 100 results; uses ripgrep if available, falls back to Go; sorted by mod time (newest first) |
 | `grep` | Search file contents with regex | `pattern`, `path`, `include` (file glob), `literal_text` | Max 100 matches; 30s timeout; uses ripgrep if available |
-| `bash` | Execute shell commands | `command`, `working_dir` | 120s timeout, 32KB max output |
+| `bash` | Execute shell commands | `command`, `working_dir`, `run_in_background` | 120s timeout (sync), 32KB max output; auto-backgrounds after 60s |
+| `job_output` | Get output from background job | `job_id`, `wait` | Returns stdout/stderr and completion status |
+| `job_kill` | Terminate a background job | `job_id` | Immediately terminates the process |
 | `fetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
 
 ### Manager Tools (agents that can have children)
@@ -173,8 +176,8 @@ Added in `startInstance()` via `buildMemoryTools()`, `buildTodoTools()`, `buildH
 
 ### Tool Totals by Agent Type
 
-- **Ephemeral agents:** 8 built-in + 5 manager = 13 tools (+ 1 if skills)
-- **Persistent agents:** 8 built-in + 5 manager + 2 memory + 1 todos + 2 history = 18 tools (+ 1 if skills)
+- **Ephemeral agents:** 11 built-in + 5 manager = 16 tools (+ 1 if skills)
+- **Persistent agents:** 11 built-in + 5 manager + 2 memory + 1 todos + 2 history = 21 tools (+ 1 if skills)
 
 ## Coordinator Agent
 

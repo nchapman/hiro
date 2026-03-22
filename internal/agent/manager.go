@@ -350,6 +350,7 @@ func (m *Manager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, ra := range m.agents {
+		ra.agent.bgMgr.KillAll()
 		ra.cancel()
 		if ra.conv.engine != nil {
 			ra.conv.engine.Close()
@@ -513,6 +514,7 @@ func (m *Manager) removeAgent(id string) {
 	}
 	m.mu.Unlock()
 	if ok {
+		ra.agent.bgMgr.KillAll()
 		ra.cancel()
 		if ra.conv.engine != nil {
 			ra.conv.engine.Close()

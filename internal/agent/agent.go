@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openrouter"
 
+	"github.com/nchapman/hivebot/internal/agent/tools"
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
 )
@@ -36,6 +37,7 @@ type Agent struct {
 	instanceDir    string // for re-reading memory.md, identity.md at runtime
 	agentDefDir    string // agent definition directory (for re-scanning skills)
 	sharedSkillDir string // workspace-level shared skills directory
+	bgMgr          *tools.BackgroundJobManager
 	logger         *slog.Logger
 }
 
@@ -88,6 +90,7 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 		instanceDir:    opts.InstanceDir,
 		agentDefDir:    opts.AgentDefDir,
 		sharedSkillDir: opts.SharedSkillDir,
+		bgMgr:          tools.NewBackgroundJobManager(),
 		logger:         logger,
 	}
 

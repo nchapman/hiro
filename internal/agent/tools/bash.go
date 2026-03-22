@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -16,17 +15,19 @@ import (
 var bashDescription string
 
 const (
-	bashTimeout  = 120 * time.Second
-	maxOutputLen = 32000
+	bashTimeout         = 120 * time.Second
+	maxOutputLen        = 32000
+	autoBackgroundAfter = 60 * time.Second
 )
 
 type BashParams struct {
-	Command    string `json:"command"     description:"The shell command to execute."`
-	WorkingDir string `json:"working_dir,omitempty" description:"Working directory for the command. Defaults to the agent's working directory."`
+	Command         string `json:"command"                    description:"The shell command to execute."`
+	WorkingDir      string `json:"working_dir,omitempty"      description:"Working directory for the command. Defaults to the agent's working directory."`
+	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in a background job. Use job_output to read output later."`
 }
 
-// NewBashTool creates a tool that executes shell commands.
-func NewBashTool(workingDir string) fantasy.AgentTool {
+// NewBashTool creates a tool that executes shell commands with background job support.
+func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"bash",
 		bashDescription,
@@ -40,55 +41,104 @@ func NewBashTool(workingDir string) fantasy.AgentTool {
 				dir = params.WorkingDir
 			}
 
-			cmdCtx, cancel := context.WithTimeout(ctx, bashTimeout)
-			defer cancel()
-
-			cmd := exec.CommandContext(cmdCtx, "bash", "-c", params.Command)
-			cmd.Dir = dir
-
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-
-			err := cmd.Run()
-
-			var output strings.Builder
-			if stdout.Len() > 0 {
-				s := stdout.String()
-				if len(s) > maxOutputLen {
-					s = s[:maxOutputLen] + "\n[output truncated]"
+			// Explicit background mode.
+			if params.RunInBackground {
+				job, err := bgMgr.Start(dir, params.Command)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
-				output.WriteString(s)
-			}
-			if stderr.Len() > 0 {
-				s := stderr.String()
-				if len(s) > maxOutputLen {
-					s = s[:maxOutputLen] + "\n[output truncated]"
+
+				// Quick check for fast failures (syntax errors, missing commands).
+				select {
+				case <-job.done:
+					bgMgr.Remove(job.ID)
+					stdout, stderr, _, execErr := job.GetOutput()
+					return formatBashResult(stdout, stderr, execErr)
+				case <-time.After(100 * time.Millisecond):
 				}
-				if output.Len() > 0 {
-					output.WriteString("\n")
-				}
-				output.WriteString("STDERR:\n")
-				output.WriteString(s)
+
+				return fantasy.NewTextResponse(
+					fmt.Sprintf("Background job started with ID: %s\n\nUse job_output to view output or job_kill to terminate.", job.ID)), nil
 			}
 
+			// Synchronous execution with auto-background on timeout.
+			job, err := bgMgr.Start(dir, params.Command)
 			if err != nil {
-				exitErr := ""
-				if e, ok := err.(*exec.ExitError); ok {
-					exitErr = fmt.Sprintf(" (exit code %d)", e.ExitCode())
-				}
-				if output.Len() == 0 {
-					return fantasy.NewTextErrorResponse(
-						fmt.Sprintf("command failed%s: %v", exitErr, err)), nil
-				}
-				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("%s\n\ncommand failed%s", output.String(), exitErr)), nil
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			if output.Len() == 0 {
-				return fantasy.NewTextResponse("(no output)"), nil
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			timeout := time.After(autoBackgroundAfter)
+
+			for {
+				select {
+				case <-ticker.C:
+					stdout, stderr, done, execErr := job.GetOutput()
+					if done {
+						bgMgr.Remove(job.ID)
+						return formatBashResult(stdout, stderr, execErr)
+					}
+				case <-timeout:
+					// Check one last time — job may have finished at the boundary.
+					stdout, stderr, done, execErr := job.GetOutput()
+					if done {
+						bgMgr.Remove(job.ID)
+						return formatBashResult(stdout, stderr, execErr)
+					}
+					return fantasy.NewTextResponse(
+						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground job ID: %s\n\nUse job_output to view output or job_kill to terminate.", job.ID)), nil
+				case <-ctx.Done():
+					_ = bgMgr.Kill(job.ID)
+					return fantasy.NewTextErrorResponse("command cancelled"), nil
+				}
 			}
-			return fantasy.NewTextResponse(output.String()), nil
 		},
 	)
+}
+
+func formatBashResult(stdout, stderr string, execErr error) (fantasy.ToolResponse, error) {
+	stdout = truncateOutput(stdout)
+	stderr = truncateOutput(stderr)
+
+	var out strings.Builder
+	if stdout != "" {
+		out.WriteString(stdout)
+	}
+	if stderr != "" {
+		if out.Len() > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString("STDERR:\n")
+		out.WriteString(stderr)
+	}
+
+	if execErr != nil {
+		exitCode := ""
+		if e, ok := execErr.(*exec.ExitError); ok {
+			exitCode = fmt.Sprintf(" (exit code %d)", e.ExitCode())
+		}
+		if out.Len() == 0 {
+			return fantasy.NewTextErrorResponse(
+				fmt.Sprintf("command failed%s: %v", exitCode, execErr)), nil
+		}
+		return fantasy.NewTextErrorResponse(
+			fmt.Sprintf("%s\n\ncommand failed%s", out.String(), exitCode)), nil
+	}
+
+	if out.Len() == 0 {
+		return fantasy.NewTextResponse("(no output)"), nil
+	}
+	return fantasy.NewTextResponse(out.String()), nil
+}
+
+func truncateOutput(s string) string {
+	if len(s) <= maxOutputLen {
+		return s
+	}
+	half := maxOutputLen / 2
+	start := s[:half]
+	end := s[len(s)-half:]
+	skipped := strings.Count(s[half:len(s)-half], "\n")
+	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, skipped, end)
 }
