@@ -21,7 +21,7 @@ You can create new agents at runtime. An agent is a directory under `agents/` wi
 ```markdown
 ---
 name: <agent-name>
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-20250514  # Optional — omit to use the server default
 mode: persistent
 description: One-line description of what this agent does.
 ---
