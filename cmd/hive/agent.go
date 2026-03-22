@@ -86,22 +86,26 @@ func runAgent() error {
 		ExtraTools:     agent.BuildManagerTools(host),
 	}
 
-	// Inject secret functions via the host
-	opts.SecretEnvFn = func() []string {
-		_, env, err := host.GetSecrets(context.Background())
-		if err != nil {
-			logger.Warn("failed to fetch secrets", "error", err)
-			return nil
+	// Inject secret functions only if the agent has bash — secrets are
+	// injected as env vars in bash commands, so they're useless without it.
+	// nil EffectiveTools means unrestricted (all tools allowed, including bash).
+	if cfg.EffectiveTools == nil || cfg.EffectiveTools["bash"] {
+		opts.SecretEnvFn = func() []string {
+			_, env, err := host.GetSecrets(context.Background())
+			if err != nil {
+				logger.Warn("failed to fetch secrets", "error", err)
+				return nil
+			}
+			return env
 		}
-		return env
-	}
-	opts.SecretNamesFn = func() []string {
-		names, _, err := host.GetSecrets(context.Background())
-		if err != nil {
-			logger.Warn("failed to fetch secret names", "error", err)
-			return nil
+		opts.SecretNamesFn = func() []string {
+			names, _, err := host.GetSecrets(context.Background())
+			if err != nil {
+				logger.Warn("failed to fetch secret names", "error", err)
+				return nil
+			}
+			return names
 		}
-		return names
 	}
 
 	// Read identity if present

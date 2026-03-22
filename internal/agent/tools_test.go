@@ -329,8 +329,8 @@ func TestBuildSystemPrompt_WithSkills(t *testing.T) {
 	if !strings.Contains(prompt, "Search the web.") {
 		t.Error("missing search description")
 	}
-	// Should NOT contain full skill body
-	if strings.Contains(prompt, "full instructions") {
+	// Should NOT contain the actual skill body content (only name/description)
+	if strings.Contains(prompt, "Step 1: do this") {
 		t.Error("skill body should not be in prompt")
 	}
 }
@@ -363,6 +363,14 @@ func TestBuildSystemPrompt_WithMemoryAndTodos(t *testing.T) {
 			t.Errorf("missing %q in prompt", want)
 		}
 	}
+
+	// Section preambles should include usage guidance
+	if !strings.Contains(prompt, "memory_write") {
+		t.Error("Memories section should include memory_write usage guidance")
+	}
+	if !strings.Contains(prompt, "todos tool") {
+		t.Error("Tasks section should include todos tool usage guidance")
+	}
 }
 
 func TestBuildSystemPrompt_EmptyOptionalSections(t *testing.T) {
@@ -379,5 +387,231 @@ func TestBuildSystemPrompt_EmptyOptionalSections(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Instructions here.") {
 		t.Error("missing prompt body")
+	}
+}
+
+func TestBuildSystemPrompt_SecuritySection(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "Do things.",
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
+	if !strings.Contains(prompt, "## Security") {
+		t.Error("Security section should always be present")
+	}
+	if !strings.Contains(prompt, "untrusted data") {
+		t.Error("Security section should warn about untrusted tool results")
+	}
+}
+
+func TestBuildSystemPrompt_SecretsSecurityGuidance(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "Do things.",
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "", []string{"API_KEY"})
+	if !strings.Contains(prompt, "Never expose secret values") {
+		t.Error("Secrets section should include guidance about not exposing values")
+	}
+}
+
+func TestBuildSystemPrompt_SkillsPreamble(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "Do things.",
+		Skills: []config.SkillConfig{
+			{Name: "review", Description: "Review code."},
+		},
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
+	// Should explain that descriptions are triggers, not full instructions
+	if !strings.Contains(prompt, "triggers") {
+		t.Error("Skills preamble should explain descriptions are triggers")
+	}
+}
+
+// sectionIndex returns the index of a section header or content string,
+// failing the test if it's not found.
+func sectionIndex(t *testing.T, prompt, marker string) int {
+	t.Helper()
+	idx := strings.Index(prompt, marker)
+	if idx < 0 {
+		t.Fatalf("expected %q in prompt but not found", marker)
+	}
+	return idx
+}
+
+func TestBuildSystemPrompt_SectionOrdering(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "Main instructions.",
+		Soul:   "Be concise.",
+		Tools:  "Use edit for small changes.",
+		Skills: []config.SkillConfig{
+			{Name: "deploy", Description: "Deploy code."},
+		},
+	}
+	prompt := buildSystemPrompt(cfg, "I am agent-7", "User prefers Go", "- [ ] Fix bug", []string{"GH_TOKEN"})
+
+	// Verify strict ordering: soul < identity < memories < todos < secrets < body < tools < skills < security
+	soul := sectionIndex(t, prompt, "Be concise.")
+	identity := sectionIndex(t, prompt, "## Identity")
+	memories := sectionIndex(t, prompt, "## Memories")
+	todos := sectionIndex(t, prompt, "## Current Tasks")
+	secrets := sectionIndex(t, prompt, "## Available Secrets")
+	body := sectionIndex(t, prompt, "Main instructions.")
+	tools := sectionIndex(t, prompt, "## Tool Notes")
+	skills := sectionIndex(t, prompt, "## Skills")
+	security := sectionIndex(t, prompt, "## Security")
+
+	pairs := []struct{ name string; a, b int }{
+		{"soul < identity", soul, identity},
+		{"identity < memories", identity, memories},
+		{"memories < todos", memories, todos},
+		{"todos < secrets", todos, secrets},
+		{"secrets < body", secrets, body},
+		{"body < tools", body, tools},
+		{"tools < skills", tools, skills},
+		{"skills < security", skills, security},
+	}
+	for _, p := range pairs {
+		if p.a >= p.b {
+			t.Errorf("ordering violated: %s (got %d >= %d)", p.name, p.a, p.b)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_MinimalEphemeral(t *testing.T) {
+	// An ephemeral agent with no soul, no skills, no tools, no secrets —
+	// just a body and the security section.
+	cfg := config.AgentConfig{
+		Name:   "worker",
+		Prompt: "Summarize the input.",
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
+
+	// Should contain body and security
+	if !strings.Contains(prompt, "Summarize the input.") {
+		t.Error("missing prompt body")
+	}
+	if !strings.Contains(prompt, "## Security") {
+		t.Error("missing security section")
+	}
+
+	// Should NOT contain any optional sections
+	for _, absent := range []string{"## Identity", "## Memories", "## Current Tasks", "## Available Secrets", "## Tool Notes", "## Skills"} {
+		if strings.Contains(prompt, absent) {
+			t.Errorf("section %q should not appear for minimal agent", absent)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_FullPersistent(t *testing.T) {
+	// A fully-loaded persistent agent with every section populated.
+	cfg := config.AgentConfig{
+		Name:   "coordinator",
+		Prompt: "You are the coordinator.",
+		Soul:   "Be helpful and precise.",
+		Tools:  "Prefer edit over write_file.",
+		Skills: []config.SkillConfig{
+			{Name: "delegate", Description: "Delegate tasks to subagents."},
+			{Name: "review", Description: "Review code changes."},
+		},
+	}
+	prompt := buildSystemPrompt(cfg,
+		"I am the coordinator agent.",
+		"User is a Go developer.\nProject uses microservices.",
+		"- [x] Set up repo\n- [ ] Write tests",
+		[]string{"GITHUB_TOKEN", "SLACK_WEBHOOK"},
+	)
+
+	// All sections present
+	for _, want := range []string{
+		"Be helpful and precise.",
+		"## Identity", "I am the coordinator agent.",
+		"## Memories", "memory_write", "User is a Go developer.",
+		"## Current Tasks", "todos tool", "Write tests",
+		"## Available Secrets", "bash commands only", "`GITHUB_TOKEN`", "`SLACK_WEBHOOK`",
+		"You are the coordinator.",
+		"## Tool Notes", "Prefer edit",
+		"## Skills", "triggers", "**delegate**", "**review**",
+		"## Security", "untrusted data",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("missing %q in full persistent prompt", want)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_EphemeralWithSecrets(t *testing.T) {
+	// An ephemeral agent that has bash + secrets but no persistent sections.
+	cfg := config.AgentConfig{
+		Name:   "fetcher",
+		Prompt: "Fetch data from the API.",
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "", []string{"API_KEY"})
+
+	if !strings.Contains(prompt, "## Available Secrets") {
+		t.Error("secrets section should appear")
+	}
+	if !strings.Contains(prompt, "`API_KEY`") {
+		t.Error("secret name should be listed")
+	}
+	// No persistent sections
+	for _, absent := range []string{"## Identity", "## Memories", "## Current Tasks"} {
+		if strings.Contains(prompt, absent) {
+			t.Errorf("section %q should not appear for ephemeral agent", absent)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_SkillsAndToolNotes(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "Do work.",
+		Tools:  "Always run tests after edits.",
+		Skills: []config.SkillConfig{
+			{Name: "lint", Description: "Lint the codebase."},
+		},
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
+
+	toolNotes := sectionIndex(t, prompt, "## Tool Notes")
+	skills := sectionIndex(t, prompt, "## Skills")
+	security := sectionIndex(t, prompt, "## Security")
+
+	if toolNotes >= skills {
+		t.Error("Tool Notes should appear before Skills")
+	}
+	if skills >= security {
+		t.Error("Skills should appear before Security")
+	}
+}
+
+func TestBuildSystemPrompt_NoDoubleBlankLines(t *testing.T) {
+	// With various combos of present/absent sections, there should be
+	// no triple+ newlines (which would indicate empty section artifacts).
+	cases := []struct {
+		name string
+		cfg  config.AgentConfig
+		id   string
+		mem  string
+		todo string
+		sec  []string
+	}{
+		{"bare", config.AgentConfig{Prompt: "Go."}, "", "", "", nil},
+		{"soul+body", config.AgentConfig{Prompt: "Go.", Soul: "Hi."}, "", "", "", nil},
+		{"memory only", config.AgentConfig{Prompt: "Go."}, "", "stuff", "", nil},
+		{"todos only", config.AgentConfig{Prompt: "Go."}, "", "", "- [ ] x", nil},
+		{"secrets only", config.AgentConfig{Prompt: "Go."}, "", "", "", []string{"K"}},
+		{"all", config.AgentConfig{Prompt: "Go.", Soul: "Hi.", Tools: "T.", Skills: []config.SkillConfig{{Name: "s", Description: "d"}}}, "id", "mem", "todo", []string{"K"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := buildSystemPrompt(tc.cfg, tc.id, tc.mem, tc.todo, tc.sec)
+			if strings.Contains(prompt, "\n\n\n") {
+				t.Errorf("prompt contains triple newline:\n%s", prompt)
+			}
+		})
 	}
 }
