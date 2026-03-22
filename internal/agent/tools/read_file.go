@@ -32,9 +32,6 @@ func NewReadFileTool(workingDir string) fantasy.AgentTool {
 			}
 
 			path := resolvePath(workingDir, params.Path)
-			if IsForbiddenPath(path) {
-				return fantasy.NewTextErrorResponse("this file is managed by the operator and is not available to agents"), nil
-			}
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %v", err)), nil

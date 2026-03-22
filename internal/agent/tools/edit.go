@@ -32,9 +32,6 @@ func NewEditTool(workingDir string) fantasy.AgentTool {
 			}
 
 			filePath := resolvePath(workingDir, params.FilePath)
-			if IsForbiddenPath(filePath) {
-				return fantasy.NewTextErrorResponse("this file is managed by the operator and is not available to agents"), nil
-			}
 
 			// Create new file: old_string empty, new_string has content
 			if params.OldString == "" {

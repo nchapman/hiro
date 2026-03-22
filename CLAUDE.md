@@ -264,8 +264,6 @@ agents:
 | `/tools rm <agent>` | Clear override |
 | `/tools list [agent]` | Show overrides |
 
-**File filtering:** File tools hide `config.yaml` from agents (forbidden path filter) so they don't waste time on it. This is a convenience feature, not a security boundary — actual access control is enforced at the OS level via UID isolation (`config.yaml` is `0600` root-owned).
-
 ## Creating Agents at Runtime
 
 Agents can create new agent definitions at runtime using their file tools:
