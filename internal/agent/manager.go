@@ -345,10 +345,11 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	}
 	agentCtx, cancel := context.WithCancel(baseCtx)
 
-	// Build options with manager tools and identity injected
+	// Build options with manager tools, identity, and instance dir
 	opts := m.opts
 	opts.ExtraTools = m.buildManagerTools(id)
 	opts.Identity = identity
+	opts.InstanceDir = instDir
 
 	// Create LM once so it can be shared with the history engine
 	if opts.LM == nil {
@@ -366,20 +367,25 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 		}
 	}
 
-	// Create conversation — persistent agents get a history engine with
-	// search/recall tools injected before the agent is created.
+	// Persistent agents get memory tools and (if LM available) history tools.
 	var conv *Conversation
-	if cfg.Mode == config.ModePersistent && opts.LM != nil {
-		historyPath := filepath.Join(instDir, "history.db")
-		store, err := history.OpenStore(historyPath)
-		if err != nil {
-			m.logger.Warn("failed to open history DB, using ephemeral conversation",
-				"instance", id, "error", err)
-			conv = NewConversation()
+	if cfg.Mode == config.ModePersistent {
+		opts.ExtraTools = append(opts.ExtraTools, buildMemoryTools(instDir)...)
+
+		if opts.LM != nil {
+			historyPath := filepath.Join(instDir, "history.db")
+			store, err := history.OpenStore(historyPath)
+			if err != nil {
+				m.logger.Warn("failed to open history DB, using ephemeral conversation",
+					"instance", id, "error", err)
+				conv = NewConversation()
+			} else {
+				engine := history.NewEngine(store, opts.LM, history.DefaultConfig(), m.logger)
+				conv = NewConversationWithHistory(engine)
+				opts.ExtraTools = append(opts.ExtraTools, buildHistoryTools(engine)...)
+			}
 		} else {
-			engine := history.NewEngine(store, opts.LM, history.DefaultConfig(), m.logger)
-			conv = NewConversationWithHistory(engine)
-			opts.ExtraTools = append(opts.ExtraTools, buildHistoryTools(engine)...)
+			conv = NewConversation()
 		}
 	} else {
 		conv = NewConversation()

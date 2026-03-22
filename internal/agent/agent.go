@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
@@ -29,21 +30,23 @@ const (
 
 // Agent is a Hive agent backed by a fantasy agent loop.
 type Agent struct {
-	config     config.AgentConfig
-	agent      fantasy.Agent
-	workingDir string
-	logger     *slog.Logger
+	config      config.AgentConfig
+	agent       fantasy.Agent
+	workingDir  string
+	instanceDir string // for re-reading memory.md, identity.md at runtime
+	logger      *slog.Logger
 }
 
 // Options configures how an agent connects to an LLM provider.
 type Options struct {
-	Provider   ProviderType
-	APIKey     string
-	Model      string                // overrides the model from agent config
-	WorkingDir string                // working directory for file/bash tools
-	ExtraTools []fantasy.AgentTool   // additional tools injected by the manager
-	Identity   string                // instance identity (from identity.md)
-	LM         fantasy.LanguageModel // if set, bypasses provider creation (for testing)
+	Provider    ProviderType
+	APIKey      string
+	Model       string                // overrides the model from agent config
+	WorkingDir  string                // working directory for file/bash tools
+	ExtraTools  []fantasy.AgentTool   // additional tools injected by the manager
+	Identity    string                // instance identity (from identity.md)
+	InstanceDir string                // instance directory for runtime file access (memory.md etc.)
+	LM          fantasy.LanguageModel // if set, bypasses provider creation (for testing)
 }
 
 // New creates a new Hive agent from the given config.
@@ -76,15 +79,18 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 	}
 
 	a := &Agent{
-		config:     cfg,
-		workingDir: workingDir,
-		logger:     logger,
+		config:      cfg,
+		workingDir:  workingDir,
+		instanceDir: opts.InstanceDir,
+		logger:      logger,
 	}
 
 	agentTools := a.buildTools()
 	agentTools = append(agentTools, opts.ExtraTools...)
 
-	systemPrompt := buildSystemPrompt(cfg, opts.Identity)
+	// Build the initial system prompt. This is also rebuilt dynamically
+	// on each StreamChat call via PrepareStep to pick up memory changes.
+	systemPrompt := a.currentSystemPrompt()
 
 	a.agent = fantasy.NewAgent(lm,
 		fantasy.WithSystemPrompt(systemPrompt),
@@ -148,6 +154,13 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 	result, err := a.agent.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt:   prompt,
 		Messages: messages,
+		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
+			if opts.StepNumber == 0 {
+				sp := a.currentSystemPrompt()
+				return ctx, fantasy.PrepareStepResult{System: &sp}, nil
+			}
+			return ctx, fantasy.PrepareStepResult{}, nil
+		},
 		OnTextDelta: func(id, text string) error {
 			if onDelta != nil {
 				return onDelta(text)
@@ -219,9 +232,31 @@ func extractText(msg fantasy.Message) string {
 	return strings.Join(parts, "\n")
 }
 
+// currentSystemPrompt rebuilds the system prompt from config and disk.
+// Called at the start of each StreamChat turn (PrepareStep step 0) to pick up
+// changes from memory_write or identity edits. Within-turn writes are visible
+// via tool results, not via the system prompt.
+func (a *Agent) currentSystemPrompt() string {
+	identity := ""
+	memory := ""
+	if a.instanceDir != "" {
+		if id, err := config.ReadOptionalFile(filepath.Join(a.instanceDir, "identity.md")); err != nil {
+			a.logger.Warn("could not read identity.md", "error", err)
+		} else {
+			identity = id
+		}
+		if mem, err := config.ReadMemoryFile(a.instanceDir); err != nil {
+			a.logger.Warn("could not read memory.md", "error", err)
+		} else {
+			memory = mem
+		}
+	}
+	return buildSystemPrompt(a.config, identity, memory)
+}
+
 // buildSystemPrompt assembles the system prompt from the agent's config
-// and optional instance identity. Order: soul → identity → instructions → tools → skills.
-func buildSystemPrompt(cfg config.AgentConfig, identity string) string {
+// and dynamic content. Order: soul → identity → memories → instructions → tools → skills.
+func buildSystemPrompt(cfg config.AgentConfig, identity, memory string) string {
 	var p strings.Builder
 
 	if cfg.Soul != "" {
@@ -232,6 +267,12 @@ func buildSystemPrompt(cfg config.AgentConfig, identity string) string {
 	if identity != "" {
 		p.WriteString("## Identity\n\n")
 		p.WriteString(identity)
+		p.WriteString("\n\n")
+	}
+
+	if memory != "" {
+		p.WriteString("## Memories\n\n")
+		p.WriteString(memory)
 		p.WriteString("\n\n")
 	}
 

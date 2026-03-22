@@ -7,6 +7,7 @@ import (
 
 	"charm.land/fantasy"
 
+	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
 )
 
@@ -38,6 +39,15 @@ func buildHistoryTools(engine *history.Engine) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		toolHistorySearch(engine),
 		toolHistoryRecall(engine),
+	}
+}
+
+// buildMemoryTools returns tools for reading and writing agent memory.
+// instanceDir is the agent's instance directory containing memory.md.
+func buildMemoryTools(instanceDir string) []fantasy.AgentTool {
+	return []fantasy.AgentTool{
+		toolMemoryRead(instanceDir),
+		toolMemoryWrite(instanceDir),
 	}
 }
 
@@ -311,6 +321,50 @@ func toolHistoryRecall(engine *history.Engine) fantasy.AgentTool {
 			}
 
 			return fantasy.NewTextResponse(truncateResult(sb.String())), nil
+		},
+	)
+}
+
+// --- memory_read tool ---
+
+func toolMemoryRead(instanceDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool("memory_read",
+		"Read your persistent memory. Returns the current contents of your memory file, which contains facts, preferences, and knowledge you've chosen to remember across conversations.",
+		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			content, err := config.ReadMemoryFile(instanceDir)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("failed to read memory: %v", err)), nil
+			}
+			if content == "" {
+				return fantasy.NewTextResponse("No memories stored yet."), nil
+			}
+			return fantasy.NewTextResponse(content), nil
+		},
+	)
+}
+
+// --- memory_write tool ---
+
+type memoryWriteInput struct {
+	Content string `json:"content" description:"The full new contents of your memory file. This overwrites the entire file, so include everything you want to remember. Read your current memory first to avoid losing existing entries."`
+}
+
+func toolMemoryWrite(instanceDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool("memory_write",
+		"Write your persistent memory. Overwrites the entire memory file with the provided content. Always read your current memory first, then include both existing and new entries. Your memories are included in your system prompt on every turn, so they're always available to you.",
+		func(ctx context.Context, input memoryWriteInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.Content == "" {
+				return fantasy.NewTextErrorResponse("content is required"), nil
+			}
+
+			if err := config.WriteMemoryFile(instanceDir, input.Content); err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("failed to write memory: %v", err)), nil
+			}
+
+			return fantasy.NewTextResponse(
+				fmt.Sprintf("Memory updated (%d bytes). Changes will be reflected in your system prompt on the next turn.", len(input.Content))), nil
 		},
 	)
 }
