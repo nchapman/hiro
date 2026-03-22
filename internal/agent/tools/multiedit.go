@@ -86,7 +86,7 @@ func multiEditCreate(filePath string, edits []MultiEditOperation) (fantasy.ToolR
 		content = result
 	}
 
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0666); err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("error writing file: %v", err)), nil
 	}
 

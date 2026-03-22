@@ -30,6 +30,15 @@ func runAgent() error {
 		return fmt.Errorf("reading spawn config: %w", err)
 	}
 
+	// When running under UID isolation, set a collaborative umask and
+	// verify we are running as the expected user.
+	if cfg.UID != 0 {
+		syscall.Umask(0002) // files: 0664, dirs: 0775 (group-writable)
+		if uint32(os.Getuid()) != cfg.UID {
+			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
+		}
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))

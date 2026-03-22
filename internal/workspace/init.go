@@ -27,7 +27,7 @@ var requiredDirs = []string{
 func Init(dir string, logger *slog.Logger) error {
 	for _, d := range requiredDirs {
 		path := filepath.Join(dir, d)
-		if err := os.MkdirAll(path, 0755); err != nil {
+		if err := os.MkdirAll(path, 0775); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
 		}
 	}

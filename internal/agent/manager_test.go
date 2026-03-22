@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/uidpool"
 )
 
 // testWorker implements ipc.AgentWorker for testing.
@@ -61,7 +63,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello from agent"))
+	}, nil, logger, "", testWorkerFactory("hello from agent"), nil)
 	return mgr, dir
 }
 
@@ -492,7 +494,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"))
+	}, nil, logger, "", testWorkerFactory("hello"), nil)
 
 	id, err := mgr1.StartAgent(ctx, "test-agent", "")
 	if err != nil {
@@ -503,7 +505,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"))
+	}, nil, logger, "", testWorkerFactory("hello"), nil)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -550,6 +552,275 @@ func TestTruncateResult(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "(result truncated)") {
 		t.Error("expected truncation suffix")
+	}
+}
+
+// --- UID pool integration tests ---
+
+// capturingWorkerFactory creates workers and records the SpawnConfig for each.
+func capturingWorkerFactory(response string) (WorkerFactory, *[]ipc.SpawnConfig) {
+	var configs []ipc.SpawnConfig
+	factory := func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+		configs = append(configs, cfg)
+		done := make(chan struct{})
+		w := &testWorker{response: response, done: done}
+		return &WorkerHandle{
+			Worker: w,
+			Kill:   func() { w.closeDone() },
+			Close:  func() {},
+			Done:   done,
+		}, nil
+	}
+	return factory, &configs
+}
+
+// failingWorkerFactory returns an error on every spawn attempt.
+func failingWorkerFactory() WorkerFactory {
+	return func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+		return nil, fmt.Errorf("simulated spawn failure")
+	}
+}
+
+func setupTestManagerWithPool(t *testing.T, pool *uidpool.Pool) (*Manager, string, *[]ipc.SpawnConfig) {
+	t.Helper()
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	factory, configs := capturingWorkerFactory("hello")
+	mgr := NewManager(t.Context(), dir, Options{
+		WorkingDir: dir,
+	}, nil, logger, "", factory, pool)
+	return mgr, dir, configs
+}
+
+func TestManager_UIDPool_Assigned(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	_, err := mgr.StartAgent(t.Context(), "test-agent", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	if len(*configs) != 1 {
+		t.Fatalf("expected 1 spawn config, got %d", len(*configs))
+	}
+	cfg := (*configs)[0]
+	if cfg.UID == 0 {
+		t.Fatal("expected non-zero UID in SpawnConfig")
+	}
+	if cfg.GID == 0 {
+		t.Fatal("expected non-zero GID in SpawnConfig")
+	}
+	if cfg.UID != 10000 {
+		t.Errorf("expected UID 10000, got %d", cfg.UID)
+	}
+	if pool.InUse() != 1 {
+		t.Errorf("expected 1 UID in use, got %d", pool.InUse())
+	}
+}
+
+func TestManager_UIDPool_DifferentUIDs(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "a", `---
+name: agent-a
+model: fake-model
+---
+A.`)
+	writeAgentMD(t, dir, "b", `---
+name: agent-b
+model: fake-model
+---
+B.`)
+
+	mgr.StartAgent(t.Context(), "a", "")
+	mgr.StartAgent(t.Context(), "b", "")
+
+	if len(*configs) != 2 {
+		t.Fatalf("expected 2 spawn configs, got %d", len(*configs))
+	}
+	if (*configs)[0].UID == (*configs)[1].UID {
+		t.Fatalf("agents should get different UIDs, both got %d", (*configs)[0].UID)
+	}
+	if pool.InUse() != 2 {
+		t.Errorf("expected 2 UIDs in use, got %d", pool.InUse())
+	}
+}
+
+func TestManager_UIDPool_ReleasedOnStop(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, _ := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, _ := mgr.StartAgent(t.Context(), "test-agent", "")
+	if pool.InUse() != 1 {
+		t.Fatalf("expected 1 UID in use, got %d", pool.InUse())
+	}
+
+	mgr.StopAgent(id)
+	if pool.InUse() != 0 {
+		t.Fatalf("expected 0 UIDs in use after stop, got %d", pool.InUse())
+	}
+}
+
+func TestManager_UIDPool_ReleasedOnShutdown(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, _ := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	mgr.StartAgent(t.Context(), "test-agent", "")
+	mgr.StartAgent(t.Context(), "test-agent", "")
+	if pool.InUse() != 2 {
+		t.Fatalf("expected 2 UIDs in use, got %d", pool.InUse())
+	}
+
+	mgr.Shutdown()
+	if pool.InUse() != 0 {
+		t.Fatalf("expected 0 UIDs in use after shutdown, got %d", pool.InUse())
+	}
+}
+
+func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	mgr := NewManager(t.Context(), dir, Options{
+		WorkingDir: dir,
+	}, nil, logger, "", failingWorkerFactory(), pool)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	_, err := mgr.StartAgent(t.Context(), "test-agent", "")
+	if err == nil {
+		t.Fatal("expected spawn failure")
+	}
+
+	// UID should be released despite spawn failure
+	if pool.InUse() != 0 {
+		t.Fatalf("expected 0 UIDs in use after spawn failure, got %d", pool.InUse())
+	}
+}
+
+func TestManager_UIDPool_Exhaustion(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 2) // tiny pool
+	mgr, dir, _ := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	_, err := mgr.StartAgent(t.Context(), "test-agent", "")
+	if err != nil {
+		t.Fatalf("start 1: %v", err)
+	}
+	_, err = mgr.StartAgent(t.Context(), "test-agent", "")
+	if err != nil {
+		t.Fatalf("start 2: %v", err)
+	}
+	_, err = mgr.StartAgent(t.Context(), "test-agent", "")
+	if err == nil {
+		t.Fatal("expected pool exhaustion error")
+	}
+}
+
+func TestManager_UIDPool_StopChildReleasesUID(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, _ := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "parent", `---
+name: parent
+model: fake-model
+---
+Parent.`)
+	writeAgentMD(t, dir, "child", `---
+name: child
+model: fake-model
+---
+Child.`)
+
+	parentID, _ := mgr.StartAgent(t.Context(), "parent", "")
+	mgr.StartAgent(t.Context(), "child", parentID)
+	if pool.InUse() != 2 {
+		t.Fatalf("expected 2 UIDs, got %d", pool.InUse())
+	}
+
+	// Stop parent — should release both parent and child UIDs
+	mgr.StopAgent(parentID)
+	if pool.InUse() != 0 {
+		t.Fatalf("expected 0 UIDs after stopping parent+child, got %d", pool.InUse())
+	}
+}
+
+func TestManager_UIDPool_RestoreSessions(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	// Start with a pool, create an agent, shut down
+	factory1, _ := capturingWorkerFactory("hello")
+	mgr1 := NewManager(ctx, dir, Options{
+		WorkingDir: dir,
+	}, nil, logger, "", factory1, pool)
+
+	id, err := mgr1.StartAgent(ctx, "test-agent", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	mgr1.Shutdown()
+	if pool.InUse() != 0 {
+		t.Fatalf("expected 0 after shutdown, got %d", pool.InUse())
+	}
+
+	// Restore with a fresh pool
+	pool2 := uidpool.New(10000, 10000, 64)
+	factory2, configs2 := capturingWorkerFactory("hello")
+	mgr2 := NewManager(ctx, dir, Options{
+		WorkingDir: dir,
+	}, nil, logger, "", factory2, pool2)
+	if err := mgr2.RestoreSessions(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// Restored agent should have a UID assigned
+	if pool2.InUse() != 1 {
+		t.Fatalf("expected 1 UID in use after restore, got %d", pool2.InUse())
+	}
+	if len(*configs2) != 1 {
+		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
+	}
+	if (*configs2)[0].UID == 0 {
+		t.Fatal("restored agent should have non-zero UID")
+	}
+
+	// Verify same agent ID
+	info, ok := mgr2.GetAgent(id)
+	if !ok {
+		t.Fatal("restored agent not found")
+	}
+	if info.Name != "test-agent" {
+		t.Errorf("restored name = %q, want test-agent", info.Name)
+	}
+}
+
+func TestManager_UIDPool_SpawnSubagent(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	_, err := mgr.SpawnSubagent(t.Context(), "test-agent", "do something", "", nil)
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	// Ephemeral agent should have gotten a UID
+	if len(*configs) != 1 {
+		t.Fatalf("expected 1 spawn config, got %d", len(*configs))
+	}
+	if (*configs)[0].UID == 0 {
+		t.Fatal("ephemeral agent should have non-zero UID")
+	}
+
+	// UID should be released after subagent completes
+	if pool.InUse() != 0 {
+		t.Fatalf("expected 0 UIDs after subagent cleanup, got %d", pool.InUse())
 	}
 }
 

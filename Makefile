@@ -1,4 +1,4 @@
-.PHONY: build test test-local check clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation check clean web build-dev docker docker-up docker-down proto
 
 BINARY := hive
 PKG := github.com/nchapman/hivebot
@@ -11,6 +11,9 @@ test:
 
 test-local:
 	go test ./... -v -count=1
+
+test-isolation:
+	docker compose run --rm --build test go test ./internal/agent/... -tags=isolation -v -count=1
 
 check:
 	docker compose run --rm --build test sh -c "go test ./... -v -count=1 && go vet ./..."

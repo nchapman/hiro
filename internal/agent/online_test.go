@@ -77,7 +77,7 @@ func setupOnlineManager(t *testing.T) (*Manager, string) {
 		APIKey:     apiKey,
 		Model:      model,
 		WorkingDir: dir,
-	}, nil, logger, "", nil)
+	}, nil, logger, "", nil, nil)
 	return mgr, dir
 }
 

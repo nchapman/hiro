@@ -64,5 +64,5 @@ func mkdirFor(filePath string) error {
 	if dir == "." || dir == "" {
 		return nil
 	}
-	return os.MkdirAll(dir, 0755)
+	return os.MkdirAll(dir, 0777)
 }

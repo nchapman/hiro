@@ -54,13 +54,13 @@ func createFile(filePath, content string) (fantasy.ToolResponse, error) {
 	}
 
 	if dir := filepath.Dir(filePath); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0777); err != nil {
 			return fantasy.NewTextErrorResponse(
 				fmt.Sprintf("error creating directory: %v", err)), nil
 		}
 	}
 
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0666); err != nil {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("error creating file: %v", err)), nil
 	}

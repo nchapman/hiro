@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
+	"github.com/nchapman/hivebot/internal/uidpool"
 	"github.com/nchapman/hivebot/internal/workspace"
 	"github.com/nchapman/hivebot/web"
 )
@@ -100,12 +103,27 @@ func run() error {
 		}
 		defer os.Remove(hostSocket)
 
+		// Detect Unix user isolation: enabled iff the hive-agents group exists.
+		var pool *uidpool.Pool
+		if grp, err := user.LookupGroup("hive-agents"); err == nil {
+			gid, err := strconv.ParseUint(grp.Gid, 10, 32)
+			if err != nil {
+				return fmt.Errorf("parsing hive-agents GID %q: %w", grp.Gid, err)
+			}
+			pool = uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
+			logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
+			// Make host socket accessible by all agent users.
+			if err := os.Chmod(hostSocket, 0777); err != nil {
+				return fmt.Errorf("setting host socket permissions: %w", err)
+			}
+		}
+
 		mgr = agent.NewManager(ctx, workspaceDir, agent.Options{
 			Provider:   agent.ProviderType(providerType),
 			APIKey:     apiKey,
 			Model:      modelOverride,
 			WorkingDir: absWorkspaceDir,
-		}, cp, logger, hostSocket, nil)
+		}, cp, logger, hostSocket, nil, pool)
 
 		// Start gRPC server — Manager satisfies ipc.HostManager.
 		grpcSrv = grpc.NewServer()

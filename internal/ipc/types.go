@@ -27,4 +27,6 @@ type SpawnConfig struct {
 	Provider       string          `json:"provider"`
 	APIKey         string          `json:"api_key"`
 	Model          string          `json:"model"`
+	UID            uint32          `json:"uid,omitempty"` // 0 = no isolation
+	GID            uint32          `json:"gid,omitempty"`
 }

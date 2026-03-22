@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/nchapman/hivebot/internal/ipc"
@@ -33,9 +34,28 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 
 	cmd := exec.CommandContext(ctx, self, "agent")
 
-	// Pass API key via env var rather than JSON payload to avoid
-	// it being visible in /proc/<pid>/fd/0 or accidentally logged.
-	cmd.Env = append(os.Environ(), "HIVE_API_KEY="+cfg.APIKey)
+	// When UID isolation is enabled, run the agent as a dedicated Unix user
+	// and build a minimal environment to avoid leaking control plane state.
+	if cfg.UID != 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid:    cfg.UID,
+				Gid:    cfg.GID,
+				Groups: []uint32{cfg.GID},
+			},
+		}
+		cmd.Env = []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=/tmp",
+			"LANG=en_US.UTF-8",
+			"LC_ALL=en_US.UTF-8",
+			"HIVE_API_KEY=" + cfg.APIKey,
+		}
+	} else {
+		// Pass API key via env var rather than JSON payload to avoid
+		// it being visible in /proc/<pid>/fd/0 or accidentally logged.
+		cmd.Env = append(os.Environ(), "HIVE_API_KEY="+cfg.APIKey)
+	}
 	cfg.APIKey = "" // strip from JSON payload
 
 	// Pipe SpawnConfig as JSON to stdin.

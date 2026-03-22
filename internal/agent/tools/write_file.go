@@ -35,12 +35,12 @@ func NewWriteFileTool(workingDir string) fantasy.AgentTool {
 
 			// Create parent directories if needed
 			dir := filepath.Dir(path)
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(dir, 0777); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error creating directory %s: %v", dir, err)), nil
 			}
 
-			if err := os.WriteFile(path, []byte(params.Content), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(params.Content), 0666); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error writing file: %v", err)), nil
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
 	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/uidpool"
 )
 
 // AgentInfo describes a running agent for external consumers.
@@ -62,6 +64,7 @@ type Manager struct {
 
 	hostSocket    string        // path to host gRPC socket
 	workerFactory WorkerFactory // creates agent workers (default = OS processes)
+	uidPool       *uidpool.Pool // per-agent Unix user isolation; nil = disabled
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.
@@ -76,7 +79,7 @@ type ControlPlane interface {
 // workspace containing agents/ and sessions/ subdirectories. The context
 // controls the lifetime of persistent agents. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.
-func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory) *Manager {
+func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory, pool *uidpool.Pool) *Manager {
 	if wf == nil {
 		wf = defaultWorkerFactory
 	}
@@ -90,6 +93,7 @@ func NewManager(ctx context.Context, workspaceDir string, opts Options, cp Contr
 		logger:        logger,
 		hostSocket:    hostSocket,
 		workerFactory: wf,
+		uidPool:       pool,
 	}
 }
 
@@ -455,6 +459,36 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		spawnCtx = m.ctx
 	}
 
+	// Acquire a dedicated Unix UID for this agent (if isolation is enabled).
+	var uid, gid uint32
+	if m.uidPool != nil {
+		var err error
+		uid, gid, err = m.uidPool.Acquire(id)
+		if err != nil {
+			return "", fmt.Errorf("acquiring UID: %w", err)
+		}
+		// Transfer ownership of the session dir to the agent user.
+		// WalkDir handles both fresh dirs (just the dir itself) and
+		// restored sessions (dir + existing files like history.db).
+		if err := filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			return os.Chown(path, int(uid), int(gid))
+		}); err != nil {
+			// Chown requires root. If we're not root (misconfigured),
+			// log and continue — the UID will still be set on the child
+			// process, but file permissions won't isolate session dirs.
+			if os.IsPermission(err) {
+				m.logger.Warn("cannot chown session dir (not root); file isolation degraded",
+					"session", id, "uid", uid)
+			} else {
+				m.uidPool.Release(id)
+				return "", fmt.Errorf("chowning session dir: %w", err)
+			}
+		}
+	}
+
 	// Build spawn config for the worker process.
 	model := cfg.Model
 	if m.opts.Model != "" {
@@ -474,10 +508,15 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		Provider:       string(m.opts.Provider),
 		APIKey:         m.opts.APIKey,
 		Model:          model,
+		UID:            uid,
+		GID:            gid,
 	}
 
 	handle, err := m.workerFactory(spawnCtx, spawnCfg)
 	if err != nil {
+		if m.uidPool != nil {
+			m.uidPool.Release(id)
+		}
 		// Clean up session dir on failure (only if we just created it)
 		if os.IsNotExist(statErr) {
 			os.RemoveAll(sessDir)
@@ -556,6 +595,9 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 
 		if exists {
 			deadRA.handle.Close()
+			if m.uidPool != nil {
+				m.uidPool.Release(id)
+			}
 			if deadRA.info.Mode == config.ModeEphemeral {
 				os.RemoveAll(m.sessionDir(id))
 			}
@@ -606,6 +648,10 @@ func (m *Manager) removeAgent(id string) {
 	}
 
 	ra.handle.Close()
+
+	if m.uidPool != nil {
+		m.uidPool.Release(id)
+	}
 
 	if ra.info.Mode == config.ModeEphemeral {
 		os.RemoveAll(m.sessionDir(id))

@@ -36,9 +36,19 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# Create non-root user and workspace
-RUN groupadd -r hive && useradd -r -g hive -m -d /home/hive -s /bin/bash hive \
-    && mkdir -p /workspace && chown hive:hive /workspace
+# Create agent user pool for per-agent Unix user isolation.
+# Each agent process runs as a dedicated user from this pool.
+RUN groupadd -g 10000 hive-agents \
+    && for i in $(seq 0 63); do \
+        uid=$((10000 + i)); \
+        useradd -r -u $uid -g hive-agents -M -d /tmp -s /bin/bash "hive-agent-$i"; \
+    done
+
+# Create hive user (for tool installation) and workspace directory.
+# Workspace uses setgid (2775) so files created by any agent inherit the
+# hive-agents group and are group-writable for collaborative access.
+RUN groupadd -r hive && useradd -r -g hive -G hive-agents -m -d /home/hive -s /bin/bash hive \
+    && mkdir -p /workspace && chown root:hive-agents /workspace && chmod 2775 /workspace
 USER hive
 ENV HOME=/home/hive
 
@@ -68,9 +78,14 @@ RUN mise use --global node@24 python@3.12 \
     && mise reshim \
     && node --version && python3 --version && which eslint && which ruff
 
+# Make mise tools accessible to all agent users
+USER root
+RUN chmod -R o+rX /home/hive/.local
+
 # Workspace
 WORKDIR /workspace
 
 COPY --from=build /hive /usr/local/bin/hive
 
+# Control plane runs as root for UID switching
 ENTRYPOINT ["hive"]

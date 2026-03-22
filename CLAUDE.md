@@ -70,9 +70,11 @@ Agent Worker Process (hive agent)
 └── gRPC AgentHost client (manager tool calls)
 ```
 
-**Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Agent starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects.
+**Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Agent starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects. When UID isolation is enabled, each agent runs as a dedicated Unix user via `SysProcAttr.Credential`.
 
-**Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers.
+**Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Session dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
+
+**Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 
 ### Agent Lifecycle
 
@@ -150,6 +152,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 - **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent` (runs in worker process); `Manager` supervises process lifecycles, spawns workers via `WorkerFactory`, routes messages via gRPC.
 - **`internal/ipc`** — IPC interfaces and types. `AgentHost` (agent→control plane), `AgentWorker` (control plane→agent), `HostManager` (gRPC server→manager), `SpawnConfig` (passed to workers at startup).
 - **`internal/ipc/grpcipc`** — gRPC adapters: `HostServer`/`HostClient` for AgentHost, `WorkerServer`/`WorkerClient` for AgentWorker. `HostClient` injects caller_id for authorization scoping.
+- **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
 - **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch).
 - **`internal/controlplane`** — Control plane: operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
@@ -290,4 +293,4 @@ Manager tools are scoped to the calling agent's descendants via `IsDescendant()`
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.test`). `make test-local` runs locally with mock workers.
-- No sandbox — agents can access the full filesystem and run any bash command. OS-level isolation (Unix users) is planned for Phase 5.
+- In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), workspace files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Outside Docker, isolation is disabled (no `hive-agents` group).
