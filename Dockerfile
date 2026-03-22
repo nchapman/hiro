@@ -41,26 +41,28 @@ ENV LC_ALL=en_US.UTF-8
 RUN groupadd -g 10000 hive-agents \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
-        useradd -r -u $uid -g hive-agents -M -d /tmp -s /bin/bash "hive-agent-$i"; \
+        useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
     done
 
-# Create hive user (for tool installation) and workspace directory.
+# Create hive user (for build-time tool installation) and workspace directory.
+# The hive user's primary group is hive-agents so that tools it installs are
+# immediately group-accessible to all agent users at runtime.
 # Workspace uses setgid (2775) so files created by any agent inherit the
 # hive-agents group and are group-writable for collaborative access.
-RUN groupadd -r hive && useradd -r -g hive -G hive-agents -m -d /home/hive -s /bin/bash hive \
+RUN useradd -r -g hive-agents -m -d /home/hive -s /bin/bash hive \
     && mkdir -p /workspace && chown root:hive-agents /workspace && chmod 2775 /workspace
 USER hive
 ENV HOME=/home/hive
 
-# Install mise and enable shims
-RUN curl https://mise.run | sh
-ENV PATH="/home/hive/.local/share/mise/shims:/home/hive/.local/bin:${PATH}"
-RUN mise settings set activate_aggressive true
+# Install mise and uv. MISE_DATA_DIR is set explicitly so agent processes
+# (which run with HOME=/tmp) can locate the shared tool installations.
+ENV MISE_DATA_DIR=/home/hive/.local/share/mise
+ENV PATH="${MISE_DATA_DIR}/shims:/home/hive/.local/bin:${PATH}"
+RUN curl https://mise.run | sh \
+    && mise settings set activate_aggressive true \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install node and python via mise, plus common global packages
+# Install node and python via mise, plus common global packages.
 RUN mise use --global node@24 python@3.12 \
     && mise reshim \
     && npm install -g \
@@ -78,9 +80,13 @@ RUN mise use --global node@24 python@3.12 \
     && mise reshim \
     && node --version && python3 --version && which eslint && which ruff
 
-# Make mise tools accessible to all agent users
+# Make tool installations group-writable so agent users (hive-agents) can
+# install additional tools at runtime via mise. Setgid ensures new files
+# inherit the hive-agents group.
 USER root
-RUN chmod -R o+rX /home/hive/.local
+RUN chgrp -R hive-agents /home/hive/.local \
+    && chmod -R g+rwX /home/hive/.local \
+    && find /home/hive/.local -type d -exec chmod g+s {} +
 
 # Workspace
 WORKDIR /workspace

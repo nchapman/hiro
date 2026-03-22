@@ -46,10 +46,17 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		}
 		cmd.Env = []string{
 			"PATH=" + os.Getenv("PATH"),
-			"HOME=/tmp",
+			"HOME=" + cfg.SessionDir,
 			"LANG=en_US.UTF-8",
 			"LC_ALL=en_US.UTF-8",
 			"HIVE_API_KEY=" + cfg.APIKey,
+		}
+		// Forward tool manager env vars so agents can use and install
+		// tools via mise. These are set in the Dockerfile.
+		for _, key := range []string{"MISE_DATA_DIR"} {
+			if v := os.Getenv(key); v != "" {
+				cmd.Env = append(cmd.Env, key+"="+v)
+			}
 		}
 	} else {
 		// Pass API key via env var rather than JSON payload to avoid
