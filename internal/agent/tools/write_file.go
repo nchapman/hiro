@@ -19,7 +19,7 @@ type WriteFileParams struct {
 }
 
 // NewWriteFileTool creates a tool that writes content to a file.
-func NewWriteFileTool() fantasy.AgentTool {
+func NewWriteFileTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"write_file",
 		writeFileDescription,
@@ -28,20 +28,22 @@ func NewWriteFileTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("path is required"), nil
 			}
 
+			path := resolvePath(workingDir, params.Path)
+
 			// Create parent directories if needed
-			dir := filepath.Dir(params.Path)
+			dir := filepath.Dir(path)
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error creating directory %s: %v", dir, err)), nil
 			}
 
-			if err := os.WriteFile(params.Path, []byte(params.Content), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(params.Content), 0644); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error writing file: %v", err)), nil
 			}
 
 			return fantasy.NewTextResponse(
-				fmt.Sprintf("wrote %d bytes to %s", len(params.Content), params.Path)), nil
+				fmt.Sprintf("wrote %d bytes to %s", len(params.Content), path)), nil
 		},
 	)
 }

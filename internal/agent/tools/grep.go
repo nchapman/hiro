@@ -61,7 +61,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 
 			searchPath := workingDir
 			if params.Path != "" {
-				searchPath = params.Path
+				searchPath = resolvePath(workingDir, params.Path)
 			}
 
 			searchCtx, cancel := context.WithTimeout(ctx, grepTimeout)

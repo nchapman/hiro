@@ -38,7 +38,7 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 
 			searchPath := workingDir
 			if params.Path != "" {
-				searchPath = params.Path
+				searchPath = resolvePath(workingDir, params.Path)
 			}
 
 			if _, err := os.Stat(searchPath); err != nil {

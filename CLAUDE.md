@@ -60,10 +60,38 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manag
 - **Ephemeral agents** are spawned via `spawn_agent` tool, run a single prompt, and are cleaned up.
 - **Persistent agents** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
 
+### Agent Definition Structure
+
+```
+agents/<name>/
+  agent.md          # Required. YAML frontmatter (name, model, mode, description) + markdown body (system prompt)
+  soul.md           # Optional. Persona, tone, boundaries — prepended to system prompt
+  tools.md          # Optional. Tool usage guidelines — appended as "## Tool Notes"
+  skills/
+    *.md            # Optional. Behavioral instructions injected into system prompt as "## Skills"
+```
+
+Skills are **not runtime tools** — they are static instructions appended to the system prompt to guide agent behavior.
+
+### System Prompt Assembly Order
+
+Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
+
+1. `soul.md` content (if present)
+2. `## Identity` + `identity.md` (persistent agents only)
+3. `## Memories` + `memory.md` (persistent agents only)
+4. `## Current Tasks` + formatted todos (persistent agents only)
+5. `agent.md` body (main instructions)
+6. `## Tool Notes` + `tools.md` (if present)
+7. `## Skills` + all `skills/*.md` formatted (if present)
+
+This means `memory_write`, identity edits, and todo updates take effect on the next turn.
+
 ### Key Packages
 
 - **`cmd/hive`** — Entry point. Loads config, starts manager, boots coordinator agent, runs HTTP server.
-- **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent`; `Manager` supervises lifecycles, provides manager tools (spawn/start/stop/send_message/list_agents), and serializes per-agent conversations.
+- **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent`; `Manager` supervises lifecycles, provides manager tools, and serializes per-agent conversations.
+- **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, bash, glob, grep, list_files, fetch).
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
 - **`internal/history`** — SQLite-backed conversation history with automatic LLM-driven compaction. `Engine` coordinates `Store` (persistence) + `Compactor` (summarization) + `Assemble` (context assembly within token budget).
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
@@ -71,19 +99,83 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manag
 - **`internal/api`** — HTTP server with REST endpoints (`/api/health`, `/api/agents`, `/api/agents/{id}/messages`) and WebSocket chat (`/ws/chat`).
 - **`web/`** — Embedded React UI (Vite + TypeScript). Built assets in `web/ui/dist/` are embedded via `//go:embed`.
 
-### System Prompt Assembly
+## Agent Tools
 
-Each turn, `currentSystemPrompt()` rebuilds the prompt from disk: soul → identity → memories → todos → instructions → tool notes → skills. This means `memory_write` and identity edits take effect on the next turn.
+### Built-in Tools (all agents get these 8)
 
-### Conversation Modes
+Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `internal/agent/tools/*.go`.
+
+| Tool | Purpose | Key Params | Constraints |
+|------|---------|------------|-------------|
+| `read_file` | Read file contents with line numbers | `path`, `offset`, `limit` | 64KB max output |
+| `write_file` | Write full content to file (creates dirs) | `path`, `content` | Full replacement only |
+| `edit` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
+| `list_files` | List directory contents | `path`, `pattern` (glob) | Max 500 entries; skips node_modules, vendor, dist, .git, hidden dirs |
+| `glob` | Find files by glob pattern | `pattern`, `path` | Max 100 results; uses ripgrep if available, falls back to Go; sorted by mod time (newest first) |
+| `grep` | Search file contents with regex | `pattern`, `path`, `include` (file glob), `literal_text` | Max 100 matches; 30s timeout; uses ripgrep if available |
+| `bash` | Execute shell commands | `command`, `working_dir` | 120s timeout, 32KB max output |
+| `fetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
+
+### Manager Tools (agents that can have children)
+
+Defined in `internal/agent/tools_manager.go` via `buildManagerTools(parentID)`. All scoped to calling agent's descendants via `IsDescendant()`.
+
+| Tool | Purpose | Key Params | Behavior |
+|------|---------|------------|----------|
+| `spawn_agent` | Run ephemeral subagent to completion | `agent` (name), `prompt` | Blocks until done; forces ephemeral mode; cleans up after; 32KB max result |
+| `start_agent` | Start a persistent child agent | `agent` (name) | Returns agent ID; respects agent config mode |
+| `send_message` | Send message to child and get response | `agent_id`, `message` | Blocks; scoped to descendants; serialized per-agent (mutex); 32KB max result |
+| `stop_agent` | Stop agent and its subtree | `agent_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent agents |
+| `list_agents` | List direct child agents | *(none)* | Shows name, ID, mode, description for direct children only |
+
+### Persistent Agent Tools (mode: persistent only)
+
+Added in `startInstance()` via `buildMemoryTools()`, `buildTodoTools()`, `buildHistoryTools()`.
+
+| Tool | Purpose | Key Params | Notes |
+|------|---------|------------|-------|
+| `memory_read` | Read `memory.md` from instance dir | *(none)* | Returns empty if no memories yet |
+| `memory_write` | Overwrite `memory.md` | `content` | Full replacement — read first to avoid data loss; 0600 perms; visible in system prompt next turn |
+| `todos` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
+| `history_search` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
+| `history_recall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
+
+### Tool Totals by Agent Type
+
+- **Ephemeral agents:** 8 built-in + 5 manager = 13 tools
+- **Persistent agents:** 8 built-in + 5 manager + 2 memory + 1 todos + 2 history = 18 tools
+
+## Coordinator Agent
+
+The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It is a persistent agent with model `claude-sonnet-4-20250514`.
+
+**Bootstrap flow** (`cmd/hive/main.go`):
+1. Check `HIVE_API_KEY` is set
+2. Create `Manager` with provider/API key
+3. `RestoreInstances()` — resume any persistent agents from prior runs
+4. `AgentByName("coordinator")` — check if already running (from restore)
+5. If not running, `StartAgent(ctx, "coordinator", "")` — no parent, becomes root
+
+The coordinator has **no special code paths** — it's a regular persistent agent that happens to be started first. It gets all 18 tools.
+
+## Creating Agents at Runtime
+
+Agents can create new agent definitions at runtime using their file tools:
+1. Use `write_file` / `edit` to create `agents/<name>/agent.md` (and optionally `soul.md`, `tools.md`, `skills/*.md`)
+2. Call `start_agent` with the new agent name — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
+3. No restart or reload mechanism needed
+
+Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory. The system prompt is rebuilt from disk each turn, so new skills take effect on the next `StreamChat` call.
+
+## Conversation Modes
 
 - **Persistent agents** use `history.Engine` — messages are stored in SQLite, automatically compacted via LLM summarization, and assembled within a token budget.
-- **Ephemeral agents** keep messages in-memory only.
+- **Ephemeral agents** keep messages in-memory only (discarded on stop).
 - **WebSocket chat** creates per-connection conversations for ephemeral agents, or uses shared persistent history for persistent agents.
 
 ### Agent Tool Scoping
 
-Manager tools (spawn/start/stop/send_message/list_agents) are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+Manager tools are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
 
 ## Testing Notes
 
@@ -91,3 +183,4 @@ Manager tools (spawn/start/stop/send_message/list_agents) are scoped to the call
 - `history` tests use `NewEngineWithSummarizer()` with a mock summarizer.
 - The `tools/` package tests run actual file/process operations in temp directories.
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go).
+- No sandbox — agents can access the full filesystem and run any bash command.

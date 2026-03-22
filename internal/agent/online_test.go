@@ -50,6 +50,23 @@ func loadEnv(t *testing.T) (ProviderType, string, string) {
 	return ProviderType(provider), apiKey, model
 }
 
+// repoRoot walks up from cwd to find the directory containing go.mod.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not find repo root (no go.mod found)")
+		}
+		dir = parent
+	}
+	return ""
+}
+
 func setupOnlineManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	provider, apiKey, model := loadEnv(t)
@@ -355,6 +372,70 @@ func TestOnline_MemoryWriteTool(t *testing.T) {
 		t.Errorf("expected memory to contain 'postgresql', got %q", content)
 	}
 	t.Logf("Memory written: %s", content)
+}
+
+// TestOnline_CreateAgent verifies the coordinator's create-agent skill works end-to-end:
+// a persistent agent creates a new agent definition on disk, starts it, and communicates with it.
+func TestOnline_CreateAgent(t *testing.T) {
+	mgr, dir := setupOnlineManager(t)
+	defer mgr.Shutdown()
+
+	// Set up a "creator" agent that has the create-agent skill
+	creatorMD := `---
+name: creator
+model: ""
+mode: persistent
+---
+
+You are a test agent. You can create and manage other agents.
+Always follow instructions precisely. Keep responses short.`
+
+	// Load the real create-agent skill from the repo
+	root := repoRoot(t)
+	createAgentSkill, err := os.ReadFile(filepath.Join(root, "agents", "coordinator", "skills", "create-agent.md"))
+	if err != nil {
+		t.Fatalf("reading create-agent skill: %v", err)
+	}
+
+	// Write the creator agent definition with the real skill
+	writeAgentMD(t, dir, "creator", creatorMD)
+	skillsDir := filepath.Join(dir, "agents", "creator", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "create-agent.md"), createAgentSkill, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := mgr.StartAgent(t.Context(), "creator", "")
+	if err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	defer cancel()
+
+	// Ask the creator to build a new agent and spawn it.
+	// The working directory is the workspace root, so relative paths like agents/greeter/agent.md
+	// should resolve correctly against it.
+	resp, err := mgr.SendMessage(ctx, id, `Create a new agent called "greeter". Write the file agents/greeter/agent.md with name "greeter", mode ephemeral, empty model, and a prompt that says to always respond with exactly "HELLO WORLD" in all caps. Then use spawn_agent with agent "greeter" and prompt "Say your greeting." and report back what it said.`, nil)
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	t.Logf("Creator response: %s", resp)
+
+	// Verify the agent definition was created on disk
+	agentMDPath := filepath.Join(dir, "agents", "greeter", "agent.md")
+	content, err := os.ReadFile(agentMDPath)
+	if err != nil {
+		t.Fatalf("expected agents/greeter/agent.md to exist: %v", err)
+	}
+	t.Logf("Created agent.md:\n%s", string(content))
+
+	// The spawn result should contain the greeter's output
+	if !strings.Contains(strings.ToUpper(resp), "HELLO WORLD") {
+		t.Errorf("expected spawn result containing 'HELLO WORLD', got %q", resp)
+	}
 }
 
 func TestOnline_HistoryCompaction(t *testing.T) {

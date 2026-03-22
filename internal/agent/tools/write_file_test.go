@@ -11,7 +11,7 @@ func TestWriteFile_CreateNew(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new.txt")
 
-	tool := NewWriteFileTool()
+	tool := NewWriteFileTool(dir)
 	content, isErr := runTool(t, tool, `{"path": "`+path+`", "content": "hello world"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -31,7 +31,7 @@ func TestWriteFile_Overwrite(t *testing.T) {
 	path := filepath.Join(dir, "existing.txt")
 	os.WriteFile(path, []byte("old"), 0644)
 
-	tool := NewWriteFileTool()
+	tool := NewWriteFileTool(dir)
 	content, isErr := runTool(t, tool, `{"path": "`+path+`", "content": "new"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -47,7 +47,7 @@ func TestWriteFile_CreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a", "b", "c", "deep.txt")
 
-	tool := NewWriteFileTool()
+	tool := NewWriteFileTool(dir)
 	content, isErr := runTool(t, tool, `{"path": "`+path+`", "content": "deep"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -63,7 +63,7 @@ func TestWriteFile_CreatesParentDirs(t *testing.T) {
 }
 
 func TestWriteFile_EmptyPath(t *testing.T) {
-	tool := NewWriteFileTool()
+	tool := NewWriteFileTool(t.TempDir())
 	content, isErr := runTool(t, tool, `{"path": "", "content": "x"}`)
 	if !isErr {
 		t.Fatal("expected error for empty path")
@@ -77,12 +77,48 @@ func TestWriteFile_ReportsBytes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sized.txt")
 
-	tool := NewWriteFileTool()
+	tool := NewWriteFileTool(dir)
 	content, isErr := runTool(t, tool, `{"path": "`+path+`", "content": "12345"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
 	if !strings.Contains(content, "5 bytes") {
 		t.Errorf("expected byte count in response, got %q", content)
+	}
+}
+
+func TestWriteFile_RelativePath(t *testing.T) {
+	dir := t.TempDir()
+
+	tool := NewWriteFileTool(dir)
+	content, isErr := runTool(t, tool, `{"path": "output.txt", "content": "relative write"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "output.txt"))
+	if err != nil {
+		t.Fatalf("file not found at expected path: %v", err)
+	}
+	if string(data) != "relative write" {
+		t.Errorf("file content = %q, want %q", string(data), "relative write")
+	}
+}
+
+func TestWriteFile_RelativeCreatesParentDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	tool := NewWriteFileTool(dir)
+	content, isErr := runTool(t, tool, `{"path": "agents/foo/agent.md", "content": "agent config"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "agents", "foo", "agent.md"))
+	if err != nil {
+		t.Fatalf("file not found at expected path: %v", err)
+	}
+	if string(data) != "agent config" {
+		t.Errorf("file content = %q, want %q", string(data), "agent config")
 	}
 }

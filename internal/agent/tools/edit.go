@@ -22,7 +22,7 @@ type EditParams struct {
 }
 
 // NewEditTool creates a tool that performs surgical find-and-replace edits on files.
-func NewEditTool() fantasy.AgentTool {
+func NewEditTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"edit",
 		editDescription,
@@ -31,13 +31,15 @@ func NewEditTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
+			filePath := resolvePath(workingDir, params.FilePath)
+
 			// Create new file: old_string empty, new_string has content
 			if params.OldString == "" {
-				return createFile(params.FilePath, params.NewString)
+				return createFile(filePath, params.NewString)
 			}
 
 			// Edit existing file
-			return editFile(params.FilePath, params.OldString, params.NewString, params.ReplaceAll)
+			return editFile(filePath, params.OldString, params.NewString, params.ReplaceAll)
 		},
 	)
 }
@@ -84,7 +86,8 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 	content := string(data)
 
 	if replaceAll {
-		if !strings.Contains(content, oldString) {
+		count := strings.Count(content, oldString)
+		if count == 0 {
 			return fantasy.NewTextErrorResponse(
 				"old_string not found in file. Make sure it matches exactly, including whitespace and line breaks."), nil
 		}
@@ -98,7 +101,6 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 				fmt.Sprintf("error writing file: %v", err)), nil
 		}
 
-		count := strings.Count(content, oldString)
 		return fantasy.NewTextResponse(
 			fmt.Sprintf("Replaced %d occurrence(s) in %s", count, filePath)), nil
 	}

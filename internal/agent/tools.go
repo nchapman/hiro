@@ -10,9 +10,9 @@ import (
 func (a *Agent) buildTools() []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		tools.NewBashTool(a.workingDir),
-		tools.NewReadFileTool(),
-		tools.NewEditTool(),
-		tools.NewWriteFileTool(),
+		tools.NewReadFileTool(a.workingDir),
+		tools.NewEditTool(a.workingDir),
+		tools.NewWriteFileTool(a.workingDir),
 		tools.NewListFilesTool(a.workingDir),
 		tools.NewGlobTool(a.workingDir),
 		tools.NewGrepTool(a.workingDir),

@@ -29,7 +29,7 @@ func NewListFilesTool(workingDir string) fantasy.AgentTool {
 		func(ctx context.Context, params ListFilesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			dir := workingDir
 			if params.Path != "" {
-				dir = params.Path
+				dir = resolvePath(workingDir, params.Path)
 			}
 
 			info, err := os.Stat(dir)

@@ -22,7 +22,7 @@ type ReadFileParams struct {
 }
 
 // NewReadFileTool creates a tool that reads file contents with line numbers.
-func NewReadFileTool() fantasy.AgentTool {
+func NewReadFileTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"read_file",
 		readFileDescription,
@@ -31,7 +31,8 @@ func NewReadFileTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("path is required"), nil
 			}
 
-			data, err := os.ReadFile(params.Path)
+			path := resolvePath(workingDir, params.Path)
+			data, err := os.ReadFile(path)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %v", err)), nil
 			}
