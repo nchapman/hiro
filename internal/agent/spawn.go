@@ -44,20 +44,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 				Groups: []uint32{cfg.GID},
 			},
 		}
-		cmd.Env = []string{
-			"PATH=" + os.Getenv("PATH"),
-			"HOME=" + cfg.SessionDir,
-			"LANG=en_US.UTF-8",
-			"LC_ALL=en_US.UTF-8",
-			"HIVE_API_KEY=" + cfg.APIKey,
-		}
-		// Forward tool manager env vars so agents can use and install
-		// tools via mise. These are set in the Dockerfile.
-		for _, key := range []string{"MISE_DATA_DIR", "MISE_CONFIG_DIR"} {
-			if v := os.Getenv(key); v != "" {
-				cmd.Env = append(cmd.Env, key+"="+v)
-			}
-		}
+		cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
 	} else {
 		// Pass API key via env var rather than JSON payload to avoid
 		// it being visible in /proc/<pid>/fd/0 or accidentally logged.
@@ -161,4 +148,32 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		},
 		Done: done,
 	}, nil
+}
+
+// forwardedEnvKeys are environment variables forwarded from the control plane
+// to isolated agent processes. These configure shared tool managers (mise)
+// so agents can find and install tools despite having a minimal environment.
+var forwardedEnvKeys = []string{
+	"MISE_DATA_DIR",
+	"MISE_CONFIG_DIR",
+}
+
+// buildIsolatedEnv constructs a minimal environment for an agent process
+// running under UID isolation. It includes only what's necessary for the
+// agent to function — locale, API key, home directory, PATH, and tool
+// manager config — preventing control plane state from leaking.
+func buildIsolatedEnv(cfg ipc.SpawnConfig, getenv func(string) string) []string {
+	env := []string{
+		"PATH=" + getenv("PATH"),
+		"HOME=" + cfg.SessionDir,
+		"LANG=en_US.UTF-8",
+		"LC_ALL=en_US.UTF-8",
+		"HIVE_API_KEY=" + cfg.APIKey,
+	}
+	for _, key := range forwardedEnvKeys {
+		if v := getenv(key); v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
+	return env
 }
