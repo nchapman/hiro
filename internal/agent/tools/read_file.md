@@ -7,3 +7,4 @@ Use this tool to examine source code, configuration files, logs, or any text fil
 - Always read a file before attempting to modify it.
 - For large files, use offset and limit to read specific sections.
 - Line numbers are 1-based.
+- Output is limited to 64KB. For larger files, use offset and limit to read in sections.

@@ -8,3 +8,4 @@ Use this to read web pages, API responses, documentation, or any HTTP resource. 
 - Timeout is 30 seconds.
 - Only HTTP and HTTPS URLs are supported.
 - For APIs that return JSON, the raw JSON will be returned.
+- Non-2xx responses are not errors — the full response (status, headers, body) is always returned. Check the HTTP status line to detect failures.

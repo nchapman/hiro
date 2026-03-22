@@ -9,7 +9,8 @@ Apply multiple find-and-replace edits to a single file in one operation. Prefer 
 
 - Edits are applied sequentially in the order provided.
 - Each edit operates on the result of the previous one.
-- If some edits fail, successful edits are still applied (partial success).
+- If all edits fail, no changes are written and an error is returned.
+- If some edits fail, the successful ones are applied and a partial-success error is returned listing which failed.
 - To create a new file, set the first edit's `old_string` to empty.
 
 ## Critical: exact matching

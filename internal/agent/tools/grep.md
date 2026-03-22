@@ -22,10 +22,11 @@ Fast content search tool that finds files containing specific text or regex patt
 
 ## Limitations
 
-- Results limited to 100 matches
-- Binary files are skipped
-- Hidden files/directories (starting with `.`) are skipped
-- `node_modules`, `vendor`, `dist`, `__pycache__`, `.git` are skipped
+- Results limited to 100 matches total.
+- In environments without ripgrep, results are further limited to 50 matches per file.
+- Binary files are skipped.
+- Hidden files/directories (starting with `.`) are skipped.
+- `node_modules`, `vendor`, `dist`, `__pycache__`, `.git` are skipped.
 
 ## Tips
 
