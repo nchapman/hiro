@@ -22,6 +22,7 @@ type SpawnConfig struct {
 	SessionDir     string          `json:"session_dir"`
 	AgentDefDir    string          `json:"agent_def_dir"`
 	SharedSkillDir string          `json:"shared_skill_dir"`
+	AgentSocket    string          `json:"agent_socket"`
 	HostSocket     string          `json:"host_socket"`
 	Provider       string          `json:"provider"`
 	APIKey         string          `json:"api_key"`

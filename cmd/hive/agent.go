@@ -49,7 +49,9 @@ func runAgent() error {
 	if cfg.Model != "" {
 		model = cfg.Model
 	}
-	lm, err := agent.CreateLanguageModel(ctx, agent.ProviderType(cfg.Provider), cfg.APIKey, model)
+	// API key is passed via env var (not in SpawnConfig JSON) for security.
+	apiKey := os.Getenv("HIVE_API_KEY")
+	lm, err := agent.CreateLanguageModel(ctx, agent.ProviderType(cfg.Provider), apiKey, model)
 	if err != nil {
 		return fmt.Errorf("creating language model: %w", err)
 	}
@@ -62,7 +64,7 @@ func runAgent() error {
 		return fmt.Errorf("connecting to control plane: %w", err)
 	}
 	defer hostConn.Close()
-	host := grpcipc.NewHostClient(hostConn)
+	host := grpcipc.NewHostClient(hostConn, cfg.SessionID)
 
 	// Build agent options
 	opts := agent.Options{
@@ -135,7 +137,10 @@ func runAgent() error {
 	}
 
 	// Start gRPC server on Unix socket
-	socketPath := fmt.Sprintf("/tmp/hive-agent-%s.sock", cfg.SessionID)
+	socketPath := cfg.AgentSocket
+	if socketPath == "" {
+		socketPath = fmt.Sprintf("/tmp/hive-agent-%s.sock", cfg.SessionID)
+	}
 	os.Remove(socketPath) // clean up stale socket
 	lis, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -153,8 +158,8 @@ func runAgent() error {
 		}
 	}()
 
-	// Signal ready by writing socket path to stdout
-	fmt.Fprintln(os.Stdout, socketPath)
+	// Signal ready to the control plane
+	fmt.Fprintln(os.Stdout, "ready")
 
 	logger.Info("agent worker ready")
 

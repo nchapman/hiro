@@ -2,65 +2,66 @@ package agent
 
 import (
 	"context"
-	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"charm.land/fantasy"
-
 	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hivebot/internal/ipc"
 )
 
-// fakeLM implements fantasy.LanguageModel for testing. It returns a canned
-// text response and records the last prompt it received.
-type fakeLM struct {
+// testWorker implements ipc.AgentWorker for testing.
+type testWorker struct {
 	response string
+	shutdown bool
+	done     chan struct{}
+	closed   bool
 }
 
-func (f *fakeLM) Generate(_ context.Context, call fantasy.Call) (*fantasy.Response, error) {
-	return &fantasy.Response{
-		Content:      fantasy.ResponseContent{fantasy.TextContent{Text: f.response}},
-		FinishReason: "end_turn",
-	}, nil
+func (w *testWorker) Chat(_ context.Context, message string, onDelta func(string) error) (string, error) {
+	if onDelta != nil {
+		onDelta(w.response)
+	}
+	return w.response, nil
 }
 
-func (f *fakeLM) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	return func(yield func(fantasy.StreamPart) bool) {
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "t0"}) {
-			return
-		}
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "t0", Delta: f.response}) {
-			return
-		}
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "t0"}) {
-			return
-		}
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: "end_turn"})
-	}, nil
+func (w *testWorker) Shutdown(_ context.Context) error {
+	w.shutdown = true
+	w.closeDone()
+	return nil
 }
 
-func (f *fakeLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
-	return &fantasy.ObjectResponse{}, nil
+func (w *testWorker) closeDone() {
+	if !w.closed {
+		w.closed = true
+		close(w.done)
+	}
 }
 
-func (f *fakeLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (iter.Seq[fantasy.ObjectStreamPart], error) {
-	return func(yield func(fantasy.ObjectStreamPart) bool) {}, nil
+// testWorkerFactory returns a WorkerFactory that creates testWorkers.
+// The done channel is closed when Shutdown is called, simulating process exit.
+func testWorkerFactory(response string) WorkerFactory {
+	return func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+		done := make(chan struct{})
+		w := &testWorker{response: response, done: done}
+		return &WorkerHandle{
+			Worker: w,
+			Kill:   func() { w.closeDone() },
+			Close:  func() {},
+			Done:   done,
+		}, nil
+	}
 }
-
-func (f *fakeLM) Provider() string { return "fake" }
-func (f *fakeLM) Model() string    { return "fake-model" }
 
 func setupTestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
-		LM:         &fakeLM{response: "hello from agent"},
 		WorkingDir: dir,
-	}, nil, logger)
+	}, nil, logger, "", testWorkerFactory("hello from agent"))
 	return mgr, dir
 }
 
@@ -136,8 +137,8 @@ func TestManager_SendMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	if result == "" {
-		t.Error("expected non-empty response")
+	if result != "hello from agent" {
+		t.Errorf("result = %q, want %q", result, "hello from agent")
 	}
 }
 
@@ -160,30 +161,6 @@ func TestManager_SendMessage_WithDelta(t *testing.T) {
 	}
 	if len(deltas) == 0 {
 		t.Error("expected at least one delta callback")
-	}
-}
-
-func TestManager_StreamChat_IsolatedConversations(t *testing.T) {
-	mgr, dir := setupTestManager(t)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	id, err := mgr.StartAgent(t.Context(), "test-agent", "")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	conv1 := NewConversation()
-	conv2 := NewConversation()
-
-	mgr.StreamChat(t.Context(), id, conv1, "message 1", nil)
-	mgr.StreamChat(t.Context(), id, conv1, "message 2", nil)
-	mgr.StreamChat(t.Context(), id, conv2, "only message", nil)
-
-	if len(conv1.Messages) != 4 { // 2 user + 2 assistant
-		t.Errorf("conv1 messages = %d, want 4", len(conv1.Messages))
-	}
-	if len(conv2.Messages) != 2 { // 1 user + 1 assistant
-		t.Errorf("conv2 messages = %d, want 2", len(conv2.Messages))
 	}
 }
 
@@ -472,11 +449,10 @@ func TestManager_EphemeralCleanup(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	// Start a persistent parent so we can spawn an ephemeral child
+	// Start a persistent parent
 	parentID, _ := mgr.StartAgent(t.Context(), "test-agent", "")
 
-	// We can't easily call SpawnSubagent (it blocks on SendMessage which
-	// needs a real LLM conversation), so test removeAgent cleanup directly.
+	// Start an ephemeral child directly
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
 	cfg.Mode = config.ModeEphemeral
 	ephID, _ := mgr.startSession(t.Context(), "ephemeral-test-id", cfg, parentID)
@@ -515,9 +491,8 @@ func TestManager_RestoreSessions(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
-		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
-	}, nil, logger)
+	}, nil, logger, "", testWorkerFactory("hello"))
 
 	id, err := mgr1.StartAgent(ctx, "test-agent", "")
 	if err != nil {
@@ -527,9 +502,8 @@ func TestManager_RestoreSessions(t *testing.T) {
 
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
-		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
-	}, nil, logger)
+	}, nil, logger, "", testWorkerFactory("hello"))
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -544,31 +518,22 @@ func TestManager_RestoreSessions(t *testing.T) {
 	}
 }
 
-func TestManager_IdentityInPrompt(t *testing.T) {
+func TestManager_SpawnSubagent(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	// Start agent to get its ID
-	id, _ := mgr.StartAgent(t.Context(), "test-agent", "")
-	mgr.StopAgent(id)
+	result, err := mgr.SpawnSubagent(t.Context(), "test-agent", "do something", "", nil)
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if result != "hello from agent" {
+		t.Errorf("result = %q, want %q", result, "hello from agent")
+	}
 
-	// Write identity into the session dir
-	sessDir := filepath.Join(dir, "sessions", id)
-	os.WriteFile(filepath.Join(sessDir, "identity.md"), []byte("I am Aria. 🦊 Curious and thorough."), 0644)
-
-	// Restore — the agent should pick up the identity
-	mgr2, _ := setupTestManager(t)
-	// Need to copy the workspace structure
-	// Actually, let's use the same dir with a fresh manager
-	mgr2 = NewManager(t.Context(), dir, Options{
-		LM:         &fakeLM{response: "hello"},
-		WorkingDir: dir,
-	}, nil, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})))
-	mgr2.RestoreSessions(t.Context())
-
-	_, ok := mgr2.GetAgent(id)
-	if !ok {
-		t.Fatal("restored agent with identity not found")
+	// Ephemeral agent should be cleaned up
+	agents := mgr.ListAgents()
+	if len(agents) != 0 {
+		t.Errorf("expected 0 agents after spawn, got %d", len(agents))
 	}
 }
 
@@ -585,5 +550,28 @@ func TestTruncateResult(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "(result truncated)") {
 		t.Error("expected truncation suffix")
+	}
+}
+
+func TestManager_EffectiveTools(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "tooled", `---
+name: tooled
+model: fake-model
+tools:
+  - bash
+  - read_file
+  - write_file
+---
+Agent with tools.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("tooled"))
+	effective := mgr.computeEffectiveTools(cfg, "")
+
+	if !effective["bash"] || !effective["read_file"] || !effective["write_file"] {
+		t.Errorf("effective tools should include all declared tools, got %v", effective)
+	}
+	if effective["glob"] {
+		t.Error("glob should not be in effective tools (not declared)")
 	}
 }

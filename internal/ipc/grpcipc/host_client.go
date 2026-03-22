@@ -11,19 +11,28 @@ import (
 )
 
 // HostClient implements ipc.AgentHost by making gRPC calls to an AgentHost server.
+// It transparently injects the caller's identity into every request so the server
+// can scope authorization without the caller having to manage parent IDs.
 type HostClient struct {
-	client pb.AgentHostClient
+	client   pb.AgentHostClient
+	callerID string
 }
 
 // NewHostClient creates an AgentHost backed by a gRPC connection.
-func NewHostClient(cc grpc.ClientConnInterface) *HostClient {
-	return &HostClient{client: pb.NewAgentHostClient(cc)}
+// callerID is this agent's session ID — it is injected as parent_id or
+// caller_id in every request for authorization scoping.
+func NewHostClient(cc grpc.ClientConnInterface, callerID string) *HostClient {
+	return &HostClient{
+		client:   pb.NewAgentHostClient(cc),
+		callerID: callerID,
+	}
 }
 
 func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, onDelta func(string) error) (string, error) {
 	stream, err := c.client.SpawnAgent(ctx, &pb.SpawnAgentRequest{
 		AgentName: agentName,
 		Prompt:    prompt,
+		ParentId:  c.callerID,
 	})
 	if err != nil {
 		return "", err
@@ -34,6 +43,7 @@ func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, o
 func (c *HostClient) StartAgent(ctx context.Context, agentName string) (string, error) {
 	resp, err := c.client.StartAgent(ctx, &pb.StartAgentRequest{
 		AgentName: agentName,
+		ParentId:  c.callerID,
 	})
 	if err != nil {
 		return "", err
@@ -43,8 +53,9 @@ func (c *HostClient) StartAgent(ctx context.Context, agentName string) (string, 
 
 func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
 	stream, err := c.client.SendMessage(ctx, &pb.SendMessageRequest{
-		AgentId: agentID,
-		Message: message,
+		AgentId:  agentID,
+		Message:  message,
+		CallerId: c.callerID,
 	})
 	if err != nil {
 		return "", err
@@ -54,13 +65,16 @@ func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, o
 
 func (c *HostClient) StopAgent(ctx context.Context, agentID string) error {
 	_, err := c.client.StopAgent(ctx, &pb.StopAgentRequest{
-		AgentId: agentID,
+		AgentId:  agentID,
+		CallerId: c.callerID,
 	})
 	return err
 }
 
 func (c *HostClient) ListAgents(ctx context.Context) ([]ipc.AgentInfo, error) {
-	resp, err := c.client.ListAgents(ctx, &pb.ListAgentsRequest{})
+	resp, err := c.client.ListAgents(ctx, &pb.ListAgentsRequest{
+		ParentId: c.callerID,
+	})
 	if err != nil {
 		return nil, err
 	}

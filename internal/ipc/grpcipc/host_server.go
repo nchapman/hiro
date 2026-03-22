@@ -4,21 +4,26 @@ package grpcipc
 
 import (
 	"context"
+	"fmt"
 
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"github.com/nchapman/hivebot/internal/ipc"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// HostServer adapts an ipc.AgentHost to the gRPC AgentHostServer interface.
+// HostServer adapts an ipc.HostManager to the gRPC AgentHostServer interface.
+// It reads parent_id / caller_id from each request to scope operations,
+// allowing a single server to multiplex requests from all agent processes.
 type HostServer struct {
 	pb.UnimplementedAgentHostServer
-	host ipc.AgentHost
+	mgr ipc.HostManager
 }
 
-// NewHostServer creates a gRPC server that delegates to the given AgentHost.
-func NewHostServer(host ipc.AgentHost) *HostServer {
-	return &HostServer{host: host}
+// NewHostServer creates a gRPC server that delegates to the given HostManager.
+func NewHostServer(mgr ipc.HostManager) *HostServer {
+	return &HostServer{mgr: mgr}
 }
 
 // Register registers this server with a gRPC service registrar.
@@ -26,13 +31,15 @@ func (s *HostServer) Register(registrar grpc.ServiceRegistrar) {
 	pb.RegisterAgentHostServer(registrar, s)
 }
 
+// SpawnAgent creates a child of the caller. No descendant check needed because
+// the caller IS the parent — parent_id is the caller's own ID, injected by HostClient.
 func (s *HostServer) SpawnAgent(req *pb.SpawnAgentRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
 	ctx := stream.Context()
 	onDelta := func(text string) error {
 		return stream.Send(&pb.ChatEvent{Type: "delta", Content: text})
 	}
 
-	result, err := s.host.SpawnAgent(ctx, req.AgentName, req.Prompt, onDelta)
+	result, err := s.mgr.SpawnSubagent(ctx, req.AgentName, req.Prompt, req.ParentId, onDelta)
 	if err != nil {
 		return err
 	}
@@ -41,7 +48,7 @@ func (s *HostServer) SpawnAgent(req *pb.SpawnAgentRequest, stream grpc.ServerStr
 }
 
 func (s *HostServer) StartAgent(ctx context.Context, req *pb.StartAgentRequest) (*pb.StartAgentResponse, error) {
-	id, err := s.host.StartAgent(ctx, req.AgentName)
+	id, err := s.mgr.StartAgent(ctx, req.AgentName, req.ParentId)
 	if err != nil {
 		return nil, err
 	}
@@ -49,12 +56,16 @@ func (s *HostServer) StartAgent(ctx context.Context, req *pb.StartAgentRequest) 
 }
 
 func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
+	if err := s.checkDescendant(req.AgentId, req.CallerId); err != nil {
+		return err
+	}
+
 	ctx := stream.Context()
 	onDelta := func(text string) error {
 		return stream.Send(&pb.ChatEvent{Type: "delta", Content: text})
 	}
 
-	result, err := s.host.SendMessage(ctx, req.AgentId, req.Message, onDelta)
+	result, err := s.mgr.SendMessage(ctx, req.AgentId, req.Message, onDelta)
 	if err != nil {
 		return err
 	}
@@ -63,17 +74,18 @@ func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerS
 }
 
 func (s *HostServer) StopAgent(ctx context.Context, req *pb.StopAgentRequest) (*pb.StopAgentResponse, error) {
-	if err := s.host.StopAgent(ctx, req.AgentId); err != nil {
+	if err := s.checkDescendant(req.AgentId, req.CallerId); err != nil {
+		return nil, err
+	}
+
+	if _, err := s.mgr.StopAgent(req.AgentId); err != nil {
 		return nil, err
 	}
 	return &pb.StopAgentResponse{}, nil
 }
 
 func (s *HostServer) ListAgents(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error) {
-	agents, err := s.host.ListAgents(ctx)
-	if err != nil {
-		return nil, err
-	}
+	agents := s.mgr.ListChildren(req.ParentId)
 	pbAgents := make([]*pb.AgentInfoProto, len(agents))
 	for i, a := range agents {
 		pbAgents[i] = &pb.AgentInfoProto{
@@ -88,9 +100,20 @@ func (s *HostServer) ListAgents(ctx context.Context, req *pb.ListAgentsRequest) 
 }
 
 func (s *HostServer) GetSecrets(ctx context.Context, req *pb.GetSecretsRequest) (*pb.GetSecretsResponse, error) {
-	names, env, err := s.host.GetSecrets(ctx)
-	if err != nil {
-		return nil, err
+	return &pb.GetSecretsResponse{
+		Names: s.mgr.SecretNames(),
+		Env:   s.mgr.SecretEnv(),
+	}, nil
+}
+
+// checkDescendant verifies that targetID is a descendant of callerID.
+func (s *HostServer) checkDescendant(targetID, callerID string) error {
+	if callerID == "" {
+		return status.Error(codes.InvalidArgument, "caller_id is required")
 	}
-	return &pb.GetSecretsResponse{Names: names, Env: env}, nil
+	if !s.mgr.IsDescendant(targetID, callerID) {
+		return status.Error(codes.PermissionDenied,
+			fmt.Sprintf("agent %q is not a descendant of caller %q", targetID, callerID))
+	}
+	return nil
 }

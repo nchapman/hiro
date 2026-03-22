@@ -101,6 +101,24 @@ func OpenStore(path string) (*Store, error) {
 	return s, nil
 }
 
+// OpenStoreReadOnly opens an existing history database in read-only mode.
+// This is used by the control plane to read an agent's history without
+// interfering with the agent process's WAL checkpointing. The caller must
+// close the store after use.
+func OpenStoreReadOnly(path string) (*Store, error) {
+	dsn := path + "?mode=ro"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("opening database read-only: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("setting busy_timeout: %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
 // Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()

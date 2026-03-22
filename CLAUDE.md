@@ -11,10 +11,12 @@ Hive is a distributed AI agent platform written in Go. A single binary serves an
 ```bash
 make build        # Build web UI + Go binary (outputs ./hive)
 make build-dev    # Build Go binary without web UI (uses -tags dev)
-make test         # go test ./... -v -count=1
-make check        # test + go vet
+make test         # Run tests in Docker (builds test container)
+make test-local   # Run tests locally (no Docker, uses mock workers)
+make check        # test + go vet (in Docker)
 make web          # Build web UI only (cd web/ui && npm install && npm run build)
 make docker       # Docker build
+make proto        # Regenerate protobuf (requires protoc)
 ```
 
 Run a single test:
@@ -47,10 +49,35 @@ A `.env` file is loaded automatically via godotenv (does not override existing v
 
 ## Architecture
 
+### Process Model
+
+Hive uses **process isolation**: the control plane and each agent run as separate OS processes from the same binary. Communication is via gRPC over Unix sockets.
+
+```
+Control Plane Process (hive)
+├── HTTP/WS API (web UI, REST, chat)
+├── gRPC AgentHost server (Unix socket)
+├── Agent process lifecycle (spawn/kill)
+├── Secrets + tool policies (config.yaml)
+├── Process registry + message routing
+└── Spawns: hive agent (one per session)
+
+Agent Worker Process (hive agent)
+├── Fantasy agent loop (LLM calls)
+├── All built-in tools (local, no IPC)
+├── Persistent tools: memory, todos, history
+├── gRPC AgentWorker server (receives messages)
+└── gRPC AgentHost client (manager tool calls)
+```
+
+**Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Agent starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects.
+
+**Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers.
+
 ### Agent Lifecycle
 
 ```
-agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manager tracks session
+agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager spawns worker process
                                                                        ↓
                                                               sessions/<uuid>/
                                                                 manifest.yaml
@@ -119,8 +146,10 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 ### Key Packages
 
-- **`cmd/hive`** — Entry point. Loads config, starts manager, boots coordinator agent, runs HTTP server.
-- **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent`; `Manager` supervises lifecycles, provides manager tools, and serializes per-agent conversations.
+- **`cmd/hive`** — Entry point. `run()` starts the control plane (HTTP, gRPC host server, manager). `runAgent()` is the agent worker entry point (reads SpawnConfig from stdin, runs fantasy agent loop, serves AgentWorker gRPC).
+- **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent` (runs in worker process); `Manager` supervises process lifecycles, spawns workers via `WorkerFactory`, routes messages via gRPC.
+- **`internal/ipc`** — IPC interfaces and types. `AgentHost` (agent→control plane), `AgentWorker` (control plane→agent), `HostManager` (gRPC server→manager), `SpawnConfig` (passed to workers at startup).
+- **`internal/ipc/grpcipc`** — gRPC adapters: `HostServer`/`HostClient` for AgentHost, `WorkerServer`/`WorkerClient` for AgentWorker. `HostClient` injects caller_id for authorization scoping.
 - **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch).
 - **`internal/controlplane`** — Control plane: operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
@@ -254,9 +283,11 @@ Manager tools are scoped to the calling agent's descendants via `IsDescendant()`
 
 ## Testing Notes
 
-- Tests use `fantasy.LanguageModel` injection (`opts.LM`) to avoid real API calls.
+- Manager tests inject a `testWorkerFactory` that returns fake `ipc.AgentWorker` implementations — no real processes or LLM calls.
 - `history` tests use `NewEngineWithSummarizer()` with a mock summarizer.
 - The `tools/` package tests run actual file/process operations in temp directories.
+- gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing.
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
-- No sandbox — agents can access the full filesystem and run any bash command.
+- `make test` runs tests in Docker (`Dockerfile.test`). `make test-local` runs locally with mock workers.
+- No sandbox — agents can access the full filesystem and run any bash command. OS-level isolation (Unix users) is planned for Phase 5.

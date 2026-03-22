@@ -9,13 +9,12 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/config"
 )
 
 // ChatMessage is a message sent or received over the chat WebSocket.
 type ChatMessage struct {
-	Type    string `json:"type"`           // "message", "delta", "done", "error"
-	Role    string `json:"role,omitempty"` // "user" or "assistant"
+	Type    string `json:"type"`              // "message", "delta", "done", "error"
+	Role    string `json:"role,omitempty"`     // "user" or "assistant"
 	Content string `json:"content"`
 }
 
@@ -61,14 +60,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Persistent agents use SendMessage (shared history persisted to DB).
-	// Ephemeral agents use StreamChat with a per-connection conversation.
-	persistent := info.Mode == config.ModePersistent
-	var conv *agent.Conversation
-	if !persistent {
-		conv = agent.NewConversation()
-	}
-
 	for {
 		// Read user message
 		var msg ChatMessage
@@ -108,13 +99,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			return conn.Write(ctx, websocket.MessageText, b)
 		}
 
-		// Stream response — persistent agents use shared history, ephemeral get per-connection
-		var streamErr error
-		if persistent {
-			_, streamErr = s.manager.SendMessage(ctx, agentID, msg.Content, onDelta)
-		} else {
-			_, streamErr = s.manager.StreamChat(ctx, agentID, conv, msg.Content, onDelta)
-		}
+		// Stream response — agent process owns the conversation.
+		_, streamErr := s.manager.SendMessage(ctx, agentID, msg.Content, onDelta)
 
 		if streamErr != nil {
 			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}

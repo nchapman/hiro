@@ -235,6 +235,7 @@ type SendMessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	CallerId      string                 `protobuf:"bytes,3,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -283,9 +284,17 @@ func (x *SendMessageRequest) GetMessage() string {
 	return ""
 }
 
+func (x *SendMessageRequest) GetCallerId() string {
+	if x != nil {
+		return x.CallerId
+	}
+	return ""
+}
+
 type StopAgentRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -323,6 +332,13 @@ func (*StopAgentRequest) Descriptor() ([]byte, []int) {
 func (x *StopAgentRequest) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
+	}
+	return ""
+}
+
+func (x *StopAgentRequest) GetCallerId() string {
+	if x != nil {
+		return x.CallerId
 	}
 	return ""
 }
@@ -750,12 +766,14 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\tparent_id\x18\x02 \x01(\tR\bparentId\"3\n" +
 	"\x12StartAgentResponse\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"I\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"f\n" +
 	"\x12SendMessageRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"-\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
+	"\tcaller_id\x18\x03 \x01(\tR\bcallerId\"J\n" +
 	"\x10StopAgentRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\tR\aagentId\"\x13\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1b\n" +
+	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x13\n" +
 	"\x11StopAgentResponse\"0\n" +
 	"\x11ListAgentsRequest\x12\x1b\n" +
 	"\tparent_id\x18\x01 \x01(\tR\bparentId\"B\n" +

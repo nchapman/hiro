@@ -15,21 +15,26 @@ import (
 
 const bufSize = 1024 * 1024
 
-// fakeHost implements ipc.AgentHost for testing.
-type fakeHost struct {
-	spawnResult  string
-	startID      string
-	sendResult   string
-	agents       []ipc.AgentInfo
-	secretNames  []string
-	secretEnv    []string
-	lastSpawnReq struct{ name, prompt string }
+// fakeManager implements ipc.HostManager for testing.
+type fakeManager struct {
+	spawnResult string
+	startID     string
+	sendResult  string
+	children    []ipc.AgentInfo
+	secretNames []string
+	secretEnv   []string
+	descendants map[string]string // targetID -> ancestorID (for IsDescendant)
+
+	lastSpawnReq struct{ name, prompt, parentID string }
 	lastSendReq  struct{ id, message string }
+	lastStartReq struct{ name, parentID string }
+	lastStopReq  string
 }
 
-func (f *fakeHost) SpawnAgent(ctx context.Context, agentName, prompt string, onDelta func(string) error) (string, error) {
+func (f *fakeManager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onDelta func(string) error) (string, error) {
 	f.lastSpawnReq.name = agentName
 	f.lastSpawnReq.prompt = prompt
+	f.lastSpawnReq.parentID = parentID
 	if onDelta != nil {
 		onDelta("thinking...")
 		onDelta("done thinking")
@@ -37,11 +42,13 @@ func (f *fakeHost) SpawnAgent(ctx context.Context, agentName, prompt string, onD
 	return f.spawnResult, nil
 }
 
-func (f *fakeHost) StartAgent(ctx context.Context, agentName string) (string, error) {
+func (f *fakeManager) StartAgent(ctx context.Context, name, parentID string) (string, error) {
+	f.lastStartReq.name = name
+	f.lastStartReq.parentID = parentID
 	return f.startID, nil
 }
 
-func (f *fakeHost) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
+func (f *fakeManager) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
 	f.lastSendReq.id = agentID
 	f.lastSendReq.message = message
 	if onDelta != nil {
@@ -50,19 +57,32 @@ func (f *fakeHost) SendMessage(ctx context.Context, agentID, message string, onD
 	return f.sendResult, nil
 }
 
-func (f *fakeHost) StopAgent(ctx context.Context, agentID string) error {
+func (f *fakeManager) StopAgent(agentID string) (ipc.AgentInfo, error) {
+	f.lastStopReq = agentID
 	if agentID == "not-found" {
-		return fmt.Errorf("agent %q not found", agentID)
+		return ipc.AgentInfo{}, fmt.Errorf("agent %q not found", agentID)
 	}
-	return nil
+	return ipc.AgentInfo{ID: agentID}, nil
 }
 
-func (f *fakeHost) ListAgents(ctx context.Context) ([]ipc.AgentInfo, error) {
-	return f.agents, nil
+func (f *fakeManager) IsDescendant(targetID, ancestorID string) bool {
+	if f.descendants == nil {
+		return true // default: allow all
+	}
+	ancestor, ok := f.descendants[targetID]
+	return ok && ancestor == ancestorID
 }
 
-func (f *fakeHost) GetSecrets(ctx context.Context) ([]string, []string, error) {
-	return f.secretNames, f.secretEnv, nil
+func (f *fakeManager) ListChildren(callerID string) []ipc.AgentInfo {
+	return f.children
+}
+
+func (f *fakeManager) SecretNames() []string {
+	return f.secretNames
+}
+
+func (f *fakeManager) SecretEnv() []string {
+	return f.secretEnv
 }
 
 // fakeWorker implements ipc.AgentWorker for testing.
@@ -85,11 +105,11 @@ func (f *fakeWorker) Shutdown(ctx context.Context) error {
 }
 
 // setupHostTest creates a bufconn-based gRPC server/client pair for AgentHost.
-func setupHostTest(t *testing.T, host ipc.AgentHost) *grpcipc.HostClient {
+func setupHostTest(t *testing.T, mgr ipc.HostManager, callerID string) *grpcipc.HostClient {
 	t.Helper()
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
-	grpcipc.NewHostServer(host).Register(srv)
+	grpcipc.NewHostServer(mgr).Register(srv)
 	go srv.Serve(lis)
 	t.Cleanup(srv.Stop)
 
@@ -104,7 +124,7 @@ func setupHostTest(t *testing.T, host ipc.AgentHost) *grpcipc.HostClient {
 	}
 	t.Cleanup(func() { conn.Close() })
 
-	return grpcipc.NewHostClient(conn)
+	return grpcipc.NewHostClient(conn, callerID)
 }
 
 // setupWorkerTest creates a bufconn-based gRPC server/client pair for AgentWorker.
@@ -131,8 +151,8 @@ func setupWorkerTest(t *testing.T, worker ipc.AgentWorker) *grpcipc.WorkerClient
 }
 
 func TestHostRoundtrip_SpawnAgent(t *testing.T) {
-	host := &fakeHost{spawnResult: "task completed successfully"}
-	client := setupHostTest(t, host)
+	mgr := &fakeManager{spawnResult: "task completed successfully"}
+	client := setupHostTest(t, mgr, "parent-1")
 
 	var deltas []string
 	result, err := client.SpawnAgent(t.Context(), "researcher", "find info", func(text string) error {
@@ -148,14 +168,17 @@ func TestHostRoundtrip_SpawnAgent(t *testing.T) {
 	if len(deltas) != 2 {
 		t.Errorf("got %d deltas, want 2", len(deltas))
 	}
-	if host.lastSpawnReq.name != "researcher" {
-		t.Errorf("agent name = %q, want researcher", host.lastSpawnReq.name)
+	if mgr.lastSpawnReq.name != "researcher" {
+		t.Errorf("agent name = %q, want researcher", mgr.lastSpawnReq.name)
+	}
+	if mgr.lastSpawnReq.parentID != "parent-1" {
+		t.Errorf("parent_id = %q, want parent-1", mgr.lastSpawnReq.parentID)
 	}
 }
 
 func TestHostRoundtrip_StartAgent(t *testing.T) {
-	host := &fakeHost{startID: "session-123"}
-	client := setupHostTest(t, host)
+	mgr := &fakeManager{startID: "session-123"}
+	client := setupHostTest(t, mgr, "parent-1")
 
 	id, err := client.StartAgent(t.Context(), "coordinator")
 	if err != nil {
@@ -164,11 +187,14 @@ func TestHostRoundtrip_StartAgent(t *testing.T) {
 	if id != "session-123" {
 		t.Errorf("id = %q, want session-123", id)
 	}
+	if mgr.lastStartReq.parentID != "parent-1" {
+		t.Errorf("parent_id = %q, want parent-1", mgr.lastStartReq.parentID)
+	}
 }
 
 func TestHostRoundtrip_SendMessage(t *testing.T) {
-	host := &fakeHost{sendResult: "hello back"}
-	client := setupHostTest(t, host)
+	mgr := &fakeManager{sendResult: "hello back"}
+	client := setupHostTest(t, mgr, "parent-1")
 
 	var deltas []string
 	result, err := client.SendMessage(t.Context(), "agent-1", "hello", func(text string) error {
@@ -187,17 +213,20 @@ func TestHostRoundtrip_SendMessage(t *testing.T) {
 }
 
 func TestHostRoundtrip_StopAgent(t *testing.T) {
-	host := &fakeHost{}
-	client := setupHostTest(t, host)
+	mgr := &fakeManager{}
+	client := setupHostTest(t, mgr, "parent-1")
 
 	if err := client.StopAgent(t.Context(), "agent-1"); err != nil {
 		t.Fatalf("StopAgent: %v", err)
 	}
+	if mgr.lastStopReq != "agent-1" {
+		t.Errorf("stopped = %q, want agent-1", mgr.lastStopReq)
+	}
 }
 
 func TestHostRoundtrip_StopAgent_NotFound(t *testing.T) {
-	host := &fakeHost{}
-	client := setupHostTest(t, host)
+	mgr := &fakeManager{}
+	client := setupHostTest(t, mgr, "parent-1")
 
 	err := client.StopAgent(t.Context(), "not-found")
 	if err == nil {
@@ -206,13 +235,13 @@ func TestHostRoundtrip_StopAgent_NotFound(t *testing.T) {
 }
 
 func TestHostRoundtrip_ListAgents(t *testing.T) {
-	host := &fakeHost{
-		agents: []ipc.AgentInfo{
+	mgr := &fakeManager{
+		children: []ipc.AgentInfo{
 			{ID: "a1", Name: "researcher", Mode: "ephemeral", Description: "finds stuff"},
 			{ID: "a2", Name: "writer", Mode: "persistent"},
 		},
 	}
-	client := setupHostTest(t, host)
+	client := setupHostTest(t, mgr, "parent-1")
 
 	agents, err := client.ListAgents(t.Context())
 	if err != nil {
@@ -230,11 +259,11 @@ func TestHostRoundtrip_ListAgents(t *testing.T) {
 }
 
 func TestHostRoundtrip_GetSecrets(t *testing.T) {
-	host := &fakeHost{
+	mgr := &fakeManager{
 		secretNames: []string{"TOKEN", "KEY"},
 		secretEnv:   []string{"TOKEN=abc", "KEY=xyz"},
 	}
-	client := setupHostTest(t, host)
+	client := setupHostTest(t, mgr, "parent-1")
 
 	names, env, err := client.GetSecrets(t.Context())
 	if err != nil {
@@ -245,6 +274,44 @@ func TestHostRoundtrip_GetSecrets(t *testing.T) {
 	}
 	if len(env) != 2 || env[0] != "TOKEN=abc" {
 		t.Errorf("env = %v, want [TOKEN=abc KEY=xyz]", env)
+	}
+}
+
+func TestHostRoundtrip_SendMessage_DescendantCheck(t *testing.T) {
+	mgr := &fakeManager{
+		sendResult: "ok",
+		descendants: map[string]string{
+			"child-1": "parent-1", // child-1 is a descendant of parent-1
+		},
+	}
+
+	// parent-1 can message child-1
+	client := setupHostTest(t, mgr, "parent-1")
+	_, err := client.SendMessage(t.Context(), "child-1", "hello", nil)
+	if err != nil {
+		t.Fatalf("expected SendMessage to succeed for descendant: %v", err)
+	}
+
+	// parent-2 cannot message child-1
+	client2 := setupHostTest(t, mgr, "parent-2")
+	_, err = client2.SendMessage(t.Context(), "child-1", "hello", nil)
+	if err == nil {
+		t.Fatal("expected SendMessage to fail for non-descendant")
+	}
+}
+
+func TestHostRoundtrip_StopAgent_DescendantCheck(t *testing.T) {
+	mgr := &fakeManager{
+		descendants: map[string]string{
+			"child-1": "parent-1",
+		},
+	}
+
+	// parent-2 cannot stop child-1
+	client := setupHostTest(t, mgr, "parent-2")
+	err := client.StopAgent(t.Context(), "child-1")
+	if err == nil {
+		t.Fatal("expected StopAgent to fail for non-descendant")
 	}
 }
 

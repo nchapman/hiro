@@ -13,6 +13,13 @@ services:
       - HIVE_ADDR=:8080
       - HIVE_WORKSPACE_DIR=/workspace
 
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.testing
+    init: true
+    profiles: ["test"]
+
 # WARNING: 'docker compose down -v' destroys all agent state (history, memory, todos).
 volumes:
   workspace:

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,11 +15,12 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"google.golang.org/grpc"
 
 	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/agent/tools"
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	"github.com/nchapman/hivebot/internal/workspace"
 	"github.com/nchapman/hivebot/web"
 )
@@ -59,12 +61,8 @@ func run() error {
 	apiKey := os.Getenv("HIVE_API_KEY")
 	modelOverride := os.Getenv("HIVE_MODEL")
 
-	// Hide the control plane config from agent file tools so they don't
-	// interact with it. This is a convenience filter, not a security
-	// boundary — OS-level permissions handle actual access control.
 	absWorkspaceDir, _ := filepath.Abs(workspaceDir)
 	cpPath := filepath.Join(absWorkspaceDir, "config.yaml")
-	tools.ForbiddenPaths = []string{cpPath}
 
 	// Initialize workspace directory structure and seed defaults
 	if err := workspace.Init(workspaceDir, logger); err != nil {
@@ -91,13 +89,32 @@ func run() error {
 
 	// Start agent manager and leader agent if API key is set
 	var mgr *agent.Manager
+	var grpcSrv *grpc.Server
 	if apiKey != "" {
+		// Start host gRPC server for agent processes to connect to.
+		hostSocket := filepath.Join(os.TempDir(), fmt.Sprintf("hive-host-%d.sock", os.Getpid()))
+		os.Remove(hostSocket)
+		hostLis, err := net.Listen("unix", hostSocket)
+		if err != nil {
+			return fmt.Errorf("listening on host socket: %w", err)
+		}
+		defer os.Remove(hostSocket)
+
 		mgr = agent.NewManager(ctx, workspaceDir, agent.Options{
 			Provider:   agent.ProviderType(providerType),
 			APIKey:     apiKey,
 			Model:      modelOverride,
-			WorkingDir: "", // defaults to cwd
-		}, cp, logger)
+			WorkingDir: absWorkspaceDir,
+		}, cp, logger, hostSocket, nil)
+
+		// Start gRPC server — Manager satisfies ipc.HostManager.
+		grpcSrv = grpc.NewServer()
+		grpcipc.NewHostServer(mgr).Register(grpcSrv)
+		go func() {
+			if err := grpcSrv.Serve(hostLis); err != nil {
+				logger.Error("host gRPC server error", "error", err)
+			}
+		}()
 
 		// Restore any persistent agents from previous run
 		if err := mgr.RestoreSessions(ctx); err != nil {
@@ -147,13 +164,16 @@ func run() error {
 	logger.Info("shutting down...")
 
 	// Drain HTTP connections first so in-flight agent calls complete,
-	// then shut down the agent manager.
+	// then shut down the agent manager and gRPC server.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	err = httpServer.Shutdown(shutdownCtx)
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop() // stop accepting agent→host calls first
+	}
 	if mgr != nil {
-		mgr.Shutdown()
+		mgr.Shutdown() // then gracefully terminate all agents
 	}
 	if saveErr := cp.Save(); saveErr != nil {
 		logger.Error("failed to save control plane config", "error", saveErr)

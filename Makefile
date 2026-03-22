@@ -1,4 +1,4 @@
-.PHONY: build test clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local check clean web build-dev docker docker-up docker-down proto
 
 BINARY := hive
 PKG := github.com/nchapman/hivebot
@@ -7,10 +7,13 @@ build: web
 	go build -o $(BINARY) ./cmd/hive
 
 test:
+	docker compose run --rm --build test
+
+test-local:
 	go test ./... -v -count=1
 
-check: test
-	go vet ./...
+check:
+	docker compose run --rm --build test sh -c "go test ./... -v -count=1 && go vet ./..."
 
 clean:
 	rm -f $(BINARY)

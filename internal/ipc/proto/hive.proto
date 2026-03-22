@@ -63,10 +63,12 @@ message StartAgentResponse {
 message SendMessageRequest {
   string agent_id = 1;
   string message = 2;
+  string caller_id = 3;
 }
 
 message StopAgentRequest {
   string agent_id = 1;
+  string caller_id = 2;
 }
 
 message StopAgentResponse {}

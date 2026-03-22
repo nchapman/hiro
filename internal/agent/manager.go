@@ -15,6 +15,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
+	"github.com/nchapman/hivebot/internal/ipc"
 )
 
 // AgentInfo describes a running agent for external consumers.
@@ -26,13 +27,24 @@ type AgentInfo struct {
 	ParentID    string // empty for top-level agents
 }
 
+// WorkerHandle represents a running agent worker (process or mock).
+type WorkerHandle struct {
+	Worker ipc.AgentWorker
+	Kill   func()          // force-kill the process (SIGKILL)
+	Close  func()          // close gRPC conn, remove socket, etc.
+	Done   <-chan struct{} // closed when the worker exits
+}
+
+// WorkerFactory creates agent workers. The default implementation spawns
+// OS processes. Tests inject alternatives that return fake workers.
+type WorkerFactory func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error)
+
 // runningAgent tracks a live agent session within the manager.
 type runningAgent struct {
-	mu             sync.Mutex // serializes calls to this agent's conversation
+	mu             sync.Mutex // serializes calls through the worker
 	info           AgentInfo
-	agent          *Agent
-	conv           *Conversation
-	cancel         context.CancelFunc
+	worker         ipc.AgentWorker
+	handle         *WorkerHandle
 	effectiveTools map[string]bool // built-in tools this agent is allowed; nil = unrestricted
 }
 
@@ -47,6 +59,9 @@ type Manager struct {
 	opts         Options
 	cp           ControlPlane // operator-level tool/secret config
 	logger       *slog.Logger
+
+	hostSocket    string        // path to host gRPC socket
+	workerFactory WorkerFactory // creates agent workers (default = OS processes)
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.
@@ -60,22 +75,27 @@ type ControlPlane interface {
 // NewManager creates a new agent manager. workspaceDir is the root of the
 // workspace containing agents/ and sessions/ subdirectories. The context
 // controls the lifetime of persistent agents. cp may be nil if no control
-// plane is configured.
-func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger) *Manager {
+// plane is configured. If wf is nil, the default OS process spawner is used.
+func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory) *Manager {
+	if wf == nil {
+		wf = defaultWorkerFactory
+	}
 	return &Manager{
-		agents:       make(map[string]*runningAgent),
-		children:     make(map[string][]string),
-		ctx:          ctx,
-		workspaceDir: workspaceDir,
-		opts:         opts,
-		cp:           cp,
-		logger:       logger,
+		agents:        make(map[string]*runningAgent),
+		children:      make(map[string][]string),
+		ctx:           ctx,
+		workspaceDir:  workspaceDir,
+		opts:          opts,
+		cp:            cp,
+		logger:        logger,
+		hostSocket:    hostSocket,
+		workerFactory: wf,
 	}
 }
 
 // StartAgent loads an agent definition by name and starts it as a persistent
 // agent supervised by the manager's lifetime context. The ctx parameter is used
-// only for config loading and agent creation, not for the running agent's lifetime.
+// only for config loading and worker spawning, not for the running agent's lifetime.
 // parentID tracks lineage; pass "" for top-level agents.
 func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string, error) {
 	if err := validateAgentName(name); err != nil {
@@ -95,7 +115,8 @@ func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string
 // the result. Blocks until the subagent completes. The agent always runs in
 // ephemeral mode regardless of its config file — the caller controls the lifecycle.
 // parentID identifies the spawning agent (empty for top-level spawns).
-func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string) (string, error) {
+// onDelta receives streaming deltas during execution (may be nil).
+func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onDelta func(string) error) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -114,7 +135,7 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 	}
 
 	// Run the prompt and collect the result
-	result, err := m.SendMessage(ctx, agentID, prompt, nil)
+	result, err := m.SendMessage(ctx, agentID, prompt, onDelta)
 
 	// Clean up the ephemeral agent and its entire subtree
 	m.StopAgent(agentID)
@@ -128,46 +149,25 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 // SendMessage sends a message to a running agent and streams the response.
 // onDelta is called for each token; it may be nil. Calls are serialized
 // per agent to prevent conversation corruption.
-//
-// NOTE: Tool calls executed during StreamChat run within the ra.mu lock.
-// This means a tool handler must not synchronously call SendMessage back
-// to the same agent, or it will deadlock. Use SpawnSubagent or StreamChat
-// for patterns that need bidirectional communication.
 func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
-	m.mu.RLock()
-	ra, ok := m.agents[agentID]
-	m.mu.RUnlock()
-	if !ok {
+	ra := m.getAgent(agentID)
+	if ra == nil {
 		return "", fmt.Errorf("agent %q not found", agentID)
 	}
 
 	ra.mu.Lock()
 	defer ra.mu.Unlock()
 
-	return ra.agent.StreamChat(ctx, ra.conv, message, onDelta)
-}
-
-// StreamChat gives the caller direct access to an agent's StreamChat with
-// a caller-owned conversation. Use this when each caller needs isolated
-// conversation history (e.g. per-WebSocket-connection chat).
-func (m *Manager) StreamChat(ctx context.Context, agentID string, conv *Conversation, message string, onDelta func(string) error) (string, error) {
-	m.mu.RLock()
-	ra, ok := m.agents[agentID]
-	m.mu.RUnlock()
-	if !ok {
-		return "", fmt.Errorf("agent %q not found", agentID)
-	}
-
-	return ra.agent.StreamChat(ctx, conv, message, onDelta)
+	return ra.worker.Chat(ctx, message, onDelta)
 }
 
 // StopAgent stops a running agent and all its descendants.
 // Returns the info of the stopped root agent.
-func (m *Manager) StopAgent(agentID string) (AgentInfo, error) {
+func (m *Manager) StopAgent(agentID string) (ipc.AgentInfo, error) {
 	// Collect the entire subtree in one snapshot, then stop leaf-first
 	toStop := m.collectDescendants(agentID)
 	if len(toStop) == 0 {
-		return AgentInfo{}, fmt.Errorf("agent %q not found", agentID)
+		return ipc.AgentInfo{}, fmt.Errorf("agent %q not found", agentID)
 	}
 
 	// Save root info before removal
@@ -178,7 +178,13 @@ func (m *Manager) StopAgent(agentID string) (AgentInfo, error) {
 		m.removeAgent(id)
 		m.logger.Info("agent stopped", "id", id)
 	}
-	return rootInfo, nil
+	return ipc.AgentInfo{
+		ID:          rootInfo.ID,
+		Name:        rootInfo.Name,
+		Mode:        string(rootInfo.Mode),
+		Description: rootInfo.Description,
+		ParentID:    rootInfo.ParentID,
+	}, nil
 }
 
 // GetAgent returns info about a running agent.
@@ -204,14 +210,20 @@ func (m *Manager) ListAgents() []AgentInfo {
 }
 
 // ListChildren returns a snapshot of agents that are direct children of callerID.
-func (m *Manager) ListChildren(callerID string) []AgentInfo {
+func (m *Manager) ListChildren(callerID string) []ipc.AgentInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	childIDs := m.children[callerID]
-	result := make([]AgentInfo, 0, len(childIDs))
+	result := make([]ipc.AgentInfo, 0, len(childIDs))
 	for _, cid := range childIDs {
 		if ra, ok := m.agents[cid]; ok {
-			result = append(result, ra.info)
+			result = append(result, ipc.AgentInfo{
+				ID:          ra.info.ID,
+				Name:        ra.info.Name,
+				Mode:        string(ra.info.Mode),
+				Description: ra.info.Description,
+				ParentID:    ra.info.ParentID,
+			})
 		}
 	}
 	return result
@@ -228,8 +240,8 @@ type HistoryMessage struct {
 var ErrAgentNotFound = errors.New("agent not found")
 
 // GetHistory returns recent messages from a persistent agent's conversation history.
-// Returns raw message rows; does not include summarized context.
-// Returns nil for ephemeral agents or agents without a history engine.
+// Opens the agent's history DB read-only, queries, and closes immediately to
+// avoid blocking WAL checkpointing in the agent process.
 func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()
 	ra, ok := m.agents[agentID]
@@ -238,26 +250,21 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 		return nil, ErrAgentNotFound
 	}
 
-	if ra.conv.engine == nil {
-		// Ephemeral agent — lock required to safely read in-memory messages
-		ra.mu.Lock()
-		defer ra.mu.Unlock()
-		var result []HistoryMessage
-		for _, msg := range ra.conv.Messages {
-			text := extractText(msg)
-			if text == "" {
-				continue
-			}
-			result = append(result, HistoryMessage{
-				Role:    string(msg.Role),
-				Content: text,
-			})
-		}
-		return result, nil
+	if ra.info.Mode == config.ModeEphemeral {
+		return nil, nil
 	}
 
-	// Persistent agent — SQLite serializes access independently
-	store := ra.conv.engine.Store()
+	historyPath := filepath.Join(m.sessionDir(agentID), "history.db")
+	store, err := history.OpenStoreReadOnly(historyPath)
+	if err != nil {
+		// Agent may not have created history.db yet (still starting).
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading history: %w", err)
+	}
+	defer store.Close()
+
 	msgs, err := store.RecentMessages(limit)
 	if err != nil {
 		return nil, fmt.Errorf("reading history: %w", err)
@@ -298,6 +305,22 @@ func (m *Manager) IsDescendant(targetID, ancestorID string) bool {
 		}
 	}
 	return false
+}
+
+// SecretNames returns the names of available secrets from the control plane.
+func (m *Manager) SecretNames() []string {
+	if m.cp == nil {
+		return nil
+	}
+	return m.cp.SecretNames()
+}
+
+// SecretEnv returns secret env vars from the control plane.
+func (m *Manager) SecretEnv() []string {
+	if m.cp == nil {
+		return nil
+	}
+	return m.cp.SecretEnv()
 }
 
 // RestoreSessions scans the sessions/ directory and restarts any
@@ -359,25 +382,35 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 
 // Shutdown stops all running agents. Ephemeral session directories are cleaned up.
 func (m *Manager) Shutdown() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, ra := range m.agents {
-		ra.agent.bgMgr.KillAll()
-		ra.cancel()
-		if ra.conv.engine != nil {
-			ra.conv.engine.Close()
-		}
-		if ra.info.Mode == config.ModeEphemeral {
-			os.RemoveAll(m.sessionDir(id))
+	m.mu.RLock()
+	ids := make([]string, 0, len(m.agents))
+	for id := range m.agents {
+		ids = append(ids, id)
+	}
+	m.mu.RUnlock()
+
+	// Stop leaf-first by collecting full tree and reversing
+	var ordered []string
+	seen := make(map[string]bool)
+	for _, id := range ids {
+		descendants := m.collectDescendants(id)
+		for _, d := range descendants {
+			if !seen[d] {
+				seen[d] = true
+				ordered = append(ordered, d)
+			}
 		}
 	}
-	m.agents = make(map[string]*runningAgent)
-	m.children = make(map[string][]string)
+
+	for i := len(ordered) - 1; i >= 0; i-- {
+		m.removeAgent(ordered[i])
+	}
+
 	m.logger.Info("agent manager shut down")
 }
 
-// startSession creates an agent from config, persists its manifest,
-// and registers it in the manager.
+// startSession creates a session directory, spawns a worker process,
+// and registers the agent in the manager.
 func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string) (string, error) {
 	// Create session directory and write manifest
 	sessDir := m.sessionDir(id)
@@ -403,89 +436,53 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		return "", fmt.Errorf("checking manifest: %w", statErr)
 	}
 
-	// Read session identity if present
-	identity, err := config.ReadOptionalFile(filepath.Join(sessDir, "identity.md"))
-	if err != nil {
-		m.logger.Warn("could not read identity.md", "session", id, "error", err)
+	// Compute effective tool set: declared tools ∩ control plane ∩ parent caps.
+	effectiveTools := m.computeEffectiveTools(cfg, parentID)
+	hasSkills := len(cfg.Skills) > 0
+	if !hasSkills {
+		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
+		if _, err := os.Stat(skillsDir); err == nil {
+			hasSkills = true
+		}
 	}
+	allowedTools := buildAllowedToolsMap(effectiveTools, hasSkills)
 
 	// Persistent agents use the manager's long-lived context so they
 	// survive beyond the tool call that started them. Ephemeral agents
 	// use the caller's context (typically the parent's tool call).
-	baseCtx := ctx
+	spawnCtx := ctx
 	if cfg.Mode == config.ModePersistent {
-		baseCtx = m.ctx
-	}
-	agentCtx, cancel := context.WithCancel(baseCtx)
-
-	// Build options with manager tools, identity, and session dir
-	opts := m.opts
-	opts.ExtraTools = BuildManagerTools(newLocalHost(m, id))
-	opts.Identity = identity
-	opts.SessionDir = sessDir
-	opts.AgentDefDir = m.agentDefDir(cfg.Name)
-	opts.SharedSkillDir = m.sharedSkillsDir()
-
-	// Create LM once so it can be shared with the history engine
-	if opts.LM == nil {
-		model := cfg.Model
-		if opts.Model != "" {
-			model = opts.Model
-		}
-		if model != "" {
-			lm, err := CreateLanguageModel(agentCtx, opts.Provider, opts.APIKey, model)
-			if err != nil {
-				cancel()
-				return "", fmt.Errorf("creating language model for %q: %w", cfg.Name, err)
-			}
-			opts.LM = lm
-		}
+		spawnCtx = m.ctx
 	}
 
-	// Persistent agents get memory tools and (if LM available) history tools.
-	var conv *Conversation
-	if cfg.Mode == config.ModePersistent {
-		opts.ExtraTools = append(opts.ExtraTools, BuildMemoryTools(sessDir)...)
-		opts.ExtraTools = append(opts.ExtraTools, BuildTodoTools(sessDir)...)
-
-		if opts.LM != nil {
-			historyPath := filepath.Join(sessDir, "history.db")
-			store, err := history.OpenStore(historyPath)
-			if err != nil {
-				m.logger.Warn("failed to open history DB, using ephemeral conversation",
-					"session", id, "error", err)
-				conv = NewConversation()
-			} else {
-				engine := history.NewEngine(store, opts.LM, history.DefaultConfig(), m.logger)
-				conv = NewConversationWithHistory(engine)
-				opts.ExtraTools = append(opts.ExtraTools, BuildHistoryTools(engine)...)
-			}
-		} else {
-			conv = NewConversation()
-		}
-	} else {
-		conv = NewConversation()
+	// Build spawn config for the worker process.
+	model := cfg.Model
+	if m.opts.Model != "" {
+		model = m.opts.Model
+	}
+	spawnCfg := ipc.SpawnConfig{
+		SessionID:      id,
+		AgentName:      cfg.Name,
+		ParentID:       parentID,
+		Mode:           string(cfg.Mode),
+		EffectiveTools: allowedTools,
+		WorkingDir:     m.opts.WorkingDir,
+		SessionDir:     sessDir,
+		AgentDefDir:    m.agentDefDir(cfg.Name),
+		SharedSkillDir: m.sharedSkillsDir(),
+		HostSocket:     m.hostSocket,
+		Provider:       string(m.opts.Provider),
+		APIKey:         m.opts.APIKey,
+		Model:          model,
 	}
 
-	// Compute effective tool set: declared tools ∩ control plane ∩ parent caps.
-	effectiveTools := m.computeEffectiveTools(cfg, parentID)
-	// Agent has skills if skills were loaded from the definition or if it has a
-	// skills directory that could gain skills at runtime.
-	hasSkills := len(cfg.Skills) > 0 || m.agentDefDir(cfg.Name) != ""
-	opts.AllowedTools = buildAllowedToolsMap(effectiveTools, hasSkills)
-
-	// Inject secret env function if control plane is available.
-	if m.cp != nil {
-		opts.SecretEnvFn = m.cp.SecretEnv
-		opts.SecretNamesFn = m.cp.SecretNames
-	}
-
-	a, err := New(agentCtx, cfg, opts, m.logger)
+	handle, err := m.workerFactory(spawnCtx, spawnCfg)
 	if err != nil {
-		cancel()
 		// Clean up session dir on failure (only if we just created it)
-		os.RemoveAll(sessDir)
-		return "", fmt.Errorf("creating agent %q: %w", cfg.Name, err)
+		if os.IsNotExist(statErr) {
+			os.RemoveAll(sessDir)
+		}
+		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
 	}
 
 	ra := &runningAgent{
@@ -496,9 +493,8 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			Description: cfg.Description,
 			ParentID:    parentID,
 		},
-		agent:          a,
-		conv:           conv,
-		cancel:         cancel,
+		worker:         handle.Worker,
+		handle:         handle,
 		effectiveTools: effectiveTools,
 	}
 
@@ -508,6 +504,9 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		m.children[parentID] = append(m.children[parentID], id)
 	}
 	m.mu.Unlock()
+
+	// Start death-watcher goroutine for unexpected process exits.
+	go m.watchWorker(id, handle.Done)
 
 	m.logger.Info("agent started",
 		"id", id,
@@ -519,15 +518,59 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	return id, nil
 }
 
-// removeAgent cancels and removes an agent from the registry.
+// watchWorker monitors a worker's Done channel and handles unexpected exits.
+func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
+	<-done
+
+	m.mu.RLock()
+	ra, ok := m.agents[agentID]
+	m.mu.RUnlock()
+	if !ok {
+		return // already removed (normal shutdown)
+	}
+
+	m.logger.Warn("agent process exited unexpectedly",
+		"id", agentID,
+		"name", ra.info.Name,
+	)
+
+	// Unregister the dead agent and its children.
+	descendants := m.collectDescendants(agentID)
+	for i := len(descendants) - 1; i >= 0; i-- {
+		id := descendants[i]
+		m.mu.Lock()
+		deadRA, exists := m.agents[id]
+		delete(m.agents, id)
+		delete(m.children, id)
+		if exists && deadRA.info.ParentID != "" {
+			siblings := m.children[deadRA.info.ParentID]
+			updated := make([]string, 0, len(siblings))
+			for _, cid := range siblings {
+				if cid != id {
+					updated = append(updated, cid)
+				}
+			}
+			m.children[deadRA.info.ParentID] = updated
+		}
+		m.mu.Unlock()
+
+		if exists {
+			deadRA.handle.Close()
+			if deadRA.info.Mode == config.ModeEphemeral {
+				os.RemoveAll(m.sessionDir(id))
+			}
+		}
+	}
+}
+
+// removeAgent gracefully shuts down and removes an agent from the registry.
 // Ephemeral session directories are cleaned up.
 func (m *Manager) removeAgent(id string) {
 	m.mu.Lock()
 	ra, ok := m.agents[id]
 	delete(m.agents, id)
 	delete(m.children, id)
-	// Remove from parent's children list (build a new slice to avoid
-	// mutating the backing array that other readers may reference).
+	// Remove from parent's children list.
 	if ok && ra.info.ParentID != "" {
 		siblings := m.children[ra.info.ParentID]
 		updated := make([]string, 0, len(siblings))
@@ -539,16 +582,41 @@ func (m *Manager) removeAgent(id string) {
 		m.children[ra.info.ParentID] = updated
 	}
 	m.mu.Unlock()
-	if ok {
-		ra.agent.bgMgr.KillAll()
-		ra.cancel()
-		if ra.conv.engine != nil {
-			ra.conv.engine.Close()
-		}
-		if ra.info.Mode == config.ModeEphemeral {
-			os.RemoveAll(m.sessionDir(id))
-		}
+
+	if !ok {
+		return
 	}
+
+	// Graceful shutdown: ask the worker to stop, then wait for exit
+	// under a single deadline.
+	const shutdownGrace = 5 * time.Second
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	ra.worker.Shutdown(shutCtx)
+
+	select {
+	case <-ra.handle.Done:
+		// Process exited cleanly.
+	case <-shutCtx.Done():
+		// Deadline expired — force-kill and wait.
+		if ra.handle.Kill != nil {
+			ra.handle.Kill()
+		}
+		<-ra.handle.Done
+	}
+
+	ra.handle.Close()
+
+	if ra.info.Mode == config.ModeEphemeral {
+		os.RemoveAll(m.sessionDir(id))
+	}
+}
+
+// getAgent returns the runningAgent for the given ID, or nil.
+func (m *Manager) getAgent(id string) *runningAgent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.agents[id]
 }
 
 // collectDescendants returns agentID plus all its descendants via BFS,
