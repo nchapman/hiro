@@ -266,7 +266,7 @@ func (a *Agent) currentSystemPrompt() string {
 			memory = mem
 		}
 		if t, err := config.ReadTodos(a.instanceDir); err != nil {
-			a.logger.Warn("could not read todos.json", "error", err)
+			a.logger.Warn("could not read todos.yaml", "error", err)
 		} else {
 			todos = config.FormatTodos(t)
 		}

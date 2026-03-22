@@ -10,7 +10,7 @@ import (
 
 func TestWriteAndReadManifest(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
+	path := filepath.Join(dir, "manifest.yaml")
 
 	want := Manifest{
 		ID:        "abc-123",
@@ -47,26 +47,26 @@ func TestWriteAndReadManifest(t *testing.T) {
 }
 
 func TestReadManifest_NotFound(t *testing.T) {
-	_, err := ReadManifest("/nonexistent/manifest.json")
+	_, err := ReadManifest("/nonexistent/manifest.yaml")
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
 }
 
-func TestReadManifest_InvalidJSON(t *testing.T) {
+func TestReadManifest_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
-	os.WriteFile(path, []byte("not json"), 0644)
+	path := filepath.Join(dir, "manifest.yaml")
+	os.WriteFile(path, []byte(":\t:bad\n\t\t:::"), 0644)
 
 	_, err := ReadManifest(path)
 	if err == nil {
-		t.Fatal("expected error for invalid JSON")
+		t.Fatal("expected error for invalid YAML")
 	}
 }
 
 func TestManifest_OmitsEmptyParentID(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
+	path := filepath.Join(dir, "manifest.yaml")
 
 	m := Manifest{
 		ID:        "abc",

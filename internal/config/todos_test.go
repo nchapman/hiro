@@ -66,7 +66,7 @@ func TestWriteTodos_Permissions(t *testing.T) {
 	dir := t.TempDir()
 	WriteTodos(dir, []Todo{{Content: "test", Status: TodoStatusPending}})
 
-	info, err := os.Stat(filepath.Join(dir, "todos.json"))
+	info, err := os.Stat(filepath.Join(dir, "todos.yaml"))
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}

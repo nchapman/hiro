@@ -304,7 +304,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		if !entry.IsDir() {
 			continue
 		}
-		manifestPath := filepath.Join(dir, entry.Name(), "manifest.json")
+		manifestPath := filepath.Join(dir, entry.Name(), "manifest.yaml")
 		manifest, err := config.ReadManifest(manifestPath)
 		if err != nil {
 			m.logger.Warn("skipping instance with unreadable manifest",
@@ -373,7 +373,7 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 		return "", fmt.Errorf("creating instance dir: %w", err)
 	}
 
-	manifestPath := filepath.Join(instDir, "manifest.json")
+	manifestPath := filepath.Join(instDir, "manifest.yaml")
 	_, statErr := os.Stat(manifestPath)
 	switch {
 	case os.IsNotExist(statErr):

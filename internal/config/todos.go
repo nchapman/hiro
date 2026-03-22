@@ -1,13 +1,14 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
-const todosFileName = "todos.json"
+const todosFileName = "todos.yaml"
 
 // TodoStatus represents the state of a todo item.
 type TodoStatus string
@@ -20,9 +21,9 @@ const (
 
 // Todo represents a single task in an agent's todo list.
 type Todo struct {
-	Content    string     `json:"content"`
-	Status     TodoStatus `json:"status"`
-	ActiveForm string     `json:"active_form,omitempty"`
+	Content    string     `yaml:"content"`
+	Status     TodoStatus `yaml:"status"`
+	ActiveForm string     `yaml:"active_form,omitempty"`
 }
 
 // ReadTodos reads the todo list from the instance directory.
@@ -36,7 +37,7 @@ func ReadTodos(instanceDir string) ([]Todo, error) {
 		return nil, err
 	}
 	var todos []Todo
-	if err := json.Unmarshal(data, &todos); err != nil {
+	if err := yaml.Unmarshal(data, &todos); err != nil {
 		return nil, fmt.Errorf("parsing todos: %w", err)
 	}
 	return todos, nil
@@ -44,7 +45,7 @@ func ReadTodos(instanceDir string) ([]Todo, error) {
 
 // WriteTodos writes the todo list to the instance directory.
 func WriteTodos(instanceDir string, todos []Todo) error {
-	data, err := json.MarshalIndent(todos, "", "  ")
+	data, err := yaml.Marshal(todos)
 	if err != nil {
 		return err
 	}

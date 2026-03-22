@@ -53,10 +53,10 @@ A `.env` file is loaded automatically via godotenv (does not override existing v
 agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manager tracks instance
                                                                        ↓
                                                               instances/<uuid>/
-                                                                manifest.json
+                                                                manifest.yaml
                                                                 memory.md
                                                                 identity.md
-                                                                todos.json
+                                                                todos.yaml
                                                                 history.db
 ```
 

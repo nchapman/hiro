@@ -462,9 +462,9 @@ func TestManager_InstanceDirCreated(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	manifestPath := filepath.Join(dir, "instances", id, "manifest.json")
+	manifestPath := filepath.Join(dir, "instances", id, "manifest.yaml")
 	if _, err := os.Stat(manifestPath); err != nil {
-		t.Fatalf("manifest.json should exist at %s: %v", manifestPath, err)
+		t.Fatalf("manifest.yaml should exist at %s: %v", manifestPath, err)
 	}
 }
 

@@ -1,23 +1,24 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Manifest describes a running agent instance persisted to disk.
 type Manifest struct {
-	ID        string    `json:"id"`
-	Agent     string    `json:"agent"` // definition name (directory under agents/)
-	Mode      AgentMode `json:"mode"`
-	ParentID  string    `json:"parent_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `yaml:"id"`
+	Agent     string    `yaml:"agent"` // definition name (directory under agents/)
+	Mode      AgentMode `yaml:"mode"`
+	ParentID  string    `yaml:"parent_id,omitempty"`
+	CreatedAt time.Time `yaml:"created_at"`
 }
 
-// WriteManifest writes a manifest to the given path as JSON.
+// WriteManifest writes a manifest to the given path as YAML.
 func WriteManifest(path string, m Manifest) error {
-	data, err := json.MarshalIndent(m, "", "  ")
+	data, err := yaml.Marshal(m)
 	if err != nil {
 		return err
 	}
@@ -31,7 +32,7 @@ func ReadManifest(path string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := yaml.Unmarshal(data, &m); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil

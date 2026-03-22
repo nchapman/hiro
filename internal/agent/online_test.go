@@ -316,7 +316,7 @@ func TestOnline_Todos(t *testing.T) {
 	}
 	t.Logf("Todo response: %s", resp)
 
-	// Verify todos.json was created
+	// Verify todos.yaml was created
 	instDir := filepath.Join(dir, "instances", id)
 	todos, err := config.ReadTodos(instDir)
 	if err != nil {
