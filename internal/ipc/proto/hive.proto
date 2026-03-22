@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package hive;
+
+option go_package = "github.com/nchapman/hivebot/internal/ipc/proto";
+
+// AgentHost is served by the control plane. Agent processes call these RPCs
+// to perform manager-level operations (spawning agents, sending messages, etc.).
+service AgentHost {
+  // SpawnAgent runs an ephemeral subagent to completion, streaming deltas.
+  rpc SpawnAgent(SpawnAgentRequest) returns (stream ChatEvent);
+
+  // StartAgent starts a persistent child agent.
+  rpc StartAgent(StartAgentRequest) returns (StartAgentResponse);
+
+  // SendMessage sends a message to a running agent, streaming deltas.
+  rpc SendMessage(SendMessageRequest) returns (stream ChatEvent);
+
+  // StopAgent stops an agent and its subtree.
+  rpc StopAgent(StopAgentRequest) returns (StopAgentResponse);
+
+  // ListAgents returns the direct children of a parent agent.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+
+  // GetSecrets returns secret names and env vars for bash injection.
+  rpc GetSecrets(GetSecretsRequest) returns (GetSecretsResponse);
+}
+
+// AgentWorker is served by each agent process. The control plane calls these
+// RPCs to send messages and manage the agent's lifecycle.
+service AgentWorker {
+  // Chat sends a message and streams back deltas and the final response.
+  rpc Chat(ChatRequest) returns (stream ChatEvent);
+
+  // Shutdown gracefully stops the agent worker process.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+// ChatEvent is a streaming event sent during Chat, SpawnAgent, or SendMessage.
+message ChatEvent {
+  // type is "delta" for incremental text, "done" for final result, or "error".
+  string type = 1;
+  string content = 2;
+}
+
+// --- AgentHost messages ---
+
+message SpawnAgentRequest {
+  string agent_name = 1;
+  string prompt = 2;
+  string parent_id = 3;
+}
+
+message StartAgentRequest {
+  string agent_name = 1;
+  string parent_id = 2;
+}
+
+message StartAgentResponse {
+  string session_id = 1;
+}
+
+message SendMessageRequest {
+  string agent_id = 1;
+  string message = 2;
+}
+
+message StopAgentRequest {
+  string agent_id = 1;
+}
+
+message StopAgentResponse {}
+
+message ListAgentsRequest {
+  string parent_id = 1;
+}
+
+message ListAgentsResponse {
+  repeated AgentInfoProto agents = 1;
+}
+
+message AgentInfoProto {
+  string id = 1;
+  string name = 2;
+  string mode = 3;
+  string description = 4;
+  string parent_id = 5;
+}
+
+message GetSecretsRequest {}
+
+message GetSecretsResponse {
+  repeated string names = 1;
+  repeated string env = 2;
+}
+
+// --- AgentWorker messages ---
+
+message ChatRequest {
+  string message = 1;
+}
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
+	"github.com/nchapman/hivebot/internal/ipc"
 )
 
 const maxAgentResultSize = 32 * 1024
@@ -20,16 +21,15 @@ func truncateResult(s string) string {
 	return s[:maxAgentResultSize] + "\n\n(result truncated)"
 }
 
-// buildManagerTools returns tools that let an agent manage other agents.
-// parentID is the ID of the agent these tools are being injected into.
-// Tools are scoped so an agent can only manage its own descendants.
-func (m *Manager) buildManagerTools(parentID string) []fantasy.AgentTool {
+// BuildManagerTools returns tools that let an agent manage other agents.
+// The host determines parent relationships and enforces descendant authorization.
+func BuildManagerTools(host ipc.AgentHost) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		m.toolSpawnAgent(parentID),
-		m.toolStartAgent(parentID),
-		m.toolListAgents(parentID),
-		m.toolSendMessage(parentID),
-		m.toolStopAgent(parentID),
+		toolSpawnAgent(host),
+		toolStartAgent(host),
+		toolListAgents(host),
+		toolSendMessage(host),
+		toolStopAgent(host),
 	}
 }
 
@@ -65,7 +65,7 @@ type spawnAgentInput struct {
 	Prompt string `json:"prompt" description:"A clear, self-contained description of the task. Do not assume the agent has any prior context."`
 }
 
-func (m *Manager) toolSpawnAgent(parentID string) fantasy.AgentTool {
+func toolSpawnAgent(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("spawn_agent",
 		"Spawn an ephemeral subagent to complete a task. The subagent runs the given prompt, returns the result, and is cleaned up. This call blocks until the subagent finishes.",
 		func(ctx context.Context, input spawnAgentInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -76,20 +76,13 @@ func (m *Manager) toolSpawnAgent(parentID string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
 
-			m.logger.Info("spawning subagent",
-				"agent", input.Agent,
-				"parent", parentID,
-			)
-
-			result, err := m.SpawnSubagent(ctx, input.Agent, input.Prompt, parentID)
+			result, err := host.SpawnAgent(ctx, input.Agent, input.Prompt, nil)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("subagent failed: %v", err)), nil
 			}
 
-			result = truncateResult(result)
-
-			return fantasy.NewTextResponse(result), nil
+			return fantasy.NewTextResponse(truncateResult(result)), nil
 		},
 	)
 }
@@ -100,7 +93,7 @@ type startAgentInput struct {
 	Agent string `json:"agent" description:"The name of the agent definition to start (matches a directory name under agents/)."`
 }
 
-func (m *Manager) toolStartAgent(parentID string) fantasy.AgentTool {
+func toolStartAgent(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("start_agent",
 		"Start a persistent agent that stays running and can receive messages. Returns the agent's ID.",
 		func(ctx context.Context, input startAgentInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -108,7 +101,7 @@ func (m *Manager) toolStartAgent(parentID string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
 
-			id, err := m.StartAgent(ctx, input.Agent, parentID)
+			id, err := host.StartAgent(ctx, input.Agent)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("failed to start agent: %v", err)), nil
@@ -122,11 +115,15 @@ func (m *Manager) toolStartAgent(parentID string) fantasy.AgentTool {
 
 // --- list_agents tool ---
 
-func (m *Manager) toolListAgents(parentID string) fantasy.AgentTool {
+func toolListAgents(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("list_agents",
 		"List your child agents — agents you have started or spawned.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			agents := m.ListChildren(parentID)
+			agents, err := host.ListAgents(ctx)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("failed to list agents: %v", err)), nil
+			}
 			if len(agents) == 0 {
 				return fantasy.NewTextResponse("No child agents running."), nil
 			}
@@ -151,7 +148,7 @@ type sendMessageInput struct {
 	Message string `json:"message"  description:"The message to send to the agent."`
 }
 
-func (m *Manager) toolSendMessage(parentID string) fantasy.AgentTool {
+func toolSendMessage(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("send_message",
 		"Send a message to one of your child agents and get its response.",
 		func(ctx context.Context, input sendMessageInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -162,20 +159,13 @@ func (m *Manager) toolSendMessage(parentID string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("message is required"), nil
 			}
 
-			if !m.IsDescendant(input.AgentID, parentID) {
-				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("agent %q is not a descendant of this agent", input.AgentID)), nil
-			}
-
-			result, err := m.SendMessage(ctx, input.AgentID, input.Message, nil)
+			result, err := host.SendMessage(ctx, input.AgentID, input.Message, nil)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("send_message failed: %v", err)), nil
 			}
 
-			result = truncateResult(result)
-
-			return fantasy.NewTextResponse(result), nil
+			return fantasy.NewTextResponse(truncateResult(result)), nil
 		},
 	)
 }
@@ -186,7 +176,7 @@ type stopAgentInput struct {
 	AgentID string `json:"agent_id" description:"The ID of the agent to stop. Must be one of your child agents."`
 }
 
-func (m *Manager) toolStopAgent(parentID string) fantasy.AgentTool {
+func toolStopAgent(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("stop_agent",
 		"Stop one of your child agents and all of its descendants.",
 		func(ctx context.Context, input stopAgentInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -194,19 +184,14 @@ func (m *Manager) toolStopAgent(parentID string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("agent_id is required"), nil
 			}
 
-			if !m.IsDescendant(input.AgentID, parentID) {
-				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("agent %q is not a descendant of this agent", input.AgentID)), nil
-			}
-
-			info, err := m.StopAgent(input.AgentID)
+			err := host.StopAgent(ctx, input.AgentID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("failed to stop agent: %v", err)), nil
 			}
 
 			return fantasy.NewTextResponse(
-				fmt.Sprintf("Agent %q (%s) stopped.", info.Name, input.AgentID)), nil
+				fmt.Sprintf("Agent %s stopped.", input.AgentID)), nil
 		},
 	)
 }

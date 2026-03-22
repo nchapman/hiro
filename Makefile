@@ -1,4 +1,4 @@
-.PHONY: build test clean web build-dev docker docker-up docker-down
+.PHONY: build test clean web build-dev docker docker-up docker-down proto
 
 BINARY := hive
 PKG := github.com/nchapman/hivebot
@@ -31,3 +31,8 @@ docker-up:
 
 docker-down:
 	docker compose down
+
+proto:
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		internal/ipc/proto/hive.proto

@@ -420,7 +420,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 
 	// Build options with manager tools, identity, and session dir
 	opts := m.opts
-	opts.ExtraTools = m.buildManagerTools(id)
+	opts.ExtraTools = BuildManagerTools(newLocalHost(m, id))
 	opts.Identity = identity
 	opts.SessionDir = sessDir
 	opts.AgentDefDir = m.agentDefDir(cfg.Name)
