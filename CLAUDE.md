@@ -22,7 +22,12 @@ Run a single test:
 go test ./internal/history/... -run TestCompaction -v -count=1
 ```
 
-Web UI dev server (separate terminal):
+Run integration tests that hit real APIs (excluded from normal `make test`):
+```bash
+go test ./internal/agent/... -tags=online -v -count=1
+```
+
+Web UI dev server (separate terminal — proxies `/api` and `/ws` to `localhost:8080`):
 ```bash
 cd web/ui && npm run dev
 ```
@@ -118,11 +123,11 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 - **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent`; `Manager` supervises lifecycles, provides manager tools, and serializes per-agent conversations.
 - **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch).
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
-- **`internal/history`** — SQLite-backed conversation history with automatic LLM-driven compaction. `Engine` coordinates `Store` (persistence) + `Compactor` (summarization) + `Assemble` (context assembly within token budget).
+- **`internal/history`** — SQLite-backed conversation history with automatic LLM-driven compaction. `Engine` coordinates `Store` (persistence) + `Compactor` (summarization) + `Assemble` (context assembly within token budget). SQLite runs in WAL mode with FTS5 for full-text search; migrations are embedded via `//go:embed` from `migrations/*.sql`.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
 - **`internal/transport`** — Wire protocol (WebSocket JSON envelopes) for leader↔worker communication.
 - **`internal/api`** — HTTP server with REST endpoints (`/api/health`, `/api/agents`, `/api/agents/{id}/messages`) and WebSocket chat (`/ws/chat`).
-- **`web/`** — Embedded React UI (Vite + TypeScript). Built assets in `web/ui/dist/` are embedded via `//go:embed`.
+- **`web/`** — Embedded React UI (Vite + TypeScript + React 19). Built assets in `web/ui/dist/` are embedded via `//go:embed`. Strict TypeScript (`noUnusedLocals`, `noUnusedParameters`).
 
 ## Agent Tools
 
@@ -216,5 +221,6 @@ Manager tools are scoped to the calling agent's descendants via `IsDescendant()`
 - Tests use `fantasy.LanguageModel` injection (`opts.LM`) to avoid real API calls.
 - `history` tests use `NewEngineWithSummarizer()` with a mock summarizer.
 - The `tools/` package tests run actual file/process operations in temp directories.
-- CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go).
+- CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
+- Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - No sandbox — agents can access the full filesystem and run any bash command.
