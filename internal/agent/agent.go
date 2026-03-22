@@ -118,6 +118,10 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 		agentTools = append(agentTools, buildSkillTool(&a.config))
 	}
 
+	// Redact secret values from all tool output before it reaches the LLM.
+	redactor := NewRedactor(opts.SecretEnvFn)
+	agentTools = wrapToolsWithRedactor(agentTools, redactor)
+
 	// Build the initial system prompt. This is also rebuilt dynamically
 	// on each StreamChat call via PrepareStep to pick up memory changes.
 	systemPrompt := a.currentSystemPrompt()
