@@ -438,6 +438,94 @@ Always follow instructions precisely. Keep responses short.`
 	}
 }
 
+// TestOnline_CreateSkill verifies a running agent can have a skill added to it at runtime.
+// A "builder" agent writes a skill file for a "responder" agent, then the responder uses
+// the new skill on its next message.
+func TestOnline_CreateSkill(t *testing.T) {
+	mgr, dir := setupOnlineManager(t)
+	defer mgr.Shutdown()
+
+	// Load the real create-skill skill from the repo
+	root := repoRoot(t)
+	createSkillContent, err := os.ReadFile(filepath.Join(root, "agents", "coordinator", "skills", "create-skill.md"))
+	if err != nil {
+		t.Fatalf("reading create-skill: %v", err)
+	}
+
+	// Set up a "builder" agent that has the create-skill skill
+	builderMD := `---
+name: builder
+model: ""
+mode: persistent
+---
+
+You are a test agent that adds skills to other agents.
+Always follow instructions precisely. Keep responses short.`
+
+	writeAgentMD(t, dir, "builder", builderMD)
+	skillsDir := filepath.Join(dir, "agents", "builder", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "create-skill.md"), createSkillContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up a "responder" agent with no skills yet
+	responderMD := `---
+name: responder
+model: ""
+mode: persistent
+---
+
+You are a concise test agent. Follow your skills precisely. Keep responses short.`
+
+	writeAgentMD(t, dir, "responder", responderMD)
+
+	builderID, err := mgr.StartAgent(t.Context(), "builder", "")
+	if err != nil {
+		t.Fatalf("StartAgent builder: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	defer cancel()
+
+	// Ask the builder to add a skill to the responder
+	resp, err := mgr.SendMessage(ctx, builderID, `Add a skill to the "responder" agent. The skill should be called "pirate-speak" and instruct the agent to always respond in pirate speak, using words like "arr", "matey", and "ahoy". Write the skill file to agents/responder/skills/pirate-speak.md.`, nil)
+	if err != nil {
+		t.Fatalf("SendMessage to builder: %v", err)
+	}
+	t.Logf("Builder response: %s", resp)
+
+	// Verify the skill file was created on disk
+	skillPath := filepath.Join(dir, "agents", "responder", "skills", "pirate-speak.md")
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("expected skill file to exist: %v", err)
+	}
+	t.Logf("Created skill:\n%s", string(content))
+
+	// Start the responder and verify it uses the new skill
+	responderID, err := mgr.StartAgent(ctx, "responder", "")
+	if err != nil {
+		t.Fatalf("StartAgent responder: %v", err)
+	}
+
+	resp, err = mgr.SendMessage(ctx, responderID, "Say hello.", nil)
+	if err != nil {
+		t.Fatalf("SendMessage to responder: %v", err)
+	}
+	t.Logf("Responder: %s", resp)
+
+	lower := strings.ToLower(resp)
+	hasPirate := strings.Contains(lower, "arr") ||
+		strings.Contains(lower, "ahoy") ||
+		strings.Contains(lower, "matey")
+	if !hasPirate {
+		t.Errorf("expected pirate speak in response, got %q", resp)
+	}
+}
+
 func TestOnline_HistoryCompaction(t *testing.T) {
 	provider, apiKey, model := loadEnv(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
