@@ -1,6 +1,5 @@
 // Package api implements the HTTP server that serves the web UI,
-// the WebSocket endpoint for worker connections, and the REST API
-// for the dashboard.
+// the chat WebSocket endpoint, and the REST API for the dashboard.
 package api
 
 import (
@@ -11,49 +10,32 @@ import (
 	"strings"
 
 	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/hub"
-	"github.com/nchapman/hivebot/internal/transport"
 )
 
 // Server is the HTTP server for the Hive leader.
 type Server struct {
-	swarm     *hub.Swarm
-	transport *transport.Server
-	manager   *agent.Manager // agent manager (nil = no agents)
-	leaderID  string         // ID of the leader agent for chat
-	webFS     fs.FS          // embedded web UI files (nil = no UI serving)
-	mux       *http.ServeMux
-	logger    *slog.Logger
+	manager  *agent.Manager // agent manager (nil = no agents)
+	leaderID string         // ID of the leader agent for chat
+	webFS    fs.FS          // embedded web UI files (nil = no UI serving)
+	mux      *http.ServeMux
+	logger   *slog.Logger
 }
 
 // NewServer creates a new API server. If webFS is non-nil, the web UI
 // will be served for any request that doesn't match an API route.
-func NewServer(swarm *hub.Swarm, logger *slog.Logger, webFS fs.FS) *Server {
+func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
 	s := &Server{
-		swarm:     swarm,
-		transport: transport.NewServer(swarm, logger),
-		webFS:     webFS,
-		mux:       http.NewServeMux(),
-		logger:    logger,
+		webFS:  webFS,
+		mux:    http.NewServeMux(),
+		logger: logger,
 	}
 	s.routes()
 	return s
 }
 
-// Transport returns the WebSocket transport server for wiring up task dispatch.
-func (s *Server) Transport() *transport.Server {
-	return s.transport
-}
-
 func (s *Server) routes() {
 	// API routes
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/swarm", s.handleSwarmStatus)
-	s.mux.HandleFunc("GET /api/workers", s.handleListWorkers)
-	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
-
-	// WebSocket endpoint for worker connections
-	s.mux.HandleFunc("/ws/worker", s.transport.HandleWebSocket)
 
 	// WebSocket endpoint for web UI chat
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
@@ -95,62 +77,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleSwarmStatus(w http.ResponseWriter, r *http.Request) {
-	workers := s.swarm.Workers()
-	activeTasks := s.swarm.ActiveTasks()
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"worker_count": len(workers),
-		"active_tasks": len(activeTasks),
-	})
-}
-
-func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
-	workers := s.swarm.Workers()
-	type workerInfo struct {
-		ID          string   `json:"id"`
-		AgentName   string   `json:"agent_name"`
-		Description string   `json:"description"`
-		Skills      []string `json:"skills"`
-		ConnectedAt string   `json:"connected_at"`
-	}
-
-	result := make([]workerInfo, 0, len(workers))
-	for _, wk := range workers {
-		result = append(result, workerInfo{
-			ID:          wk.ID,
-			AgentName:   wk.AgentName,
-			Description: wk.Description,
-			Skills:      wk.Skills,
-			ConnectedAt: wk.ConnectedAt.Format("2006-01-02T15:04:05Z"),
-		})
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	tasks := s.swarm.ActiveTasks()
-	type taskInfo struct {
-		ID       string `json:"id"`
-		Skill    string `json:"skill"`
-		Prompt   string `json:"prompt"`
-		WorkerID string `json:"worker_id"`
-		Status   string `json:"status"`
-	}
-
-	result := make([]taskInfo, 0, len(tasks))
-	for _, t := range tasks {
-		result = append(result, taskInfo{
-			ID:       t.ID,
-			Skill:    t.Skill,
-			Prompt:   t.Prompt,
-			WorkerID: t.WorkerID,
-			Status:   string(t.Status),
-		})
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

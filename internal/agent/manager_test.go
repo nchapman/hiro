@@ -10,8 +10,6 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-
-	"github.com/nchapman/hivebot/internal/hub"
 )
 
 // fakeLM implements fantasy.LanguageModel for testing. It returns a canned
@@ -56,9 +54,8 @@ func (f *fakeLM) Model() string    { return "fake-model" }
 func setupTestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	dir := t.TempDir()
-	swarm := hub.NewSwarm("test-code")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, swarm, Options{
+	mgr := NewManager(t.Context(), dir, Options{
 		LM:         &fakeLM{response: "hello from agent"},
 		WorkingDir: dir,
 	}, logger)

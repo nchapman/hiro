@@ -16,7 +16,6 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
-	"github.com/nchapman/hivebot/internal/hub"
 	"github.com/nchapman/hivebot/web"
 )
 
@@ -47,8 +46,6 @@ func run() error {
 	apiKey := os.Getenv("HIVE_API_KEY")
 	modelOverride := os.Getenv("HIVE_MODEL")
 
-	swarm := hub.NewSwarm(swarmCode)
-
 	webFS, err := web.DistFS()
 	if err != nil {
 		return fmt.Errorf("loading web UI: %w", err)
@@ -58,12 +55,12 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := api.NewServer(swarm, logger, webFS)
+	srv := api.NewServer(logger, webFS)
 
 	// Start agent manager and leader agent if API key is set
 	var mgr *agent.Manager
 	if apiKey != "" {
-		mgr = agent.NewManager(ctx, agentsDir, swarm, agent.Options{
+		mgr = agent.NewManager(ctx, agentsDir, agent.Options{
 			Provider:   agent.ProviderType(providerType),
 			APIKey:     apiKey,
 			Model:      modelOverride,

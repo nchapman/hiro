@@ -1,6 +1,6 @@
 // Package agent wraps charmbracelet/fantasy to provide the Hive agent runtime.
 // An agent loads its identity and tools from markdown config, then runs an
-// agentic loop that can delegate tasks to other agents in the swarm.
+// agentic loop managed by the AgentManager.
 package agent
 
 import (
@@ -14,7 +14,6 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 
 	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/hub"
 )
 
 // ProviderType identifies which LLM provider to use.
@@ -27,12 +26,10 @@ const (
 
 // Agent is a Hive agent backed by a fantasy agent loop.
 type Agent struct {
-	config         config.AgentConfig
-	agent          fantasy.Agent
-	swarm          *hub.Swarm
-	workingDir     string
-	logger         *slog.Logger
-	taskDispatcher TaskDispatchFunc
+	config     config.AgentConfig
+	agent      fantasy.Agent
+	workingDir string
+	logger     *slog.Logger
 }
 
 // Options configures how an agent connects to an LLM provider.
@@ -45,9 +42,8 @@ type Options struct {
 	LM         fantasy.LanguageModel // if set, bypasses provider creation (for testing)
 }
 
-// New creates a new Hive agent from the given config, connecting it to
-// the swarm for task delegation.
-func New(ctx context.Context, cfg config.AgentConfig, swarm *hub.Swarm, opts Options, logger *slog.Logger) (*Agent, error) {
+// New creates a new Hive agent from the given config.
+func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog.Logger) (*Agent, error) {
 	var lm fantasy.LanguageModel
 	if opts.LM != nil {
 		lm = opts.LM
@@ -77,7 +73,6 @@ func New(ctx context.Context, cfg config.AgentConfig, swarm *hub.Swarm, opts Opt
 
 	a := &Agent{
 		config:     cfg,
-		swarm:      swarm,
 		workingDir: workingDir,
 		logger:     logger,
 	}

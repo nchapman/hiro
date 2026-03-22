@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/hub"
 )
 
 // AgentInfo describes a running agent for external consumers.
@@ -40,20 +39,18 @@ type Manager struct {
 
 	ctx       context.Context // long-lived context for persistent agents
 	agentsDir string
-	swarm     *hub.Swarm
 	opts      Options
 	logger    *slog.Logger
 }
 
 // NewManager creates a new agent manager. The context controls the lifetime
 // of persistent agents — cancel it to shut everything down.
-func NewManager(ctx context.Context, agentsDir string, swarm *hub.Swarm, opts Options, logger *slog.Logger) *Manager {
+func NewManager(ctx context.Context, agentsDir string, opts Options, logger *slog.Logger) *Manager {
 	return &Manager{
 		agents:    make(map[string]*runningAgent),
 		children:  make(map[string][]string),
 		ctx:       ctx,
 		agentsDir: agentsDir,
-		swarm:     swarm,
 		opts:      opts,
 		logger:    logger,
 	}
@@ -254,7 +251,7 @@ func (m *Manager) startFromConfig(ctx context.Context, cfg config.AgentConfig, p
 	opts := m.opts
 	opts.ExtraTools = m.buildManagerTools(id)
 
-	a, err := New(agentCtx, cfg, m.swarm, opts, m.logger)
+	a, err := New(agentCtx, cfg, opts, m.logger)
 	if err != nil {
 		cancel()
 		return "", fmt.Errorf("creating agent %q: %w", cfg.Name, err)
