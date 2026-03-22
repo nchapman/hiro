@@ -38,6 +38,7 @@ type Agent struct {
 	agentDefDir    string // agent definition directory (for re-scanning skills)
 	sharedSkillDir string // workspace-level shared skills directory
 	bgMgr          *tools.BackgroundJobManager
+	secretNamesFn  func() []string // returns secret names for system prompt (nil if no control plane)
 	logger         *slog.Logger
 }
 
@@ -53,6 +54,9 @@ type Options struct {
 	AgentDefDir    string                // agent definition directory (for runtime skill re-scan)
 	SharedSkillDir string                // workspace-level shared skills directory
 	LM             fantasy.LanguageModel // if set, bypasses provider creation (for testing)
+	AllowedTools   map[string]bool       // effective tool set; tools not in this map are filtered out
+	SecretEnvFn    func() []string       // returns secret env vars for bash injection
+	SecretNamesFn  func() []string       // returns secret names for system prompt
 }
 
 // New creates a new Hive agent from the given config.
@@ -90,12 +94,24 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 		instanceDir:    opts.InstanceDir,
 		agentDefDir:    opts.AgentDefDir,
 		sharedSkillDir: opts.SharedSkillDir,
-		bgMgr:          tools.NewBackgroundJobManager(),
+		bgMgr:          tools.NewBackgroundJobManager(opts.SecretEnvFn),
+		secretNamesFn:  opts.SecretNamesFn,
 		logger:         logger,
 	}
 
 	agentTools := a.buildTools()
 	agentTools = append(agentTools, opts.ExtraTools...)
+
+	// Filter tools based on allowed set (closed by default).
+	if opts.AllowedTools != nil {
+		filtered := make([]fantasy.AgentTool, 0, len(agentTools))
+		for _, t := range agentTools {
+			if opts.AllowedTools[t.Info().Name] {
+				filtered = append(filtered, t)
+			}
+		}
+		agentTools = filtered
+	}
 
 	// Add use_skill tool if this agent can have skills
 	if a.agentDefDir != "" || len(cfg.Skills) > 0 {
@@ -286,12 +302,17 @@ func (a *Agent) currentSystemPrompt() string {
 		}
 	}
 
-	return buildSystemPrompt(a.config, identity, memory, todos)
+	var secretNames []string
+	if a.secretNamesFn != nil {
+		secretNames = a.secretNamesFn()
+	}
+
+	return buildSystemPrompt(a.config, identity, memory, todos, secretNames)
 }
 
 // buildSystemPrompt assembles the system prompt from the agent's config
-// and dynamic content. Order: soul → identity → memories → todos → instructions → tools → skills.
-func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string) string {
+// and dynamic content. Order: soul → identity → memories → todos → secrets → instructions → tools → skills.
+func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string, secretNames []string) string {
 	var p strings.Builder
 
 	if cfg.Soul != "" {
@@ -315,6 +336,15 @@ func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string) s
 		p.WriteString("## Current Tasks\n\n")
 		p.WriteString(todos)
 		p.WriteString("\n\n")
+	}
+
+	if len(secretNames) > 0 {
+		p.WriteString("## Available Secrets\n\n")
+		p.WriteString("The following secrets are available as environment variables in bash commands. You cannot read these values directly — they are injected by the operator.\n\n")
+		for _, name := range secretNames {
+			fmt.Fprintf(&p, "- `%s`\n", name)
+		}
+		p.WriteString("\n")
 	}
 
 	p.WriteString(cfg.Prompt)

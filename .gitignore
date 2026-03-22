@@ -30,6 +30,9 @@ Thumbs.db
 /instances/
 /skills/
 
+# Control plane config (contains secrets)
+/config.yaml
+
 # Test
 coverage.out
 *.test

@@ -8,7 +8,7 @@ import (
 )
 
 func TestJobKill_RunningJob(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "sleep 60")
 
 	tool := NewJobKillTool(mgr)
@@ -28,7 +28,7 @@ func TestJobKill_RunningJob(t *testing.T) {
 }
 
 func TestJobKill_NotFound(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	tool := NewJobKillTool(mgr)
 	content, isErr := runTool(t, tool, `{"job_id": "NOPE"}`)
 	if !isErr {
@@ -40,7 +40,7 @@ func TestJobKill_NotFound(t *testing.T) {
 }
 
 func TestJobKill_MissingID(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	tool := NewJobKillTool(mgr)
 	_, isErr := runTool(t, tool, `{"job_id": ""}`)
 	if !isErr {
@@ -49,7 +49,7 @@ func TestJobKill_MissingID(t *testing.T) {
 }
 
 func TestJobKill_AlreadyCompleted(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "true")
 	job.Wait(context.Background())
 

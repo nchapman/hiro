@@ -73,6 +73,21 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 					fmt.Sprintf("error searching files: %v", err)), nil
 			}
 
+			// Filter out matches in forbidden paths (e.g. control plane config).
+			if len(ForbiddenPaths) > 0 {
+				filtered := matches[:0]
+				for _, m := range matches {
+					abs := m.path
+					if !filepath.IsAbs(abs) {
+						abs = filepath.Join(searchPath, abs)
+					}
+					if !IsForbiddenPath(abs) {
+						filtered = append(filtered, m)
+					}
+				}
+				matches = filtered
+			}
+
 			if len(matches) == 0 {
 				return fantasy.NewTextResponse("No matches found"), nil
 			}

@@ -60,7 +60,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	mgr := NewManager(t.Context(), dir, Options{
 		LM:         &fakeLM{response: "hello from agent"},
 		WorkingDir: dir,
-	}, logger)
+	}, nil, logger)
 	return mgr, dir
 }
 
@@ -517,7 +517,7 @@ func TestManager_RestoreInstances(t *testing.T) {
 	mgr1 := NewManager(ctx, dir, Options{
 		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
-	}, logger)
+	}, nil, logger)
 
 	id, err := mgr1.StartAgent(ctx, "test-agent", "")
 	if err != nil {
@@ -529,7 +529,7 @@ func TestManager_RestoreInstances(t *testing.T) {
 	mgr2 := NewManager(ctx, dir, Options{
 		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
-	}, logger)
+	}, nil, logger)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestManager_IdentityInPrompt(t *testing.T) {
 	mgr2 = NewManager(t.Context(), dir, Options{
 		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
-	}, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})))
+	}, nil, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})))
 	mgr2.RestoreInstances(t.Context())
 
 	_, ok := mgr2.GetAgent(id)

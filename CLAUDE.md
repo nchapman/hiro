@@ -69,7 +69,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manag
 
 ```
 agents/<name>/
-  agent.md          # Required. YAML frontmatter (name, model, mode, description) + markdown body (system prompt)
+  agent.md          # Required. YAML frontmatter (name, model, mode, description, tools) + markdown body (system prompt)
   soul.md           # Optional. Persona, tone, boundaries — prepended to system prompt
   tools.md          # Optional. Tool usage guidelines — appended as "## Tool Notes"
   skills/
@@ -122,6 +122,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 - **`cmd/hive`** — Entry point. Loads config, starts manager, boots coordinator agent, runs HTTP server.
 - **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent`; `Manager` supervises lifecycles, provides manager tools, and serializes per-agent conversations.
 - **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch).
+- **`internal/controlplane`** — Control plane: operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
 - **`internal/history`** — SQLite-backed conversation history with automatic LLM-driven compaction. `Engine` coordinates `Store` (persistence) + `Compactor` (summarization) + `Assemble` (context assembly within token budget). SQLite runs in WAL mode with FTS5 for full-text search; migrations are embedded via `//go:embed` from `migrations/*.sql`.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
@@ -131,7 +132,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 ## Agent Tools
 
-### Built-in Tools (all agents get these 11)
+### Built-in Tools (11 total, agents must declare which they use)
 
 Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `internal/agent/tools/*.go`.
 
@@ -195,7 +196,42 @@ The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It is a 
 4. `AgentByName("coordinator")` — check if already running (from restore)
 5. If not running, `StartAgent(ctx, "coordinator", "")` — no parent, becomes root
 
-The coordinator has **no special code paths** — it's a regular persistent agent that happens to be started first. It gets all 18 tools.
+The coordinator has **no special code paths** — it's a regular persistent agent that happens to be started first.
+
+## Control Plane
+
+The control plane (`internal/controlplane`) manages operator-level configuration that agents cannot access or modify.
+
+**Config file:** `config.yaml` at workspace root. Read at startup into Go memory. Written back on shutdown. During runtime, Go memory is authoritative.
+
+```yaml
+secrets:
+  GITHUB_TOKEN: ghp_xxxxxxxxxxxx
+
+agents:
+  researcher:
+    tools: [read_file, glob, grep]  # restrict below declared tools
+```
+
+**Key concepts:**
+
+- **Secrets** — Named key-value pairs. Injected as env vars into bash commands. Agents see names in system prompt but never values.
+- **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`tools: [bash, read_file, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
+- **Inherited caps** — Child effective tools = intersection of (declared tools ∩ control plane ∩ parent's effective tools).
+- **Bash is binary** — Agent gets bash or doesn't. No sandboxing pretense.
+
+**Slash commands** (intercepted in WebSocket handler, never reach agent):
+
+| Command | Effect |
+|---------|--------|
+| `/secrets set NAME=VALUE` | Store a secret |
+| `/secrets rm NAME` | Remove a secret |
+| `/secrets list` | List secret names (not values) |
+| `/tools set <agent> <tools>` | Set tool override |
+| `/tools rm <agent>` | Clear override |
+| `/tools list [agent]` | Show overrides |
+
+**File filtering:** File tools hide `config.yaml` from agents (forbidden path filter) so they don't waste time on it. This is a convenience feature, not a security boundary — actual access control will be enforced at the OS level.
 
 ## Creating Agents at Runtime
 

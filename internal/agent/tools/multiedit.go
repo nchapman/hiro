@@ -40,6 +40,9 @@ func NewMultiEditTool(workingDir string) fantasy.AgentTool {
 			}
 
 			filePath := resolvePath(workingDir, params.FilePath)
+			if IsForbiddenPath(filePath) {
+				return fantasy.NewTextErrorResponse("this file is managed by the operator and is not available to agents"), nil
+			}
 
 			// Validate: only the first edit may have empty old_string (file creation).
 			for i, e := range params.Edits {

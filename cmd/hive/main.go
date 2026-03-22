@@ -9,13 +9,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 
 	"github.com/nchapman/hivebot/internal/agent"
+	"github.com/nchapman/hivebot/internal/agent/tools"
 	"github.com/nchapman/hivebot/internal/api"
+	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/workspace"
 	"github.com/nchapman/hivebot/web"
 )
@@ -47,9 +50,22 @@ func run() error {
 	apiKey := os.Getenv("HIVE_API_KEY")
 	modelOverride := os.Getenv("HIVE_MODEL")
 
+	// Hide the control plane config from agent file tools so they don't
+	// interact with it. This is a convenience filter, not a security
+	// boundary — OS-level permissions handle actual access control.
+	absWorkspaceDir, _ := filepath.Abs(workspaceDir)
+	cpPath := filepath.Join(absWorkspaceDir, "config.yaml")
+	tools.ForbiddenPaths = []string{cpPath}
+
 	// Initialize workspace directory structure and seed defaults
 	if err := workspace.Init(workspaceDir, logger); err != nil {
 		return fmt.Errorf("initializing workspace: %w", err)
+	}
+
+	// Load control plane config (secrets, tool policies).
+	cp, err := controlplane.Load(cpPath, logger)
+	if err != nil {
+		return fmt.Errorf("loading control plane: %w", err)
 	}
 
 	webFS, err := web.DistFS()
@@ -62,6 +78,7 @@ func run() error {
 	defer cancel()
 
 	srv := api.NewServer(logger, webFS)
+	srv.SetControlPlane(cp)
 
 	// Start agent manager and leader agent if API key is set
 	var mgr *agent.Manager
@@ -71,7 +88,7 @@ func run() error {
 			APIKey:     apiKey,
 			Model:      modelOverride,
 			WorkingDir: "", // defaults to cwd
-		}, logger)
+		}, cp, logger)
 
 		// Restore any persistent agents from previous run
 		if err := mgr.RestoreInstances(ctx); err != nil {
@@ -128,6 +145,9 @@ func run() error {
 	err = httpServer.Shutdown(shutdownCtx)
 	if mgr != nil {
 		mgr.Shutdown()
+	}
+	if saveErr := cp.Save(); saveErr != nil {
+		logger.Error("failed to save control plane config", "error", saveErr)
 	}
 	return err
 }

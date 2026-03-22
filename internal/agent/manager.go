@@ -28,11 +28,12 @@ type AgentInfo struct {
 
 // runningAgent tracks a live agent instance within the manager.
 type runningAgent struct {
-	mu     sync.Mutex // serializes calls to this agent's conversation
-	info   AgentInfo
-	agent  *Agent
-	conv   *Conversation
-	cancel context.CancelFunc
+	mu             sync.Mutex // serializes calls to this agent's conversation
+	info           AgentInfo
+	agent          *Agent
+	conv           *Conversation
+	cancel         context.CancelFunc
+	effectiveTools map[string]bool // built-in tools this agent is allowed; nil = unrestricted
 }
 
 // Manager supervises agent lifecycles on a single node.
@@ -44,19 +45,30 @@ type Manager struct {
 	ctx          context.Context // long-lived context for persistent agents
 	workspaceDir string
 	opts         Options
+	cp           ControlPlane // operator-level tool/secret config
 	logger       *slog.Logger
+}
+
+// ControlPlane is the interface the Manager uses for operator-level config.
+// Defined here to avoid a direct dependency on the controlplane package.
+type ControlPlane interface {
+	AgentTools(name string) (tools []string, ok bool)
+	SecretNames() []string
+	SecretEnv() []string
 }
 
 // NewManager creates a new agent manager. workspaceDir is the root of the
 // workspace containing agents/ and instances/ subdirectories. The context
-// controls the lifetime of persistent agents.
-func NewManager(ctx context.Context, workspaceDir string, opts Options, logger *slog.Logger) *Manager {
+// controls the lifetime of persistent agents. cp may be nil if no control
+// plane is configured.
+func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger) *Manager {
 	return &Manager{
 		agents:       make(map[string]*runningAgent),
 		children:     make(map[string][]string),
 		ctx:          ctx,
 		workspaceDir: workspaceDir,
 		opts:         opts,
+		cp:           cp,
 		logger:       logger,
 	}
 }
@@ -455,6 +467,19 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 		conv = NewConversation()
 	}
 
+	// Compute effective tool set: declared tools ∩ control plane ∩ parent caps.
+	effectiveTools := m.computeEffectiveTools(cfg, parentID)
+	// Agent has skills if skills were loaded from the definition or if it has a
+	// skills directory that could gain skills at runtime.
+	hasSkills := len(cfg.Skills) > 0 || m.agentDefDir(cfg.Name) != ""
+	opts.AllowedTools = buildAllowedToolsMap(effectiveTools, hasSkills)
+
+	// Inject secret env function if control plane is available.
+	if m.cp != nil {
+		opts.SecretEnvFn = m.cp.SecretEnv
+		opts.SecretNamesFn = m.cp.SecretNames
+	}
+
 	a, err := New(agentCtx, cfg, opts, m.logger)
 	if err != nil {
 		cancel()
@@ -471,9 +496,10 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 			Description: cfg.Description,
 			ParentID:    parentID,
 		},
-		agent:  a,
-		conv:   conv,
-		cancel: cancel,
+		agent:          a,
+		conv:           conv,
+		cancel:         cancel,
+		effectiveTools: effectiveTools,
 	}
 
 	m.mu.Lock()
@@ -544,6 +570,87 @@ func (m *Manager) collectDescendants(agentID string) []string {
 		queue = append(queue, m.children[current]...)
 	}
 	return result
+}
+
+// structuralTools are always injected regardless of the control plane or
+// agent declarations. They're intrinsic to the agent's mode/role, not
+// capabilities. Note: bash and use_skill are NOT structural — agents must
+// explicitly declare bash, and use_skill is only added when skills exist.
+var structuralTools = []string{
+	// Manager tools
+	"spawn_agent", "start_agent", "list_agents", "send_message", "stop_agent",
+	// Persistent agent tools
+	"memory_read", "memory_write", "todos", "history_search", "history_recall",
+}
+
+// computeEffectiveTools returns the set of built-in tools this agent is
+// allowed to use, computed as the intersection of:
+//  1. The agent's declared tools (from agent.md frontmatter)
+//  2. The control plane override (if any)
+//  3. The parent's effective tools (if any)
+//
+// Returns nil if the agent has no restrictions (all tools allowed).
+func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string) map[string]bool {
+	// Start with declared tools from agent.md.
+	var effective map[string]bool
+	if cfg.DeclaredTools != nil {
+		effective = make(map[string]bool, len(cfg.DeclaredTools))
+		for _, t := range cfg.DeclaredTools {
+			effective[t] = true
+		}
+	}
+	// No declared tools = closed by default (empty set, not nil).
+	if effective == nil {
+		effective = make(map[string]bool)
+	}
+
+	// Intersect with control plane override if present.
+	if m.cp != nil {
+		if cpTools, ok := m.cp.AgentTools(cfg.Name); ok {
+			cpSet := make(map[string]bool, len(cpTools))
+			for _, t := range cpTools {
+				cpSet[t] = true
+			}
+			for t := range effective {
+				if !cpSet[t] {
+					delete(effective, t)
+				}
+			}
+		}
+	}
+
+	// Intersect with parent's effective tools if parent exists.
+	if parentID != "" {
+		m.mu.RLock()
+		parent, ok := m.agents[parentID]
+		m.mu.RUnlock()
+		if ok && parent.effectiveTools != nil {
+			for t := range effective {
+				if !parent.effectiveTools[t] {
+					delete(effective, t)
+				}
+			}
+		}
+	}
+
+	return effective
+}
+
+// buildAllowedToolsMap creates the AllowedTools map for agent.Options,
+// adding structural tools that always bypass filtering. hasSkills controls
+// whether the use_skill tool is included.
+func buildAllowedToolsMap(effective map[string]bool, hasSkills bool) map[string]bool {
+	allowed := make(map[string]bool, len(effective)+len(structuralTools)+1)
+	for t := range effective {
+		allowed[t] = true
+	}
+	for _, t := range structuralTools {
+		allowed[t] = true
+	}
+	if hasSkills {
+		allowed["use_skill"] = true
+	}
+	return allowed
 }
 
 // Path helpers

@@ -52,6 +52,9 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 					fmt.Sprintf("error finding files: %v", err)), nil
 			}
 
+			// Filter out forbidden paths (e.g. control plane config).
+			files = filterForbiddenResults(files, searchPath)
+
 			if len(files) == 0 {
 				return fantasy.NewTextResponse("No files found"), nil
 			}

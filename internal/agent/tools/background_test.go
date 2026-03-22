@@ -8,7 +8,7 @@ import (
 )
 
 func TestBackgroundJob_StartAndGetOutput(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, err := mgr.Start(t.TempDir(), "echo hello")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -28,7 +28,7 @@ func TestBackgroundJob_StartAndGetOutput(t *testing.T) {
 }
 
 func TestBackgroundJob_Kill(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, err := mgr.Start(t.TempDir(), "sleep 60")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -45,14 +45,14 @@ func TestBackgroundJob_Kill(t *testing.T) {
 }
 
 func TestBackgroundJob_KillNotFound(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	if err := mgr.Kill("999"); err == nil {
 		t.Error("expected error for nonexistent job")
 	}
 }
 
 func TestBackgroundJob_WaitContextCancelled(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, err := mgr.Start(t.TempDir(), "sleep 60")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -68,7 +68,7 @@ func TestBackgroundJob_WaitContextCancelled(t *testing.T) {
 }
 
 func TestBackgroundJob_MaxJobs(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 
 	var jobs []*BackgroundJob
 	for i := 0; i < MaxBackgroundJobs; i++ {
@@ -90,7 +90,7 @@ func TestBackgroundJob_MaxJobs(t *testing.T) {
 }
 
 func TestBackgroundJob_FailingCommand(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, err := mgr.Start(t.TempDir(), "exit 42")
 	if err != nil {
 		t.Fatalf("Start: %v", err)

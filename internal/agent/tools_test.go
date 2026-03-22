@@ -312,7 +312,7 @@ func TestBuildSystemPrompt_WithSkills(t *testing.T) {
 			{Name: "deploy", Description: "Deploy to production."},
 		},
 	}
-	prompt := buildSystemPrompt(cfg, "", "", "")
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
 
 	if !strings.Contains(prompt, "## Skills") {
 		t.Error("missing Skills section")
@@ -340,7 +340,7 @@ func TestBuildSystemPrompt_NoSkills(t *testing.T) {
 		Name:   "test",
 		Prompt: "Instructions.",
 	}
-	prompt := buildSystemPrompt(cfg, "", "", "")
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
 	if strings.Contains(prompt, "## Skills") {
 		t.Error("Skills section should not appear when no skills")
 	}
@@ -356,7 +356,7 @@ func TestBuildSystemPrompt_WithMemoryAndTodos(t *testing.T) {
 		Soul:   "Be kind.",
 	}
 
-	prompt := buildSystemPrompt(cfg, "I am Agent X", "User likes Go", "- [x] Done\n- [ ] Next\n")
+	prompt := buildSystemPrompt(cfg, "I am Agent X", "User likes Go", "- [x] Done\n- [ ] Next\n", nil)
 
 	for _, want := range []string{"## Identity", "## Memories", "## Current Tasks", "Be kind.", "You are a helpful agent."} {
 		if !strings.Contains(prompt, want) {
@@ -371,7 +371,7 @@ func TestBuildSystemPrompt_EmptyOptionalSections(t *testing.T) {
 		Prompt: "Instructions here.",
 	}
 
-	prompt := buildSystemPrompt(cfg, "", "", "")
+	prompt := buildSystemPrompt(cfg, "", "", "", nil)
 	for _, absent := range []string{"## Identity", "## Memories", "## Current Tasks"} {
 		if strings.Contains(prompt, absent) {
 			t.Errorf("empty section %q should not appear", absent)

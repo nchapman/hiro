@@ -8,7 +8,7 @@ import (
 )
 
 func TestJobOutput_CompletedJob(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "echo hello")
 	job.Wait(context.Background())
 
@@ -26,7 +26,7 @@ func TestJobOutput_CompletedJob(t *testing.T) {
 }
 
 func TestJobOutput_RunningJob(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "sleep 60")
 	defer mgr.Kill(job.ID)
 
@@ -41,7 +41,7 @@ func TestJobOutput_RunningJob(t *testing.T) {
 }
 
 func TestJobOutput_NotFound(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	tool := NewJobOutputTool(mgr)
 	content, isErr := runTool(t, tool, `{"job_id": "NOPE"}`)
 	if !isErr {
@@ -53,7 +53,7 @@ func TestJobOutput_NotFound(t *testing.T) {
 }
 
 func TestJobOutput_MissingID(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	tool := NewJobOutputTool(mgr)
 	_, isErr := runTool(t, tool, `{"job_id": ""}`)
 	if !isErr {
@@ -62,7 +62,7 @@ func TestJobOutput_MissingID(t *testing.T) {
 }
 
 func TestJobOutput_FailedCommand(t *testing.T) {
-	mgr := NewBackgroundJobManager()
+	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "echo oops >&2; exit 7")
 	job.Wait(context.Background())
 

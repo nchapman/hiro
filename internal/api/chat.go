@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -22,6 +23,11 @@ type ChatMessage struct {
 func (s *Server) SetManager(m *agent.Manager, leaderID string) {
 	s.manager = m
 	s.leaderID = leaderID
+}
+
+// SetControlPlane sets the command handler for slash commands.
+func (s *Server) SetControlPlane(h CommandHandler) {
+	s.cmdHandler = h
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +82,24 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 		if msg.Type != "message" || msg.Content == "" {
 			continue
+		}
+
+		// Intercept slash commands before they reach the agent.
+		if s.cmdHandler != nil && strings.HasPrefix(msg.Content, "/") {
+			result, err := s.cmdHandler.HandleCommand(msg.Content)
+			if err == nil {
+				// Recognized command — send result directly, don't forward to agent.
+				resp := ChatMessage{Type: "system", Content: result}
+				if writeErr := wsjson.Write(ctx, conn, resp); writeErr != nil {
+					return
+				}
+				done := ChatMessage{Type: "done"}
+				if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
+					return
+				}
+				continue
+			}
+			// Unrecognized command — fall through to agent as normal message.
 		}
 
 		onDelta := func(text string) error {

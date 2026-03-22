@@ -3,12 +3,12 @@ import type { AgentInfo } from '../App'
 
 interface Message {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system'
   content: string
 }
 
 interface ChatWireMessage {
-  type: 'message' | 'delta' | 'done' | 'error'
+  type: 'message' | 'delta' | 'done' | 'error' | 'system'
   role?: 'user' | 'assistant'
   content?: string
 }
@@ -119,15 +119,17 @@ const styles = {
     flexDirection: 'column' as const,
     gap: 16,
   },
-  message: (role: 'user' | 'assistant') => ({
-    maxWidth: '70%',
-    alignSelf: role === 'user' ? 'flex-end' as const : 'flex-start' as const,
-    background: role === 'user' ? 'var(--accent-dim)' : 'var(--bg-elevated)',
-    padding: '10px 14px',
-    borderRadius: 12,
-    fontSize: 14,
+  message: (role: 'user' | 'assistant' | 'system') => ({
+    maxWidth: role === 'system' ? '90%' : '70%',
+    alignSelf: role === 'user' ? 'flex-end' as const : role === 'system' ? 'center' as const : 'flex-start' as const,
+    background: role === 'user' ? 'var(--accent-dim)' : role === 'system' ? 'var(--bg-surface, var(--bg-elevated))' : 'var(--bg-elevated)',
+    padding: role === 'system' ? '8px 14px' : '10px 14px',
+    borderRadius: role === 'system' ? 8 : 12,
+    fontSize: role === 'system' ? 13 : 14,
     lineHeight: 1.5,
     whiteSpace: 'pre-wrap' as const,
+    color: role === 'system' ? 'var(--text-muted)' : undefined,
+    border: role === 'system' ? '1px solid var(--border)' : undefined,
   }),
   inputArea: {
     padding: 16,
@@ -255,6 +257,13 @@ export default function Chat({ agent }: ChatProps) {
         case 'done':
           streamingMsgId.current = null
           setStreaming(false)
+          break
+        case 'system':
+          setMessages(prev => [...prev, {
+            id: crypto.randomUUID(),
+            role: 'system',
+            content: msg.content || '',
+          }])
           break
         case 'error':
           streamingMsgId.current = null

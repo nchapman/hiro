@@ -29,6 +29,9 @@ func NewWriteFileTool(workingDir string) fantasy.AgentTool {
 			}
 
 			path := resolvePath(workingDir, params.Path)
+			if IsForbiddenPath(path) {
+				return fantasy.NewTextErrorResponse("this file is managed by the operator and is not available to agents"), nil
+			}
 
 			// Create parent directories if needed
 			dir := filepath.Dir(path)

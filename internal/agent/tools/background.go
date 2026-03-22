@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -91,15 +92,22 @@ func (j *BackgroundJob) Wait(ctx context.Context) bool {
 
 // BackgroundJobManager tracks running background jobs.
 type BackgroundJobManager struct {
-	mu   sync.RWMutex
-	jobs map[string]*BackgroundJob
+	mu    sync.RWMutex
+	jobs  map[string]*BackgroundJob
+	envFn func() []string // extra env vars injected into every command (e.g. secrets)
 }
 
 var jobIDCounter atomic.Uint64
 
-// NewBackgroundJobManager creates a new job manager.
-func NewBackgroundJobManager() *BackgroundJobManager {
-	return &BackgroundJobManager{jobs: make(map[string]*BackgroundJob)}
+// NewBackgroundJobManager creates a new job manager. envFn, if non-nil,
+// is called at each Start() to get extra environment variables (e.g.
+// secrets from the control plane). It is called lazily so updates to
+// secrets take effect on the next command.
+func NewBackgroundJobManager(envFn func() []string) *BackgroundJobManager {
+	return &BackgroundJobManager{
+		jobs:  make(map[string]*BackgroundJob),
+		envFn: envFn,
+	}
 }
 
 // Start creates and starts a new background job.
@@ -136,6 +144,11 @@ func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob
 		cmd.Stdout = job.stdout
 		cmd.Stderr = job.stderr
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if m.envFn != nil {
+			if extra := m.envFn(); len(extra) > 0 {
+				cmd.Env = append(os.Environ(), extra...)
+			}
+		}
 		cmd.Cancel = func() error {
 			// Kill the entire process group, not just the lead process.
 			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)

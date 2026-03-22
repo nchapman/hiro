@@ -13,10 +13,16 @@ import (
 	"github.com/nchapman/hivebot/internal/agent"
 )
 
+// CommandHandler handles slash commands from the chat interface.
+type CommandHandler interface {
+	HandleCommand(input string) (string, error)
+}
+
 // Server is the HTTP server for the Hive leader.
 type Server struct {
 	manager  *agent.Manager // agent manager (nil = no agents)
 	leaderID string         // ID of the leader agent for chat
+	cmdHandler CommandHandler // control plane command handler (nil = no commands)
 	webFS    fs.FS          // embedded web UI files (nil = no UI serving)
 	mux      *http.ServeMux
 	logger   *slog.Logger

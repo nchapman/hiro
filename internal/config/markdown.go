@@ -37,6 +37,26 @@ func (f Frontmatter) String(key string) string {
 	return s
 }
 
+// StringSlice returns a frontmatter value as a []string, or nil if missing/wrong type.
+// YAML unmarshals [a, b, c] as []any, so we convert each element.
+func (f Frontmatter) StringSlice(key string) []string {
+	v, ok := f[key]
+	if !ok {
+		return nil
+	}
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 // StringMap returns a frontmatter value as a map[string]string, or nil if missing/wrong type.
 func (f Frontmatter) StringMap(key string) map[string]string {
 	v, ok := f[key]
@@ -142,14 +162,15 @@ const (
 
 // AgentConfig represents an agent's configuration loaded from markdown.
 type AgentConfig struct {
-	Name        string
-	Model       string
-	Mode        AgentMode // ModePersistent (default) or ModeEphemeral
-	Description string
-	Prompt      string // the markdown body — the agent's operating instructions
-	Soul        string // persona, tone, boundaries (from soul.md)
-	Tools       string // tool notes and conventions (from tools.md)
-	Skills      []SkillConfig
+	Name          string
+	Model         string
+	Mode          AgentMode // ModePersistent (default) or ModeEphemeral
+	Description   string
+	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
+	Prompt        string   // the markdown body — the agent's operating instructions
+	Soul          string   // persona, tone, boundaries (from soul.md)
+	Tools         string   // tool notes and conventions (from tools.md)
+	Skills        []SkillConfig
 }
 
 // SkillConfig represents a skill definition loaded from markdown.
@@ -200,11 +221,12 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	}
 
 	agent := AgentConfig{
-		Name:        parsed.Frontmatter.String("name"),
-		Model:       parsed.Frontmatter.String("model"),
-		Mode:        mode,
-		Description: parsed.Frontmatter.String("description"),
-		Prompt:      parsed.Body,
+		Name:          parsed.Frontmatter.String("name"),
+		Model:         parsed.Frontmatter.String("model"),
+		Mode:          mode,
+		Description:   parsed.Frontmatter.String("description"),
+		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
+		Prompt:        parsed.Body,
 	}
 
 	if agent.Name == "" {
