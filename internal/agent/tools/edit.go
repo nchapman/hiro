@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
@@ -47,8 +48,7 @@ func createFile(filePath, content string) (fantasy.ToolResponse, error) {
 			fmt.Sprintf("file already exists: %s (use old_string + new_string to edit it)", filePath)), nil
 	}
 
-	dir := filePath[:strings.LastIndex(filePath, "/")]
-	if dir != "" {
+	if dir := filepath.Dir(filePath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fantasy.NewTextErrorResponse(
 				fmt.Sprintf("error creating directory: %v", err)), nil
@@ -64,12 +64,19 @@ func createFile(filePath, content string) (fantasy.ToolResponse, error) {
 }
 
 func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.ToolResponse, error) {
-	data, err := os.ReadFile(filePath)
+	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fantasy.NewTextErrorResponse(
 				fmt.Sprintf("file not found: %s", filePath)), nil
 		}
+		return fantasy.NewTextErrorResponse(
+			fmt.Sprintf("error accessing file: %v", err)), nil
+	}
+	fileMode := info.Mode()
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("error reading file: %v", err)), nil
 	}
@@ -86,7 +93,7 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 			return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
 		}
 
-		if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+		if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil {
 			return fantasy.NewTextErrorResponse(
 				fmt.Sprintf("error writing file: %v", err)), nil
 		}
@@ -110,7 +117,7 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 	}
 
 	newContent := content[:index] + newString + content[index+len(oldString):]
-	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("error writing file: %v", err)), nil
 	}

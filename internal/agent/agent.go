@@ -61,7 +61,11 @@ func New(ctx context.Context, cfg config.AgentConfig, swarm *hub.Swarm, opts Opt
 
 	workingDir := opts.WorkingDir
 	if workingDir == "" {
-		workingDir, _ = os.Getwd()
+		var err error
+		workingDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("determining working directory: %w", err)
+		}
 	}
 
 	a := &Agent{

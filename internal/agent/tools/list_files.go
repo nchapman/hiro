@@ -18,7 +18,7 @@ const maxListEntries = 500
 
 type ListFilesParams struct {
 	Path    string `json:"path"              description:"Directory path to list. Defaults to the current working directory."`
-	Pattern string `json:"pattern,omitempty"  description:"Glob pattern to filter results (e.g. '*.go', '**/*.ts'). Defaults to all files."`
+	Pattern string `json:"pattern,omitempty"  description:"Glob pattern to filter by filename (e.g. '*.go', '*.ts'). Matches against the file's base name. Defaults to all files."`
 }
 
 // NewListFilesTool creates a tool that lists directory contents.
