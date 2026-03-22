@@ -4,7 +4,7 @@ FROM golang:1.26
 RUN groupadd -g 10000 hive-agents \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
-        useradd -r -u $uid -g hive-agents -M -d /tmp -s /bin/bash "hive-agent-$i"; \
+        useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
     done
 
 WORKDIR /app

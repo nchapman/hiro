@@ -71,7 +71,7 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 | `/workspace` | `2775` (setgid) | root:hive-agents | Shared workspace. All agents can read and write. New files inherit the `hive-agents` group. |
 | `agents/` | `0755` | root | Agent definitions. Readable by all, writable by control plane. |
 | `sessions/{id}/` | `0700` | agent-user | Private per-agent data (memory, history, todos, manifest). Only the owning agent can access. |
-| `/home/hive/.local/` | `2775` (setgid) | hive:hive-agents | Shared tool installations (mise, uv, node, python). All agents can read, write, and install new tools. |
+| `/opt/mise/` | `2775` (setgid) | root:hive-agents | Shared tool installations (mise, node, python, etc.). All agents can read, write, and install new tools. |
 | Host socket | `0777` | root | gRPC server for agent→control plane calls. Must be accessible by all agent UIDs. |
 | Agent socket | default | agent-user | gRPC server for control plane→agent calls. Located at `/tmp/hive-agent-{session-id}.sock`. |
 

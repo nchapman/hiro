@@ -53,7 +53,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		}
 		// Forward tool manager env vars so agents can use and install
 		// tools via mise. These are set in the Dockerfile.
-		for _, key := range []string{"MISE_DATA_DIR"} {
+		for _, key := range []string{"MISE_DATA_DIR", "MISE_CONFIG_DIR"} {
 			if v := os.Getenv(key); v != "" {
 				cmd.Env = append(cmd.Env, key+"="+v)
 			}
