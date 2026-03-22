@@ -1,35 +1,76 @@
 ---
 name: create-skill
-description: Add new skills to existing agents by writing markdown files to their skills/ directory.
+description: Add skills to agents or the shared workspace. Use when asked to teach an agent something new or add a capability.
 ---
 
-You can add skills to any agent by writing markdown files to its `skills/` directory.
+You can add skills to any agent by writing markdown files, or create shared skills available to all agents.
 
-## Steps
+## Agent-specific skills
 
-1. Identify the target agent by name (e.g. `coordinator`, `code-reviewer`).
-2. Write a `.md` file to `agents/<agent-name>/skills/<skill-name>.md`.
-3. The skill takes effect on the agent's next turn — the system prompt is rebuilt from disk each turn.
+Write to `agents/<agent-name>/skills/`. Two formats are supported:
+
+**Flat file:** `agents/<agent-name>/skills/<skill-name>.md`
+
+**Directory:** `agents/<agent-name>/skills/<skill-name>/SKILL.md` — use this when the skill needs bundled resources like scripts, references, or assets in subdirectories alongside the SKILL.md.
+
+## Shared workspace skills
+
+Write to the workspace-level `skills/` directory. These are available to all agents. Agent-specific skills take precedence over shared skills with the same name.
 
 ## Skill file format
 
 ```markdown
 ---
 name: skill-name
-description: Brief description of what this skill enables.
+description: What this skill does and when to use it. Include trigger phrases.
+license: MIT
+compatibility: Requires python 3.8+
+metadata:
+  author: your-name
+  version: "1.0"
 ---
 
-Instructions for the agent when using this skill.
-Write as direct instructions — these are injected into the system prompt under "## Skills".
+Full instructions for the agent when using this skill.
 ```
 
-Both `name` and `description` are required in the frontmatter.
+### Required fields
+
+| Field | Rules |
+|-------|-------|
+| `name` | Lowercase kebab-case (`a-z`, `0-9`, hyphens). Max 64 chars. Must match directory name for directory skills. |
+| `description` | What the skill does AND when to use it. Max 1024 chars. This is what agents see to decide whether to load the skill. |
+
+### Optional fields
+
+| Field | Purpose |
+|-------|---------|
+| `license` | License identifier (e.g. `MIT`, `Apache-2.0`) |
+| `compatibility` | System/dependency requirements. Max 500 chars. |
+| `metadata` | Arbitrary key-value pairs (author, version, category, etc.) |
+
+## How skills work at runtime
+
+Skills use progressive disclosure. Only the name and description appear in the agent's system prompt. The agent calls `use_skill("<skill-name>")` to load the full instructions and any bundled resources. This keeps prompts lean as skills grow.
+
+## Skill directory format
+
+For skills that bundle resources:
+
+```
+skills/my-skill/
+  SKILL.md         # Required — the skill definition
+  scripts/         # Optional — executable code
+  references/      # Optional — documentation, examples
+  assets/          # Optional — templates, data files
+```
+
+The agent can access all files in the skill directory via `read_file` and `list_files`.
 
 ## Guidelines
 
-- Use kebab-case for skill file names (e.g. `summarize-code.md`, `write-tests.md`).
-- Keep skills focused — one capability per skill.
-- Write instructions as if speaking directly to the agent that will use the skill.
+- Use kebab-case for names (e.g. `summarize-code`, `write-tests`).
+- Write the description as a trigger: what the skill does + when to use it.
+- Keep the SKILL.md body focused on instructions. Move detailed docs to `references/`.
 - Don't duplicate instructions already in the agent's `agent.md` or other skills.
-- Check the agent's existing skills first with `list_files agents/<agent-name>/skills/` to avoid overlap.
-- If the target agent is currently running, the new skill takes effect on its next message — no restart needed.
+- Check existing skills first with `list_files agents/<agent-name>/skills/`.
+- Skills take effect on the agent's next message — no restart needed.

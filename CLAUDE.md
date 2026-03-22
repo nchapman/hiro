@@ -68,10 +68,35 @@ agents/<name>/
   soul.md           # Optional. Persona, tone, boundaries — prepended to system prompt
   tools.md          # Optional. Tool usage guidelines — appended as "## Tool Notes"
   skills/
-    *.md            # Optional. Behavioral instructions injected into system prompt as "## Skills"
+    flat-skill.md           # Flat file skill
+    dir-skill/
+      SKILL.md              # Directory skill (can bundle scripts/, references/, assets/)
+      scripts/
+      references/
+      assets/
 ```
 
-Skills are **not runtime tools** — they are static instructions appended to the system prompt to guide agent behavior.
+A workspace-level `skills/` directory provides shared skills available to all agents. Agent-specific skills take precedence over shared skills with the same name.
+
+Skills use **progressive disclosure** — only name and description are listed in the system prompt. The agent activates a skill via the `use_skill` tool, which returns the full instructions and lists bundled resources.
+
+### Skill File Format
+
+```yaml
+---
+name: skill-name          # Required. Lowercase kebab-case, max 64 chars.
+description: What and when. # Required. Max 1024 chars. Trigger mechanism for the agent.
+license: MIT               # Optional.
+compatibility: Requires X  # Optional. Max 500 chars.
+metadata:                  # Optional. Arbitrary key-value pairs.
+  author: name
+  version: "1.0"
+---
+
+Full instructions (read on demand by the agent).
+```
+
+Validation: name must match `^[a-z0-9]+(-[a-z0-9]+)*$`. For directory skills, name must match directory name (case-insensitive).
 
 ### System Prompt Assembly Order
 
@@ -83,9 +108,9 @@ Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
 4. `## Current Tasks` + formatted todos (persistent agents only)
 5. `agent.md` body (main instructions)
 6. `## Tool Notes` + `tools.md` (if present)
-7. `## Skills` + all `skills/*.md` formatted (if present)
+7. `## Skills` + XML listing of skill name/description/path (if present)
 
-This means `memory_write`, identity edits, and todo updates take effect on the next turn.
+Skills are re-scanned from disk each turn (like memory and identity), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `read_file`.
 
 ### Key Packages
 
@@ -140,10 +165,16 @@ Added in `startInstance()` via `buildMemoryTools()`, `buildTodoTools()`, `buildH
 | `history_search` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
 | `history_recall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
 
+### Skill Tool (agents with skills)
+
+| Tool | Purpose | Key Params | Notes |
+|------|---------|------------|-------|
+| `use_skill` | Activate a skill and get full instructions | `name` | Returns full skill body + directory listing of bundled resources. Only present when agent has skills available. |
+
 ### Tool Totals by Agent Type
 
-- **Ephemeral agents:** 8 built-in + 5 manager = 13 tools
-- **Persistent agents:** 8 built-in + 5 manager + 2 memory + 1 todos + 2 history = 18 tools
+- **Ephemeral agents:** 8 built-in + 5 manager = 13 tools (+ 1 if skills)
+- **Persistent agents:** 8 built-in + 5 manager + 2 memory + 1 todos + 2 history = 18 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
@@ -165,7 +196,7 @@ Agents can create new agent definitions at runtime using their file tools:
 2. Call `start_agent` with the new agent name — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 
-Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory. The system prompt is rebuilt from disk each turn, so new skills take effect on the next `StreamChat` call.
+Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next `StreamChat` call.
 
 ## Conversation Modes
 

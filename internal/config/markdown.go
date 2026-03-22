@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,6 +35,32 @@ func (f Frontmatter) String(key string) string {
 		return ""
 	}
 	return s
+}
+
+// StringMap returns a frontmatter value as a map[string]string, or nil if missing/wrong type.
+func (f Frontmatter) StringMap(key string) map[string]string {
+	v, ok := f[key]
+	if !ok {
+		return nil
+	}
+	// YAML v3 unmarshals nested maps as the same named type (Frontmatter),
+	// so we need to check for both Frontmatter and plain map[string]any.
+	var m map[string]any
+	switch tv := v.(type) {
+	case Frontmatter:
+		m = tv
+	case map[string]any:
+		m = tv
+	default:
+		return nil
+	}
+	result := make(map[string]string, len(m))
+	for k, val := range m {
+		if s, ok := val.(string); ok {
+			result[k] = s
+		}
+	}
+	return result
 }
 
 // ParseMarkdown parses a markdown file with optional YAML frontmatter.
@@ -127,9 +154,29 @@ type AgentConfig struct {
 
 // SkillConfig represents a skill definition loaded from markdown.
 type SkillConfig struct {
-	Name        string
-	Description string
-	Prompt      string // the markdown body — instructions for this skill
+	Name          string
+	Description   string
+	Prompt        string            // the markdown body — instructions for this skill
+	Path          string            // absolute path to the skill file (for progressive disclosure)
+	License       string            // optional: license identifier (e.g. MIT, Apache-2.0)
+	Compatibility string            // optional: system/dependency requirements (max 500 chars)
+	Metadata      map[string]string // optional: arbitrary key-value pairs (author, version, etc.)
+}
+
+var validSkillName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// ValidateSkillName checks that a skill name is kebab-case, max 64 characters.
+func ValidateSkillName(name string) error {
+	if name == "" {
+		return fmt.Errorf("skill name is required")
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("skill name %q exceeds 64 character limit", name)
+	}
+	if !validSkillName.MatchString(name) {
+		return fmt.Errorf("skill name %q must be kebab-case (letters, numbers, hyphens)", name)
+	}
+	return nil
 }
 
 // LoadAgentDir loads an agent configuration from a directory containing
@@ -178,27 +225,76 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	agent.Tools = toolsContent
 
 	// Load skills
-	skillsDir := filepath.Join(dir, "skills")
+	skills, err := LoadSkills(filepath.Join(dir, "skills"))
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	agent.Skills = skills
+
+	return agent, nil
+}
+
+// LoadSkills loads all skill configs from a skills directory.
+// Supports both flat files (skill.md) and directories (skill/SKILL.md).
+// Returns nil and no error if the directory does not exist.
+func LoadSkills(skillsDir string) ([]SkillConfig, error) {
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return agent, nil // no skills directory is fine
+			return nil, nil
 		}
-		return AgentConfig{}, fmt.Errorf("reading skills directory: %w", err)
+		return nil, fmt.Errorf("reading skills directory: %w", err)
 	}
 
+	var skills []SkillConfig
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		var skillPath string
+		if entry.IsDir() {
+			// Directory skill: look for SKILL.md inside
+			candidate := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
+			if _, err := os.Stat(candidate); err != nil {
+				continue // directory without SKILL.md, skip
+			}
+			skillPath = candidate
+		} else if strings.HasSuffix(entry.Name(), ".md") {
+			skillPath = filepath.Join(skillsDir, entry.Name())
+		} else {
 			continue
 		}
-		skill, err := loadSkillFile(filepath.Join(skillsDir, entry.Name()))
+
+		skill, err := loadSkillFile(skillPath)
 		if err != nil {
-			return AgentConfig{}, fmt.Errorf("loading skill %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("loading skill %s: %w", entry.Name(), err)
 		}
-		agent.Skills = append(agent.Skills, skill)
+
+		// For directory skills, validate name matches directory name
+		if entry.IsDir() && !strings.EqualFold(skill.Name, entry.Name()) {
+			return nil, fmt.Errorf(
+				"skill name %q in %s must match directory name %q (case-insensitive)",
+				skill.Name, skillPath, entry.Name())
+		}
+
+		skills = append(skills, skill)
 	}
 
-	return agent, nil
+	return skills, nil
+}
+
+// MergeSkills combines agent-specific and shared skills.
+// Agent skills take precedence over shared skills with the same name.
+func MergeSkills(agentSkills, sharedSkills []SkillConfig) []SkillConfig {
+	seen := make(map[string]bool, len(agentSkills))
+	for _, s := range agentSkills {
+		seen[s.Name] = true
+	}
+	merged := make([]SkillConfig, len(agentSkills))
+	copy(merged, agentSkills)
+	for _, s := range sharedSkills {
+		if !seen[s.Name] {
+			merged = append(merged, s)
+		}
+	}
+	return merged
 }
 
 // ReadOptionalFile reads a file and returns its trimmed content.
@@ -220,14 +316,33 @@ func loadSkillFile(path string) (SkillConfig, error) {
 		return SkillConfig{}, err
 	}
 
-	skill := SkillConfig{
-		Name:        parsed.Frontmatter.String("name"),
-		Description: parsed.Frontmatter.String("description"),
-		Prompt:      parsed.Body,
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return SkillConfig{}, fmt.Errorf("resolving skill path: %w", err)
 	}
 
-	if skill.Name == "" {
-		return SkillConfig{}, fmt.Errorf("skill at %s missing required 'name' field", path)
+	skill := SkillConfig{
+		Name:          parsed.Frontmatter.String("name"),
+		Description:   parsed.Frontmatter.String("description"),
+		Prompt:        parsed.Body,
+		Path:          absPath,
+		License:       parsed.Frontmatter.String("license"),
+		Compatibility: parsed.Frontmatter.String("compatibility"),
+		Metadata:      parsed.Frontmatter.StringMap("metadata"),
+	}
+
+	if err := ValidateSkillName(skill.Name); err != nil {
+		return SkillConfig{}, fmt.Errorf("skill at %s: %w", path, err)
+	}
+
+	if skill.Description == "" {
+		return SkillConfig{}, fmt.Errorf("skill %q at %s missing required 'description' field", skill.Name, path)
+	}
+	if len(skill.Description) > 1024 {
+		return SkillConfig{}, fmt.Errorf("skill %q description exceeds 1024 character limit", skill.Name)
+	}
+	if len(skill.Compatibility) > 500 {
+		return SkillConfig{}, fmt.Errorf("skill %q compatibility exceeds 500 character limit", skill.Name)
 	}
 
 	return skill, nil

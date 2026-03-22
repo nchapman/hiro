@@ -410,6 +410,8 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	opts.ExtraTools = m.buildManagerTools(id)
 	opts.Identity = identity
 	opts.InstanceDir = instDir
+	opts.AgentDefDir = m.agentDefDir(cfg.Name)
+	opts.SharedSkillDir = m.sharedSkillsDir()
 
 	// Create LM once so it can be shared with the history engine
 	if opts.LM == nil {
@@ -546,6 +548,10 @@ func (m *Manager) collectDescendants(agentID string) []string {
 
 func (m *Manager) agentDefDir(name string) string {
 	return filepath.Join(m.workspaceDir, "agents", name)
+}
+
+func (m *Manager) sharedSkillsDir() string {
+	return filepath.Join(m.workspaceDir, "skills")
 }
 
 func (m *Manager) instancesDir() string {

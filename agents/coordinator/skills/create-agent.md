@@ -1,6 +1,6 @@
 ---
 name: create-agent
-description: Create new agent definitions by writing markdown files to the agents/ directory.
+description: Create new agents at runtime. Use when asked to build, define, or set up a new agent.
 ---
 
 You can create new agents at runtime. An agent is a directory under `agents/` with at minimum an `agent.md` file.
@@ -13,7 +13,8 @@ You can create new agents at runtime. An agent is a directory under `agents/` wi
 3. Optionally create supporting files:
    - `agents/<name>/soul.md` — persona, tone, and behavioral boundaries (no frontmatter needed, plain markdown)
    - `agents/<name>/tools.md` — tool usage guidelines (no frontmatter needed, plain markdown)
-   - `agents/<name>/skills/<skill-name>.md` — specialized behavioral instructions (requires frontmatter with `name` and `description`)
+   - `agents/<name>/skills/<skill-name>.md` — flat skill file (requires frontmatter with `name` and `description`)
+   - `agents/<name>/skills/<skill-name>/SKILL.md` — directory skill with optional `scripts/`, `references/`, `assets/` subdirs
 
 ## agent.md format
 
@@ -48,13 +49,18 @@ Write this as direct instructions to the agent about what it is and how it shoul
 ```markdown
 ---
 name: skill-name
-description: Brief description of the skill.
+description: What this skill does and when to use it.
+license: MIT
+compatibility: Requires python 3.8+
+metadata:
+  author: your-name
+  version: "1.0"
 ---
 
-Instructions for this skill. These are injected into the agent's system prompt.
+Instructions for this skill. The agent reads this file on demand when a task matches the description.
 ```
 
-Both `name` and `description` are required in skill frontmatter.
+Required: `name` (lowercase kebab-case, max 64 chars) and `description` (max 1024 chars). Optional: `license`, `compatibility` (max 500 chars), `metadata` (key-value pairs).
 
 ## After creating an agent
 

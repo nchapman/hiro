@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Break tasks into sub-tasks and delegate them to other agents in the swarm based on their skills.
+description: Delegate work to other agents in the swarm. Use when a task should be split up or handled by a specialist.
 ---
 
 When delegating work:

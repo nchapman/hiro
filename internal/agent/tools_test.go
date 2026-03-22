@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -133,6 +135,217 @@ func TestTodos_EmptyList(t *testing.T) {
 	}
 	if !strings.Contains(resp.Content, "0/0") {
 		t.Errorf("expected 0/0, got %q", resp.Content)
+	}
+}
+
+// --- use_skill tool tests ---
+
+func TestUseSkill_ReturnsBody(t *testing.T) {
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "test-skill.md")
+	os.WriteFile(skillPath, []byte("---\nname: test-skill\ndescription: A test skill.\n---\n\nDo the thing step by step."), 0644)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "test-skill", Description: "A test skill.", Path: skillPath},
+		},
+	}
+	tool := buildSkillTool(cfg)
+	resp := callTool(t, tool, `{"name": "test-skill"}`)
+	if resp.IsError {
+		t.Fatalf("unexpected error: %s", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "Do the thing step by step") {
+		t.Errorf("expected skill body, got %q", resp.Content)
+	}
+	// Should NOT contain frontmatter
+	if strings.Contains(resp.Content, "---") {
+		t.Error("response should not contain YAML frontmatter delimiters")
+	}
+	if strings.Contains(resp.Content, "name: test-skill") {
+		t.Error("response should not contain frontmatter fields")
+	}
+}
+
+func TestUseSkill_DirectorySkillListsResources(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "my-skill")
+	os.MkdirAll(filepath.Join(skillDir, "scripts"), 0755)
+	os.MkdirAll(filepath.Join(skillDir, "references"), 0755)
+
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	os.WriteFile(skillPath, []byte("---\nname: my-skill\ndescription: Desc.\n---\n\nInstructions."), 0644)
+	os.WriteFile(filepath.Join(skillDir, "scripts", "run.sh"), []byte("#!/bin/bash"), 0755)
+	os.WriteFile(filepath.Join(skillDir, "references", "guide.md"), []byte("# Guide"), 0644)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "my-skill", Description: "Desc.", Path: skillPath},
+		},
+	}
+	tool := buildSkillTool(cfg)
+	resp := callTool(t, tool, `{"name": "my-skill"}`)
+	if resp.IsError {
+		t.Fatalf("unexpected error: %s", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "Bundled Resources") {
+		t.Errorf("expected bundled resources section, got %q", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "scripts/") {
+		t.Errorf("expected scripts/ listed, got %q", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "scripts/run.sh") {
+		t.Errorf("expected scripts/run.sh listed, got %q", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "references/") {
+		t.Errorf("expected references/ listed, got %q", resp.Content)
+	}
+}
+
+func TestUseSkill_FlatSkillNoBundledResources(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	os.MkdirAll(skillsDir, 0755)
+	skillPath := filepath.Join(skillsDir, "simple.md")
+	os.WriteFile(skillPath, []byte("---\nname: simple\ndescription: Simple.\n---\n\nJust do it."), 0644)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "simple", Description: "Simple.", Path: skillPath},
+		},
+	}
+	tool := buildSkillTool(cfg)
+	resp := callTool(t, tool, `{"name": "simple"}`)
+	if resp.IsError {
+		t.Fatalf("unexpected error: %s", resp.Content)
+	}
+	if strings.Contains(resp.Content, "Bundled Resources") {
+		t.Error("flat skill should not have bundled resources section")
+	}
+}
+
+func TestUseSkill_EmptyName(t *testing.T) {
+	cfg := &config.AgentConfig{}
+	tool := buildSkillTool(cfg)
+	resp := callTool(t, tool, `{"name": ""}`)
+	if !resp.IsError {
+		t.Fatal("expected error for empty name")
+	}
+	if !strings.Contains(resp.Content, "required") {
+		t.Errorf("expected 'required' error, got %q", resp.Content)
+	}
+}
+
+func TestUseSkill_NotFound(t *testing.T) {
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "search", Description: "Search."},
+			{Name: "deploy", Description: "Deploy."},
+		},
+	}
+	tool := buildSkillTool(cfg)
+	resp := callTool(t, tool, `{"name": "nonexistent"}`)
+	if !resp.IsError {
+		t.Fatal("expected error for missing skill")
+	}
+	if !strings.Contains(resp.Content, "not found") {
+		t.Errorf("expected 'not found' error, got %q", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "search") || !strings.Contains(resp.Content, "deploy") {
+		t.Errorf("expected available skill names listed, got %q", resp.Content)
+	}
+}
+
+func TestUseSkill_FileReadError(t *testing.T) {
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "broken", Description: "Broken.", Path: "/nonexistent/skill.md"},
+		},
+	}
+	tool := buildSkillTool(cfg)
+	resp := callTool(t, tool, `{"name": "broken"}`)
+	if !resp.IsError {
+		t.Fatal("expected error for missing file")
+	}
+	if !strings.Contains(resp.Content, "error reading") {
+		t.Errorf("expected read error, got %q", resp.Content)
+	}
+}
+
+func TestUseSkill_SeesUpdatedSkills(t *testing.T) {
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "a.md")
+	os.WriteFile(skillPath, []byte("skill A body"), 0644)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "a", Description: "Skill A.", Path: skillPath},
+		},
+	}
+	tool := buildSkillTool(cfg)
+
+	// Mutate the config (simulating re-scan)
+	skillPath2 := filepath.Join(dir, "b.md")
+	os.WriteFile(skillPath2, []byte("skill B body"), 0644)
+	cfg.Skills = append(cfg.Skills, config.SkillConfig{
+		Name: "b", Description: "Skill B.", Path: skillPath2,
+	})
+
+	// Tool should see the new skill via the config pointer
+	resp := callTool(t, tool, `{"name": "b"}`)
+	if resp.IsError {
+		t.Fatalf("unexpected error: %s", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "skill B body") {
+		t.Errorf("expected skill B body, got %q", resp.Content)
+	}
+}
+
+// --- buildSystemPrompt skill tests ---
+
+func TestBuildSystemPrompt_WithSkills(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "You are a test agent.",
+		Skills: []config.SkillConfig{
+			{Name: "search", Description: "Search the web."},
+			{Name: "deploy", Description: "Deploy to production."},
+		},
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "")
+
+	if !strings.Contains(prompt, "## Skills") {
+		t.Error("missing Skills section")
+	}
+	if !strings.Contains(prompt, "use_skill") {
+		t.Error("missing use_skill instruction")
+	}
+	if !strings.Contains(prompt, "**search**") {
+		t.Error("missing search skill listing")
+	}
+	if !strings.Contains(prompt, "**deploy**") {
+		t.Error("missing deploy skill listing")
+	}
+	if !strings.Contains(prompt, "Search the web.") {
+		t.Error("missing search description")
+	}
+	// Should NOT contain full skill body
+	if strings.Contains(prompt, "full instructions") {
+		t.Error("skill body should not be in prompt")
+	}
+}
+
+func TestBuildSystemPrompt_NoSkills(t *testing.T) {
+	cfg := config.AgentConfig{
+		Name:   "test",
+		Prompt: "Instructions.",
+	}
+	prompt := buildSystemPrompt(cfg, "", "", "")
+	if strings.Contains(prompt, "## Skills") {
+		t.Error("Skills section should not appear when no skills")
+	}
+	if strings.Contains(prompt, "use_skill") {
+		t.Error("use_skill instruction should not appear when no skills")
 	}
 }
 

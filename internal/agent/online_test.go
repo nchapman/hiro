@@ -418,7 +418,17 @@ Always follow instructions precisely. Keep responses short.`
 	// Ask the creator to build a new agent and spawn it.
 	// The working directory is the workspace root, so relative paths like agents/greeter/agent.md
 	// should resolve correctly against it.
-	resp, err := mgr.SendMessage(ctx, id, `Create a new agent called "greeter". Write the file agents/greeter/agent.md with name "greeter", mode ephemeral, empty model, and a prompt that says to always respond with exactly "HELLO WORLD" in all caps. Then use spawn_agent with agent "greeter" and prompt "Say your greeting." and report back what it said.`, nil)
+	resp, err := mgr.SendMessage(ctx, id, `Create a new agent called "greeter". Write agents/greeter/agent.md with this exact content:
+
+---
+name: greeter
+mode: ephemeral
+model: ""
+---
+
+Always respond with exactly "HELLO WORLD" in all caps. Nothing else.
+
+Then use spawn_agent with agent "greeter" and prompt "Say your greeting." and report back what it said.`, nil)
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
@@ -490,8 +500,8 @@ You are a concise test agent. Follow your skills precisely. Keep responses short
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 
-	// Ask the builder to add a skill to the responder
-	resp, err := mgr.SendMessage(ctx, builderID, `Add a skill to the "responder" agent. The skill should be called "pirate-speak" and instruct the agent to always respond in pirate speak, using words like "arr", "matey", and "ahoy". Write the skill file to agents/responder/skills/pirate-speak.md.`, nil)
+	// Ask the builder to add a skill — the use_skill call gives it the format
+	resp, err := mgr.SendMessage(ctx, builderID, `Use your create-skill skill, then add a skill called "pirate-speak" to the "responder" agent. It should instruct the agent to always respond in pirate speak using words like "arr", "matey", and "ahoy". Write it to agents/responder/skills/pirate-speak.md.`, nil)
 	if err != nil {
 		t.Fatalf("SendMessage to builder: %v", err)
 	}
@@ -511,7 +521,7 @@ You are a concise test agent. Follow your skills precisely. Keep responses short
 		t.Fatalf("StartAgent responder: %v", err)
 	}
 
-	resp, err = mgr.SendMessage(ctx, responderID, "Say hello.", nil)
+	resp, err = mgr.SendMessage(ctx, responderID, "Say hello like a pirate.", nil)
 	if err != nil {
 		t.Fatalf("SendMessage to responder: %v", err)
 	}

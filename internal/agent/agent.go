@@ -30,23 +30,27 @@ const (
 
 // Agent is a Hive agent backed by a fantasy agent loop.
 type Agent struct {
-	config      config.AgentConfig
-	agent       fantasy.Agent
-	workingDir  string
-	instanceDir string // for re-reading memory.md, identity.md at runtime
-	logger      *slog.Logger
+	config         config.AgentConfig
+	agent          fantasy.Agent
+	workingDir     string
+	instanceDir    string // for re-reading memory.md, identity.md at runtime
+	agentDefDir    string // agent definition directory (for re-scanning skills)
+	sharedSkillDir string // workspace-level shared skills directory
+	logger         *slog.Logger
 }
 
 // Options configures how an agent connects to an LLM provider.
 type Options struct {
-	Provider    ProviderType
-	APIKey      string
-	Model       string                // overrides the model from agent config
-	WorkingDir  string                // working directory for file/bash tools
-	ExtraTools  []fantasy.AgentTool   // additional tools injected by the manager
-	Identity    string                // instance identity (from identity.md)
-	InstanceDir string                // instance directory for runtime file access (memory.md etc.)
-	LM          fantasy.LanguageModel // if set, bypasses provider creation (for testing)
+	Provider       ProviderType
+	APIKey         string
+	Model          string                // overrides the model from agent config
+	WorkingDir     string                // working directory for file/bash tools
+	ExtraTools     []fantasy.AgentTool   // additional tools injected by the manager
+	Identity       string                // instance identity (from identity.md)
+	InstanceDir    string                // instance directory for runtime file access (memory.md etc.)
+	AgentDefDir    string                // agent definition directory (for runtime skill re-scan)
+	SharedSkillDir string                // workspace-level shared skills directory
+	LM             fantasy.LanguageModel // if set, bypasses provider creation (for testing)
 }
 
 // New creates a new Hive agent from the given config.
@@ -79,14 +83,21 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 	}
 
 	a := &Agent{
-		config:      cfg,
-		workingDir:  workingDir,
-		instanceDir: opts.InstanceDir,
-		logger:      logger,
+		config:         cfg,
+		workingDir:     workingDir,
+		instanceDir:    opts.InstanceDir,
+		agentDefDir:    opts.AgentDefDir,
+		sharedSkillDir: opts.SharedSkillDir,
+		logger:         logger,
 	}
 
 	agentTools := a.buildTools()
 	agentTools = append(agentTools, opts.ExtraTools...)
+
+	// Add use_skill tool if this agent can have skills
+	if a.agentDefDir != "" || len(cfg.Skills) > 0 {
+		agentTools = append(agentTools, buildSkillTool(&a.config))
+	}
 
 	// Build the initial system prompt. This is also rebuilt dynamically
 	// on each StreamChat call via PrepareStep to pick up memory changes.
@@ -257,6 +268,21 @@ func (a *Agent) currentSystemPrompt() string {
 			todos = config.FormatTodos(t)
 		}
 	}
+
+	// Re-scan skills from disk each turn (skills may be added at runtime).
+	if a.agentDefDir != "" {
+		agentSkills, err := config.LoadSkills(filepath.Join(a.agentDefDir, "skills"))
+		if err != nil {
+			a.logger.Warn("could not reload skills", "error", err)
+		} else {
+			sharedSkills, sharedErr := config.LoadSkills(a.sharedSkillDir)
+			if sharedErr != nil {
+				a.logger.Warn("could not reload shared skills", "error", sharedErr)
+			}
+			a.config.Skills = config.MergeSkills(agentSkills, sharedSkills)
+		}
+	}
+
 	return buildSystemPrompt(a.config, identity, memory, todos)
 }
 
@@ -297,8 +323,10 @@ func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string) s
 
 	if len(cfg.Skills) > 0 {
 		p.WriteString("\n\n## Skills\n\n")
+		p.WriteString("IMPORTANT: Always call use_skill before performing a task that matches a skill. " +
+			"Skills contain critical instructions and formats — do not attempt the task without activating the skill first.\n\n")
 		for _, skill := range cfg.Skills {
-			fmt.Fprintf(&p, "### %s\n%s\n\n%s\n\n", skill.Name, skill.Description, skill.Prompt)
+			fmt.Fprintf(&p, "- **%s**: %s\n", skill.Name, skill.Description)
 		}
 	}
 

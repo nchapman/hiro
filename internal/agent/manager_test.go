@@ -357,6 +357,15 @@ func TestManager_AgentDefDir(t *testing.T) {
 	}
 }
 
+func TestManager_SharedSkillsDir(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	got := mgr.sharedSkillsDir()
+	want := filepath.Join(dir, "skills")
+	if got != want {
+		t.Errorf("sharedSkillsDir = %q, want %q", got, want)
+	}
+}
+
 func TestValidateAgentName(t *testing.T) {
 	tests := []struct {
 		name    string
