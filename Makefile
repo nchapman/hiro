@@ -1,4 +1,4 @@
-.PHONY: build test clean web
+.PHONY: build test clean web build-dev docker docker-up docker-down
 
 BINARY := hive
 PKG := github.com/nchapman/hivebot
@@ -24,4 +24,10 @@ build-dev:
 	go build -tags dev -o $(BINARY) ./cmd/hive
 
 docker:
-	docker build -t hivebot .
+	docker compose build
+
+docker-up:
+	docker compose up
+
+docker-down:
+	docker compose down

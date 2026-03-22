@@ -1,0 +1,19 @@
+.git
+.env
+instances/
+web/ui/node_modules
+web/ui/dist
+
+# Root-level docs (keep internal/**/*.md for go:embed)
+/*.md
+
+# Agent and skill definitions are mounted at runtime, not baked in
+agents/
+skills/
+
+# Secrets
+*.pem
+*.key
+*.crt
+.ssh/
+.aws/

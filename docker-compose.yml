@@ -1,0 +1,18 @@
+services:
+  hive:
+    build: .
+    image: hive:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - workspace:/workspace
+    environment:
+      - HIVE_ADDR=:8080
+      - HIVE_WORKSPACE_DIR=/workspace
+
+# WARNING: 'docker compose down -v' destroys all agent state (history, memory, todos).
+volumes:
+  workspace:
