@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -39,6 +40,7 @@ type Options struct {
 	Model      string                // overrides the model from agent config
 	WorkingDir string                // working directory for file/bash tools
 	ExtraTools []fantasy.AgentTool   // additional tools injected by the manager
+	Identity   string                // instance identity (from identity.md)
 	LM         fantasy.LanguageModel // if set, bypasses provider creation (for testing)
 }
 
@@ -80,15 +82,7 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 	agentTools := a.buildTools()
 	agentTools = append(agentTools, opts.ExtraTools...)
 
-	// Build system prompt: agent prompt + skill instructions
-	systemPrompt := cfg.Prompt
-	if len(cfg.Skills) > 0 {
-		systemPrompt += "\n\n## Skills\n\n"
-		for _, skill := range cfg.Skills {
-			systemPrompt += fmt.Sprintf("### %s\n%s\n\n%s\n\n",
-				skill.Name, skill.Description, skill.Prompt)
-		}
-	}
+	systemPrompt := buildSystemPrompt(cfg, opts.Identity)
 
 	a.agent = fantasy.NewAgent(lm,
 		fantasy.WithSystemPrompt(systemPrompt),
@@ -144,6 +138,39 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 	}
 
 	return result.Response.Content.Text(), nil
+}
+
+// buildSystemPrompt assembles the system prompt from the agent's config
+// and optional instance identity. Order: soul → identity → instructions → tools → skills.
+func buildSystemPrompt(cfg config.AgentConfig, identity string) string {
+	var p strings.Builder
+
+	if cfg.Soul != "" {
+		p.WriteString(cfg.Soul)
+		p.WriteString("\n\n")
+	}
+
+	if identity != "" {
+		p.WriteString("## Identity\n\n")
+		p.WriteString(identity)
+		p.WriteString("\n\n")
+	}
+
+	p.WriteString(cfg.Prompt)
+
+	if cfg.Tools != "" {
+		p.WriteString("\n\n## Tool Notes\n\n")
+		p.WriteString(cfg.Tools)
+	}
+
+	if len(cfg.Skills) > 0 {
+		p.WriteString("\n\n## Skills\n\n")
+		for _, skill := range cfg.Skills {
+			fmt.Fprintf(&p, "### %s\n%s\n\n%s\n\n", skill.Name, skill.Description, skill.Prompt)
+		}
+	}
+
+	return strings.TrimSpace(p.String())
 }
 
 func createLanguageModel(ctx context.Context, opts Options, model string) (fantasy.LanguageModel, error) {

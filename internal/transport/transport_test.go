@@ -88,12 +88,12 @@ func TestWorkerRegistration_BadSwarmCode(t *testing.T) {
 	defer cancel()
 
 	client := NewClient(ClientOptions{
-		LeaderURL:   wsURL,
-		AgentName:   "bad-worker",
-		Skills:      []string{"search"},
-		SwarmCode:   "wrong-code",
-		Handler:     func(ctx context.Context, skill, prompt, taskContext string) (string, error) { return "", nil },
-		Logger:      logger,
+		LeaderURL: wsURL,
+		AgentName: "bad-worker",
+		Skills:    []string{"search"},
+		SwarmCode: "wrong-code",
+		Handler:   func(ctx context.Context, skill, prompt, taskContext string) (string, error) { return "", nil },
+		Logger:    logger,
 	})
 
 	err := client.Connect(ctx)

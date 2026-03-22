@@ -119,7 +119,9 @@ type AgentConfig struct {
 	Model       string
 	Mode        AgentMode // ModePersistent (default) or ModeEphemeral
 	Description string
-	Prompt      string // the markdown body — the agent's system prompt
+	Prompt      string // the markdown body — the agent's operating instructions
+	Soul        string // persona, tone, boundaries (from soul.md)
+	Tools       string // tool notes and conventions (from tools.md)
 	Skills      []SkillConfig
 }
 
@@ -162,6 +164,19 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		return AgentConfig{}, fmt.Errorf("agent config at %s missing required 'name' field", agentPath)
 	}
 
+	// Load optional files
+	soul, err := ReadOptionalFile(filepath.Join(dir, "soul.md"))
+	if err != nil {
+		return AgentConfig{}, fmt.Errorf("reading soul.md: %w", err)
+	}
+	agent.Soul = soul
+
+	toolsContent, err := ReadOptionalFile(filepath.Join(dir, "tools.md"))
+	if err != nil {
+		return AgentConfig{}, fmt.Errorf("reading tools.md: %w", err)
+	}
+	agent.Tools = toolsContent
+
 	// Load skills
 	skillsDir := filepath.Join(dir, "skills")
 	entries, err := os.ReadDir(skillsDir)
@@ -184,6 +199,19 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	}
 
 	return agent, nil
+}
+
+// ReadOptionalFile reads a file and returns its trimmed content.
+// Returns empty string and nil error if the file does not exist.
+func ReadOptionalFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func loadSkillFile(path string) (SkillConfig, error) {

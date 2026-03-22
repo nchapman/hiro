@@ -9,10 +9,10 @@ type MessageType string
 
 const (
 	// Control messages
-	TypeRegister   MessageType = "register"    // worker → leader: announce skills
-	TypeRegistered MessageType = "registered"  // leader → worker: confirm registration
-	TypeHeartbeat  MessageType = "heartbeat"   // bidirectional keep-alive
-	TypeDisconnect MessageType = "disconnect"  // either direction: clean shutdown
+	TypeRegister   MessageType = "register"   // worker → leader: announce skills
+	TypeRegistered MessageType = "registered" // leader → worker: confirm registration
+	TypeHeartbeat  MessageType = "heartbeat"  // bidirectional keep-alive
+	TypeDisconnect MessageType = "disconnect" // either direction: clean shutdown
 
 	// Task messages
 	TypeTaskRequest  MessageType = "task_request"  // leader → worker: do this task
@@ -24,7 +24,7 @@ const (
 // Envelope is the top-level wire format for all messages.
 type Envelope struct {
 	Type      MessageType `json:"type"`
-	ID        string      `json:"id"`                  // unique message ID
+	ID        string      `json:"id"`                    // unique message ID
 	InReplyTo string      `json:"in_reply_to,omitempty"` // for responses
 	From      string      `json:"from"`
 	Timestamp time.Time   `json:"timestamp"`

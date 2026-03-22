@@ -41,7 +41,7 @@ func run() error {
 			"code", swarmCode)
 	}
 	listenAddr := envOr("HIVE_ADDR", ":8080")
-	agentsDir := envOr("HIVE_AGENTS_DIR", "agents")
+	workspaceDir := envOr("HIVE_WORKSPACE_DIR", ".")
 	providerType := envOr("HIVE_PROVIDER", "anthropic")
 	apiKey := os.Getenv("HIVE_API_KEY")
 	modelOverride := os.Getenv("HIVE_MODEL")
@@ -60,22 +60,33 @@ func run() error {
 	// Start agent manager and leader agent if API key is set
 	var mgr *agent.Manager
 	if apiKey != "" {
-		mgr = agent.NewManager(ctx, agentsDir, agent.Options{
+		mgr = agent.NewManager(ctx, workspaceDir, agent.Options{
 			Provider:   agent.ProviderType(providerType),
 			APIKey:     apiKey,
 			Model:      modelOverride,
 			WorkingDir: "", // defaults to cwd
 		}, logger)
 
-		leaderID, err := mgr.StartAgent(ctx, "coordinator", "")
-		if err != nil {
-			if os.IsNotExist(err) {
-				logger.Info("no coordinator agent defined, skipping")
-			} else {
-				return fmt.Errorf("starting leader agent: %w", err)
+		// Restore any persistent agents from previous run
+		if err := mgr.RestoreInstances(ctx); err != nil {
+			logger.Warn("failed to restore some agent instances", "error", err)
+		}
+
+		// Start coordinator if not already restored from a previous run
+		leaderID, alreadyRunning := mgr.AgentByName("coordinator")
+		if !alreadyRunning {
+			var err error
+			leaderID, err = mgr.StartAgent(ctx, "coordinator", "")
+			if err != nil {
+				if os.IsNotExist(err) {
+					logger.Info("no coordinator agent defined, skipping")
+				} else {
+					return fmt.Errorf("starting leader agent: %w", err)
+				}
 			}
-		} else {
-			logger.Info("leader agent started",
+		}
+		if leaderID != "" {
+			logger.Info("leader agent ready",
 				"id", leaderID,
 				"provider", providerType,
 			)

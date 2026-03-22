@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	maxAgentNameLen   = 64
-	maxDescriptionLen = 256
-	maxSkills         = 20
-	maxSkillNameLen   = 64
-	maxTaskResultLen  = 32768 // 32KB cap on task results sent to LLM
+	maxAgentNameLen     = 64
+	maxDescriptionLen   = 256
+	maxSkills           = 20
+	maxSkillNameLen     = 64
+	maxTaskResultLen    = 32768 // 32KB cap on task results sent to LLM
 	registrationTimeout = 10 * time.Second
 )
 
@@ -33,7 +33,7 @@ type Server struct {
 
 	mu      sync.Mutex
 	conns   map[string]*workerConn         // worker ID -> connection
-	pending map[string]chan taskResponse    // task ID -> result channel
+	pending map[string]chan taskResponse   // task ID -> result channel
 	tasks   map[string]map[string]struct{} // worker ID -> set of pending task IDs
 }
 

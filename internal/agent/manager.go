@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -37,22 +39,23 @@ type Manager struct {
 	agents   map[string]*runningAgent // agent ID -> running agent
 	children map[string][]string      // parent ID -> child IDs
 
-	ctx       context.Context // long-lived context for persistent agents
-	agentsDir string
-	opts      Options
-	logger    *slog.Logger
+	ctx          context.Context // long-lived context for persistent agents
+	workspaceDir string
+	opts         Options
+	logger       *slog.Logger
 }
 
-// NewManager creates a new agent manager. The context controls the lifetime
-// of persistent agents — cancel it to shut everything down.
-func NewManager(ctx context.Context, agentsDir string, opts Options, logger *slog.Logger) *Manager {
+// NewManager creates a new agent manager. workspaceDir is the root of the
+// workspace containing agents/ and instances/ subdirectories. The context
+// controls the lifetime of persistent agents.
+func NewManager(ctx context.Context, workspaceDir string, opts Options, logger *slog.Logger) *Manager {
 	return &Manager{
-		agents:    make(map[string]*runningAgent),
-		children:  make(map[string][]string),
-		ctx:       ctx,
-		agentsDir: agentsDir,
-		opts:      opts,
-		logger:    logger,
+		agents:       make(map[string]*runningAgent),
+		children:     make(map[string][]string),
+		ctx:          ctx,
+		workspaceDir: workspaceDir,
+		opts:         opts,
+		logger:       logger,
 	}
 }
 
@@ -65,12 +68,13 @@ func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string
 		return "", err
 	}
 
-	cfg, err := config.LoadAgentDir(m.agentDir(name))
+	cfg, err := config.LoadAgentDir(m.agentDefDir(name))
 	if err != nil {
 		return "", fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
-	return m.startFromConfig(ctx, cfg, parentID)
+	id := uuid.New().String()
+	return m.startInstance(ctx, id, cfg, parentID)
 }
 
 // SpawnSubagent starts an ephemeral agent that runs the given prompt and returns
@@ -82,23 +86,24 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 		return "", err
 	}
 
-	cfg, err := config.LoadAgentDir(m.agentDir(agentName))
+	cfg, err := config.LoadAgentDir(m.agentDefDir(agentName))
 	if err != nil {
 		return "", fmt.Errorf("loading agent %q: %w", agentName, err)
 	}
 	// Always ephemeral — the caller controls the lifecycle, not the config.
 	cfg.Mode = config.ModeEphemeral
 
-	id, err := m.startFromConfig(ctx, cfg, parentID)
+	id := uuid.New().String()
+	agentID, err := m.startInstance(ctx, id, cfg, parentID)
 	if err != nil {
 		return "", err
 	}
 
 	// Run the prompt and collect the result
-	result, err := m.SendMessage(ctx, id, prompt, nil)
+	result, err := m.SendMessage(ctx, agentID, prompt, nil)
 
 	// Clean up the ephemeral agent and its entire subtree
-	m.StopAgent(id)
+	m.StopAgent(agentID)
 
 	if err != nil {
 		return "", fmt.Errorf("subagent %q failed: %w", agentName, err)
@@ -222,21 +227,110 @@ func (m *Manager) IsDescendant(targetID, ancestorID string) bool {
 	return false
 }
 
-// Shutdown stops all running agents.
+// RestoreInstances scans the instances/ directory and restarts any
+// persistent agents that have manifests. Call once after NewManager.
+func (m *Manager) RestoreInstances(ctx context.Context) error {
+	dir := m.instancesDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("scanning instances: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(dir, entry.Name(), "manifest.json")
+		manifest, err := config.ReadManifest(manifestPath)
+		if err != nil {
+			m.logger.Warn("skipping instance with unreadable manifest",
+				"dir", entry.Name(), "error", err)
+			continue
+		}
+		if manifest.Mode != config.ModePersistent {
+			// Clean up stale ephemeral instance dirs
+			os.RemoveAll(filepath.Join(dir, entry.Name()))
+			continue
+		}
+
+		// Validate manifest fields to prevent path traversal
+		if err := validateAgentName(manifest.Agent); err != nil {
+			m.logger.Warn("skipping instance with invalid agent name",
+				"dir", entry.Name(), "agent", manifest.Agent, "error", err)
+			continue
+		}
+		if manifest.ID != entry.Name() {
+			m.logger.Warn("skipping instance where manifest ID does not match directory",
+				"dir", entry.Name(), "manifest_id", manifest.ID)
+			continue
+		}
+
+		cfg, err := config.LoadAgentDir(m.agentDefDir(manifest.Agent))
+		if err != nil {
+			m.logger.Warn("skipping instance with missing agent definition",
+				"agent", manifest.Agent, "error", err)
+			continue
+		}
+
+		_, err = m.startInstance(ctx, manifest.ID, cfg, manifest.ParentID)
+		if err != nil {
+			m.logger.Warn("failed to restore agent",
+				"id", manifest.ID, "agent", manifest.Agent, "error", err)
+		}
+	}
+	return nil
+}
+
+// Shutdown stops all running agents. Ephemeral instance directories are cleaned up.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, ra := range m.agents {
+	for id, ra := range m.agents {
 		ra.cancel()
+		if ra.info.Mode == config.ModeEphemeral {
+			os.RemoveAll(m.instanceDir(id))
+		}
 	}
 	m.agents = make(map[string]*runningAgent)
 	m.children = make(map[string][]string)
 	m.logger.Info("agent manager shut down")
 }
 
-// startFromConfig creates and registers an agent from a loaded config.
-func (m *Manager) startFromConfig(ctx context.Context, cfg config.AgentConfig, parentID string) (string, error) {
-	id := uuid.New().String()
+// startInstance creates an agent from config, persists its manifest,
+// and registers it in the manager.
+func (m *Manager) startInstance(ctx context.Context, id string, cfg config.AgentConfig, parentID string) (string, error) {
+	// Create instance directory and write manifest
+	instDir := m.instanceDir(id)
+	if err := os.MkdirAll(instDir, 0700); err != nil {
+		return "", fmt.Errorf("creating instance dir: %w", err)
+	}
+
+	manifestPath := filepath.Join(instDir, "manifest.json")
+	_, statErr := os.Stat(manifestPath)
+	switch {
+	case os.IsNotExist(statErr):
+		manifest := config.Manifest{
+			ID:        id,
+			Agent:     cfg.Name,
+			Mode:      cfg.Mode,
+			ParentID:  parentID,
+			CreatedAt: time.Now(),
+		}
+		if err := config.WriteManifest(manifestPath, manifest); err != nil {
+			return "", fmt.Errorf("writing manifest: %w", err)
+		}
+	case statErr != nil:
+		return "", fmt.Errorf("checking manifest: %w", statErr)
+	}
+
+	// Read instance identity if present
+	identity, err := config.ReadOptionalFile(filepath.Join(instDir, "identity.md"))
+	if err != nil {
+		m.logger.Warn("could not read identity.md", "instance", id, "error", err)
+	}
 
 	// Persistent agents use the manager's long-lived context so they
 	// survive beyond the tool call that started them. Ephemeral agents
@@ -247,13 +341,16 @@ func (m *Manager) startFromConfig(ctx context.Context, cfg config.AgentConfig, p
 	}
 	agentCtx, cancel := context.WithCancel(baseCtx)
 
-	// Build options with manager tools injected
+	// Build options with manager tools and identity injected
 	opts := m.opts
 	opts.ExtraTools = m.buildManagerTools(id)
+	opts.Identity = identity
 
 	a, err := New(agentCtx, cfg, opts, m.logger)
 	if err != nil {
 		cancel()
+		// Clean up instance dir on failure (only if we just created it)
+		os.RemoveAll(instDir)
 		return "", fmt.Errorf("creating agent %q: %w", cfg.Name, err)
 	}
 
@@ -288,6 +385,7 @@ func (m *Manager) startFromConfig(ctx context.Context, cfg config.AgentConfig, p
 }
 
 // removeAgent cancels and removes an agent from the registry.
+// Ephemeral instance directories are cleaned up.
 func (m *Manager) removeAgent(id string) {
 	m.mu.Lock()
 	ra, ok := m.agents[id]
@@ -308,6 +406,9 @@ func (m *Manager) removeAgent(id string) {
 	m.mu.Unlock()
 	if ok {
 		ra.cancel()
+		if ra.info.Mode == config.ModeEphemeral {
+			os.RemoveAll(m.instanceDir(id))
+		}
 	}
 }
 
@@ -332,8 +433,18 @@ func (m *Manager) collectDescendants(agentID string) []string {
 	return result
 }
 
-func (m *Manager) agentDir(name string) string {
-	return filepath.Join(m.agentsDir, name)
+// Path helpers
+
+func (m *Manager) agentDefDir(name string) string {
+	return filepath.Join(m.workspaceDir, "agents", name)
+}
+
+func (m *Manager) instancesDir() string {
+	return filepath.Join(m.workspaceDir, "instances")
+}
+
+func (m *Manager) instanceDir(id string) string {
+	return filepath.Join(m.workspaceDir, "instances", id)
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

@@ -251,6 +251,50 @@ An ephemeral agent.`
 	}
 }
 
+func TestLoadAgentDir_WithSoul(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nInstructions."), 0644)
+	os.WriteFile(filepath.Join(dir, "soul.md"), []byte("Be warm and curious."), 0644)
+
+	agent, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.Soul != "Be warm and curious." {
+		t.Errorf("soul = %q, want %q", agent.Soul, "Be warm and curious.")
+	}
+}
+
+func TestLoadAgentDir_WithTools(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nInstructions."), 0644)
+	os.WriteFile(filepath.Join(dir, "tools.md"), []byte("Use grep for searching."), 0644)
+
+	agent, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.Tools != "Use grep for searching." {
+		t.Errorf("tools = %q, want %q", agent.Tools, "Use grep for searching.")
+	}
+}
+
+func TestLoadAgentDir_WithoutSoulAndTools(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nInstructions."), 0644)
+
+	agent, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.Soul != "" {
+		t.Errorf("soul should be empty, got %q", agent.Soul)
+	}
+	if agent.Tools != "" {
+		t.Errorf("tools should be empty, got %q", agent.Tools)
+	}
+}
+
 func TestLoadAgentDir_SkipsNonMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	agentMD := `---

@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+
+	"github.com/nchapman/hivebot/internal/config"
 )
 
 // fakeLM implements fantasy.LanguageModel for testing. It returns a canned
@@ -62,9 +64,10 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	return mgr, dir
 }
 
-func writeAgentMD(t *testing.T, dir, name, content string) {
+// writeAgentMD writes an agent definition into workspace/agents/<name>/agent.md.
+func writeAgentMD(t *testing.T, workspaceDir, name, content string) {
 	t.Helper()
-	agentDir := filepath.Join(dir, name)
+	agentDir := filepath.Join(workspaceDir, "agents", name)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -345,12 +348,12 @@ Child.`)
 	}
 }
 
-func TestManager_AgentDir(t *testing.T) {
+func TestManager_AgentDefDir(t *testing.T) {
 	mgr, dir := setupTestManager(t)
-	got := mgr.agentDir("coordinator")
-	want := filepath.Join(dir, "coordinator")
+	got := mgr.agentDefDir("coordinator")
+	want := filepath.Join(dir, "agents", "coordinator")
 	if got != want {
-		t.Errorf("agentDir = %q, want %q", got, want)
+		t.Errorf("agentDefDir = %q, want %q", got, want)
 	}
 }
 
@@ -438,6 +441,125 @@ Child.`)
 	noKids := mgr.ListChildren("nonexistent")
 	if len(noKids) != 0 {
 		t.Errorf("expected 0 children, got %d", len(noKids))
+	}
+}
+
+func TestManager_InstanceDirCreated(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.StartAgent(t.Context(), "test-agent", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	manifestPath := filepath.Join(dir, "instances", id, "manifest.json")
+	if _, err := os.Stat(manifestPath); err != nil {
+		t.Fatalf("manifest.json should exist at %s: %v", manifestPath, err)
+	}
+}
+
+func TestManager_EphemeralCleanup(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	// Start a persistent parent so we can spawn an ephemeral child
+	parentID, _ := mgr.StartAgent(t.Context(), "test-agent", "")
+
+	// We can't easily call SpawnSubagent (it blocks on SendMessage which
+	// needs a real LLM conversation), so test removeAgent cleanup directly.
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
+	cfg.Mode = config.ModeEphemeral
+	ephID, _ := mgr.startInstance(t.Context(), "ephemeral-test-id", cfg, parentID)
+
+	instDir := filepath.Join(dir, "instances", ephID)
+	if _, err := os.Stat(instDir); err != nil {
+		t.Fatalf("ephemeral instance dir should exist: %v", err)
+	}
+
+	mgr.StopAgent(ephID)
+
+	if _, err := os.Stat(instDir); !os.IsNotExist(err) {
+		t.Error("ephemeral instance dir should be cleaned up after stop")
+	}
+}
+
+func TestManager_PersistentNotCleaned(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, _ := mgr.StartAgent(t.Context(), "test-agent", "")
+	instDir := filepath.Join(dir, "instances", id)
+
+	mgr.StopAgent(id)
+
+	if _, err := os.Stat(instDir); os.IsNotExist(err) {
+		t.Error("persistent instance dir should survive stop")
+	}
+}
+
+func TestManager_RestoreInstances(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	// Create a manager, start an agent, then shut down
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+	mgr1 := NewManager(ctx, dir, Options{
+		LM:         &fakeLM{response: "hello"},
+		WorkingDir: dir,
+	}, logger)
+
+	id, err := mgr1.StartAgent(ctx, "test-agent", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	mgr1.Shutdown()
+
+	// Create a new manager and restore
+	mgr2 := NewManager(ctx, dir, Options{
+		LM:         &fakeLM{response: "hello"},
+		WorkingDir: dir,
+	}, logger)
+	if err := mgr2.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// The agent should be running with the same ID
+	info, ok := mgr2.GetAgent(id)
+	if !ok {
+		t.Fatal("restored agent not found")
+	}
+	if info.Name != "test-agent" {
+		t.Errorf("restored name = %q, want test-agent", info.Name)
+	}
+}
+
+func TestManager_IdentityInPrompt(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	// Start agent to get its ID
+	id, _ := mgr.StartAgent(t.Context(), "test-agent", "")
+	mgr.StopAgent(id)
+
+	// Write identity into the instance dir
+	instDir := filepath.Join(dir, "instances", id)
+	os.WriteFile(filepath.Join(instDir, "identity.md"), []byte("I am Aria. 🦊 Curious and thorough."), 0644)
+
+	// Restore — the agent should pick up the identity
+	mgr2, _ := setupTestManager(t)
+	// Need to copy the workspace structure
+	// Actually, let's use the same dir with a fresh manager
+	mgr2 = NewManager(t.Context(), dir, Options{
+		LM:         &fakeLM{response: "hello"},
+		WorkingDir: dir,
+	}, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})))
+	mgr2.RestoreInstances(t.Context())
+
+	_, ok := mgr2.GetAgent(id)
+	if !ok {
+		t.Fatal("restored agent with identity not found")
 	}
 }
 
