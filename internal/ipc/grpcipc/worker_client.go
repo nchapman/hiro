@@ -1,0 +1,31 @@
+package grpcipc
+
+import (
+	"context"
+
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"google.golang.org/grpc"
+)
+
+// WorkerClient implements ipc.AgentWorker by making gRPC calls to an AgentWorker server.
+type WorkerClient struct {
+	client pb.AgentWorkerClient
+}
+
+// NewWorkerClient creates an AgentWorker backed by a gRPC connection.
+func NewWorkerClient(cc grpc.ClientConnInterface) *WorkerClient {
+	return &WorkerClient{client: pb.NewAgentWorkerClient(cc)}
+}
+
+func (c *WorkerClient) Chat(ctx context.Context, message string, onDelta func(string) error) (string, error) {
+	stream, err := c.client.Chat(ctx, &pb.ChatRequest{Message: message})
+	if err != nil {
+		return "", err
+	}
+	return recvStream(stream, onDelta)
+}
+
+func (c *WorkerClient) Shutdown(ctx context.Context) error {
+	_, err := c.client.Shutdown(ctx, &pb.ShutdownRequest{})
+	return err
+}
