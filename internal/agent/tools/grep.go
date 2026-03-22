@@ -22,11 +22,11 @@ import (
 var grepDescription string
 
 const (
-	maxGrepResults   = 100
-	maxGrepLineWidth = 500
+	maxGrepResults    = 100
+	maxGrepLineWidth  = 500
 	maxMatchesPerFile = 50
-	grepTimeout      = 30 * time.Second
-	maxRgOutputBytes = 64 * 1024 * 1024 // 64 MB cap on ripgrep output
+	grepTimeout       = 30 * time.Second
+	maxRgOutputBytes  = 64 * 1024 * 1024 // 64 MB cap on ripgrep output
 )
 
 type GrepParams struct {

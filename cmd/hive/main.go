@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
-	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/hub"
 	"github.com/nchapman/hivebot/web"
 )
@@ -56,42 +54,35 @@ func run() error {
 		return fmt.Errorf("loading web UI: %w", err)
 	}
 
+	// Set up signal handling early so the manager gets a cancellable context
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
 	srv := api.NewServer(swarm, logger, webFS)
 
-	// Load coordinator agent if config exists and API key is set
-	coordinatorDir := filepath.Join(agentsDir, "coordinator")
+	// Start agent manager and leader agent if API key is set
+	var mgr *agent.Manager
 	if apiKey != "" {
-		if _, err := os.Stat(filepath.Join(coordinatorDir, "agent.md")); err == nil {
-			cfg, err := config.LoadAgentDir(coordinatorDir)
-			if err != nil {
-				return fmt.Errorf("loading coordinator config: %w", err)
-			}
+		mgr = agent.NewManager(ctx, agentsDir, swarm, agent.Options{
+			Provider:   agent.ProviderType(providerType),
+			APIKey:     apiKey,
+			Model:      modelOverride,
+			WorkingDir: "", // defaults to cwd
+		}, logger)
 
-			coordinator, err := agent.New(context.Background(), cfg, swarm, agent.Options{
-				Provider: agent.ProviderType(providerType),
-				APIKey:   apiKey,
-				Model:    modelOverride,
-			}, logger)
-			if err != nil {
-				return fmt.Errorf("creating coordinator agent: %w", err)
+		leaderID, err := mgr.StartAgent(ctx, "coordinator", "")
+		if err != nil {
+			if os.IsNotExist(err) {
+				logger.Info("no coordinator agent defined, skipping")
+			} else {
+				return fmt.Errorf("starting leader agent: %w", err)
 			}
-
-			// Wire task dispatch through the transport layer
-			coordinator.SetTaskDispatcher(srv.Transport().DispatchTask)
-
-			actualModel := cfg.Model
-			if modelOverride != "" {
-				actualModel = modelOverride
-			}
-			logger.Info("coordinator agent loaded",
-				"name", coordinator.Name(),
+		} else {
+			logger.Info("leader agent started",
+				"id", leaderID,
 				"provider", providerType,
-				"model", actualModel,
-				"skills", len(cfg.Skills),
 			)
-
-			// Wire coordinator into chat WebSocket endpoint
-			srv.SetAgent(coordinator)
+			srv.SetManager(mgr, leaderID)
 		}
 	} else {
 		logger.Info("no HIVE_API_KEY set — running without LLM (dashboard only)")
@@ -104,10 +95,6 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// Graceful shutdown
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
 	go func() {
 		logger.Info("hive starting", "addr", listenAddr, "swarm", swarmCode)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -119,10 +106,16 @@ func run() error {
 	<-ctx.Done()
 	logger.Info("shutting down...")
 
+	// Drain HTTP connections first so in-flight agent calls complete,
+	// then shut down the agent manager.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	return httpServer.Shutdown(shutdownCtx)
+	err = httpServer.Shutdown(shutdownCtx)
+	if mgr != nil {
+		mgr.Shutdown()
+	}
+	return err
 }
 
 func envOr(key, fallback string) string {

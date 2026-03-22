@@ -192,6 +192,65 @@ A simple agent with no skills directory.`
 	}
 }
 
+func TestLoadAgentDir_DefaultMode(t *testing.T) {
+	dir := t.TempDir()
+	agentMD := `---
+name: test
+---
+
+No mode specified.`
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.Mode != ModePersistent {
+		t.Errorf("mode = %q, want %q", agent.Mode, ModePersistent)
+	}
+}
+
+func TestLoadAgentDir_InvalidMode(t *testing.T) {
+	dir := t.TempDir()
+	agentMD := `---
+name: test
+mode: persistant
+---
+
+Typo in mode.`
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadAgentDir(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
+func TestLoadAgentDir_ExplicitMode(t *testing.T) {
+	dir := t.TempDir()
+	agentMD := `---
+name: worker
+mode: ephemeral
+---
+
+An ephemeral agent.`
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.Mode != ModeEphemeral {
+		t.Errorf("mode = %q, want %q", agent.Mode, ModeEphemeral)
+	}
+}
+
 func TestLoadAgentDir_SkipsNonMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	agentMD := `---

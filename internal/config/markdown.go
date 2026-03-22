@@ -105,10 +105,19 @@ func ParseMarkdownFile(path string) (ParsedMarkdown, error) {
 	return ParseMarkdown(f)
 }
 
+// AgentMode distinguishes persistent from ephemeral agents.
+type AgentMode string
+
+const (
+	ModePersistent AgentMode = "persistent"
+	ModeEphemeral  AgentMode = "ephemeral"
+)
+
 // AgentConfig represents an agent's configuration loaded from markdown.
 type AgentConfig struct {
 	Name        string
 	Model       string
+	Mode        AgentMode // ModePersistent (default) or ModeEphemeral
 	Description string
 	Prompt      string // the markdown body — the agent's system prompt
 	Skills      []SkillConfig
@@ -130,9 +139,21 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		return AgentConfig{}, fmt.Errorf("loading agent config: %w", err)
 	}
 
+	mode := AgentMode(parsed.Frontmatter.String("mode"))
+	if mode == "" {
+		mode = ModePersistent
+	}
+	switch mode {
+	case ModePersistent, ModeEphemeral:
+		// valid
+	default:
+		return AgentConfig{}, fmt.Errorf("unknown mode %q in %s (valid: persistent, ephemeral)", mode, agentPath)
+	}
+
 	agent := AgentConfig{
 		Name:        parsed.Frontmatter.String("name"),
 		Model:       parsed.Frontmatter.String("model"),
+		Mode:        mode,
 		Description: parsed.Frontmatter.String("description"),
 		Prompt:      parsed.Body,
 	}

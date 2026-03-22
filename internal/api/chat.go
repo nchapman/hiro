@@ -12,18 +12,19 @@ import (
 
 // ChatMessage is a message sent or received over the chat WebSocket.
 type ChatMessage struct {
-	Type    string `json:"type"`          // "message", "delta", "done", "error"
+	Type    string `json:"type"`           // "message", "delta", "done", "error"
 	Role    string `json:"role,omitempty"` // "user" or "assistant"
 	Content string `json:"content"`
 }
 
-// SetAgent sets the coordinator agent for handling chat messages.
-func (s *Server) SetAgent(a *agent.Agent) {
-	s.agent = a
+// SetManager sets the agent manager and leader agent ID for handling chat.
+func (s *Server) SetManager(m *agent.Manager, leaderID string) {
+	s.manager = m
+	s.leaderID = leaderID
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	if s.agent == nil {
+	if s.manager == nil || s.leaderID == "" {
 		http.Error(w, "no agent configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -55,8 +56,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Stream response from agent with conversation history
-		_, err := s.agent.StreamChat(ctx, conv, msg.Content, func(text string) error {
+		// Stream response from the leader agent with per-connection history
+		_, err := s.manager.StreamChat(ctx, s.leaderID, conv, msg.Content, func(text string) error {
 			delta := ChatMessage{Type: "delta", Role: "assistant", Content: text}
 			b, _ := json.Marshal(delta)
 			return conn.Write(ctx, websocket.MessageText, b)

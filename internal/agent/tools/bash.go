@@ -16,8 +16,8 @@ import (
 var bashDescription string
 
 const (
-	bashTimeout      = 120 * time.Second
-	maxOutputLen     = 32000
+	bashTimeout  = 120 * time.Second
+	maxOutputLen = 32000
 )
 
 type BashParams struct {

@@ -19,8 +19,9 @@ import (
 type Server struct {
 	swarm     *hub.Swarm
 	transport *transport.Server
-	agent     *agent.Agent // coordinator agent for chat (nil = no chat)
-	webFS     fs.FS        // embedded web UI files (nil = no UI serving)
+	manager   *agent.Manager // agent manager (nil = no agents)
+	leaderID  string         // ID of the leader agent for chat
+	webFS     fs.FS          // embedded web UI files (nil = no UI serving)
 	mux       *http.ServeMux
 	logger    *slog.Logger
 }

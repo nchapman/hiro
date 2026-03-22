@@ -39,24 +39,31 @@ type Agent struct {
 type Options struct {
 	Provider   ProviderType
 	APIKey     string
-	Model      string // overrides the model from agent config
-	WorkingDir string // working directory for file/bash tools
+	Model      string                // overrides the model from agent config
+	WorkingDir string                // working directory for file/bash tools
+	ExtraTools []fantasy.AgentTool   // additional tools injected by the manager
+	LM         fantasy.LanguageModel // if set, bypasses provider creation (for testing)
 }
 
 // New creates a new Hive agent from the given config, connecting it to
 // the swarm for task delegation.
 func New(ctx context.Context, cfg config.AgentConfig, swarm *hub.Swarm, opts Options, logger *slog.Logger) (*Agent, error) {
-	model := cfg.Model
-	if opts.Model != "" {
-		model = opts.Model
-	}
-	if model == "" {
-		return nil, fmt.Errorf("no model specified for agent %q", cfg.Name)
-	}
-
-	lm, err := createLanguageModel(ctx, opts, model)
-	if err != nil {
-		return nil, fmt.Errorf("creating language model: %w", err)
+	var lm fantasy.LanguageModel
+	if opts.LM != nil {
+		lm = opts.LM
+	} else {
+		model := cfg.Model
+		if opts.Model != "" {
+			model = opts.Model
+		}
+		if model == "" {
+			return nil, fmt.Errorf("no model specified for agent %q", cfg.Name)
+		}
+		var err error
+		lm, err = createLanguageModel(ctx, opts, model)
+		if err != nil {
+			return nil, fmt.Errorf("creating language model: %w", err)
+		}
 	}
 
 	workingDir := opts.WorkingDir
@@ -76,6 +83,7 @@ func New(ctx context.Context, cfg config.AgentConfig, swarm *hub.Swarm, opts Opt
 	}
 
 	agentTools := a.buildTools()
+	agentTools = append(agentTools, opts.ExtraTools...)
 
 	// Build system prompt: agent prompt + skill instructions
 	systemPrompt := cfg.Prompt
