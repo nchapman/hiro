@@ -73,7 +73,7 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 			return nil, fmt.Errorf("no model specified for agent %q", cfg.Name)
 		}
 		var err error
-		lm, err = createLanguageModel(ctx, opts, model)
+		lm, err = CreateLanguageModel(ctx, opts.Provider, opts.APIKey, model)
 		if err != nil {
 			return nil, fmt.Errorf("creating language model: %w", err)
 		}
@@ -138,6 +138,11 @@ func (a *Agent) Name() string {
 // Config returns the agent's configuration.
 func (a *Agent) Config() config.AgentConfig {
 	return a.config
+}
+
+// Cleanup kills all background jobs. Call when shutting down the agent.
+func (a *Agent) Cleanup() {
+	a.bgMgr.KillAll()
 }
 
 // Conversation holds the message history for a multi-turn chat session.
@@ -366,23 +371,24 @@ func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string, s
 	return strings.TrimSpace(p.String())
 }
 
-func createLanguageModel(ctx context.Context, opts Options, model string) (fantasy.LanguageModel, error) {
-	switch opts.Provider {
+// CreateLanguageModel creates a language model for the given provider and model name.
+func CreateLanguageModel(ctx context.Context, provider ProviderType, apiKey, model string) (fantasy.LanguageModel, error) {
+	switch provider {
 	case ProviderAnthropic:
-		p, err := anthropic.New(anthropic.WithAPIKey(opts.APIKey))
+		p, err := anthropic.New(anthropic.WithAPIKey(apiKey))
 		if err != nil {
 			return nil, err
 		}
 		return p.LanguageModel(ctx, model)
 
 	case ProviderOpenRouter:
-		p, err := openrouter.New(openrouter.WithAPIKey(opts.APIKey))
+		p, err := openrouter.New(openrouter.WithAPIKey(apiKey))
 		if err != nil {
 			return nil, err
 		}
 		return p.LanguageModel(ctx, model)
 
 	default:
-		return nil, fmt.Errorf("unsupported provider: %q", opts.Provider)
+		return nil, fmt.Errorf("unsupported provider: %q", provider)
 	}
 }

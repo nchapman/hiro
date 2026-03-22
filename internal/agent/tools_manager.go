@@ -33,26 +33,26 @@ func BuildManagerTools(host ipc.AgentHost) []fantasy.AgentTool {
 	}
 }
 
-// buildHistoryTools returns tools for searching and exploring conversation history.
+// BuildHistoryTools returns tools for searching and exploring conversation history.
 // These are only injected into agents with a history engine.
-func buildHistoryTools(engine *history.Engine) []fantasy.AgentTool {
+func BuildHistoryTools(engine *history.Engine) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		toolHistorySearch(engine),
 		toolHistoryRecall(engine),
 	}
 }
 
-// buildMemoryTools returns tools for reading and writing agent memory.
+// BuildMemoryTools returns tools for reading and writing agent memory.
 // sessionDir is the agent's session directory containing memory.md.
-func buildMemoryTools(sessionDir string) []fantasy.AgentTool {
+func BuildMemoryTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		toolMemoryRead(sessionDir),
 		toolMemoryWrite(sessionDir),
 	}
 }
 
-// buildTodoTools returns a tool for managing the agent's todo list.
-func buildTodoTools(sessionDir string) []fantasy.AgentTool {
+// BuildTodoTools returns a tool for managing the agent's todo list.
+func BuildTodoTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		toolTodos(sessionDir),
 	}

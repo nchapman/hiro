@@ -541,12 +541,9 @@ func TestOnline_HistoryCompaction(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// Create a real LM for summarization
-	lm, err := createLanguageModel(t.Context(), Options{
-		Provider: provider,
-		APIKey:   apiKey,
-	}, model)
+	lm, err := CreateLanguageModel(t.Context(), provider, apiKey, model)
 	if err != nil {
-		t.Fatalf("createLanguageModel: %v", err)
+		t.Fatalf("CreateLanguageModel: %v", err)
 	}
 
 	// Open a history store

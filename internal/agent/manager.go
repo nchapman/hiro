@@ -433,7 +433,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			model = opts.Model
 		}
 		if model != "" {
-			lm, err := createLanguageModel(agentCtx, opts, model)
+			lm, err := CreateLanguageModel(agentCtx, opts.Provider, opts.APIKey, model)
 			if err != nil {
 				cancel()
 				return "", fmt.Errorf("creating language model for %q: %w", cfg.Name, err)
@@ -445,8 +445,8 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	// Persistent agents get memory tools and (if LM available) history tools.
 	var conv *Conversation
 	if cfg.Mode == config.ModePersistent {
-		opts.ExtraTools = append(opts.ExtraTools, buildMemoryTools(sessDir)...)
-		opts.ExtraTools = append(opts.ExtraTools, buildTodoTools(sessDir)...)
+		opts.ExtraTools = append(opts.ExtraTools, BuildMemoryTools(sessDir)...)
+		opts.ExtraTools = append(opts.ExtraTools, BuildTodoTools(sessDir)...)
 
 		if opts.LM != nil {
 			historyPath := filepath.Join(sessDir, "history.db")
@@ -458,7 +458,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			} else {
 				engine := history.NewEngine(store, opts.LM, history.DefaultConfig(), m.logger)
 				conv = NewConversationWithHistory(engine)
-				opts.ExtraTools = append(opts.ExtraTools, buildHistoryTools(engine)...)
+				opts.ExtraTools = append(opts.ExtraTools, BuildHistoryTools(engine)...)
 			}
 		} else {
 			conv = NewConversation()

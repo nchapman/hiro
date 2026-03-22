@@ -24,6 +24,15 @@ import (
 )
 
 func main() {
+	// Dispatch subcommand: "hive agent" runs an agent worker process.
+	if len(os.Args) > 1 && os.Args[1] == "agent" {
+		if err := runAgent(); err != nil {
+			fmt.Fprintf(os.Stderr, "agent error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
