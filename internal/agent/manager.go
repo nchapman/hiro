@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hivebot/internal/history"
 )
 
 // AgentInfo describes a running agent for external consumers.
@@ -290,6 +291,9 @@ func (m *Manager) Shutdown() {
 	defer m.mu.Unlock()
 	for id, ra := range m.agents {
 		ra.cancel()
+		if ra.conv.engine != nil {
+			ra.conv.engine.Close()
+		}
 		if ra.info.Mode == config.ModeEphemeral {
 			os.RemoveAll(m.instanceDir(id))
 		}
@@ -346,6 +350,41 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	opts.ExtraTools = m.buildManagerTools(id)
 	opts.Identity = identity
 
+	// Create LM once so it can be shared with the history engine
+	if opts.LM == nil {
+		model := cfg.Model
+		if opts.Model != "" {
+			model = opts.Model
+		}
+		if model != "" {
+			lm, err := createLanguageModel(agentCtx, opts, model)
+			if err != nil {
+				cancel()
+				return "", fmt.Errorf("creating language model for %q: %w", cfg.Name, err)
+			}
+			opts.LM = lm
+		}
+	}
+
+	// Create conversation — persistent agents get a history engine with
+	// search/recall tools injected before the agent is created.
+	var conv *Conversation
+	if cfg.Mode == config.ModePersistent && opts.LM != nil {
+		historyPath := filepath.Join(instDir, "history.db")
+		store, err := history.OpenStore(historyPath)
+		if err != nil {
+			m.logger.Warn("failed to open history DB, using ephemeral conversation",
+				"instance", id, "error", err)
+			conv = NewConversation()
+		} else {
+			engine := history.NewEngine(store, opts.LM, history.DefaultConfig(), m.logger)
+			conv = NewConversationWithHistory(engine)
+			opts.ExtraTools = append(opts.ExtraTools, buildHistoryTools(engine)...)
+		}
+	} else {
+		conv = NewConversation()
+	}
+
 	a, err := New(agentCtx, cfg, opts, m.logger)
 	if err != nil {
 		cancel()
@@ -363,7 +402,7 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 			ParentID:    parentID,
 		},
 		agent:  a,
-		conv:   NewConversation(),
+		conv:   conv,
 		cancel: cancel,
 	}
 
@@ -406,6 +445,9 @@ func (m *Manager) removeAgent(id string) {
 	m.mu.Unlock()
 	if ok {
 		ra.cancel()
+		if ra.conv.engine != nil {
+			ra.conv.engine.Close()
+		}
 		if ra.info.Mode == config.ModeEphemeral {
 			os.RemoveAll(m.instanceDir(id))
 		}

@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 
 	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hivebot/internal/history"
 )
 
 // ProviderType identifies which LLM provider to use.
@@ -103,23 +105,49 @@ func (a *Agent) Config() config.AgentConfig {
 }
 
 // Conversation holds the message history for a multi-turn chat session.
+// When backed by a history engine, messages are persisted and compacted.
 type Conversation struct {
 	Messages []fantasy.Message
+	engine   *history.Engine // non-nil for persistent agents with history
 }
 
-// NewConversation creates a new empty conversation.
+// NewConversation creates a new ephemeral conversation (no persistence).
 func NewConversation() *Conversation {
 	return &Conversation{}
+}
+
+// NewConversationWithHistory creates a conversation backed by a history engine.
+// Messages are persisted to SQLite and automatically compacted.
+func NewConversationWithHistory(engine *history.Engine) *Conversation {
+	return &Conversation{engine: engine}
 }
 
 // StreamChat sends a message in the context of a conversation, streaming
 // the response token-by-token. The conversation history is automatically
 // updated with both the user message and the assistant's response.
 // If onDelta returns an error, streaming stops.
+//
+// When the conversation has a history engine, messages are persisted and
+// context is assembled from the DB within the token budget.
 func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt string, onDelta func(text string) error) (string, error) {
+	var messages []fantasy.Message
+
+	if conv.engine != nil {
+		// Assemble existing context from DB within token budget.
+		// The user message is NOT persisted yet — we only persist after
+		// a successful stream to keep history consistent.
+		assembled, err := conv.engine.Assemble()
+		if err != nil {
+			a.logger.Warn("failed to assemble context, falling back to empty", "error", err)
+		}
+		messages = assembled.Messages
+	} else {
+		messages = conv.Messages
+	}
+
 	result, err := a.agent.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt:   prompt,
-		Messages: conv.Messages,
+		Messages: messages,
 		OnTextDelta: func(id, text string) error {
 			if onDelta != nil {
 				return onDelta(text)
@@ -131,13 +159,64 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 		return "", fmt.Errorf("agent stream: %w", err)
 	}
 
-	// Accumulate messages from all steps into conversation history
-	conv.Messages = append(conv.Messages, fantasy.NewUserMessage(prompt))
-	for _, step := range result.Steps {
-		conv.Messages = append(conv.Messages, step.Messages...)
+	if conv.engine != nil {
+		// Persist user message + assistant response atomically after success
+		rawJSON := marshalMessage(fantasy.NewUserMessage(prompt))
+		if err := conv.engine.Ingest("user", prompt, rawJSON); err != nil {
+			a.logger.Warn("failed to ingest user message", "error", err)
+		}
+		for _, step := range result.Steps {
+			for _, msg := range step.Messages {
+				rawJSON := marshalMessage(msg)
+				text := extractText(msg)
+				role := string(msg.Role)
+				if err := conv.engine.Ingest(role, text, rawJSON); err != nil {
+					a.logger.Warn("failed to ingest step message", "role", role, "error", err)
+				}
+			}
+		}
+
+		// Trigger incremental compaction
+		if err := conv.engine.Compact(ctx); err != nil {
+			a.logger.Warn("compaction failed", "error", err)
+		}
+	} else {
+		// Ephemeral: keep messages in memory
+		conv.Messages = append(conv.Messages, fantasy.NewUserMessage(prompt))
+		for _, step := range result.Steps {
+			conv.Messages = append(conv.Messages, step.Messages...)
+		}
 	}
 
 	return result.Response.Content.Text(), nil
+}
+
+// marshalMessage serializes a fantasy.Message to JSON for storage.
+func marshalMessage(msg fantasy.Message) string {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+// extractText extracts all text content from a message for search indexing.
+func extractText(msg fantasy.Message) string {
+	var parts []string
+	for _, part := range msg.Content {
+		if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+			parts = append(parts, tp.Text)
+		}
+		if tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part); ok {
+			parts = append(parts, fmt.Sprintf("[tool_call: %s]", tc.ToolName))
+		}
+		if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+			if text, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](tr.Output); ok {
+				parts = append(parts, text.Text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // buildSystemPrompt assembles the system prompt from the agent's config

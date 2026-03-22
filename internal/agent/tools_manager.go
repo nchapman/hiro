@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+
+	"github.com/nchapman/hivebot/internal/history"
 )
 
 const maxAgentResultSize = 32 * 1024
@@ -27,6 +29,15 @@ func (m *Manager) buildManagerTools(parentID string) []fantasy.AgentTool {
 		m.toolListAgents(parentID),
 		m.toolSendMessage(parentID),
 		m.toolStopAgent(parentID),
+	}
+}
+
+// buildHistoryTools returns tools for searching and exploring conversation history.
+// These are only injected into agents with a history engine.
+func buildHistoryTools(engine *history.Engine) []fantasy.AgentTool {
+	return []fantasy.AgentTool{
+		toolHistorySearch(engine),
+		toolHistoryRecall(engine),
 	}
 }
 
@@ -179,6 +190,127 @@ func (m *Manager) toolStopAgent(parentID string) fantasy.AgentTool {
 
 			return fantasy.NewTextResponse(
 				fmt.Sprintf("Agent %q (%s) stopped.", info.Name, input.AgentID)), nil
+		},
+	)
+}
+
+// --- history_search tool ---
+
+type historySearchInput struct {
+	Query string `json:"query" description:"Search query (full-text search). Use keywords that might appear in past messages or summaries."`
+	Scope string `json:"scope" description:"Where to search: 'messages' (raw messages only), 'summaries' (compacted summaries only), or 'all' (both). Default: 'all'." default:"all"`
+}
+
+func toolHistorySearch(engine *history.Engine) fantasy.AgentTool {
+	return fantasy.NewAgentTool("history_search",
+		"Search your conversation history for past messages and summaries. Use this when you need to recall something discussed earlier that may have been compacted out of your active context.",
+		func(ctx context.Context, input historySearchInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.Query == "" {
+				return fantasy.NewTextErrorResponse("query is required"), nil
+			}
+			scope := input.Scope
+			if scope == "" {
+				scope = "all"
+			}
+
+			store := engine.Store()
+			var results []history.SearchResult
+			var err error
+
+			switch scope {
+			case "messages":
+				results, err = store.SearchMessages(input.Query, 20)
+			case "summaries":
+				results, err = store.SearchSummaries(input.Query, 20)
+			default:
+				results, err = store.Search(input.Query, 20)
+			}
+			if err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("search failed: %v", err)), nil
+			}
+
+			if len(results) == 0 {
+				return fantasy.NewTextResponse("No results found."), nil
+			}
+
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "Found %d results:\n\n", len(results))
+			for _, r := range results {
+				fmt.Fprintf(&sb, "- [%s:%s] %s\n", r.Type, r.ID, r.Snippet)
+			}
+			return fantasy.NewTextResponse(sb.String()), nil
+		},
+	)
+}
+
+// --- history_recall tool ---
+
+type historyRecallInput struct {
+	SummaryID string `json:"summary_id" description:"The ID of a summary to expand (e.g. 'sum_abc123'). Get these from history_search results."`
+}
+
+func toolHistoryRecall(engine *history.Engine) fantasy.AgentTool {
+	return fantasy.NewAgentTool("history_recall",
+		"Drill into a conversation summary to see more detail. Returns the summary's full content plus its children (the lower-level summaries or original messages it was created from).",
+		func(ctx context.Context, input historyRecallInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.SummaryID == "" {
+				return fantasy.NewTextErrorResponse("summary_id is required"), nil
+			}
+
+			store := engine.Store()
+
+			sum, err := store.GetSummary(input.SummaryID)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("summary not found: %v", err)), nil
+			}
+
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "## Summary %s (depth %d, %s)\n\n",
+				sum.ID, sum.Depth, sum.Kind)
+			fmt.Fprintf(&sb, "Time range: %s to %s\n",
+				sum.EarliestAt.Format("2006-01-02 15:04"),
+				sum.LatestAt.Format("2006-01-02 15:04"))
+			fmt.Fprintf(&sb, "Compression: %d tokens → %d tokens\n\n",
+				sum.SourceTokens, sum.Tokens)
+			sb.WriteString(sum.Content)
+
+			// Show children
+			if sum.Kind == "leaf" {
+				// Show source messages
+				msgIDs, err := store.GetSummarySourceMessages(sum.ID)
+				if err == nil && len(msgIDs) > 0 {
+					msgs, err := store.GetMessages(msgIDs)
+					if err == nil {
+						sb.WriteString("\n\n---\n### Source Messages\n\n")
+						for _, m := range msgs {
+							fmt.Fprintf(&sb, "[%s] **%s**: %s\n\n",
+								m.CreatedAt.Format("15:04:05"), m.Role,
+								truncateResult(m.Content))
+						}
+					}
+				}
+			} else {
+				// Show child summaries
+				childIDs, err := store.GetSummaryChildren(sum.ID)
+				if err == nil && len(childIDs) > 0 {
+					sb.WriteString("\n\n---\n### Child Summaries\n\n")
+					for _, cid := range childIDs {
+						child, err := store.GetSummary(cid)
+						if err != nil {
+							continue
+						}
+						fmt.Fprintf(&sb, "**%s** (depth %d, %s to %s):\n%s\n\n",
+							child.ID, child.Depth,
+							child.EarliestAt.Format("2006-01-02 15:04"),
+							child.LatestAt.Format("2006-01-02 15:04"),
+							child.Content)
+					}
+				}
+			}
+
+			return fantasy.NewTextResponse(truncateResult(sb.String())), nil
 		},
 	)
 }
