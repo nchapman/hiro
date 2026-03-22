@@ -153,6 +153,8 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 // forwardedEnvKeys are environment variables forwarded from the control plane
 // to isolated agent processes. These configure shared tool managers (mise)
 // so agents can find and install tools despite having a minimal environment.
+// Note: MISE_INSTALL_PATH is intentionally excluded — it's only needed at
+// mise install time, not runtime. The binary is at /usr/local/bin/mise.
 var forwardedEnvKeys = []string{
 	"MISE_DATA_DIR",
 	"MISE_CONFIG_DIR",

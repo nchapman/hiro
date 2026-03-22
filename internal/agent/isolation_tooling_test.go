@@ -173,10 +173,10 @@ func TestIsolation_MiseDataDirGroupWritable(t *testing.T) {
 		t.Skip("MISE_DATA_DIR not set")
 	}
 
-	// Try to create a file in the mise data dir as the agent user.
+	// Try to create and remove a file in the mise data dir as the agent user.
 	testFile := miseDir + "/test-write-permission"
 	cmd := agentCmd(t, uid, gid, sessDir, "sh", "-c",
-		"touch "+testFile+" && echo ok && rm "+testFile)
+		`touch "$1" && echo ok && rm "$1"`, "--", testFile)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("agent user cannot write to MISE_DATA_DIR: %v\n%s", err, output)
@@ -197,6 +197,8 @@ func TestIsolation_MiseInstallGlobal(t *testing.T) {
 	}
 
 	// "mise use -g" installs and registers globally — shim works immediately.
+	// This mutates the shared /opt/mise global config, which is fine because
+	// isolation tests run in ephemeral Docker containers.
 	cmd := agentCmd(t, uid, gid, sessDir, "sh", "-c",
 		"mise use -g jq@latest && jq --version")
 	cmd.Dir = sessDir
@@ -255,8 +257,8 @@ func TestIsolation_NoEnvLeak(t *testing.T) {
 		"PATH": true, "HOME": true, "LANG": true, "LC_ALL": true,
 		"HIVE_API_KEY": true, "MISE_DATA_DIR": true, "MISE_CONFIG_DIR": true,
 		"MISE_CACHE_DIR": true, "MISE_GLOBAL_CONFIG_FILE": true,
-		// Shell internals that get added by the subprocess.
-		"PWD": true, "SHLVL": true, "_": true,
+		// PWD is set by the kernel on execve.
+		"PWD": true,
 	}
 
 	for _, line := range strings.Split(string(output), "\n") {

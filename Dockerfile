@@ -57,7 +57,7 @@ ENV MISE_CACHE_DIR=/opt/mise/cache
 ENV MISE_GLOBAL_CONFIG_FILE=/opt/mise/config/config.toml
 ENV MISE_INSTALL_PATH=/usr/local/bin/mise
 ENV PATH="/opt/mise/shims:${PATH}"
-RUN curl https://mise.run | sh
+RUN curl -fsSL https://mise.run | sh
 
 # Install runtimes and tools via mise, plus common global packages.
 RUN mise use -g node@24 python@3.12 uv@latest \
