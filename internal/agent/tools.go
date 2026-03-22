@@ -20,6 +20,8 @@ func (a *Agent) buildTools() []fantasy.AgentTool {
 		tools.NewEditTool(),
 		tools.NewWriteFileTool(),
 		tools.NewListFilesTool(a.workingDir),
+		tools.NewGlobTool(a.workingDir),
+		tools.NewGrepTool(a.workingDir),
 		tools.NewFetchTool(),
 
 		// Swarm tools
