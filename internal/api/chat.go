@@ -8,6 +8,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/nchapman/hivebot/internal/agent"
+	"github.com/nchapman/hivebot/internal/config"
 )
 
 // ChatMessage is a message sent or received over the chat WebSocket.
@@ -29,7 +30,23 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, nil)
+	// Allow targeting a specific agent via query param, default to leader
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		agentID = s.leaderID
+	}
+	info, ok := s.manager.GetAgent(agentID)
+	if !ok || info.ParentID != "" {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		// Restrict to same-origin. In development, Vite proxies WebSocket
+		// requests so the origin matches. In production, the embedded UI
+		// is served from the same host.
+		OriginPatterns: []string{r.Host},
+	})
 	if err != nil {
 		s.logger.Error("chat websocket accept failed", "error", err)
 		return
@@ -38,8 +55,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Each WebSocket connection gets its own conversation history
-	conv := agent.NewConversation()
+	// Persistent agents use SendMessage (shared history persisted to DB).
+	// Ephemeral agents use StreamChat with a per-connection conversation.
+	persistent := info.Mode == config.ModePersistent
+	var conv *agent.Conversation
+	if !persistent {
+		conv = agent.NewConversation()
+	}
 
 	for {
 		// Read user message
@@ -56,15 +78,22 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Stream response from the leader agent with per-connection history
-		_, err := s.manager.StreamChat(ctx, s.leaderID, conv, msg.Content, func(text string) error {
+		onDelta := func(text string) error {
 			delta := ChatMessage{Type: "delta", Role: "assistant", Content: text}
 			b, _ := json.Marshal(delta)
 			return conn.Write(ctx, websocket.MessageText, b)
-		})
+		}
 
-		if err != nil {
-			errMsg := ChatMessage{Type: "error", Content: err.Error()}
+		// Stream response — persistent agents use shared history, ephemeral get per-connection
+		var streamErr error
+		if persistent {
+			_, streamErr = s.manager.SendMessage(ctx, agentID, msg.Content, onDelta)
+		} else {
+			_, streamErr = s.manager.StreamChat(ctx, agentID, conv, msg.Content, onDelta)
+		}
+
+		if streamErr != nil {
+			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}
 			if writeErr := wsjson.Write(ctx, conn, errMsg); writeErr != nil {
 				return
 			}

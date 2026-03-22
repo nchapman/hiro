@@ -1,23 +1,24 @@
-type View = 'chat' | 'dashboard'
+import type { AgentInfo } from '../App'
 
 interface SidebarProps {
-  view: View
-  onNavigate: (view: View) => void
+  agents: AgentInfo[]
+  selectedId: string | null
+  onSelect: (id: string) => void
 }
 
 const styles = {
   sidebar: {
     width: 220,
+    minWidth: 220,
     background: 'var(--bg-surface)',
     borderRight: '1px solid var(--border)',
     display: 'flex',
     flexDirection: 'column' as const,
-    padding: '16px 0',
+    overflow: 'hidden',
   },
   logo: {
-    padding: '0 16px 16px',
+    padding: '16px 16px 16px',
     borderBottom: '1px solid var(--border)',
-    marginBottom: 8,
   },
   logoText: {
     fontSize: 20,
@@ -25,13 +26,23 @@ const styles = {
     color: 'var(--accent)',
     letterSpacing: '-0.5px',
   },
-  nav: {
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+    padding: '16px 16px 6px',
+  },
+  agentList: {
+    flex: 1,
+    overflow: 'auto',
+    padding: '0 8px 8px',
     display: 'flex',
     flexDirection: 'column' as const,
     gap: 2,
-    padding: '8px 8px',
   },
-  navItem: (active: boolean) => ({
+  agentItem: (active: boolean) => ({
     padding: '8px 12px',
     borderRadius: 6,
     cursor: 'pointer',
@@ -42,29 +53,55 @@ const styles = {
     border: 'none',
     textAlign: 'left' as const,
     transition: 'background 0.15s',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
   }),
+  modeDot: (mode: string) => ({
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    background: mode === 'persistent' ? 'var(--green)' : 'var(--text-muted)',
+    flexShrink: 0,
+  }),
+  agentName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  empty: {
+    padding: '8px 16px',
+    fontSize: 13,
+    color: 'var(--text-muted)',
+    fontStyle: 'italic' as const,
+  },
 }
 
-export default function Sidebar({ view, onNavigate }: SidebarProps) {
+export default function Sidebar({ agents, selectedId, onSelect }: SidebarProps) {
   return (
     <aside style={styles.sidebar}>
       <div style={styles.logo}>
         <span style={styles.logoText}>hive</span>
       </div>
-      <nav style={styles.nav}>
-        <button
-          style={styles.navItem(view === 'chat')}
-          onClick={() => onNavigate('chat')}
-        >
-          Chat
-        </button>
-        <button
-          style={styles.navItem(view === 'dashboard')}
-          onClick={() => onNavigate('dashboard')}
-        >
-          Dashboard
-        </button>
-      </nav>
+      <div style={styles.sectionLabel}>Agents</div>
+      <div style={styles.agentList}>
+        {agents.length === 0 ? (
+          <div style={styles.empty}>No agents running</div>
+        ) : (
+          agents.map(agent => (
+            <button
+              key={agent.id}
+              style={styles.agentItem(agent.id === selectedId)}
+              onClick={() => onSelect(agent.id)}
+              title={agent.description || agent.name}
+            >
+              <span style={styles.modeDot(agent.mode)} />
+              <span style={styles.agentName}>{agent.name}</span>
+            </button>
+          ))
+        )}
+      </div>
     </aside>
   )
 }

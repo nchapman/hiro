@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import type { AgentInfo } from '../App'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  timestamp: Date
 }
 
 interface ChatWireMessage {
@@ -13,21 +13,44 @@ interface ChatWireMessage {
   content?: string
 }
 
-function useWebSocket() {
+interface HistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp?: string
+}
+
+function useWebSocket(agentId: string | null) {
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const onMessageRef = useRef<(msg: ChatWireMessage) => void>(() => {})
   const reconnectTimer = useRef<number | undefined>(undefined)
+  const currentAgentId = useRef<string | null>(null)
 
-  const connectWs = useCallback(() => {
+  const cleanup = useCallback(() => {
+    clearTimeout(reconnectTimer.current)
+    reconnectTimer.current = undefined
+    if (wsRef.current) {
+      wsRef.current.onclose = null // prevent reconnect
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    setConnected(false)
+  }, [])
+
+  const connectWs = useCallback((id: string) => {
+    cleanup()
+    currentAgentId.current = id
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat`)
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat?agent_id=${encodeURIComponent(id)}`)
 
     ws.onopen = () => setConnected(true)
     ws.onclose = () => {
       setConnected(false)
-      // Auto-reconnect after 3 seconds
-      reconnectTimer.current = window.setTimeout(connectWs, 3000)
+      // Auto-reconnect after 3 seconds if still targeting same agent
+      if (currentAgentId.current === id) {
+        reconnectTimer.current = window.setTimeout(() => connectWs(id), 3000)
+      }
     }
     ws.onmessage = (e) => {
       try {
@@ -36,16 +59,16 @@ function useWebSocket() {
     }
 
     wsRef.current = ws
-  }, [])
+  }, [cleanup])
 
-  const connect = useCallback((onMessage: (msg: ChatWireMessage) => void) => {
-    onMessageRef.current = onMessage
-    connectWs()
-    return () => {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
+  useEffect(() => {
+    if (agentId) {
+      connectWs(agentId)
+    } else {
+      cleanup()
     }
-  }, [connectWs])
+    return cleanup
+  }, [agentId, connectWs, cleanup])
 
   const send = useCallback((msg: ChatWireMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -53,7 +76,11 @@ function useWebSocket() {
     }
   }, [])
 
-  return { connect, send, connected }
+  const setOnMessage = useCallback((handler: (msg: ChatWireMessage) => void) => {
+    onMessageRef.current = handler
+  }, [])
+
+  return { send, connected, setOnMessage }
 }
 
 const styles = {
@@ -61,6 +88,8 @@ const styles = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column' as const,
+    minHeight: 0,
+    overflow: 'hidden',
   },
   header: {
     padding: '12px 20px',
@@ -70,6 +99,11 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
+  },
+  headerName: {
+    color: 'var(--text)',
+    fontWeight: 600,
   },
   statusDot: (connected: boolean) => ({
     width: 6,
@@ -79,7 +113,7 @@ const styles = {
   }),
   messages: {
     flex: 1,
-    overflow: 'auto',
+    overflowY: 'auto' as const,
     padding: 20,
     display: 'flex',
     flexDirection: 'column' as const,
@@ -100,6 +134,7 @@ const styles = {
     borderTop: '1px solid var(--border)',
     display: 'flex',
     gap: 8,
+    flexShrink: 0,
   },
   input: {
     flex: 1,
@@ -131,32 +166,73 @@ const styles = {
     color: 'var(--text-muted)',
     fontSize: 14,
   },
+  noAgent: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'var(--text-muted)',
+    fontSize: 14,
+  },
 }
 
-export default function Chat() {
+interface ChatProps {
+  agent: AgentInfo | null
+}
+
+export default function Chat({ agent }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const messagesEnd = useRef<HTMLDivElement>(null)
   const streamingMsgId = useRef<string | null>(null)
-  const { connect, send, connected } = useWebSocket()
-
-  // Auto-scroll only when near the bottom
   const messagesContainer = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const container = messagesContainer.current
-    if (!container) return
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
-    if (isNearBottom) {
-      messagesEnd.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [messages])
+  const agentGeneration = useRef(0)
+  const { send, connected, setOnMessage } = useWebSocket(agent?.id ?? null)
 
+  // Load message history when agent changes
   useEffect(() => {
-    return connect((msg) => {
+    const gen = ++agentGeneration.current
+
+    if (!agent) {
+      setMessages([])
+      return
+    }
+
+    const ac = new AbortController()
+    setMessages([])
+    setStreaming(false)
+    streamingMsgId.current = null
+    setLoadingHistory(true)
+
+    fetch(`/api/agents/${encodeURIComponent(agent.id)}/messages`, { signal: ac.signal })
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((history: HistoryMessage[]) => {
+        if (agentGeneration.current !== gen) return
+        setMessages(history.map(m => ({
+          id: crypto.randomUUID(),
+          role: m.role,
+          content: m.content,
+        })))
+      })
+      .catch(err => {
+        if (err.name === 'AbortError') return
+        if (agentGeneration.current !== gen) return
+        setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: 'Failed to load conversation history.' }])
+      })
+      .finally(() => {
+        if (agentGeneration.current === gen) setLoadingHistory(false)
+      })
+
+    // Set up WebSocket message handler with the same generation guard
+    setOnMessage((msg: ChatWireMessage) => {
+      if (agentGeneration.current !== gen) return
       switch (msg.type) {
         case 'delta': {
-          // Append delta to the current streaming message
           if (!streamingMsgId.current) {
             const id = crypto.randomUUID()
             streamingMsgId.current = id
@@ -164,7 +240,6 @@ export default function Chat() {
               id,
               role: 'assistant',
               content: msg.content || '',
-              timestamp: new Date(),
             }])
           } else {
             const id = streamingMsgId.current
@@ -188,12 +263,23 @@ export default function Chat() {
             id: crypto.randomUUID(),
             role: 'assistant',
             content: `Error: ${msg.content}`,
-            timestamp: new Date(),
           }])
           break
       }
     })
-  }, [connect])
+
+    return () => ac.abort()
+  }, [agent?.id, setOnMessage])
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    const container = messagesContainer.current
+    if (!container) return
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+    if (isNearBottom) {
+      messagesEnd.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
 
   const handleSend = () => {
     const text = input.trim()
@@ -203,7 +289,6 @@ export default function Chat() {
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
-      timestamp: new Date(),
     }])
     setInput('')
     setStreaming(true)
@@ -217,14 +302,26 @@ export default function Chat() {
     }
   }
 
+  if (!agent) {
+    return (
+      <div style={styles.noAgent}>
+        Select an agent from the sidebar to start chatting.
+      </div>
+    )
+  }
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <span style={styles.statusDot(connected)} />
-        Swarm Chat {!connected && '(connecting...)'}
+        <span style={styles.headerName}>{agent.name}</span>
+        {agent.description && <span>— {agent.description}</span>}
+        {!connected && <span>(connecting...)</span>}
       </div>
-      {messages.length === 0 ? (
-        <div style={styles.empty}>Send a message to start a conversation with the swarm.</div>
+      {loadingHistory ? (
+        <div style={styles.empty}>Loading history...</div>
+      ) : messages.length === 0 ? (
+        <div style={styles.empty}>Send a message to start a conversation.</div>
       ) : (
         <div style={styles.messages} ref={messagesContainer}>
           {messages.map(msg => (
@@ -246,7 +343,7 @@ export default function Chat() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={connected ? 'Message the swarm...' : 'Connecting...'}
+          placeholder={connected ? `Message ${agent.name}...` : 'Connecting...'}
           disabled={!connected}
           rows={1}
         />

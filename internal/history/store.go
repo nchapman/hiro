@@ -712,3 +712,35 @@ func (s *Store) MaxSummaryDepth() (int, error) {
 	}
 	return int(depth.Int64), nil
 }
+
+// RecentMessages returns the most recent N messages ordered oldest-first.
+func (s *Store) RecentMessages(limit int) ([]Message, error) {
+	rows, err := s.db.Query(`
+		SELECT id, seq, role, content, raw_json, tokens, created_at
+		FROM messages ORDER BY seq DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		var createdAt string
+		if err := rows.Scan(&m.ID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &createdAt); err != nil {
+			return nil, err
+		}
+		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		msgs = append(msgs, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reverse to oldest-first order
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}

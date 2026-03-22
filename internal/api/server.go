@@ -4,6 +4,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -36,6 +37,8 @@ func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
 func (s *Server) routes() {
 	// API routes
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	s.mux.HandleFunc("GET /api/agents/{id}/messages", s.handleAgentMessages)
 
 	// WebSocket endpoint for web UI chat
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
@@ -77,6 +80,55 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	modeFilter := r.URL.Query().Get("mode")
+	agents := s.manager.ListAgents()
+	type agentResponse struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Mode        string `json:"mode"`
+		Description string `json:"description,omitempty"`
+		ParentID    string `json:"parent_id,omitempty"`
+	}
+	result := make([]agentResponse, 0, len(agents))
+	for _, a := range agents {
+		if modeFilter != "" && string(a.Mode) != modeFilter {
+			continue
+		}
+		result = append(result, agentResponse{
+			ID:          a.ID,
+			Name:        a.Name,
+			Mode:        string(a.Mode),
+			Description: a.Description,
+			ParentID:    a.ParentID,
+		})
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleAgentMessages(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "no agent manager", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	msgs, err := s.manager.GetHistory(id, 100)
+	if err != nil {
+		if errors.Is(err, agent.ErrAgentNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			s.logger.Error("failed to read agent history", "id", id, "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, msgs)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

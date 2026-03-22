@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -202,6 +203,65 @@ func (m *Manager) ListChildren(callerID string) []AgentInfo {
 		}
 	}
 	return result
+}
+
+// HistoryMessage is a simplified message for API consumers.
+type HistoryMessage struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// ErrAgentNotFound is returned when an agent ID does not match a running agent.
+var ErrAgentNotFound = errors.New("agent not found")
+
+// GetHistory returns recent messages from a persistent agent's conversation history.
+// Returns raw message rows; does not include summarized context.
+// Returns nil for ephemeral agents or agents without a history engine.
+func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error) {
+	m.mu.RLock()
+	ra, ok := m.agents[agentID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, ErrAgentNotFound
+	}
+
+	if ra.conv.engine == nil {
+		// Ephemeral agent — lock required to safely read in-memory messages
+		ra.mu.Lock()
+		defer ra.mu.Unlock()
+		var result []HistoryMessage
+		for _, msg := range ra.conv.Messages {
+			text := extractText(msg)
+			if text == "" {
+				continue
+			}
+			result = append(result, HistoryMessage{
+				Role:    string(msg.Role),
+				Content: text,
+			})
+		}
+		return result, nil
+	}
+
+	// Persistent agent — SQLite serializes access independently
+	store := ra.conv.engine.Store()
+	msgs, err := store.RecentMessages(limit)
+	if err != nil {
+		return nil, fmt.Errorf("reading history: %w", err)
+	}
+
+	result := make([]HistoryMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			result = append(result, HistoryMessage{
+				Role:      msg.Role,
+				Content:   msg.Content,
+				Timestamp: msg.CreatedAt.Format(time.RFC3339),
+			})
+		}
+	}
+	return result, nil
 }
 
 // AgentByName returns the ID of a running agent by name.
