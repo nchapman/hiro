@@ -27,7 +27,7 @@ Thumbs.db
 
 # Workspace (runtime state — defaults are embedded in the binary)
 /agents/
-/instances/
+/sessions/
 /skills/
 
 # Control plane config (contains secrets)

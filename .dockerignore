@@ -1,6 +1,6 @@
 .git
 .env
-instances/
+sessions/
 web/ui/node_modules
 web/ui/dist
 

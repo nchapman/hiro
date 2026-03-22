@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Manifest describes a running agent instance persisted to disk.
+// Manifest describes a running agent session persisted to disk.
 type Manifest struct {
 	ID        string    `yaml:"id"`
 	Agent     string    `yaml:"agent"` // definition name (directory under agents/)

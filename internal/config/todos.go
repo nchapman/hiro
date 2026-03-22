@@ -26,10 +26,10 @@ type Todo struct {
 	ActiveForm string     `yaml:"active_form,omitempty"`
 }
 
-// ReadTodos reads the todo list from the instance directory.
+// ReadTodos reads the todo list from the session directory.
 // Returns an empty slice if the file does not exist.
-func ReadTodos(instanceDir string) ([]Todo, error) {
-	data, err := os.ReadFile(filepath.Join(instanceDir, todosFileName))
+func ReadTodos(sessionDir string) ([]Todo, error) {
+	data, err := os.ReadFile(filepath.Join(sessionDir, todosFileName))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -43,13 +43,13 @@ func ReadTodos(instanceDir string) ([]Todo, error) {
 	return todos, nil
 }
 
-// WriteTodos writes the todo list to the instance directory.
-func WriteTodos(instanceDir string, todos []Todo) error {
+// WriteTodos writes the todo list to the session directory.
+func WriteTodos(sessionDir string, todos []Todo) error {
 	data, err := yaml.Marshal(todos)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(instanceDir, todosFileName), data, 0600)
+	return os.WriteFile(filepath.Join(sessionDir, todosFileName), data, 0600)
 }
 
 // FormatTodos renders a todo list as markdown for system prompt injection.

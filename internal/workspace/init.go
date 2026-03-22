@@ -17,7 +17,7 @@ var defaultAgents embed.FS
 // requiredDirs are the top-level directories that must exist in a workspace.
 var requiredDirs = []string{
 	"agents",
-	"instances",
+	"sessions",
 	"skills",
 }
 

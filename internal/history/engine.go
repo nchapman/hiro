@@ -8,7 +8,7 @@ import (
 	"charm.land/fantasy"
 )
 
-// Engine manages conversation history for a single agent instance.
+// Engine manages conversation history for a single agent session.
 // It coordinates message storage, context assembly, and automatic compaction.
 type Engine struct {
 	store     *Store

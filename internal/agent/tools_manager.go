@@ -43,18 +43,18 @@ func buildHistoryTools(engine *history.Engine) []fantasy.AgentTool {
 }
 
 // buildMemoryTools returns tools for reading and writing agent memory.
-// instanceDir is the agent's instance directory containing memory.md.
-func buildMemoryTools(instanceDir string) []fantasy.AgentTool {
+// sessionDir is the agent's session directory containing memory.md.
+func buildMemoryTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		toolMemoryRead(instanceDir),
-		toolMemoryWrite(instanceDir),
+		toolMemoryRead(sessionDir),
+		toolMemoryWrite(sessionDir),
 	}
 }
 
 // buildTodoTools returns a tool for managing the agent's todo list.
-func buildTodoTools(instanceDir string) []fantasy.AgentTool {
+func buildTodoTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		toolTodos(instanceDir),
+		toolTodos(sessionDir),
 	}
 }
 
@@ -334,11 +334,11 @@ func toolHistoryRecall(engine *history.Engine) fantasy.AgentTool {
 
 // --- memory_read tool ---
 
-func toolMemoryRead(instanceDir string) fantasy.AgentTool {
+func toolMemoryRead(sessionDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool("memory_read",
 		"Read your persistent memory. Returns the current contents of your memory file, which contains facts, preferences, and knowledge you've chosen to remember across conversations.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			content, err := config.ReadMemoryFile(instanceDir)
+			content, err := config.ReadMemoryFile(sessionDir)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("failed to read memory: %v", err)), nil
@@ -357,7 +357,7 @@ type memoryWriteInput struct {
 	Content string `json:"content" description:"The full new contents of your memory file. This overwrites the entire file, so include everything you want to remember. Read your current memory first to avoid losing existing entries."`
 }
 
-func toolMemoryWrite(instanceDir string) fantasy.AgentTool {
+func toolMemoryWrite(sessionDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool("memory_write",
 		"Write your persistent memory. Overwrites the entire memory file with the provided content. Always read your current memory first, then include both existing and new entries. Your memories are included in your system prompt on every turn, so they're always available to you.",
 		func(ctx context.Context, input memoryWriteInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -365,7 +365,7 @@ func toolMemoryWrite(instanceDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("content is required"), nil
 			}
 
-			if err := config.WriteMemoryFile(instanceDir, input.Content); err != nil {
+			if err := config.WriteMemoryFile(sessionDir, input.Content); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("failed to write memory: %v", err)), nil
 			}
@@ -388,12 +388,12 @@ type todoItem struct {
 	ActiveForm string `json:"active_form" description:"Present continuous form shown while in progress (e.g. 'Setting up database schema'). Optional."`
 }
 
-func toolTodos(instanceDir string) fantasy.AgentTool {
+func toolTodos(sessionDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool("todos",
 		"Manage your task list. Send the complete updated list each time — you can add, remove, reorder, and update statuses in one call. Your tasks are shown in your system prompt so you always know what's next. Use this for multi-step work to track progress.",
 		func(ctx context.Context, input todosInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Read old todos for change tracking
-			oldTodos, _ := config.ReadTodos(instanceDir)
+			oldTodos, _ := config.ReadTodos(sessionDir)
 			oldStatus := make(map[string]config.TodoStatus)
 			for _, t := range oldTodos {
 				oldStatus[t.Content] = t.Status
@@ -431,7 +431,7 @@ func toolTodos(instanceDir string) fantasy.AgentTool {
 				}
 			}
 
-			if err := config.WriteTodos(instanceDir, todos); err != nil {
+			if err := config.WriteTodos(sessionDir, todos); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("failed to write todos: %v", err)), nil
 			}

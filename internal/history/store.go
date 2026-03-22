@@ -66,7 +66,7 @@ type Store struct {
 // and runs any pending migrations.
 func OpenStore(path string) (*Store, error) {
 	// Ensure the DB file is created with restricted permissions (0600).
-	// The instance directory should already be 0700.
+	// The session directory should already be 0700.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)

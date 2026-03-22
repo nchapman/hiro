@@ -40,7 +40,7 @@ cd web/ui && npm run dev
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
 | `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_WORKSPACE_DIR` | `.` | Root containing `agents/` and `instances/` |
+| `HIVE_WORKSPACE_DIR` | `.` | Root containing `agents/` and `sessions/` |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 A `.env` file is loaded automatically via godotenv (does not override existing vars).
@@ -50,9 +50,9 @@ A `.env` file is loaded automatically via godotenv (does not override existing v
 ### Agent Lifecycle
 
 ```
-agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manager tracks instance
+agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manager tracks session
                                                                        ↓
-                                                              instances/<uuid>/
+                                                              sessions/<uuid>/
                                                                 manifest.yaml
                                                                 memory.md
                                                                 identity.md
@@ -61,7 +61,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  agent.New()  →  Manag
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
-- **Instances** are runtime state stored in `instances/<uuid>/`. Persistent agents survive restarts via `RestoreInstances()`.
+- **Sessions** are runtime state stored in `sessions/<uuid>/`. Persistent agents survive restarts via `RestoreSessions()`.
 - **Ephemeral agents** are spawned via `spawn_agent` tool, run a single prompt, and are cleaned up.
 - **Persistent agents** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
 
@@ -164,11 +164,11 @@ Defined in `internal/agent/tools_manager.go` via `buildManagerTools(parentID)`. 
 
 ### Persistent Agent Tools (mode: persistent only)
 
-Added in `startInstance()` via `buildMemoryTools()`, `buildTodoTools()`, `buildHistoryTools()`.
+Added in `startSession()` via `buildMemoryTools()`, `buildTodoTools()`, `buildHistoryTools()`.
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
-| `memory_read` | Read `memory.md` from instance dir | *(none)* | Returns empty if no memories yet |
+| `memory_read` | Read `memory.md` from session dir | *(none)* | Returns empty if no memories yet |
 | `memory_write` | Overwrite `memory.md` | `content` | Full replacement — read first to avoid data loss; 0600 perms; visible in system prompt next turn |
 | `todos` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
 | `history_search` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
@@ -192,7 +192,7 @@ The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It is a 
 **Bootstrap flow** (`cmd/hive/main.go`):
 1. Check `HIVE_API_KEY` is set
 2. Create `Manager` with provider/API key
-3. `RestoreInstances()` — resume any persistent agents from prior runs
+3. `RestoreSessions()` — resume any persistent agents from prior runs
 4. `AgentByName("coordinator")` — check if already running (from restore)
 5. If not running, `StartAgent(ctx, "coordinator", "")` — no parent, becomes root
 

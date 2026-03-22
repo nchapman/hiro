@@ -34,7 +34,7 @@ All configuration is via environment variables. A `.env` file is loaded automati
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
 | `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_WORKSPACE_DIR` | `.` | Root directory for agents, skills, and instances |
+| `HIVE_WORKSPACE_DIR` | `.` | Root directory for agents, skills, and sessions |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 ## How It Works
@@ -95,7 +95,7 @@ On first boot, Hive initializes the workspace directory with a default coordinat
 workspace/
   agents/       # Agent definitions
   skills/       # Shared skills (available to all agents)
-  instances/    # Runtime state (history, memory, todos)
+  sessions/     # Runtime state (history, memory, todos)
 ```
 
 ## Development

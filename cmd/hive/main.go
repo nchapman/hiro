@@ -91,8 +91,8 @@ func run() error {
 		}, cp, logger)
 
 		// Restore any persistent agents from previous run
-		if err := mgr.RestoreInstances(ctx); err != nil {
-			logger.Warn("failed to restore some agent instances", "error", err)
+		if err := mgr.RestoreSessions(ctx); err != nil {
+			logger.Warn("failed to restore some agent sessions", "error", err)
 		}
 
 		// Start coordinator if not already restored from a previous run

@@ -34,7 +34,7 @@ type Agent struct {
 	config         config.AgentConfig
 	agent          fantasy.Agent
 	workingDir     string
-	instanceDir    string // for re-reading memory.md, identity.md at runtime
+	sessionDir     string // for re-reading memory.md, identity.md at runtime
 	agentDefDir    string // agent definition directory (for re-scanning skills)
 	sharedSkillDir string // workspace-level shared skills directory
 	bgMgr          *tools.BackgroundJobManager
@@ -49,8 +49,8 @@ type Options struct {
 	Model          string                // overrides the model from agent config
 	WorkingDir     string                // working directory for file/bash tools
 	ExtraTools     []fantasy.AgentTool   // additional tools injected by the manager
-	Identity       string                // instance identity (from identity.md)
-	InstanceDir    string                // instance directory for runtime file access (memory.md etc.)
+	Identity       string                // session identity (from identity.md)
+	SessionDir     string                // session directory for runtime file access (memory.md etc.)
 	AgentDefDir    string                // agent definition directory (for runtime skill re-scan)
 	SharedSkillDir string                // workspace-level shared skills directory
 	LM             fantasy.LanguageModel // if set, bypasses provider creation (for testing)
@@ -91,7 +91,7 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 	a := &Agent{
 		config:         cfg,
 		workingDir:     workingDir,
-		instanceDir:    opts.InstanceDir,
+		sessionDir:     opts.SessionDir,
 		agentDefDir:    opts.AgentDefDir,
 		sharedSkillDir: opts.SharedSkillDir,
 		bgMgr:          tools.NewBackgroundJobManager(opts.SecretEnvFn),
@@ -270,18 +270,18 @@ func (a *Agent) currentSystemPrompt() string {
 	identity := ""
 	memory := ""
 	todos := ""
-	if a.instanceDir != "" {
-		if id, err := config.ReadOptionalFile(filepath.Join(a.instanceDir, "identity.md")); err != nil {
+	if a.sessionDir != "" {
+		if id, err := config.ReadOptionalFile(filepath.Join(a.sessionDir, "identity.md")); err != nil {
 			a.logger.Warn("could not read identity.md", "error", err)
 		} else {
 			identity = id
 		}
-		if mem, err := config.ReadMemoryFile(a.instanceDir); err != nil {
+		if mem, err := config.ReadMemoryFile(a.sessionDir); err != nil {
 			a.logger.Warn("could not read memory.md", "error", err)
 		} else {
 			memory = mem
 		}
-		if t, err := config.ReadTodos(a.instanceDir); err != nil {
+		if t, err := config.ReadTodos(a.sessionDir); err != nil {
 			a.logger.Warn("could not read todos.yaml", "error", err)
 		} else {
 			todos = config.FormatTodos(t)

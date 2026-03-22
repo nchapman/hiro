@@ -26,7 +26,7 @@ type AgentInfo struct {
 	ParentID    string // empty for top-level agents
 }
 
-// runningAgent tracks a live agent instance within the manager.
+// runningAgent tracks a live agent session within the manager.
 type runningAgent struct {
 	mu             sync.Mutex // serializes calls to this agent's conversation
 	info           AgentInfo
@@ -58,7 +58,7 @@ type ControlPlane interface {
 }
 
 // NewManager creates a new agent manager. workspaceDir is the root of the
-// workspace containing agents/ and instances/ subdirectories. The context
+// workspace containing agents/ and sessions/ subdirectories. The context
 // controls the lifetime of persistent agents. cp may be nil if no control
 // plane is configured.
 func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger) *Manager {
@@ -88,7 +88,7 @@ func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string
 	}
 
 	id := uuid.New().String()
-	return m.startInstance(ctx, id, cfg, parentID)
+	return m.startSession(ctx, id, cfg, parentID)
 }
 
 // SpawnSubagent starts an ephemeral agent that runs the given prompt and returns
@@ -108,7 +108,7 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 	cfg.Mode = config.ModeEphemeral
 
 	id := uuid.New().String()
-	agentID, err := m.startInstance(ctx, id, cfg, parentID)
+	agentID, err := m.startSession(ctx, id, cfg, parentID)
 	if err != nil {
 		return "", err
 	}
@@ -300,16 +300,16 @@ func (m *Manager) IsDescendant(targetID, ancestorID string) bool {
 	return false
 }
 
-// RestoreInstances scans the instances/ directory and restarts any
+// RestoreSessions scans the sessions/ directory and restarts any
 // persistent agents that have manifests. Call once after NewManager.
-func (m *Manager) RestoreInstances(ctx context.Context) error {
-	dir := m.instancesDir()
+func (m *Manager) RestoreSessions(ctx context.Context) error {
+	dir := m.sessionsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return fmt.Errorf("scanning instances: %w", err)
+		return fmt.Errorf("scanning sessions: %w", err)
 	}
 
 	for _, entry := range entries {
@@ -319,36 +319,36 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		manifestPath := filepath.Join(dir, entry.Name(), "manifest.yaml")
 		manifest, err := config.ReadManifest(manifestPath)
 		if err != nil {
-			m.logger.Warn("skipping instance with unreadable manifest",
+			m.logger.Warn("skipping session with unreadable manifest",
 				"dir", entry.Name(), "error", err)
 			continue
 		}
 		if manifest.Mode != config.ModePersistent {
-			// Clean up stale ephemeral instance dirs
+			// Clean up stale ephemeral session dirs
 			os.RemoveAll(filepath.Join(dir, entry.Name()))
 			continue
 		}
 
 		// Validate manifest fields to prevent path traversal
 		if err := validateAgentName(manifest.Agent); err != nil {
-			m.logger.Warn("skipping instance with invalid agent name",
+			m.logger.Warn("skipping session with invalid agent name",
 				"dir", entry.Name(), "agent", manifest.Agent, "error", err)
 			continue
 		}
 		if manifest.ID != entry.Name() {
-			m.logger.Warn("skipping instance where manifest ID does not match directory",
+			m.logger.Warn("skipping session where manifest ID does not match directory",
 				"dir", entry.Name(), "manifest_id", manifest.ID)
 			continue
 		}
 
 		cfg, err := config.LoadAgentDir(m.agentDefDir(manifest.Agent))
 		if err != nil {
-			m.logger.Warn("skipping instance with missing agent definition",
+			m.logger.Warn("skipping session with missing agent definition",
 				"agent", manifest.Agent, "error", err)
 			continue
 		}
 
-		_, err = m.startInstance(ctx, manifest.ID, cfg, manifest.ParentID)
+		_, err = m.startSession(ctx, manifest.ID, cfg, manifest.ParentID)
 		if err != nil {
 			m.logger.Warn("failed to restore agent",
 				"id", manifest.ID, "agent", manifest.Agent, "error", err)
@@ -357,7 +357,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown stops all running agents. Ephemeral instance directories are cleaned up.
+// Shutdown stops all running agents. Ephemeral session directories are cleaned up.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -368,7 +368,7 @@ func (m *Manager) Shutdown() {
 			ra.conv.engine.Close()
 		}
 		if ra.info.Mode == config.ModeEphemeral {
-			os.RemoveAll(m.instanceDir(id))
+			os.RemoveAll(m.sessionDir(id))
 		}
 	}
 	m.agents = make(map[string]*runningAgent)
@@ -376,16 +376,16 @@ func (m *Manager) Shutdown() {
 	m.logger.Info("agent manager shut down")
 }
 
-// startInstance creates an agent from config, persists its manifest,
+// startSession creates an agent from config, persists its manifest,
 // and registers it in the manager.
-func (m *Manager) startInstance(ctx context.Context, id string, cfg config.AgentConfig, parentID string) (string, error) {
-	// Create instance directory and write manifest
-	instDir := m.instanceDir(id)
-	if err := os.MkdirAll(instDir, 0700); err != nil {
-		return "", fmt.Errorf("creating instance dir: %w", err)
+func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string) (string, error) {
+	// Create session directory and write manifest
+	sessDir := m.sessionDir(id)
+	if err := os.MkdirAll(sessDir, 0700); err != nil {
+		return "", fmt.Errorf("creating session dir: %w", err)
 	}
 
-	manifestPath := filepath.Join(instDir, "manifest.yaml")
+	manifestPath := filepath.Join(sessDir, "manifest.yaml")
 	_, statErr := os.Stat(manifestPath)
 	switch {
 	case os.IsNotExist(statErr):
@@ -403,10 +403,10 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 		return "", fmt.Errorf("checking manifest: %w", statErr)
 	}
 
-	// Read instance identity if present
-	identity, err := config.ReadOptionalFile(filepath.Join(instDir, "identity.md"))
+	// Read session identity if present
+	identity, err := config.ReadOptionalFile(filepath.Join(sessDir, "identity.md"))
 	if err != nil {
-		m.logger.Warn("could not read identity.md", "instance", id, "error", err)
+		m.logger.Warn("could not read identity.md", "session", id, "error", err)
 	}
 
 	// Persistent agents use the manager's long-lived context so they
@@ -418,11 +418,11 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	}
 	agentCtx, cancel := context.WithCancel(baseCtx)
 
-	// Build options with manager tools, identity, and instance dir
+	// Build options with manager tools, identity, and session dir
 	opts := m.opts
 	opts.ExtraTools = m.buildManagerTools(id)
 	opts.Identity = identity
-	opts.InstanceDir = instDir
+	opts.SessionDir = sessDir
 	opts.AgentDefDir = m.agentDefDir(cfg.Name)
 	opts.SharedSkillDir = m.sharedSkillsDir()
 
@@ -445,15 +445,15 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	// Persistent agents get memory tools and (if LM available) history tools.
 	var conv *Conversation
 	if cfg.Mode == config.ModePersistent {
-		opts.ExtraTools = append(opts.ExtraTools, buildMemoryTools(instDir)...)
-		opts.ExtraTools = append(opts.ExtraTools, buildTodoTools(instDir)...)
+		opts.ExtraTools = append(opts.ExtraTools, buildMemoryTools(sessDir)...)
+		opts.ExtraTools = append(opts.ExtraTools, buildTodoTools(sessDir)...)
 
 		if opts.LM != nil {
-			historyPath := filepath.Join(instDir, "history.db")
+			historyPath := filepath.Join(sessDir, "history.db")
 			store, err := history.OpenStore(historyPath)
 			if err != nil {
 				m.logger.Warn("failed to open history DB, using ephemeral conversation",
-					"instance", id, "error", err)
+					"session", id, "error", err)
 				conv = NewConversation()
 			} else {
 				engine := history.NewEngine(store, opts.LM, history.DefaultConfig(), m.logger)
@@ -483,8 +483,8 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 	a, err := New(agentCtx, cfg, opts, m.logger)
 	if err != nil {
 		cancel()
-		// Clean up instance dir on failure (only if we just created it)
-		os.RemoveAll(instDir)
+		// Clean up session dir on failure (only if we just created it)
+		os.RemoveAll(sessDir)
 		return "", fmt.Errorf("creating agent %q: %w", cfg.Name, err)
 	}
 
@@ -520,7 +520,7 @@ func (m *Manager) startInstance(ctx context.Context, id string, cfg config.Agent
 }
 
 // removeAgent cancels and removes an agent from the registry.
-// Ephemeral instance directories are cleaned up.
+// Ephemeral session directories are cleaned up.
 func (m *Manager) removeAgent(id string) {
 	m.mu.Lock()
 	ra, ok := m.agents[id]
@@ -546,7 +546,7 @@ func (m *Manager) removeAgent(id string) {
 			ra.conv.engine.Close()
 		}
 		if ra.info.Mode == config.ModeEphemeral {
-			os.RemoveAll(m.instanceDir(id))
+			os.RemoveAll(m.sessionDir(id))
 		}
 	}
 }
@@ -663,12 +663,12 @@ func (m *Manager) sharedSkillsDir() string {
 	return filepath.Join(m.workspaceDir, "skills")
 }
 
-func (m *Manager) instancesDir() string {
-	return filepath.Join(m.workspaceDir, "instances")
+func (m *Manager) sessionsDir() string {
+	return filepath.Join(m.workspaceDir, "sessions")
 }
 
-func (m *Manager) instanceDir(id string) string {
-	return filepath.Join(m.workspaceDir, "instances", id)
+func (m *Manager) sessionDir(id string) string {
+	return filepath.Join(m.workspaceDir, "sessions", id)
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

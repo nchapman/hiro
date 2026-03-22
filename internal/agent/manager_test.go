@@ -453,7 +453,7 @@ Child.`)
 	}
 }
 
-func TestManager_InstanceDirCreated(t *testing.T) {
+func TestManager_SessionDirCreated(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
@@ -462,7 +462,7 @@ func TestManager_InstanceDirCreated(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	manifestPath := filepath.Join(dir, "instances", id, "manifest.yaml")
+	manifestPath := filepath.Join(dir, "sessions", id, "manifest.yaml")
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("manifest.yaml should exist at %s: %v", manifestPath, err)
 	}
@@ -479,17 +479,17 @@ func TestManager_EphemeralCleanup(t *testing.T) {
 	// needs a real LLM conversation), so test removeAgent cleanup directly.
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
 	cfg.Mode = config.ModeEphemeral
-	ephID, _ := mgr.startInstance(t.Context(), "ephemeral-test-id", cfg, parentID)
+	ephID, _ := mgr.startSession(t.Context(), "ephemeral-test-id", cfg, parentID)
 
-	instDir := filepath.Join(dir, "instances", ephID)
-	if _, err := os.Stat(instDir); err != nil {
-		t.Fatalf("ephemeral instance dir should exist: %v", err)
+	sessDir := filepath.Join(dir, "sessions", ephID)
+	if _, err := os.Stat(sessDir); err != nil {
+		t.Fatalf("ephemeral session dir should exist: %v", err)
 	}
 
 	mgr.StopAgent(ephID)
 
-	if _, err := os.Stat(instDir); !os.IsNotExist(err) {
-		t.Error("ephemeral instance dir should be cleaned up after stop")
+	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
+		t.Error("ephemeral session dir should be cleaned up after stop")
 	}
 }
 
@@ -498,16 +498,16 @@ func TestManager_PersistentNotCleaned(t *testing.T) {
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	id, _ := mgr.StartAgent(t.Context(), "test-agent", "")
-	instDir := filepath.Join(dir, "instances", id)
+	sessDir := filepath.Join(dir, "sessions", id)
 
 	mgr.StopAgent(id)
 
-	if _, err := os.Stat(instDir); os.IsNotExist(err) {
-		t.Error("persistent instance dir should survive stop")
+	if _, err := os.Stat(sessDir); os.IsNotExist(err) {
+		t.Error("persistent session dir should survive stop")
 	}
 }
 
-func TestManager_RestoreInstances(t *testing.T) {
+func TestManager_RestoreSessions(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
@@ -530,7 +530,7 @@ func TestManager_RestoreInstances(t *testing.T) {
 		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
 	}, nil, logger)
-	if err := mgr2.RestoreInstances(ctx); err != nil {
+	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
@@ -552,9 +552,9 @@ func TestManager_IdentityInPrompt(t *testing.T) {
 	id, _ := mgr.StartAgent(t.Context(), "test-agent", "")
 	mgr.StopAgent(id)
 
-	// Write identity into the instance dir
-	instDir := filepath.Join(dir, "instances", id)
-	os.WriteFile(filepath.Join(instDir, "identity.md"), []byte("I am Aria. 🦊 Curious and thorough."), 0644)
+	// Write identity into the session dir
+	sessDir := filepath.Join(dir, "sessions", id)
+	os.WriteFile(filepath.Join(sessDir, "identity.md"), []byte("I am Aria. 🦊 Curious and thorough."), 0644)
 
 	// Restore — the agent should pick up the identity
 	mgr2, _ := setupTestManager(t)
@@ -564,7 +564,7 @@ func TestManager_IdentityInPrompt(t *testing.T) {
 		LM:         &fakeLM{response: "hello"},
 		WorkingDir: dir,
 	}, nil, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})))
-	mgr2.RestoreInstances(t.Context())
+	mgr2.RestoreSessions(t.Context())
 
 	_, ok := mgr2.GetAgent(id)
 	if !ok {

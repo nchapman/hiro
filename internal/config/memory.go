@@ -8,16 +8,16 @@ import (
 
 const memoryFileName = "memory.md"
 
-// ReadMemoryFile reads the memory.md file from the given instance directory.
+// ReadMemoryFile reads the memory.md file from the given session directory.
 // Returns empty string if the file does not exist.
-func ReadMemoryFile(instanceDir string) (string, error) {
-	return ReadOptionalFile(filepath.Join(instanceDir, memoryFileName))
+func ReadMemoryFile(sessionDir string) (string, error) {
+	return ReadOptionalFile(filepath.Join(sessionDir, memoryFileName))
 }
 
-// WriteMemoryFile writes content to the memory.md file in the given instance
+// WriteMemoryFile writes content to the memory.md file in the given session
 // directory, creating it if it doesn't exist.
-func WriteMemoryFile(instanceDir, content string) error {
-	path := filepath.Join(instanceDir, memoryFileName)
+func WriteMemoryFile(sessionDir, content string) error {
+	path := filepath.Join(sessionDir, memoryFileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}

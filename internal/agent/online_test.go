@@ -198,8 +198,8 @@ func TestOnline_Memory(t *testing.T) {
 	}
 
 	// Pre-write a memory file
-	instDir := filepath.Join(dir, "instances", id)
-	if err := config.WriteMemoryFile(instDir, "The user's favorite color is blue."); err != nil {
+	sessDir := filepath.Join(dir, "sessions", id)
+	if err := config.WriteMemoryFile(sessDir, "The user's favorite color is blue."); err != nil {
 		t.Fatalf("WriteMemoryFile: %v", err)
 	}
 
@@ -281,8 +281,8 @@ func TestOnline_ConversationHistory(t *testing.T) {
 	t.Logf("History recall: %s", resp)
 
 	// Verify history.db was created
-	instDir := filepath.Join(dir, "instances", id)
-	if _, err := os.Stat(filepath.Join(instDir, "history.db")); os.IsNotExist(err) {
+	sessDir := filepath.Join(dir, "sessions", id)
+	if _, err := os.Stat(filepath.Join(sessDir, "history.db")); os.IsNotExist(err) {
 		t.Error("history.db was not created for persistent agent")
 	}
 }
@@ -317,8 +317,8 @@ func TestOnline_Todos(t *testing.T) {
 	t.Logf("Todo response: %s", resp)
 
 	// Verify todos.yaml was created
-	instDir := filepath.Join(dir, "instances", id)
-	todos, err := config.ReadTodos(instDir)
+	sessDir := filepath.Join(dir, "sessions", id)
+	todos, err := config.ReadTodos(sessDir)
 	if err != nil {
 		t.Fatalf("ReadTodos: %v", err)
 	}
@@ -360,8 +360,8 @@ func TestOnline_MemoryWriteTool(t *testing.T) {
 	}
 
 	// Verify memory.md was created with the content
-	instDir := filepath.Join(dir, "instances", id)
-	content, err := config.ReadMemoryFile(instDir)
+	sessDir := filepath.Join(dir, "sessions", id)
+	content, err := config.ReadMemoryFile(sessDir)
 	if err != nil {
 		t.Fatalf("ReadMemoryFile: %v", err)
 	}
