@@ -1,12 +1,22 @@
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { SendHorizontal } from "lucide-react"
+import { ArrowUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useWebSocket } from "@/hooks/use-websocket"
 import type { ChatWireMessage } from "@/hooks/use-websocket"
 import type { AgentInfo } from "@/App"
+import {
+  ChatContainerRoot,
+  ChatContainerContent,
+} from "@/components/prompt-kit/chat-container"
+import { ScrollButton } from "@/components/prompt-kit/scroll-button"
+import { Markdown } from "@/components/prompt-kit/markdown"
+import { Loader } from "@/components/prompt-kit/loader"
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputActions,
+} from "@/components/prompt-kit/prompt-input"
 
 interface Message {
   id: string
@@ -29,9 +39,7 @@ export default function Chat({ agent }: ChatProps) {
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
-  const messagesEnd = useRef<HTMLDivElement>(null)
   const streamingMsgId = useRef<string | null>(null)
-  const messagesContainer = useRef<HTMLDivElement>(null)
   const agentGeneration = useRef(0)
   const { send, connected, setOnMessage } = useWebSocket(agent?.id ?? null)
 
@@ -137,18 +145,6 @@ export default function Chat({ agent }: ChatProps) {
     return () => ac.abort()
   }, [agent?.id, setOnMessage])
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    const container = messagesContainer.current
-    if (!container) return
-    const isNearBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight <
-      100
-    if (isNearBottom) {
-      messagesEnd.current?.scrollIntoView({ behavior: "smooth" })
-    }
-  }, [messages])
-
   const handleSend = () => {
     const text = input.trim()
     if (!text || streaming || !connected) return
@@ -162,13 +158,6 @@ export default function Chat({ agent }: ChatProps) {
     send({ type: "message", content: text })
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
   if (!agent) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -179,77 +168,107 @@ export default function Chat({ agent }: ChatProps) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex shrink-0 items-center gap-2 border-b px-5 py-3 text-sm text-muted-foreground">
-        <span
-          className={cn(
-            "h-1.5 w-1.5 rounded-full",
-            connected ? "bg-green-500" : "bg-destructive"
-          )}
-        />
-        <span className="font-semibold text-foreground">{agent.name}</span>
-        {agent.description && <span>— {agent.description}</span>}
-        {!connected && <span>(connecting...)</span>}
-      </div>
-
       {/* Messages */}
       {loadingHistory ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Loading history...
         </div>
       ) : messages.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Send a message to start a conversation.
+        <div className="flex flex-1 flex-col items-center justify-center gap-2">
+          <p className="text-lg font-medium text-foreground">
+            {agent.name}
+          </p>
+          {agent.description && (
+            <p className="text-sm text-muted-foreground">
+              {agent.description}
+            </p>
+          )}
         </div>
       ) : (
-        <ScrollArea className="flex-1" ref={messagesContainer}>
-          <div className="flex flex-col gap-4 p-5">
+        <ChatContainerRoot className="relative flex-1">
+          <ChatContainerContent className="mx-auto w-full max-w-3xl px-4 py-4">
             {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={cn(
-                  "max-w-[70%] whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
-                  msg.role === "user" &&
-                    "self-end bg-primary text-primary-foreground",
-                  msg.role === "assistant" && "self-start bg-muted",
-                  msg.role === "system" &&
-                    "max-w-[90%] self-center rounded-lg border px-3.5 py-2 text-xs text-muted-foreground"
+              <div key={msg.id}>
+                {msg.role === "user" && (
+                  <div className="flex justify-end py-2">
+                    <div className="max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-sm">
+                      {msg.content}
+                    </div>
+                  </div>
                 )}
-              >
-                {msg.content || (msg.role === "assistant" ? "..." : "")}
+
+                {msg.role === "assistant" && (
+                  <div className="py-2">
+                    <Markdown
+                      className={cn(
+                        "prose prose-sm dark:prose-invert max-w-none",
+                        "prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none"
+                      )}
+                    >
+                      {msg.content || "..."}
+                    </Markdown>
+                  </div>
+                )}
+
+                {msg.role === "system" && (
+                  <div className="flex justify-center py-2">
+                    <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
+                      {msg.content}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
+
             {streaming && !streamingMsgId.current && (
-              <div className="max-w-[70%] self-start whitespace-pre-wrap rounded-xl bg-muted px-3.5 py-2.5 text-sm">
-                <span className="text-muted-foreground">Thinking...</span>
+              <div className="py-2">
+                <Loader variant="typing" size="sm" />
               </div>
             )}
-            <div ref={messagesEnd} />
+          </ChatContainerContent>
+
+          {/* Scroll to bottom button */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-4">
+            <div className="pointer-events-auto">
+              <ScrollButton />
+            </div>
           </div>
-        </ScrollArea>
+        </ChatContainerRoot>
       )}
 
-      {/* Input */}
-      <div className="flex shrink-0 gap-2 border-t p-4">
-        <Textarea
+      {/* Input area */}
+      <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2">
+        <PromptInput
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={
-            connected ? `Message ${agent.name}...` : "Connecting..."
-          }
+          onValueChange={setInput}
+          onSubmit={handleSend}
+          isLoading={streaming}
           disabled={!connected}
-          rows={1}
-          className="min-h-[40px] flex-1 resize-none"
-        />
-        <Button
-          onClick={handleSend}
-          disabled={streaming || !connected}
-          size="icon"
-          className="h-10 w-10 shrink-0"
+          className="bg-muted/50"
         >
-          <SendHorizontal className="h-4 w-4" />
-        </Button>
+          <PromptInputTextarea
+            placeholder={
+              connected ? `Message ${agent.name}...` : "Connecting..."
+            }
+            autoFocus
+          />
+          <PromptInputActions>
+            <Button
+              size="icon"
+              className="h-8 w-8 rounded-full"
+              onClick={handleSend}
+              disabled={streaming || !connected || !input.trim()}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+          </PromptInputActions>
+        </PromptInput>
+
+        {!connected && (
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Connecting to {agent.name}...
+          </p>
+        )}
       </div>
     </div>
   )

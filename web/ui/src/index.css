@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -127,4 +128,40 @@
   html {
     @apply font-sans;
     }
+}
+
+/* prompt-kit loader animations */
+@keyframes typing {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  from { background-position: 200% center; }
+  to { background-position: -200% center; }
+}
+
+@keyframes loading-dots {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+/* prose overrides for chat markdown */
+.prose :where(pre):not(:where([class~="not-prose"] *)) {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.prose :where(p):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose :where(p:first-child):not(:where([class~="not-prose"] *)) {
+  margin-top: 0;
+}
+
+.prose :where(p:last-child):not(:where([class~="not-prose"] *)) {
+  margin-bottom: 0;
 }
