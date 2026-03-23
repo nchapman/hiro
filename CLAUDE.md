@@ -43,7 +43,7 @@ cd web/ui && npm run dev
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
 | `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_WORKSPACE_DIR` | `.` | Root containing `agents/` and `sessions/` |
+| `HIVE_ROOT` | `.` | Platform root containing `agents/`, `sessions/`, `skills/`, `workspace/` |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 A `.env` file is loaded automatically via godotenv (does not override existing vars).
@@ -76,7 +76,7 @@ Agent Worker Process (hive agent)
 **Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Session dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
 
 **Group-based access control**: Two Unix groups control filesystem access:
-- `hive-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/workspace` and `/opt/mise`.
+- `hive-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hive` and `/opt/mise`.
 - `hive-coordinators` (GID 10001) — supplementary group for coordinator-mode agents. Grants write access to `agents/` and `skills/` directories (setgid `2775`). Non-coordinator agents get read-only access via "other" bits. Group membership is assigned dynamically at spawn time via `SysProcAttr.Credential.Groups` — no UIDs are statically added to `hive-coordinators` in `/etc/group`.
 
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
@@ -91,7 +91,10 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager spawns worker p
                                                                 memory.md
                                                                 identity.md
                                                                 todos.yaml
-                                                                history.db
+                                                                db/
+                                                                  history.db
+                                                                scratch/
+                                                                tmp/
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
@@ -116,7 +119,7 @@ agents/<name>/
       assets/
 ```
 
-A workspace-level `skills/` directory provides shared skills available to all agents. Agent-specific skills take precedence over shared skills with the same name.
+A platform-level `skills/` directory provides shared skills available to all agents. Agent-specific skills take precedence over shared skills with the same name.
 
 Skills use **progressive disclosure** — only name and description are listed in the system prompt. The agent activates a skill via the `use_skill` tool, which returns the full instructions and lists bundled resources.
 
@@ -249,7 +252,7 @@ The coordinator uses `mode: coordinator`, which gives it persistent-agent capabi
 
 The control plane (`internal/controlplane`) manages operator-level configuration that agents cannot access or modify.
 
-**Config file:** `config.yaml` at workspace root. Read at startup into Go memory. Written back on shutdown. During runtime, Go memory is authoritative.
+**Config file:** `config.yaml` at platform root. Read at startup into Go memory. Written back on shutdown. During runtime, Go memory is authoritative.
 
 ```yaml
 secrets:
@@ -306,4 +309,4 @@ Coordinator tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) a
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), workspace files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).
+- In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).

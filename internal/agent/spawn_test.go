@@ -10,7 +10,7 @@ import (
 
 func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 	cfg := ipc.SpawnConfig{
-		SessionDir: "/workspace/sessions/abc-123",
+		SessionDir: "/hive/sessions/abc-123",
 		APIKey:     "sk-test-key",
 	}
 	getenv := func(key string) string {
@@ -24,7 +24,7 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 
 	expect := map[string]string{
 		"PATH":         "/opt/mise/shims:/usr/local/bin:/usr/bin",
-		"HOME":         "/workspace/sessions/abc-123",
+		"HOME":         "/hive/sessions/abc-123",
 		"LANG":         "en_US.UTF-8",
 		"LC_ALL":       "en_US.UTF-8",
 		"HIVE_API_KEY": "sk-test-key",
@@ -42,11 +42,11 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 }
 
 func TestBuildIsolatedEnv_HomeIsSessionDir(t *testing.T) {
-	cfg := ipc.SpawnConfig{SessionDir: "/workspace/sessions/agent-xyz"}
+	cfg := ipc.SpawnConfig{SessionDir: "/hive/sessions/agent-xyz"}
 	env := buildIsolatedEnv(cfg, func(string) string { return "" })
 	envMap := parseEnv(env)
 
-	if envMap["HOME"] != "/workspace/sessions/agent-xyz" {
+	if envMap["HOME"] != "/hive/sessions/agent-xyz" {
 		t.Errorf("HOME = %q, want session dir", envMap["HOME"])
 	}
 }

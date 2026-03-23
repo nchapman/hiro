@@ -67,10 +67,10 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	return mgr, dir
 }
 
-// writeAgentMD writes an agent definition into workspace/agents/<name>/agent.md.
-func writeAgentMD(t *testing.T, workspaceDir, name, content string) {
+// writeAgentMD writes an agent definition into <rootDir>/agents/<name>/agent.md.
+func writeAgentMD(t *testing.T, rootDir, name, content string) {
 	t.Helper()
-	agentDir := filepath.Join(workspaceDir, "agents", name)
+	agentDir := filepath.Join(rootDir, "agents", name)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -444,6 +444,29 @@ func TestManager_SessionDirCreated(t *testing.T) {
 	manifestPath := filepath.Join(dir, "sessions", id, "manifest.yaml")
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("manifest.yaml should exist at %s: %v", manifestPath, err)
+	}
+}
+
+func TestManager_SessionSubdirs(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.StartAgent(t.Context(), "test-agent", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	sessDir := filepath.Join(dir, "sessions", id)
+	for _, sub := range []string{"db", "scratch", "tmp"} {
+		subDir := filepath.Join(sessDir, sub)
+		info, err := os.Stat(subDir)
+		if err != nil {
+			t.Errorf("session subdir %s should exist: %v", sub, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("%s should be a directory", sub)
+		}
 	}
 }
 

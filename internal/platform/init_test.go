@@ -1,4 +1,4 @@
-package workspace
+package platform
 
 import (
 	"log/slog"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestInit_EmptyWorkspace(t *testing.T) {
+func TestInit_EmptyPlatform(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.DiscardHandler)
 

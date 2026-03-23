@@ -9,9 +9,9 @@ services:
       - HIVE_PROVIDER=${HIVE_PROVIDER:-anthropic}
       - HIVE_MODEL=${HIVE_MODEL:-}
       - HIVE_ADDR=:8080
-      - HIVE_WORKSPACE_DIR=/workspace
+      - HIVE_ROOT=/hive
     volumes:
-      - e2e-workspace:/workspace
+      - e2e-hive:/hive
     init: true # clean up zombie agent processes
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
@@ -20,4 +20,4 @@ services:
       start_period: 10s
 
 volumes:
-  e2e-workspace:
+  e2e-hive:

@@ -34,7 +34,7 @@ All configuration is via environment variables. A `.env` file is loaded automati
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
 | `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_WORKSPACE_DIR` | `.` | Root directory for agents, skills, and sessions |
+| `HIVE_ROOT` | `.` | Platform root containing `agents/`, `sessions/`, `skills/`, `workspace/` |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 ## How It Works
@@ -87,15 +87,16 @@ Skills can be flat `.md` files or directories that bundle scripts, references, a
 
 Agents can create new agent and skill definitions at runtime using their file tools. No restart needed — new definitions are picked up immediately.
 
-### Workspace
+### Platform Root
 
-On first boot, Hive initializes the workspace directory with a default coordinator agent. The coordinator manages conversations, spawns subagents, and can delegate tasks to remote swarm workers. The workspace structure:
+On first boot, Hive initializes the platform root with a default coordinator agent. The coordinator manages conversations, spawns subagents, and can delegate tasks to remote swarm workers. The directory structure:
 
 ```
-workspace/
-  agents/       # Agent definitions
-  skills/       # Shared skills (available to all agents)
-  sessions/     # Runtime state (history, memory, todos)
+/hive/
+  agents/       # Agent definitions (coordinator-writable)
+  skills/       # Shared skills (coordinator-writable)
+  sessions/     # Per-agent runtime state (history, memory, todos)
+  workspace/    # Shared collaborative space for agent work
 ```
 
 ## Development
@@ -131,7 +132,7 @@ The container is the primary security boundary. Inside it, each agent runs as a 
 
 - **Session isolation**: Each agent's session directory (`sessions/<uuid>/`) is owned by its Unix user with `0700` permissions — agents cannot read each other's memory, history, or todos.
 - **Secrets protection**: `config.yaml` is owned by root with `0600` permissions — agents cannot read operator secrets.
-- **Collaborative workspace**: The workspace uses setgid (`2775`) so all agents can read and write shared files (agent definitions, code, etc.) via group membership.
+- **Collaborative workspace**: The shared `workspace/` directory uses setgid (`2775`) so all agents can read and write collaborative files via group membership. Agent definitions (`agents/`, `skills/`) are writable only by coordinator-mode agents.
 - **Control plane as root**: The control plane runs as root for UID switching; agents run as unprivileged users.
 
 Isolation is auto-detected at startup (enabled when the `hive-agents` group exists). Outside Docker, all processes run as the same user.

@@ -58,9 +58,11 @@ func TestOnline_HistoryCompaction(t *testing.T) {
 		t.Fatalf("CreateLanguageModel: %v", err)
 	}
 
-	// Open a history store
+	// Open a history store (matches session layout: db/history.db)
 	dir := t.TempDir()
-	store, err := history.OpenStore(filepath.Join(dir, "history.db"))
+	dbDir := filepath.Join(dir, "db")
+	os.MkdirAll(dbDir, 0700)
+	store, err := history.OpenStore(filepath.Join(dbDir, "history.db"))
 	if err != nil {
 		t.Fatalf("OpenStore: %v", err)
 	}

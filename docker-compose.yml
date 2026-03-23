@@ -9,10 +9,10 @@ services:
     env_file:
       - .env
     volumes:
-      - workspace:/workspace
+      - hive:/hive
     environment:
       - HIVE_ADDR=:8080
-      - HIVE_WORKSPACE_DIR=/workspace
+      - HIVE_ROOT=/hive
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 30s
@@ -21,4 +21,4 @@ services:
 
 # WARNING: 'docker compose down -v' destroys all agent state (history, memory, todos).
 volumes:
-  workspace:
+  hive:

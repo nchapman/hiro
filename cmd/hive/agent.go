@@ -131,7 +131,7 @@ func runAgent() error {
 		opts.ExtraTools = append(opts.ExtraTools, agent.BuildMemoryTools(cfg.SessionDir)...)
 		opts.ExtraTools = append(opts.ExtraTools, agent.BuildTodoTools(cfg.SessionDir)...)
 
-		historyPath := filepath.Join(cfg.SessionDir, "history.db")
+		historyPath := filepath.Join(cfg.SessionDir, "db", "history.db")
 		store, storeErr := history.OpenStore(historyPath)
 		if storeErr != nil {
 			logger.Warn("failed to open history DB, using ephemeral conversation", "error", storeErr)

@@ -81,11 +81,11 @@ RUN groupadd -g 10000 hive-agents \
         useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
     done
 
-# Workspace uses setgid (2775) so files created by any agent inherit the
+# Platform root uses setgid (2775) so files created by any agent inherit the
 # hive-agents group and are group-writable for collaborative access.
-# agents/ and skills/ ownership is set by workspace.Init() at runtime
-# (hive-coordinators group with setgid for coordinator write access).
-RUN mkdir -p /workspace && chown root:hive-agents /workspace && chmod 2775 /workspace
+# Subdirectory ownership (agents/, skills/, workspace/) is set by platform.Init()
+# at runtime — hive-coordinators for agents/ and skills/, hive-agents for workspace/.
+RUN mkdir -p /hive && chown root:hive-agents /hive && chmod 2775 /hive
 
 # Install mise (tool version manager). All mise state lives under /opt/mise —
 # binary, tool installs, config, cache, and shims — so every user (root and
@@ -120,7 +120,7 @@ RUN chgrp -R hive-agents /opt/mise \
     && chmod -R g+rwX /opt/mise \
     && find /opt/mise -type d -exec chmod g+s {} +
 
-WORKDIR /workspace
+WORKDIR /hive
 
 COPY --from=build /hive /usr/local/bin/hive
 

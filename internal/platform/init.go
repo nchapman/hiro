@@ -1,5 +1,5 @@
-// Package workspace handles initialization of the hive workspace directory.
-package workspace
+// Package platform handles initialization of the hive platform root directory.
+package platform
 
 import (
 	"embed"
@@ -16,11 +16,12 @@ import (
 //go:embed defaults/agents
 var defaultAgents embed.FS
 
-// requiredDirs are the top-level directories that must exist in a workspace.
+// requiredDirs are the top-level directories that must exist in the platform root.
 var requiredDirs = []string{
 	"agents",
 	"sessions",
 	"skills",
+	"workspace", // inherits hive-agents group via setgid on parent
 }
 
 // coordinatorDirs are directories owned by the hive-coordinators group.
@@ -30,9 +31,9 @@ var coordinatorDirs = map[string]bool{
 	"skills": true,
 }
 
-// Init ensures the workspace directory structure exists and seeds default
-// agent definitions if the workspace is new. It is safe to call on an
-// existing workspace — it will not overwrite files that already exist.
+// Init ensures the platform root directory structure exists and seeds default
+// agent definitions if the platform is new. It is safe to call on an
+// existing platform — it will not overwrite files that already exist.
 func Init(dir string, logger *slog.Logger) error {
 	// Detect hive-coordinators group for directory ownership.
 	coordGID := lookupGroupGID("hive-coordinators")
@@ -60,7 +61,7 @@ func Init(dir string, logger *slog.Logger) error {
 		return fmt.Errorf("reading agents dir: %w", err)
 	}
 	if len(entries) > 0 {
-		logger.Debug("workspace already has agents, skipping defaults")
+		logger.Debug("agents directory non-empty, skipping defaults")
 		return nil
 	}
 

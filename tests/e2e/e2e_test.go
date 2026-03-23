@@ -275,5 +275,5 @@ func containerWriteFile(t *testing.T, filePath, content string) {
 // sessionDir returns the container path to an agent's session directory.
 func sessionDir(t *testing.T, agentID string) string {
 	t.Helper()
-	return "/workspace/sessions/" + agentID
+	return "/hive/sessions/" + agentID
 }

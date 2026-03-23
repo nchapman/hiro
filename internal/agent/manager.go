@@ -56,11 +56,11 @@ type Manager struct {
 	agents   map[string]*runningAgent // agent ID -> running agent
 	children map[string][]string      // parent ID -> child IDs
 
-	ctx          context.Context // long-lived context for persistent agents
-	workspaceDir string
-	opts         Options
-	cp           ControlPlane // operator-level tool/secret config
-	logger       *slog.Logger
+	ctx     context.Context // long-lived context for persistent agents
+	rootDir string
+	opts    Options
+	cp      ControlPlane // operator-level tool/secret config
+	logger  *slog.Logger
 
 	hostSocket    string        // path to host gRPC socket
 	workerFactory WorkerFactory // creates agent workers (default = OS processes)
@@ -78,11 +78,11 @@ type ControlPlane interface {
 	DefaultModel() string
 }
 
-// NewManager creates a new agent manager. workspaceDir is the root of the
-// workspace containing agents/ and sessions/ subdirectories. The context
+// NewManager creates a new agent manager. rootDir is the hive platform root
+// containing agents/, sessions/, skills/, and workspace/ subdirectories. The context
 // controls the lifetime of persistent agents. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.
-func NewManager(ctx context.Context, workspaceDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory, pool *uidpool.Pool) *Manager {
+func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory, pool *uidpool.Pool) *Manager {
 	if wf == nil {
 		wf = defaultWorkerFactory
 	}
@@ -90,7 +90,7 @@ func NewManager(ctx context.Context, workspaceDir string, opts Options, cp Contr
 		agents:        make(map[string]*runningAgent),
 		children:      make(map[string][]string),
 		ctx:           ctx,
-		workspaceDir:  workspaceDir,
+		rootDir:  rootDir,
 		opts:          opts,
 		cp:            cp,
 		logger:        logger,
@@ -261,7 +261,7 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 		return nil, nil
 	}
 
-	historyPath := filepath.Join(m.sessionDir(agentID), "history.db")
+	historyPath := filepath.Join(m.sessionDir(agentID), "db", "history.db")
 	store, err := history.OpenStoreReadOnly(historyPath)
 	if err != nil {
 		// Agent may not have created history.db yet (still starting).
@@ -419,10 +419,15 @@ func (m *Manager) Shutdown() {
 // startSession creates a session directory, spawns a worker process,
 // and registers the agent in the manager.
 func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string) (string, error) {
-	// Create session directory and write manifest
+	// Create session directory and standard subdirectories.
 	sessDir := m.sessionDir(id)
 	if err := os.MkdirAll(sessDir, 0700); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
+	}
+	for _, sub := range []string{"db", "scratch", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0700); err != nil {
+			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
+		}
 	}
 
 	manifestPath := filepath.Join(sessDir, "manifest.yaml")
@@ -823,19 +828,19 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 // Path helpers
 
 func (m *Manager) agentDefDir(name string) string {
-	return filepath.Join(m.workspaceDir, "agents", name)
+	return filepath.Join(m.rootDir, "agents", name)
 }
 
 func (m *Manager) sharedSkillsDir() string {
-	return filepath.Join(m.workspaceDir, "skills")
+	return filepath.Join(m.rootDir, "skills")
 }
 
 func (m *Manager) sessionsDir() string {
-	return filepath.Join(m.workspaceDir, "sessions")
+	return filepath.Join(m.rootDir, "sessions")
 }
 
 func (m *Manager) sessionDir(id string) string {
-	return filepath.Join(m.workspaceDir, "sessions", id)
+	return filepath.Join(m.rootDir, "sessions", id)
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

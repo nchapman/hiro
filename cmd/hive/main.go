@@ -24,7 +24,7 @@ import (
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	"github.com/nchapman/hivebot/internal/uidpool"
-	"github.com/nchapman/hivebot/internal/workspace"
+	"github.com/nchapman/hivebot/internal/platform"
 	"github.com/nchapman/hivebot/web"
 )
 
@@ -59,14 +59,14 @@ func run() error {
 			"code", swarmCode)
 	}
 	listenAddr := envOr("HIVE_ADDR", ":8080")
-	workspaceDir := envOr("HIVE_WORKSPACE_DIR", ".")
+	rootDir := envOr("HIVE_ROOT", ".")
 
-	absWorkspaceDir, _ := filepath.Abs(workspaceDir)
-	cpPath := filepath.Join(absWorkspaceDir, "config.yaml")
+	absRootDir, _ := filepath.Abs(rootDir)
+	cpPath := filepath.Join(absRootDir, "config.yaml")
 
-	// Initialize workspace directory structure and seed defaults
-	if err := workspace.Init(workspaceDir, logger); err != nil {
-		return fmt.Errorf("initializing workspace: %w", err)
+	// Initialize platform directory structure and seed defaults
+	if err := platform.Init(rootDir, logger); err != nil {
+		return fmt.Errorf("initializing platform: %w", err)
 	}
 
 	// Load control plane config (secrets, tool policies, providers).
@@ -133,8 +133,8 @@ func run() error {
 			}
 		}
 
-		mgr = agent.NewManager(ctx, workspaceDir, agent.Options{
-			WorkingDir: absWorkspaceDir,
+		mgr = agent.NewManager(ctx, rootDir, agent.Options{
+			WorkingDir: absRootDir,
 		}, cp, logger, hostSocket, nil, pool)
 
 		grpcSrv = grpc.NewServer()

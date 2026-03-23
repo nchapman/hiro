@@ -37,7 +37,7 @@ func TestE2E_ConversationHistory(t *testing.T) {
 
 	// Verify history.db was created.
 	sessDir := sessionDir(t, coordinatorID)
-	if !containerFileExists(t, sessDir+"/history.db") {
+	if !containerFileExists(t, sessDir+"/db/history.db") {
 		t.Error("history.db was not created for persistent agent")
 	}
 }
