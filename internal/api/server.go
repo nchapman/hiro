@@ -9,8 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/nchapman/hivebot/internal/agent"
+	"github.com/nchapman/hivebot/internal/auth"
+	"github.com/nchapman/hivebot/internal/controlplane"
 )
 
 // CommandHandler handles slash commands from the chat interface.
@@ -20,31 +23,64 @@ type CommandHandler interface {
 
 // Server is the HTTP server for the Hive leader.
 type Server struct {
-	manager  *agent.Manager // agent manager (nil = no agents)
-	leaderID string         // ID of the leader agent for chat
-	cmdHandler CommandHandler // control plane command handler (nil = no commands)
-	webFS    fs.FS          // embedded web UI files (nil = no UI serving)
-	mux      *http.ServeMux
-	logger   *slog.Logger
+	manager      *agent.Manager          // agent manager (nil = no agents)
+	leaderID     string                  // ID of the leader agent for chat
+	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
+	cp           *controlplane.ControlPlane // control plane (for auth + settings)
+	sessions     *auth.SessionManager    // session manager for auth
+	startManager func() error            // callback to start the agent manager (set by main)
+	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
+	mux          *http.ServeMux
+	logger       *slog.Logger
 }
 
 // NewServer creates a new API server. If webFS is non-nil, the web UI
 // will be served for any request that doesn't match an API route.
 func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
 	s := &Server{
-		webFS:  webFS,
-		mux:    http.NewServeMux(),
-		logger: logger,
+		webFS:    webFS,
+		mux:      http.NewServeMux(),
+		sessions: auth.NewSessionManager(24 * time.Hour),
+		logger:   logger,
 	}
 	s.routes()
+
+	// Periodically clean up expired sessions.
+	go func() {
+		for {
+			time.Sleep(time.Hour)
+			s.sessions.Cleanup()
+		}
+	}()
+
 	return s
 }
 
 func (s *Server) routes() {
-	// API routes
+	// Auth routes (unauthenticated)
+	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+
+	// Auth routes (authenticated)
+	s.mux.HandleFunc("POST /api/auth/logout", s.requireAuth(s.handleLogout))
+	s.mux.HandleFunc("POST /api/auth/password", s.requireAuth(s.handleChangePassword))
+
+	// Setup routes (unauthenticated, only work when needsSetup is true)
+	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
+	s.mux.HandleFunc("POST /api/setup/test-provider", s.handleTestProvider)
+
+	// Settings routes (authenticated)
+	s.mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleGetSettings))
+	s.mux.HandleFunc("PUT /api/settings", s.requireAuth(s.handleUpdateSettings))
+	s.mux.HandleFunc("GET /api/settings/providers", s.requireAuth(s.handleListProviders))
+	s.mux.HandleFunc("PUT /api/settings/providers/{type}", s.requireAuth(s.handlePutProvider))
+	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))
+	s.mux.HandleFunc("POST /api/settings/providers/{type}/test", s.requireAuth(s.handleTestProviderByType))
+
+	// API routes (authenticated)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/agents", s.handleListAgents)
-	s.mux.HandleFunc("GET /api/agents/{id}/messages", s.handleAgentMessages)
+	s.mux.HandleFunc("GET /api/agents", s.requireAuth(s.handleListAgents))
+	s.mux.HandleFunc("GET /api/agents/{id}/messages", s.requireAuth(s.handleAgentMessages))
 
 	// WebSocket endpoint for web UI chat
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
@@ -84,7 +120,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -137,6 +173,33 @@ func (s *Server) handleAgentMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, msgs)
 }
 
+// isSameOrigin checks that the request's Origin header (if present) matches
+// the server's Host. This provides CSRF protection for unauthenticated
+// mutation endpoints (like setup).
+func isSameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// No Origin header means this is not a cross-origin request (or is
+		// a same-origin request from a non-browser client).
+		return true
+	}
+	// Origin includes scheme (e.g. "http://localhost:8080").
+	// Extract host and compare with the request's Host header.
+	host := r.Host
+	if host == "" {
+		return false
+	}
+	// Strip scheme from origin to get the host portion.
+	originHost := origin
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(originHost, prefix) {
+			originHost = originHost[len(prefix):]
+			break
+		}
+	}
+	return originHost == host
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -145,5 +208,5 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = w.Write(b) // error is unreachable for in-memory responses; log if needed
+	_, _ = w.Write(b)
 }

@@ -164,6 +164,7 @@ const (
 type AgentConfig struct {
 	Name          string
 	Model         string
+	Provider      string    // optional: override default provider (e.g. "openrouter")
 	Mode          AgentMode // ModePersistent (default) or ModeEphemeral
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
@@ -223,6 +224,7 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	agent := AgentConfig{
 		Name:          parsed.Frontmatter.String("name"),
 		Model:         parsed.Frontmatter.String("model"),
+		Provider:      parsed.Frontmatter.String("provider"),
 		Mode:          mode,
 		Description:   parsed.Frontmatter.String("description"),
 		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),

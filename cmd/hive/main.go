@@ -60,9 +60,6 @@ func run() error {
 	}
 	listenAddr := envOr("HIVE_ADDR", ":8080")
 	workspaceDir := envOr("HIVE_WORKSPACE_DIR", ".")
-	providerType := envOr("HIVE_PROVIDER", "anthropic")
-	apiKey := os.Getenv("HIVE_API_KEY")
-	modelOverride := os.Getenv("HIVE_MODEL")
 
 	absWorkspaceDir, _ := filepath.Abs(workspaceDir)
 	cpPath := filepath.Join(absWorkspaceDir, "config.yaml")
@@ -72,7 +69,7 @@ func run() error {
 		return fmt.Errorf("initializing workspace: %w", err)
 	}
 
-	// Load control plane config (secrets, tool policies).
+	// Load control plane config (secrets, tool policies, providers).
 	cp, err := controlplane.Load(cpPath, logger)
 	if err != nil {
 		return fmt.Errorf("loading control plane: %w", err)
@@ -90,18 +87,27 @@ func run() error {
 	srv := api.NewServer(logger, webFS)
 	srv.SetControlPlane(cp)
 
-	// Start agent manager and leader agent if API key is set
+	// Shared state for the manager lifecycle — the manager can be started
+	// at boot (if providers are configured) or later via the setup API.
 	var mgr *agent.Manager
 	var grpcSrv *grpc.Server
-	if apiKey != "" {
-		// Start host gRPC server for agent processes to connect to.
+
+	// startManager boots the agent manager, gRPC server, and coordinator.
+	// It is idempotent — calling it when a manager already exists is a no-op.
+	startManager := func() error {
+		if mgr != nil {
+			return nil // already started
+		}
+		if !cp.IsConfigured() {
+			return fmt.Errorf("no LLM provider configured")
+		}
+
 		hostSocket := filepath.Join(os.TempDir(), fmt.Sprintf("hive-host-%d.sock", os.Getpid()))
 		os.Remove(hostSocket)
 		hostLis, err := net.Listen("unix", hostSocket)
 		if err != nil {
 			return fmt.Errorf("listening on host socket: %w", err)
 		}
-		defer os.Remove(hostSocket)
 
 		// Detect Unix user isolation: enabled iff the hive-agents group exists.
 		var pool *uidpool.Pool
@@ -112,20 +118,15 @@ func run() error {
 			}
 			pool = uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
 			logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
-			// Make host socket accessible by all agent users.
 			if err := os.Chmod(hostSocket, 0777); err != nil {
 				return fmt.Errorf("setting host socket permissions: %w", err)
 			}
 		}
 
 		mgr = agent.NewManager(ctx, workspaceDir, agent.Options{
-			Provider:   agent.ProviderType(providerType),
-			APIKey:     apiKey,
-			Model:      modelOverride,
 			WorkingDir: absWorkspaceDir,
 		}, cp, logger, hostSocket, nil, pool)
 
-		// Start gRPC server — Manager satisfies ipc.HostManager.
 		grpcSrv = grpc.NewServer()
 		grpcipc.NewHostServer(mgr).Register(grpcSrv)
 		go func() {
@@ -153,14 +154,27 @@ func run() error {
 			}
 		}
 		if leaderID != "" {
+			providerType, _, _ := cp.ProviderInfo()
 			logger.Info("leader agent ready",
 				"id", leaderID,
 				"provider", providerType,
 			)
 			srv.SetManager(mgr, leaderID)
 		}
+
+		return nil
+	}
+
+	// Expose the startManager callback so the setup API can trigger it.
+	srv.SetStartManager(startManager)
+
+	// Start agent manager if a provider is already configured.
+	if cp.IsConfigured() {
+		if err := startManager(); err != nil {
+			return fmt.Errorf("starting agent manager: %w", err)
+		}
 	} else {
-		logger.Info("no HIVE_API_KEY set — running without LLM (dashboard only)")
+		logger.Info("no LLM provider configured — waiting for setup via web UI")
 	}
 
 	httpServer := &http.Server{
@@ -188,10 +202,10 @@ func run() error {
 
 	err = httpServer.Shutdown(shutdownCtx)
 	if grpcSrv != nil {
-		grpcSrv.GracefulStop() // stop accepting agent→host calls first
+		grpcSrv.GracefulStop()
 	}
 	if mgr != nil {
-		mgr.Shutdown() // then gracefully terminate all agents
+		mgr.Shutdown()
 	}
 	if saveErr := cp.Save(); saveErr != nil {
 		logger.Error("failed to save control plane config", "error", saveErr)

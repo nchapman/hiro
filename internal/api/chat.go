@@ -9,6 +9,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/nchapman/hivebot/internal/agent"
+	"github.com/nchapman/hivebot/internal/controlplane"
 )
 
 // ChatMessage is a message sent or received over the chat WebSocket.
@@ -24,12 +25,25 @@ func (s *Server) SetManager(m *agent.Manager, leaderID string) {
 	s.leaderID = leaderID
 }
 
-// SetControlPlane sets the command handler for slash commands.
-func (s *Server) SetControlPlane(h CommandHandler) {
-	s.cmdHandler = h
+// SetControlPlane sets the control plane for auth and slash commands.
+func (s *Server) SetControlPlane(cp *controlplane.ControlPlane) {
+	s.cp = cp
+	s.cmdHandler = cp
+}
+
+// SetStartManager sets the callback to start the agent manager.
+// Used by the setup endpoint to boot the manager after initial config.
+func (s *Server) SetStartManager(fn func() error) {
+	s.startManager = fn
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	// Enforce auth on WebSocket upgrade (browser sends cookies automatically).
+	if s.cp != nil && !s.cp.NeedsSetup() && !s.isAuthenticated(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if s.manager == nil || s.leaderID == "" {
 		http.Error(w, "no agent configured", http.StatusServiceUnavailable)
 		return

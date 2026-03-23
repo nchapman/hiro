@@ -1,6 +1,7 @@
 // Package controlplane manages operator-level configuration that agents
-// cannot access or modify. It holds secrets and per-agent tool policies,
-// reads from config.yaml at startup, and writes state back on shutdown.
+// cannot access or modify. It holds secrets, per-agent tool policies,
+// authentication, and LLM provider settings. It reads from config.yaml
+// at startup and writes state back on shutdown.
 package controlplane
 
 import (
@@ -9,20 +10,36 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the on-disk representation of the control plane state.
-type Config struct {
-	Secrets map[string]string      `yaml:"secrets,omitempty"`
-	Agents  map[string]AgentPolicy `yaml:"agents,omitempty"`
+// AuthConfig holds authentication settings.
+type AuthConfig struct {
+	PasswordHash string `yaml:"password_hash,omitempty"`
+}
+
+// ProviderConfig defines an LLM provider. The map key is the provider
+// type (e.g. "anthropic", "openrouter"), so only one entry per type.
+type ProviderConfig struct {
+	APIKey string `yaml:"api_key" json:"api_key"` // provider API key
 }
 
 // AgentPolicy defines operator-level overrides for a named agent.
 type AgentPolicy struct {
 	Tools []string `yaml:"tools,omitempty"`
+}
+
+// Config is the on-disk representation of the control plane state.
+type Config struct {
+	Auth            AuthConfig                `yaml:"auth,omitempty"`
+	Providers       map[string]ProviderConfig `yaml:"providers,omitempty"`       // keyed by provider type
+	DefaultProvider string                    `yaml:"default_provider,omitempty"` // provider type to use by default
+	DefaultModel    string                    `yaml:"default_model,omitempty"`
+	Secrets         map[string]string         `yaml:"secrets,omitempty"`
+	Agents          map[string]AgentPolicy    `yaml:"agents,omitempty"`
 }
 
 // ControlPlane holds operator-level state in memory during runtime.
@@ -43,8 +60,9 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 		path:   path,
 		logger: logger,
 		config: Config{
-			Secrets: make(map[string]string),
-			Agents:  make(map[string]AgentPolicy),
+			Providers: make(map[string]ProviderConfig),
+			Secrets:   make(map[string]string),
+			Agents:    make(map[string]AgentPolicy),
 		},
 	}
 
@@ -61,6 +79,9 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing control plane config: %w", err)
 	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]ProviderConfig)
+	}
 	if cfg.Secrets == nil {
 		cfg.Secrets = make(map[string]string)
 	}
@@ -69,7 +90,8 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 	}
 	cp.config = cfg
 	logger.Info("loaded control plane config", "path", path,
-		"secrets", len(cfg.Secrets), "agent_policies", len(cfg.Agents))
+		"providers", len(cfg.Providers), "secrets", len(cfg.Secrets),
+		"agent_policies", len(cfg.Agents))
 	return cp, nil
 }
 
@@ -80,7 +102,7 @@ func (cp *ControlPlane) Save() error {
 	defer cp.mu.RUnlock()
 
 	// Don't write an empty file if there's nothing to persist.
-	if len(cp.config.Secrets) == 0 && len(cp.config.Agents) == 0 {
+	if !cp.hasContent() {
 		return nil
 	}
 
@@ -102,9 +124,177 @@ func (cp *ControlPlane) Save() error {
 	return nil
 }
 
+// hasContent returns true if there is any state worth persisting.
+// Must be called with mu held.
+func (cp *ControlPlane) hasContent() bool {
+	return cp.config.Auth.PasswordHash != "" ||
+		len(cp.config.Providers) > 0 ||
+		cp.config.DefaultModel != "" ||
+		len(cp.config.Secrets) > 0 ||
+		len(cp.config.Agents) > 0
+}
+
 // Path returns the absolute path to the config file.
 func (cp *ControlPlane) Path() string {
 	return cp.path
+}
+
+// --- Authentication ---
+
+// NeedsSetup returns true if no admin password has been set (first run).
+func (cp *ControlPlane) NeedsSetup() bool {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Auth.PasswordHash == ""
+}
+
+// PasswordHash returns the bcrypt password hash.
+func (cp *ControlPlane) PasswordHash() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Auth.PasswordHash
+}
+
+// SetPasswordHash stores the bcrypt password hash.
+func (cp *ControlPlane) SetPasswordHash(hash string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.Auth.PasswordHash = hash
+}
+
+// --- Providers ---
+
+// IsConfigured returns true if at least one provider with an API key exists.
+func (cp *ControlPlane) IsConfigured() bool {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	for _, p := range cp.config.Providers {
+		if p.APIKey != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ProviderInfo returns the default provider's type and API key.
+// This is the interface the Manager uses to resolve provider config.
+// Uses DefaultProvider if set, otherwise falls back to the alphabetically
+// first configured provider.
+func (cp *ControlPlane) ProviderInfo() (providerType string, apiKey string, ok bool) {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+
+	// Use explicit default if set and configured.
+	if dp := cp.config.DefaultProvider; dp != "" {
+		if p, exists := cp.config.Providers[dp]; exists && p.APIKey != "" {
+			return dp, p.APIKey, true
+		}
+	}
+
+	// Fall back to the alphabetically first provider with an API key.
+	names := make([]string, 0, len(cp.config.Providers))
+	for name := range cp.config.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := cp.config.Providers[name]
+		if p.APIKey != "" {
+			return name, p.APIKey, true
+		}
+	}
+	return "", "", false
+}
+
+// DefaultProvider returns the default provider type.
+func (cp *ControlPlane) DefaultProvider() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.DefaultProvider
+}
+
+// SetDefaultProvider sets the default provider type.
+func (cp *ControlPlane) SetDefaultProvider(providerType string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.DefaultProvider = providerType
+}
+
+// DefaultModel returns the global default model override.
+func (cp *ControlPlane) DefaultModel() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.DefaultModel
+}
+
+// SetDefaultModel sets the global default model override.
+func (cp *ControlPlane) SetDefaultModel(model string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.DefaultModel = model
+}
+
+// ProviderByType returns the API key for a specific provider type.
+// Used by the Manager when an agent overrides the default provider.
+func (cp *ControlPlane) ProviderByType(providerType string) (apiKey string, ok bool) {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	p, exists := cp.config.Providers[providerType]
+	if !exists || p.APIKey == "" {
+		return "", false
+	}
+	return p.APIKey, true
+}
+
+// GetProvider returns a provider by type name.
+func (cp *ControlPlane) GetProvider(providerType string) (ProviderConfig, bool) {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	p, ok := cp.config.Providers[providerType]
+	return p, ok
+}
+
+// SetProvider creates or updates a provider keyed by type.
+func (cp *ControlPlane) SetProvider(providerType string, cfg ProviderConfig) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.Providers[providerType] = cfg
+}
+
+// DeleteProvider removes a provider by type.
+func (cp *ControlPlane) DeleteProvider(providerType string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	delete(cp.config.Providers, providerType)
+	// Clear default if we just deleted it.
+	if cp.config.DefaultProvider == providerType {
+		cp.config.DefaultProvider = ""
+	}
+}
+
+// ListProviders returns a copy of all providers with API keys masked
+// (only last 4 characters visible). Suitable for API responses.
+func (cp *ControlPlane) ListProviders() map[string]ProviderConfig {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	result := make(map[string]ProviderConfig, len(cp.config.Providers))
+	for k, v := range cp.config.Providers {
+		v.APIKey = maskKey(v.APIKey)
+		result[k] = v
+	}
+	return result
+}
+
+// maskKey returns a masked version of an API key showing a short prefix
+// and the last 4 characters (e.g. "sk-or-...4xBq").
+func maskKey(key string) string {
+	if len(key) <= 8 {
+		return strings.Repeat("*", len(key))
+	}
+	// Show up to 6 chars of prefix + ... + last 4 chars.
+	prefix := key[:6]
+	suffix := key[len(key)-4:]
+	return prefix + "..." + suffix
 }
 
 // --- Secrets ---

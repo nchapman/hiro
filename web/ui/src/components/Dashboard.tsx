@@ -1,4 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface WorkerInfo {
   id: string
@@ -13,91 +16,6 @@ interface SwarmStatus {
   active_tasks: number
 }
 
-const styles = {
-  container: {
-    flex: 1,
-    overflow: 'auto',
-    padding: 24,
-  },
-  header: {
-    fontSize: 20,
-    fontWeight: 700,
-    marginBottom: 24,
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: 16,
-    marginBottom: 32,
-  },
-  stat: {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: 16,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 28,
-    fontWeight: 700,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: 600,
-    marginBottom: 12,
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
-  },
-  workerCard: {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 8,
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  workerName: {
-    fontSize: 14,
-    fontWeight: 600,
-  },
-  workerSkills: {
-    display: 'flex',
-    gap: 6,
-  },
-  skillBadge: {
-    fontSize: 11,
-    padding: '2px 8px',
-    borderRadius: 12,
-    background: 'var(--accent-dim)',
-    color: 'var(--accent)',
-  },
-  statusDot: (online: boolean) => ({
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: online ? 'var(--green)' : 'var(--red)',
-    display: 'inline-block',
-    marginRight: 8,
-  }),
-  empty: {
-    color: 'var(--text-muted)',
-    fontSize: 14,
-    fontStyle: 'italic' as const,
-  },
-}
-
 export default function Dashboard() {
   const [status, setStatus] = useState<SwarmStatus | null>(null)
   const [workers, setWorkers] = useState<WorkerInfo[]>([])
@@ -106,13 +24,13 @@ export default function Dashboard() {
     const fetchData = async () => {
       try {
         const [statusRes, workersRes] = await Promise.all([
-          fetch('/api/swarm'),
-          fetch('/api/workers'),
+          fetch("/api/swarm"),
+          fetch("/api/workers"),
         ])
         setStatus(await statusRes.json())
         setWorkers(await workersRes.json())
       } catch {
-        // API not available yet — that's fine during dev
+        /* API not available */
       }
     }
 
@@ -122,47 +40,75 @@ export default function Dashboard() {
   }, [])
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>Swarm Dashboard</div>
+    <ScrollArea className="flex-1">
+      <div className="p-6">
+        <h1 className="mb-6 text-xl font-bold">Swarm Dashboard</h1>
 
-      <div style={styles.grid}>
-        <div style={styles.stat}>
-          <div style={styles.statLabel}>Workers</div>
-          <div style={styles.statValue}>{status?.worker_count ?? '—'}</div>
+        <div className="mb-8 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Workers
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">
+                {status?.worker_count ?? "\u2014"}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Active Tasks
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">
+                {status?.active_tasks ?? "\u2014"}
+              </div>
+            </CardContent>
+          </Card>
         </div>
-        <div style={styles.stat}>
-          <div style={styles.statLabel}>Active Tasks</div>
-          <div style={styles.statValue}>{status?.active_tasks ?? '—'}</div>
-        </div>
-      </div>
 
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>Connected Workers</div>
-        {workers.length === 0 ? (
-          <div style={styles.empty}>No workers connected</div>
-        ) : (
-          workers.map(w => (
-            <div key={w.id} style={styles.workerCard}>
-              <div>
-                <div style={styles.workerName}>
-                  <span style={styles.statusDot(true)} />
-                  {w.agent_name}
-                </div>
-                {w.description && (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    {w.description}
-                  </div>
-                )}
-              </div>
-              <div style={styles.workerSkills}>
-                {w.skills?.map(skill => (
-                  <span key={skill} style={styles.skillBadge}>{skill}</span>
-                ))}
-              </div>
+        <div>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Connected Workers
+          </h2>
+          {workers.length === 0 ? (
+            <p className="text-sm italic text-muted-foreground">
+              No workers connected
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {workers.map((w) => (
+                <Card key={w.id}>
+                  <CardContent className="flex items-center justify-between py-4">
+                    <div>
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        {w.agent_name}
+                      </div>
+                      {w.description && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {w.description}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5">
+                      {w.skills?.map((skill) => (
+                        <Badge key={skill} variant="secondary">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
-          ))
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </ScrollArea>
   )
 }

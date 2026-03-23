@@ -1,181 +1,23 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import type { AgentInfo } from '../App'
+import { useState, useRef, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { SendHorizontal } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { useWebSocket } from "@/hooks/use-websocket"
+import type { ChatWireMessage } from "@/hooks/use-websocket"
+import type { AgentInfo } from "@/App"
 
 interface Message {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: "user" | "assistant" | "system"
   content: string
-}
-
-interface ChatWireMessage {
-  type: 'message' | 'delta' | 'done' | 'error' | 'system'
-  role?: 'user' | 'assistant'
-  content?: string
 }
 
 interface HistoryMessage {
-  role: 'user' | 'assistant'
+  role: "user" | "assistant"
   content: string
   timestamp?: string
-}
-
-function useWebSocket(agentId: string | null) {
-  const wsRef = useRef<WebSocket | null>(null)
-  const [connected, setConnected] = useState(false)
-  const onMessageRef = useRef<(msg: ChatWireMessage) => void>(() => {})
-  const reconnectTimer = useRef<number | undefined>(undefined)
-  const currentAgentId = useRef<string | null>(null)
-
-  const cleanup = useCallback(() => {
-    clearTimeout(reconnectTimer.current)
-    reconnectTimer.current = undefined
-    if (wsRef.current) {
-      wsRef.current.onclose = null // prevent reconnect
-      wsRef.current.close()
-      wsRef.current = null
-    }
-    setConnected(false)
-  }, [])
-
-  const connectWs = useCallback((id: string) => {
-    cleanup()
-    currentAgentId.current = id
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat?agent_id=${encodeURIComponent(id)}`)
-
-    ws.onopen = () => setConnected(true)
-    ws.onclose = () => {
-      setConnected(false)
-      // Auto-reconnect after 3 seconds if still targeting same agent
-      if (currentAgentId.current === id) {
-        reconnectTimer.current = window.setTimeout(() => connectWs(id), 3000)
-      }
-    }
-    ws.onmessage = (e) => {
-      try {
-        onMessageRef.current(JSON.parse(e.data))
-      } catch { /* ignore malformed messages */ }
-    }
-
-    wsRef.current = ws
-  }, [cleanup])
-
-  useEffect(() => {
-    if (agentId) {
-      connectWs(agentId)
-    } else {
-      cleanup()
-    }
-    return cleanup
-  }, [agentId, connectWs, cleanup])
-
-  const send = useCallback((msg: ChatWireMessage) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(msg))
-    }
-  }, [])
-
-  const setOnMessage = useCallback((handler: (msg: ChatWireMessage) => void) => {
-    onMessageRef.current = handler
-  }, [])
-
-  return { send, connected, setOnMessage }
-}
-
-const styles = {
-  container: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  header: {
-    padding: '12px 20px',
-    borderBottom: '1px solid var(--border)',
-    fontSize: 14,
-    color: 'var(--text-muted)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 0,
-  },
-  headerName: {
-    color: 'var(--text)',
-    fontWeight: 600,
-  },
-  statusDot: (connected: boolean) => ({
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-    background: connected ? 'var(--green)' : 'var(--red)',
-  }),
-  messages: {
-    flex: 1,
-    overflowY: 'auto' as const,
-    padding: 20,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 16,
-  },
-  message: (role: 'user' | 'assistant' | 'system') => ({
-    maxWidth: role === 'system' ? '90%' : '70%',
-    alignSelf: role === 'user' ? 'flex-end' as const : role === 'system' ? 'center' as const : 'flex-start' as const,
-    background: role === 'user' ? 'var(--accent-dim)' : role === 'system' ? 'var(--bg-surface, var(--bg-elevated))' : 'var(--bg-elevated)',
-    padding: role === 'system' ? '8px 14px' : '10px 14px',
-    borderRadius: role === 'system' ? 8 : 12,
-    fontSize: role === 'system' ? 13 : 14,
-    lineHeight: 1.5,
-    whiteSpace: 'pre-wrap' as const,
-    color: role === 'system' ? 'var(--text-muted)' : undefined,
-    border: role === 'system' ? '1px solid var(--border)' : undefined,
-  }),
-  inputArea: {
-    padding: 16,
-    borderTop: '1px solid var(--border)',
-    display: 'flex',
-    gap: 8,
-    flexShrink: 0,
-  },
-  input: {
-    flex: 1,
-    padding: '10px 14px',
-    background: 'var(--bg-elevated)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    color: 'var(--text)',
-    fontSize: 14,
-    outline: 'none',
-    resize: 'none' as const,
-    fontFamily: 'inherit',
-  },
-  send: (disabled: boolean) => ({
-    padding: '10px 20px',
-    background: disabled ? 'var(--bg-elevated)' : 'var(--accent)',
-    color: disabled ? 'var(--text-muted)' : '#000',
-    border: 'none',
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: disabled ? 'default' : 'pointer',
-  }),
-  empty: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: 'var(--text-muted)',
-    fontSize: 14,
-  },
-  noAgent: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: 'var(--text-muted)',
-    fontSize: 14,
-  },
 }
 
 interface ChatProps {
@@ -184,7 +26,7 @@ interface ChatProps {
 
 export default function Chat({ agent }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const messagesEnd = useRef<HTMLDivElement>(null)
@@ -208,71 +50,86 @@ export default function Chat({ agent }: ChatProps) {
     streamingMsgId.current = null
     setLoadingHistory(true)
 
-    fetch(`/api/agents/${encodeURIComponent(agent.id)}/messages`, { signal: ac.signal })
-      .then(res => {
+    fetch(`/api/agents/${encodeURIComponent(agent.id)}/messages`, {
+      signal: ac.signal,
+    })
+      .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
       })
       .then((history: HistoryMessage[]) => {
         if (agentGeneration.current !== gen) return
-        setMessages(history.map(m => ({
-          id: crypto.randomUUID(),
-          role: m.role,
-          content: m.content,
-        })))
+        setMessages(
+          history.map((m) => ({
+            id: crypto.randomUUID(),
+            role: m.role,
+            content: m.content,
+          }))
+        )
       })
-      .catch(err => {
-        if (err.name === 'AbortError') return
+      .catch((err: Error) => {
+        if (err.name === "AbortError") return
         if (agentGeneration.current !== gen) return
-        setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: 'Failed to load conversation history.' }])
+        setMessages([
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "Failed to load conversation history.",
+          },
+        ])
       })
       .finally(() => {
         if (agentGeneration.current === gen) setLoadingHistory(false)
       })
 
-    // Set up WebSocket message handler with the same generation guard
     setOnMessage((msg: ChatWireMessage) => {
       if (agentGeneration.current !== gen) return
       switch (msg.type) {
-        case 'delta': {
+        case "delta": {
           if (!streamingMsgId.current) {
             const id = crypto.randomUUID()
             streamingMsgId.current = id
-            setMessages(prev => [...prev, {
-              id,
-              role: 'assistant',
-              content: msg.content || '',
-            }])
+            setMessages((prev) => [
+              ...prev,
+              { id, role: "assistant", content: msg.content || "" },
+            ])
           } else {
             const id = streamingMsgId.current
-            setMessages(prev =>
-              prev.map(m => m.id === id
-                ? { ...m, content: m.content + (msg.content || '') }
-                : m
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id
+                  ? { ...m, content: m.content + (msg.content || "") }
+                  : m
               )
             )
           }
           break
         }
-        case 'done':
+        case "done":
           streamingMsgId.current = null
           setStreaming(false)
           break
-        case 'system':
-          setMessages(prev => [...prev, {
-            id: crypto.randomUUID(),
-            role: 'system',
-            content: msg.content || '',
-          }])
+        case "system":
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: msg.content || "",
+            },
+          ])
           break
-        case 'error':
+        case "error":
           streamingMsgId.current = null
           setStreaming(false)
-          setMessages(prev => [...prev, {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: `Error: ${msg.content}`,
-          }])
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: `Error: ${msg.content}`,
+            },
+          ])
           break
       }
     })
@@ -284,9 +141,11 @@ export default function Chat({ agent }: ChatProps) {
   useEffect(() => {
     const container = messagesContainer.current
     if (!container) return
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+    const isNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight <
+      100
     if (isNearBottom) {
-      messagesEnd.current?.scrollIntoView({ behavior: 'smooth' })
+      messagesEnd.current?.scrollIntoView({ behavior: "smooth" })
     }
   }, [messages])
 
@@ -294,18 +153,17 @@ export default function Chat({ agent }: ChatProps) {
     const text = input.trim()
     if (!text || streaming || !connected) return
 
-    setMessages(prev => [...prev, {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-    }])
-    setInput('')
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", content: text },
+    ])
+    setInput("")
     setStreaming(true)
-    send({ type: 'message', content: text })
+    send({ type: "message", content: text })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
@@ -313,56 +171,85 @@ export default function Chat({ agent }: ChatProps) {
 
   if (!agent) {
     return (
-      <div style={styles.noAgent}>
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         Select an agent from the sidebar to start chatting.
       </div>
     )
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <span style={styles.statusDot(connected)} />
-        <span style={styles.headerName}>{agent.name}</span>
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex shrink-0 items-center gap-2 border-b px-5 py-3 text-sm text-muted-foreground">
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            connected ? "bg-green-500" : "bg-destructive"
+          )}
+        />
+        <span className="font-semibold text-foreground">{agent.name}</span>
         {agent.description && <span>— {agent.description}</span>}
         {!connected && <span>(connecting...)</span>}
       </div>
+
+      {/* Messages */}
       {loadingHistory ? (
-        <div style={styles.empty}>Loading history...</div>
-      ) : messages.length === 0 ? (
-        <div style={styles.empty}>Send a message to start a conversation.</div>
-      ) : (
-        <div style={styles.messages} ref={messagesContainer}>
-          {messages.map(msg => (
-            <div key={msg.id} style={styles.message(msg.role)}>
-              {msg.content || (msg.role === 'assistant' ? '...' : '')}
-            </div>
-          ))}
-          {streaming && !streamingMsgId.current && (
-            <div style={styles.message('assistant')}>
-              <span style={{ color: 'var(--text-muted)' }}>Thinking...</span>
-            </div>
-          )}
-          <div ref={messagesEnd} />
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          Loading history...
         </div>
+      ) : messages.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          Send a message to start a conversation.
+        </div>
+      ) : (
+        <ScrollArea className="flex-1" ref={messagesContainer}>
+          <div className="flex flex-col gap-4 p-5">
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={cn(
+                  "max-w-[70%] whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                  msg.role === "user" &&
+                    "self-end bg-primary text-primary-foreground",
+                  msg.role === "assistant" && "self-start bg-muted",
+                  msg.role === "system" &&
+                    "max-w-[90%] self-center rounded-lg border px-3.5 py-2 text-xs text-muted-foreground"
+                )}
+              >
+                {msg.content || (msg.role === "assistant" ? "..." : "")}
+              </div>
+            ))}
+            {streaming && !streamingMsgId.current && (
+              <div className="max-w-[70%] self-start whitespace-pre-wrap rounded-xl bg-muted px-3.5 py-2.5 text-sm">
+                <span className="text-muted-foreground">Thinking...</span>
+              </div>
+            )}
+            <div ref={messagesEnd} />
+          </div>
+        </ScrollArea>
       )}
-      <div style={styles.inputArea}>
-        <textarea
-          style={styles.input}
+
+      {/* Input */}
+      <div className="flex shrink-0 gap-2 border-t p-4">
+        <Textarea
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={connected ? `Message ${agent.name}...` : 'Connecting...'}
+          placeholder={
+            connected ? `Message ${agent.name}...` : "Connecting..."
+          }
           disabled={!connected}
           rows={1}
+          className="min-h-[40px] flex-1 resize-none"
         />
-        <button
-          style={styles.send(streaming || !connected)}
+        <Button
           onClick={handleSend}
           disabled={streaming || !connected}
+          size="icon"
+          className="h-10 w-10 shrink-0"
         >
-          {streaming ? '...' : 'Send'}
-        </button>
+          <SendHorizontal className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   )

@@ -73,6 +73,9 @@ type ControlPlane interface {
 	AgentTools(name string) (tools []string, ok bool)
 	SecretNames() []string
 	SecretEnv() []string
+	ProviderInfo() (providerType string, apiKey string, ok bool)
+	ProviderByType(providerType string) (apiKey string, ok bool)
+	DefaultModel() string
 }
 
 // NewManager creates a new agent manager. workspaceDir is the root of the
@@ -489,11 +492,40 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		}
 	}
 
-	// Build spawn config for the worker process.
+	// Resolve provider from control plane (dynamic — picks up latest config).
+	// When cp is nil (tests), provider/apiKey stay empty — the test worker
+	// factory doesn't need them.
+	var provider, apiKey string
+	if m.cp != nil {
+		if cfg.Provider != "" {
+			// Agent specifies a provider override — look it up directly.
+			var ok bool
+			apiKey, ok = m.cp.ProviderByType(cfg.Provider)
+			if !ok {
+				return "", fmt.Errorf("agent %q requests provider %q which is not configured", cfg.Name, cfg.Provider)
+			}
+			provider = cfg.Provider
+		} else {
+			// Use the default provider.
+			var ok bool
+			provider, apiKey, ok = m.cp.ProviderInfo()
+			if !ok {
+				return "", fmt.Errorf("no LLM provider configured")
+			}
+		}
+	}
+
+	// Resolve model: agent config → control plane default → empty (provider default).
 	model := cfg.Model
+	if m.cp != nil {
+		if dm := m.cp.DefaultModel(); dm != "" && model == "" {
+			model = dm
+		}
+	}
 	if m.opts.Model != "" {
 		model = m.opts.Model
 	}
+
 	spawnCfg := ipc.SpawnConfig{
 		SessionID:      id,
 		AgentName:      cfg.Name,
@@ -505,8 +537,8 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		AgentDefDir:    m.agentDefDir(cfg.Name),
 		SharedSkillDir: m.sharedSkillsDir(),
 		HostSocket:     m.hostSocket,
-		Provider:       string(m.opts.Provider),
-		APIKey:         m.opts.APIKey,
+		Provider:       provider,
+		APIKey:         apiKey,
 		Model:          model,
 		UID:            uid,
 		GID:            gid,

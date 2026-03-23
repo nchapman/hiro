@@ -1,106 +1,126 @@
-import type { AgentInfo } from '../App'
+import { Separator } from "@/components/ui/separator"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { Settings, Sun, Moon, Monitor } from "lucide-react"
+import { useTheme } from "@/hooks/use-theme"
+import { cn } from "@/lib/utils"
+import type { AgentInfo } from "@/App"
 
 interface SidebarProps {
   agents: AgentInfo[]
   selectedId: string | null
   onSelect: (id: string) => void
+  view: "chat" | "settings"
+  onViewChange: (view: "chat" | "settings") => void
 }
 
-const styles = {
-  sidebar: {
-    width: 220,
-    minWidth: 220,
-    background: 'var(--bg-surface)',
-    borderRight: '1px solid var(--border)',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    overflow: 'hidden',
-  },
-  logo: {
-    padding: '16px 16px 16px',
-    borderBottom: '1px solid var(--border)',
-  },
-  logoText: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: 'var(--accent)',
-    letterSpacing: '-0.5px',
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
-    padding: '16px 16px 6px',
-  },
-  agentList: {
-    flex: 1,
-    overflow: 'auto',
-    padding: '0 8px 8px',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 2,
-  },
-  agentItem: (active: boolean) => ({
-    padding: '8px 12px',
-    borderRadius: 6,
-    cursor: 'pointer',
-    fontSize: 14,
-    fontWeight: active ? 600 : 400,
-    background: active ? 'var(--bg-elevated)' : 'transparent',
-    color: active ? 'var(--text)' : 'var(--text-muted)',
-    border: 'none',
-    textAlign: 'left' as const,
-    transition: 'background 0.15s',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  }),
-  modeDot: (mode: string) => ({
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-    background: mode === 'persistent' ? 'var(--green)' : 'var(--text-muted)',
-    flexShrink: 0,
-  }),
-  agentName: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-  },
-  empty: {
-    padding: '8px 16px',
-    fontSize: 13,
-    color: 'var(--text-muted)',
-    fontStyle: 'italic' as const,
-  },
-}
+const themeIcons = {
+  light: Sun,
+  dark: Moon,
+  system: Monitor,
+} as const
 
-export default function Sidebar({ agents, selectedId, onSelect }: SidebarProps) {
+const themeOrder = ["system", "light", "dark"] as const
+
+export default function Sidebar({
+  agents,
+  selectedId,
+  onSelect,
+  view,
+  onViewChange,
+}: SidebarProps) {
+  const { theme, setTheme } = useTheme()
+  const ThemeIcon = themeIcons[theme]
+
+  const cycleTheme = () => {
+    const idx = themeOrder.indexOf(theme)
+    setTheme(themeOrder[(idx + 1) % themeOrder.length])
+  }
+
   return (
-    <aside style={styles.sidebar}>
-      <div style={styles.logo}>
-        <span style={styles.logoText}>hive</span>
+    <aside className="flex h-full w-56 min-w-56 flex-col border-r bg-card">
+      <div className="px-4 py-4">
+        <button
+          onClick={() => onViewChange("chat")}
+          className="text-xl font-bold tracking-tight text-primary cursor-pointer"
+        >
+          hive
+        </button>
       </div>
-      <div style={styles.sectionLabel}>Agents</div>
-      <div style={styles.agentList}>
+      <Separator />
+      <div className="px-4 pt-4 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Agents
+      </div>
+      <ScrollArea className="flex-1 px-2">
         {agents.length === 0 ? (
-          <div style={styles.empty}>No agents running</div>
+          <p className="px-2 py-2 text-sm italic text-muted-foreground">
+            No agents running
+          </p>
         ) : (
-          agents.map(agent => (
-            <button
-              key={agent.id}
-              style={styles.agentItem(agent.id === selectedId)}
-              onClick={() => onSelect(agent.id)}
-              title={agent.description || agent.name}
-            >
-              <span style={styles.modeDot(agent.mode)} />
-              <span style={styles.agentName}>{agent.name}</span>
-            </button>
-          ))
+          <div className="flex flex-col gap-0.5">
+            {agents.map((agent) => (
+              <Tooltip key={agent.id}>
+                <TooltipTrigger
+                  onClick={() => {
+                    onSelect(agent.id)
+                    onViewChange("chat")
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-left transition-colors cursor-pointer",
+                    agent.id === selectedId && view === "chat"
+                      ? "bg-accent font-semibold text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      agent.mode === "persistent"
+                        ? "bg-green-500"
+                        : "bg-muted-foreground"
+                    )}
+                  />
+                  <span className="truncate">{agent.name}</span>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {agent.description || agent.name}
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
         )}
+      </ScrollArea>
+      <Separator />
+      <div className="flex items-center gap-1 p-2">
+        <Tooltip>
+          <TooltipTrigger
+            onClick={() => onViewChange("settings")}
+            className={cn(
+              "inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors",
+              view === "settings"
+                ? "bg-secondary text-secondary-foreground"
+                : "hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            <Settings className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            onClick={cycleTheme}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <ThemeIcon className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            Theme: {theme}
+          </TooltipContent>
+        </Tooltip>
       </div>
     </aside>
   )

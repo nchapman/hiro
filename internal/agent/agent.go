@@ -420,6 +420,22 @@ func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string, s
 	return strings.TrimSpace(p.String())
 }
 
+// TestProviderConnection validates a provider's API key by sending a minimal
+// request. Returns nil if the connection works, or an error describing the failure.
+func TestProviderConnection(ctx context.Context, provider ProviderType, apiKey, model string) error {
+	lm, err := CreateLanguageModel(ctx, provider, apiKey, model)
+	if err != nil {
+		return err
+	}
+
+	maxTokens := int64(1)
+	_, err = lm.Generate(ctx, fantasy.Call{
+		Prompt:          fantasy.Prompt{fantasy.NewUserMessage("Hi")},
+		MaxOutputTokens: &maxTokens,
+	})
+	return err
+}
+
 // CreateLanguageModel creates a language model for the given provider and model name.
 func CreateLanguageModel(ctx context.Context, provider ProviderType, apiKey, model string) (fantasy.LanguageModel, error) {
 	switch provider {
