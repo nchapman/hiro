@@ -6,14 +6,48 @@ RUN npm ci
 COPY web/ui/ ./
 RUN npm run build
 
-# Build Go binary
-FROM golang:1.26-alpine AS build
+# Go source + dependencies (shared between build and test stages)
+FROM golang:1.26 AS go-base
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+
+# Build Go binary
+FROM go-base AS build
 COPY --from=web /app/web/ui/dist ./web/ui/dist
 RUN CGO_ENABLED=0 go build -o /hive ./cmd/hive
+
+# Test runner — docker compose run --rm --build test
+FROM go-base AS test
+
+# Stub web UI so go:embed is satisfied without building the frontend.
+RUN mkdir -p web/ui/dist && echo '<!doctype html>' > web/ui/dist/index.html
+
+# Create agent user pool for isolation tests.
+RUN groupadd -g 10000 hive-agents \
+    && for i in $(seq 0 63); do \
+        uid=$((10000 + i)); \
+        useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
+    done
+
+# Install mise — same env vars as runtime stage.
+ENV MISE_DATA_DIR=/opt/mise
+ENV MISE_CONFIG_DIR=/opt/mise/config
+ENV MISE_CACHE_DIR=/opt/mise/cache
+ENV MISE_GLOBAL_CONFIG_FILE=/opt/mise/config/config.toml
+ENV MISE_INSTALL_PATH=/usr/local/bin/mise
+ENV PATH="/opt/mise/shims:${PATH}"
+RUN curl -fsSL https://mise.run | sh \
+    && mise use -g node@24 python@3.12 \
+    && chgrp -R hive-agents /opt/mise \
+    && chmod -R g+rwX /opt/mise \
+    && find /opt/mise -type d -exec chmod g+s {} +
+
+# Pre-build the binary so tests that spawn agent processes have it available.
+RUN go build -o /usr/local/bin/hive ./cmd/hive
+
+CMD ["go", "test", "./...", "-v", "-count=1"]
 
 # Runtime
 FROM ubuntu:24.04

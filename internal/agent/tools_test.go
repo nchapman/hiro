@@ -273,6 +273,9 @@ func TestUseSkill_FileReadError(t *testing.T) {
 }
 
 func TestUseSkill_FileReadError_WithConfinement(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
 	dir := t.TempDir()
 	skillsDir := filepath.Join(dir, "skills")
 	os.MkdirAll(skillsDir, 0755)

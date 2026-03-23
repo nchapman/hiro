@@ -3,6 +3,7 @@ services:
     build: .
     image: hive:latest
     restart: unless-stopped
+    init: true
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
@@ -12,13 +13,11 @@ services:
     environment:
       - HIVE_ADDR=:8080
       - HIVE_WORKSPACE_DIR=/workspace
-
-  test:
-    build:
-      context: .
-      dockerfile: Dockerfile.testing
-    init: true
-    profiles: ["test"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
 
 # WARNING: 'docker compose down -v' destroys all agent state (history, memory, todos).
 volumes:

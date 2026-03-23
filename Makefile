@@ -7,13 +7,15 @@ build: web
 	go build -o $(BINARY) ./cmd/hive
 
 test:
-	docker compose run --rm --build test
+	docker build --target test -t hive-test .
+	docker run --rm --init hive-test
 
 test-local:
 	go test ./... -v -count=1
 
 test-isolation:
-	docker compose run --rm --build test go test ./internal/agent/... -tags=isolation -v -count=1
+	docker build --target test -t hive-test .
+	docker run --rm --init hive-test go test ./internal/agent/... -tags=isolation -v -count=1
 
 test-online:
 	@if [ -z "$$HIVE_API_KEY" ]; then echo "HIVE_API_KEY must be set"; exit 1; fi
@@ -30,7 +32,8 @@ test-online:
 	exit $$EXIT
 
 check:
-	docker compose run --rm --build test sh -c "go test ./... -v -count=1 && go vet ./..."
+	docker build --target test -t hive-test .
+	docker run --rm --init hive-test sh -c "go test ./... -v -count=1 && go vet ./..."
 
 clean:
 	rm -f $(BINARY)
