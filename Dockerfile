@@ -60,7 +60,7 @@ ENV PATH="/opt/mise/shims:${PATH}"
 RUN curl -fsSL https://mise.run | sh
 
 # Install runtimes and tools via mise, plus common global packages.
-RUN mise use -g node@24 python@3.12 uv@latest \
+RUN mise use -g node@24 python@3.12 uv@latest ruff@latest \
     && npm install -g \
         typescript \
         ts-node \
@@ -71,9 +71,8 @@ RUN mise use -g node@24 python@3.12 uv@latest \
         pyyaml \
         beautifulsoup4 \
         pytest \
-        ruff \
         httpx \
-    && node --version && python3 --version && which eslint && which ruff
+    && node --version && python3 --version && which eslint && ruff --version
 
 # Make tool installations group-writable so agent users (hive-agents) can
 # install additional tools at runtime via mise. Setgid ensures new files

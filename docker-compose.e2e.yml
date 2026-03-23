@@ -1,0 +1,18 @@
+# E2E test overlay — run with: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up hive-e2e
+services:
+  hive-e2e:
+    build: .
+    ports:
+      - "0:8080" # random host port to avoid conflicts
+    environment:
+      - HIVE_API_KEY
+      - HIVE_PROVIDER=${HIVE_PROVIDER:-anthropic}
+      - HIVE_MODEL=${HIVE_MODEL:-}
+      - HIVE_ADDR=:8080
+      - HIVE_WORKSPACE_DIR=/workspace
+    volumes:
+      - e2e-workspace:/workspace
+    init: true # clean up zombie agent processes
+
+volumes:
+  e2e-workspace:

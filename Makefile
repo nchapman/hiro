@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation check clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation test-online check clean web build-dev docker docker-up docker-down proto
 
 BINARY := hive
 PKG := github.com/nchapman/hivebot
@@ -14,6 +14,20 @@ test-local:
 
 test-isolation:
 	docker compose run --rm --build test go test ./internal/agent/... -tags=isolation -v -count=1
+
+test-online:
+	@if [ -z "$$HIVE_API_KEY" ]; then echo "HIVE_API_KEY must be set"; exit 1; fi
+	@# Build production image and start hive server
+	docker compose -f docker-compose.yml -f docker-compose.e2e.yml build hive-e2e
+	docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d hive-e2e
+	@# Discover the mapped port and run e2e tests on the host
+	@PORT=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml port hive-e2e 8080 | cut -d: -f2); \
+	HIVE_E2E_URL=http://localhost:$$PORT \
+	HIVE_E2E_CONTAINER=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml ps -q hive-e2e) \
+	go test ./tests/e2e/... -tags=e2e -v -count=1 -timeout=10m; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.yml -f docker-compose.e2e.yml down -v; \
+	exit $$EXIT
 
 check:
 	docker compose run --rm --build test sh -c "go test ./... -v -count=1 && go vet ./..."
