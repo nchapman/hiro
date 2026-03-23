@@ -141,9 +141,10 @@ Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
 2. `## Identity` + `identity.md` (persistent agents only)
 3. `## Memories` + `memory.md` (persistent agents only)
 4. `## Current Tasks` + formatted todos (persistent agents only)
-5. `agent.md` body (main instructions)
-6. `## Tool Notes` + `tools.md` (if present)
-7. `## Skills` + XML listing of skill name/description/path (if present)
+5. `## Available Secrets` + secret names (if any)
+6. `agent.md` body (main instructions)
+7. `## Tool Notes` + `tools.md` (if present)
+8. `## Skills` + skill name/description listing (if present)
 
 Skills are re-scanned from disk each turn (like memory and identity), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `read_file`.
 

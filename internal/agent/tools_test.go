@@ -150,7 +150,7 @@ func TestUseSkill_ReturnsBody(t *testing.T) {
 			{Name: "test-skill", Description: "A test skill.", Path: skillPath},
 		},
 	}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 	resp := callTool(t, tool, `{"name": "test-skill"}`)
 	if resp.IsError {
 		t.Fatalf("unexpected error: %s", resp.Content)
@@ -183,7 +183,7 @@ func TestUseSkill_DirectorySkillListsResources(t *testing.T) {
 			{Name: "my-skill", Description: "Desc.", Path: skillPath},
 		},
 	}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 	resp := callTool(t, tool, `{"name": "my-skill"}`)
 	if resp.IsError {
 		t.Fatalf("unexpected error: %s", resp.Content)
@@ -214,7 +214,7 @@ func TestUseSkill_FlatSkillNoBundledResources(t *testing.T) {
 			{Name: "simple", Description: "Simple.", Path: skillPath},
 		},
 	}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 	resp := callTool(t, tool, `{"name": "simple"}`)
 	if resp.IsError {
 		t.Fatalf("unexpected error: %s", resp.Content)
@@ -226,7 +226,7 @@ func TestUseSkill_FlatSkillNoBundledResources(t *testing.T) {
 
 func TestUseSkill_EmptyName(t *testing.T) {
 	cfg := &config.AgentConfig{}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 	resp := callTool(t, tool, `{"name": ""}`)
 	if !resp.IsError {
 		t.Fatal("expected error for empty name")
@@ -243,7 +243,7 @@ func TestUseSkill_NotFound(t *testing.T) {
 			{Name: "deploy", Description: "Deploy."},
 		},
 	}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 	resp := callTool(t, tool, `{"name": "nonexistent"}`)
 	if !resp.IsError {
 		t.Fatal("expected error for missing skill")
@@ -262,10 +262,35 @@ func TestUseSkill_FileReadError(t *testing.T) {
 			{Name: "broken", Description: "Broken.", Path: "/nonexistent/skill.md"},
 		},
 	}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 	resp := callTool(t, tool, `{"name": "broken"}`)
 	if !resp.IsError {
 		t.Fatal("expected error for missing file")
+	}
+	if !strings.Contains(resp.Content, "error reading") {
+		t.Errorf("expected read error, got %q", resp.Content)
+	}
+}
+
+func TestUseSkill_FileReadError_WithConfinement(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	os.MkdirAll(skillsDir, 0755)
+
+	// Create a file with no read permissions to trigger a read error
+	// after the confinement check passes.
+	unreadablePath := filepath.Join(skillsDir, "unreadable.md")
+	os.WriteFile(unreadablePath, []byte("---\nname: unreadable\n---\nBody."), 0000)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "unreadable", Description: "Unreadable.", Path: unreadablePath},
+		},
+	}
+	tool := buildSkillTool(cfg, []string{realPath(t, skillsDir)})
+	resp := callTool(t, tool, `{"name": "unreadable"}`)
+	if !resp.IsError {
+		t.Fatal("expected error for unreadable file within allowed dir")
 	}
 	if !strings.Contains(resp.Content, "error reading") {
 		t.Errorf("expected read error, got %q", resp.Content)
@@ -282,7 +307,7 @@ func TestUseSkill_SeesUpdatedSkills(t *testing.T) {
 			{Name: "a", Description: "Skill A.", Path: skillPath},
 		},
 	}
-	tool := buildSkillTool(cfg)
+	tool := buildSkillTool(cfg, nil)
 
 	// Mutate the config (simulating re-scan)
 	skillPath2 := filepath.Join(dir, "b.md")
@@ -298,6 +323,93 @@ func TestUseSkill_SeesUpdatedSkills(t *testing.T) {
 	}
 	if !strings.Contains(resp.Content, "skill B body") {
 		t.Errorf("expected skill B body, got %q", resp.Content)
+	}
+}
+
+// --- path confinement tests ---
+
+// realPath resolves symlinks in a path (e.g. macOS /var -> /private/var).
+func realPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path // not yet on disk, return as-is
+	}
+	return resolved
+}
+
+func TestUseSkill_PathConfinement(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	os.MkdirAll(skillsDir, 0755)
+
+	skillPath := filepath.Join(skillsDir, "ok.md")
+	os.WriteFile(skillPath, []byte("---\nname: ok\ndescription: OK.\n---\n\nAllowed."), 0644)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "ok", Description: "OK.", Path: skillPath},
+		},
+	}
+	// Resolve symlinks on allowedDirs (mirrors production behavior in agent.go)
+	tool := buildSkillTool(cfg, []string{realPath(t, skillsDir)})
+	resp := callTool(t, tool, `{"name": "ok"}`)
+	if resp.IsError {
+		t.Fatalf("expected success for skill under allowed dir, got %q", resp.Content)
+	}
+	if !strings.Contains(resp.Content, "Allowed.") {
+		t.Errorf("expected skill body, got %q", resp.Content)
+	}
+}
+
+func TestUseSkill_PathConfinementRejectsOutsidePath(t *testing.T) {
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	skillsDir := filepath.Join(dir, "skills")
+	os.MkdirAll(skillsDir, 0755)
+
+	// Skill file is outside the allowed directory
+	outsidePath := filepath.Join(outsideDir, "evil.md")
+	os.WriteFile(outsidePath, []byte("---\nname: evil\ndescription: Evil.\n---\n\nSneaky."), 0644)
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "evil", Description: "Evil.", Path: outsidePath},
+		},
+	}
+	tool := buildSkillTool(cfg, []string{realPath(t, skillsDir)})
+	resp := callTool(t, tool, `{"name": "evil"}`)
+	if !resp.IsError {
+		t.Fatal("expected error for skill outside allowed directory")
+	}
+	if !strings.Contains(resp.Content, "outside allowed") {
+		t.Errorf("expected 'outside allowed' error, got %q", resp.Content)
+	}
+}
+
+func TestIsUnderAllowedDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		dirs    []string
+		allowed bool
+	}{
+		{"empty dirs allows all", "/any/path", nil, true},
+		{"under allowed dir", "/a/b/skill.md", []string{"/a/b"}, true},
+		{"not under any dir", "/c/d/skill.md", []string{"/a/b"}, false},
+		{"exact dir not allowed", "/a/b", []string{"/a/b"}, false},
+		{"skip empty dir entries", "/a/b/skill.md", []string{"", "/a/b"}, true},
+		{"multiple dirs, second matches", "/x/y/skill.md", []string{"/a/b", "/x/y"}, true},
+		{"all empty dir entries allows all", "/any/path", []string{"", ""}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isUnderAllowedDir(tc.path, tc.dirs)
+			if got != tc.allowed {
+				t.Errorf("isUnderAllowedDir(%q, %v) = %v, want %v", tc.path, tc.dirs, got, tc.allowed)
+			}
+		})
 	}
 }
 

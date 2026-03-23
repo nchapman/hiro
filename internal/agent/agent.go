@@ -34,9 +34,10 @@ type Agent struct {
 	config         config.AgentConfig
 	agent          fantasy.Agent
 	workingDir     string
-	sessionDir     string // for re-reading memory.md, identity.md at runtime
-	agentDefDir    string // agent definition directory (for re-scanning skills)
-	sharedSkillDir string // workspace-level shared skills directory
+	sessionDir     string               // for re-reading memory.md, identity.md at runtime
+	agentDefDir    string               // agent definition directory (for re-scanning skills)
+	sharedSkillDir string               // workspace-level shared skills directory
+	lastShared     []config.SkillConfig // last successfully loaded shared skills (for error retention)
 	bgMgr          *tools.BackgroundJobManager
 	secretNamesFn  func() []string // returns secret names for system prompt (nil if no control plane)
 	logger         *slog.Logger
@@ -55,6 +56,7 @@ type Options struct {
 	SharedSkillDir string                // workspace-level shared skills directory
 	LM             fantasy.LanguageModel // if set, bypasses provider creation (for testing)
 	AllowedTools   map[string]bool       // effective tool set; tools not in this map are filtered out
+	HasSkills      bool                  // whether use_skill should be registered (set by manager)
 	SecretEnvFn    func() []string       // returns secret env vars for bash injection
 	SecretNamesFn  func() []string       // returns secret names for system prompt
 }
@@ -113,9 +115,32 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 		agentTools = filtered
 	}
 
-	// Add use_skill tool if this agent can have skills
-	if a.agentDefDir != "" || len(cfg.Skills) > 0 {
-		agentTools = append(agentTools, buildSkillTool(&a.config))
+	// Add use_skill tool if this agent can have skills.
+	// use_skill is added after the AllowedTools filter because it is not a
+	// declared built-in tool — it is registered when HasSkills is true
+	// (production, set by the manager from EffectiveTools) or when skills
+	// are present in config (tests where AllowedTools is nil). If AllowedTools
+	// is set, HasSkills must also be set for use_skill to appear.
+	hasSkills := opts.HasSkills || len(cfg.Skills) > 0
+	if hasSkills {
+		// Resolve symlinks at construction time so the confinement check
+		// in buildSkillTool compares real paths against real boundaries.
+		var allowedDirs []string
+		if a.agentDefDir != "" {
+			dir := filepath.Join(a.agentDefDir, "skills")
+			if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = resolved
+			}
+			allowedDirs = append(allowedDirs, dir)
+		}
+		if a.sharedSkillDir != "" {
+			dir := a.sharedSkillDir
+			if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = resolved
+			}
+			allowedDirs = append(allowedDirs, dir)
+		}
+		agentTools = append(agentTools, buildSkillTool(&a.config, allowedDirs))
 	}
 
 	// Redact secret values from all tool output before it reaches the LLM.
@@ -298,14 +323,22 @@ func (a *Agent) currentSystemPrompt() string {
 	}
 
 	// Re-scan skills from disk each turn (skills may be added at runtime).
+	// Safe without a mutex: the manager serializes StreamChat calls per agent
+	// (via runningAgent.mu), so this write and the read in buildSkillTool's
+	// closure never race.
 	if a.agentDefDir != "" {
 		agentSkills, err := config.LoadSkills(filepath.Join(a.agentDefDir, "skills"))
 		if err != nil {
-			a.logger.Warn("could not reload skills", "error", err)
+			a.logger.Warn("could not reload agent skills, retaining previous set", "error", err)
 		} else {
 			sharedSkills, sharedErr := config.LoadSkills(a.sharedSkillDir)
 			if sharedErr != nil {
-				a.logger.Warn("could not reload shared skills", "error", sharedErr)
+				// Retain last successfully loaded shared skills rather than
+				// merging with nil, which would silently drop all shared skills.
+				a.logger.Warn("could not reload shared skills, retaining previous set", "error", sharedErr)
+				sharedSkills = a.lastShared
+			} else {
+				a.lastShared = sharedSkills
 			}
 			a.config.Skills = config.MergeSkills(agentSkills, sharedSkills)
 		}

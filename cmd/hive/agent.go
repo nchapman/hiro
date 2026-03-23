@@ -83,6 +83,7 @@ func runAgent() error {
 		SharedSkillDir: cfg.SharedSkillDir,
 		LM:             lm,
 		AllowedTools:   cfg.EffectiveTools,
+		HasSkills:      cfg.EffectiveTools["use_skill"],
 		ExtraTools:     agent.BuildManagerTools(host),
 	}
 
