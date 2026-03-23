@@ -84,7 +84,16 @@ func runAgent() error {
 		LM:             lm,
 		AllowedTools:   cfg.EffectiveTools,
 		HasSkills:      cfg.EffectiveTools["use_skill"],
-		ExtraTools:     agent.BuildManagerTools(host),
+	}
+
+	// All agents can spawn ephemeral subagents. Spawn and coordinator tools
+	// are structural capabilities gated by mode, not subject to operator
+	// override via config.yaml tool allowlists. The mode itself is the gate.
+	opts.ExtraTools = append(opts.ExtraTools, agent.BuildSpawnTool(host))
+
+	// Coordinator agents get persistent agent management tools.
+	if cfg.Mode == string(config.ModeCoordinator) {
+		opts.ExtraTools = append(opts.ExtraTools, agent.BuildCoordinatorTools(host)...)
 	}
 
 	// Inject secret functions only if the agent has bash — secrets are
@@ -118,7 +127,7 @@ func runAgent() error {
 	var conv *agent.Conversation
 	var historyEngine *history.Engine
 
-	if cfg.Mode == string(config.ModePersistent) {
+	if config.AgentMode(cfg.Mode).IsPersistent() {
 		opts.ExtraTools = append(opts.ExtraTools, agent.BuildMemoryTools(cfg.SessionDir)...)
 		opts.ExtraTools = append(opts.ExtraTools, agent.BuildTodoTools(cfg.SessionDir)...)
 

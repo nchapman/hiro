@@ -153,19 +153,29 @@ func ParseMarkdownFile(path string) (ParsedMarkdown, error) {
 }
 
 // AgentMode distinguishes persistent from ephemeral agents.
+// Coordinator is a superset of persistent — it adds manager tools
+// and write access to agents/ and skills/ directories.
 type AgentMode string
 
 const (
-	ModePersistent AgentMode = "persistent"
-	ModeEphemeral  AgentMode = "ephemeral"
+	ModePersistent  AgentMode = "persistent"
+	ModeEphemeral   AgentMode = "ephemeral"
+	ModeCoordinator AgentMode = "coordinator"
 )
+
+// IsPersistent reports whether the mode has persistent-agent capabilities
+// (memory, todos, history, session restoration). Both persistent and
+// coordinator modes are persistent.
+func (m AgentMode) IsPersistent() bool {
+	return m == ModePersistent || m == ModeCoordinator
+}
 
 // AgentConfig represents an agent's configuration loaded from markdown.
 type AgentConfig struct {
 	Name          string
 	Model         string
 	Provider      string    // optional: override default provider (e.g. "openrouter")
-	Mode          AgentMode // ModePersistent (default) or ModeEphemeral
+	Mode          AgentMode // ModePersistent (default), ModeEphemeral, or ModeCoordinator
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
 	Prompt        string   // the markdown body — the agent's operating instructions
@@ -215,10 +225,10 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		mode = ModePersistent
 	}
 	switch mode {
-	case ModePersistent, ModeEphemeral:
+	case ModePersistent, ModeEphemeral, ModeCoordinator:
 		// valid
 	default:
-		return AgentConfig{}, fmt.Errorf("unknown mode %q in %s (valid: persistent, ephemeral)", mode, agentPath)
+		return AgentConfig{}, fmt.Errorf("unknown mode %q in %s (valid: persistent, ephemeral, coordinator)", mode, agentPath)
 	}
 
 	agent := AgentConfig{

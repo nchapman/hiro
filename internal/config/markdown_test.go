@@ -251,6 +251,44 @@ An ephemeral agent.`
 	}
 }
 
+func TestLoadAgentDir_CoordinatorMode(t *testing.T) {
+	dir := t.TempDir()
+	agentMD := `---
+name: coordinator
+mode: coordinator
+tools: [bash, read_file]
+---
+
+A coordinator agent.`
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.Mode != ModeCoordinator {
+		t.Errorf("mode = %q, want %q", agent.Mode, ModeCoordinator)
+	}
+}
+
+func TestAgentMode_IsPersistent(t *testing.T) {
+	tests := []struct {
+		mode AgentMode
+		want bool
+	}{
+		{ModePersistent, true},
+		{ModeCoordinator, true},
+		{ModeEphemeral, false},
+	}
+	for _, tt := range tests {
+		if got := tt.mode.IsPersistent(); got != tt.want {
+			t.Errorf("%q.IsPersistent() = %v, want %v", tt.mode, got, tt.want)
+		}
+	}
+}
+
 func TestLoadAgentDir_WithSoul(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nInstructions."), 0644)

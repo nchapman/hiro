@@ -257,7 +257,7 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 		return nil, ErrAgentNotFound
 	}
 
-	if ra.info.Mode == config.ModeEphemeral {
+	if !ra.info.Mode.IsPersistent() {
 		return nil, nil
 	}
 
@@ -353,7 +353,7 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 				"dir", entry.Name(), "error", err)
 			continue
 		}
-		if manifest.Mode != config.ModePersistent {
+		if !manifest.Mode.IsPersistent() {
 			// Clean up stale ephemeral session dirs
 			os.RemoveAll(filepath.Join(dir, entry.Name()))
 			continue
@@ -452,23 +452,31 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			hasSkills = true
 		}
 	}
-	allowedTools := buildAllowedToolsMap(effectiveTools, hasSkills)
+	allowedTools := buildAllowedToolsMap(effectiveTools, cfg.Mode, hasSkills)
 
 	// Persistent agents use the manager's long-lived context so they
 	// survive beyond the tool call that started them. Ephemeral agents
 	// use the caller's context (typically the parent's tool call).
 	spawnCtx := ctx
-	if cfg.Mode == config.ModePersistent {
+	if cfg.Mode.IsPersistent() {
 		spawnCtx = m.ctx
 	}
 
 	// Acquire a dedicated Unix UID for this agent (if isolation is enabled).
 	var uid, gid uint32
+	var groups []uint32
 	if m.uidPool != nil {
 		var err error
 		uid, gid, err = m.uidPool.Acquire(id)
 		if err != nil {
 			return "", fmt.Errorf("acquiring UID: %w", err)
+		}
+		groups = []uint32{gid}
+		// Coordinator agents get write access to agents/ and skills/.
+		if cfg.Mode == config.ModeCoordinator {
+			if coordGID := m.uidPool.CoordinatorGID(); coordGID != 0 {
+				groups = append(groups, coordGID)
+			}
 		}
 		// Transfer ownership of the session dir to the agent user.
 		// WalkDir handles both fresh dirs (just the dir itself) and
@@ -542,6 +550,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		Model:          model,
 		UID:            uid,
 		GID:            gid,
+		Groups:         groups,
 	}
 
 	handle, err := m.workerFactory(spawnCtx, spawnCfg)
@@ -619,7 +628,7 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 			if m.uidPool != nil {
 				m.uidPool.Release(id)
 			}
-			if deadRA.info.Mode == config.ModeEphemeral {
+			if !deadRA.info.Mode.IsPersistent() {
 				os.RemoveAll(m.sessionDir(id))
 			}
 		}
@@ -662,7 +671,7 @@ func (m *Manager) removeAgent(id string) {
 		m.uidPool.Release(id)
 	}
 
-	if ra.info.Mode == config.ModeEphemeral {
+	if !ra.info.Mode.IsPersistent() {
 		os.RemoveAll(m.sessionDir(id))
 	}
 }
@@ -712,14 +721,18 @@ func (m *Manager) collectDescendants(agentID string) []string {
 	return result
 }
 
-// structuralTools are always injected regardless of the control plane or
-// agent declarations. They're intrinsic to the agent's mode/role, not
-// capabilities. Note: bash and use_skill are NOT structural — agents must
-// explicitly declare bash, and use_skill is only added when skills exist.
-var structuralTools = []string{
-	// Manager tools
-	"spawn_agent", "start_agent", "list_agents", "send_message", "stop_agent",
-	// Persistent agent tools
+// spawnTool is injected into all agents — spawning ephemeral subagents is
+// universally available since the subagent is fire-and-forget.
+var spawnTool = "spawn_agent"
+
+// coordinatorTools are injected only for coordinator-mode agents. These
+// manage persistent agent lifecycles and require hive-coordinators group.
+var coordinatorTools = []string{
+	"start_agent", "list_agents", "send_message", "stop_agent",
+}
+
+// persistentTools are injected for persistent and coordinator agents.
+var persistentTools = []string{
 	"memory_read", "memory_write", "todos", "history_search", "history_recall",
 }
 
@@ -777,16 +790,30 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 }
 
 // buildAllowedToolsMap creates the AllowedTools map for agent.Options,
-// adding structural tools that always bypass filtering. hasSkills controls
-// whether the use_skill tool is included.
-func buildAllowedToolsMap(effective map[string]bool, hasSkills bool) map[string]bool {
-	allowed := make(map[string]bool, len(effective)+len(structuralTools)+1)
+// adding mode-appropriate structural tools that bypass filtering.
+func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasSkills bool) map[string]bool {
+	allowed := make(map[string]bool, len(effective)+10)
 	for t := range effective {
 		allowed[t] = true
 	}
-	for _, t := range structuralTools {
-		allowed[t] = true
+
+	// All agents can spawn ephemeral subagents.
+	allowed[spawnTool] = true
+
+	// Coordinator agents get full agent management tools.
+	if mode == config.ModeCoordinator {
+		for _, t := range coordinatorTools {
+			allowed[t] = true
+		}
 	}
+
+	// Persistent and coordinator agents get memory/todos/history tools.
+	if mode.IsPersistent() {
+		for _, t := range persistentTools {
+			allowed[t] = true
+		}
+	}
+
 	if hasSkills {
 		allowed["use_skill"] = true
 	}

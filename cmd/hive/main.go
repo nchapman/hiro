@@ -121,6 +121,16 @@ func run() error {
 			if err := os.Chmod(hostSocket, 0777); err != nil {
 				return fmt.Errorf("setting host socket permissions: %w", err)
 			}
+
+			// Detect hive-coordinators group for agents/ and skills/ write access.
+			if coordGrp, err := user.LookupGroup("hive-coordinators"); err == nil {
+				coordGID, err := strconv.ParseUint(coordGrp.Gid, 10, 32)
+				if err != nil {
+					return fmt.Errorf("parsing hive-coordinators GID %q: %w", coordGrp.Gid, err)
+				}
+				pool.SetCoordinatorGID(uint32(coordGID))
+				logger.Info("coordinator group detected", "gid", coordGID)
+			}
 		}
 
 		mgr = agent.NewManager(ctx, workspaceDir, agent.Options{

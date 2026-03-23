@@ -21,11 +21,17 @@ func truncateResult(s string) string {
 	return s[:maxAgentResultSize] + "\n\n(result truncated)"
 }
 
-// BuildManagerTools returns tools that let an agent manage other agents.
-// The host determines parent relationships and enforces descendant authorization.
-func BuildManagerTools(host ipc.AgentHost) []fantasy.AgentTool {
+// BuildSpawnTool returns the spawn_agent tool, available to all agents.
+// Spawning ephemeral subagents is universally safe — the subagent runs,
+// returns a result, and is cleaned up.
+func BuildSpawnTool(host ipc.AgentHost) fantasy.AgentTool {
+	return toolSpawnAgent(host)
+}
+
+// BuildCoordinatorTools returns tools for managing persistent agent lifecycles.
+// Only coordinator-mode agents should receive these.
+func BuildCoordinatorTools(host ipc.AgentHost) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		toolSpawnAgent(host),
 		toolStartAgent(host),
 		toolListAgents(host),
 		toolSendMessage(host),

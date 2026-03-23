@@ -75,3 +75,18 @@ func TestDoubleRelease(t *testing.T) {
 		t.Fatalf("expected 0 in use, got %d", p.InUse())
 	}
 }
+
+func TestCoordinatorGID(t *testing.T) {
+	p := New(10000, 10000, 2)
+
+	// Default: no coordinator GID.
+	if gid := p.CoordinatorGID(); gid != 0 {
+		t.Fatalf("expected 0, got %d", gid)
+	}
+
+	// Set and retrieve.
+	p.SetCoordinatorGID(10001)
+	if gid := p.CoordinatorGID(); gid != 10001 {
+		t.Fatalf("expected 10001, got %d", gid)
+	}
+}

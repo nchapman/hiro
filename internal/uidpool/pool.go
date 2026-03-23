@@ -19,11 +19,12 @@ const (
 // It is pure bookkeeping — no OS calls. The actual UID assignment happens
 // via syscall.SysProcAttr.Credential at process spawn time.
 type Pool struct {
-	mu      sync.Mutex
-	baseUID uint32
-	gid     uint32            // GID of the hive-agents group
-	size    int               // number of UIDs in the pool
-	inUse   map[uint32]string // UID -> session ID
+	mu             sync.Mutex
+	baseUID        uint32
+	gid            uint32            // GID of the hive-agents group
+	coordinatorGID uint32            // GID of hive-coordinators group; 0 = not available
+	size           int               // number of UIDs in the pool
+	inUse          map[uint32]string // UID -> session ID
 }
 
 // New creates a UID pool starting at baseUID with the given group ID and size.
@@ -34,6 +35,22 @@ func New(baseUID, gid uint32, size int) *Pool {
 		size:    size,
 		inUse:   make(map[uint32]string),
 	}
+}
+
+// SetCoordinatorGID sets the GID of the hive-coordinators group.
+// Coordinator-mode agents are given this as a supplementary group
+// for write access to agents/ and skills/ directories.
+func (p *Pool) SetCoordinatorGID(gid uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.coordinatorGID = gid
+}
+
+// CoordinatorGID returns the hive-coordinators group GID, or 0 if not configured.
+func (p *Pool) CoordinatorGID() uint32 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.coordinatorGID
 }
 
 // Acquire assigns the next available UID to the given session.

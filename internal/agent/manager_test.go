@@ -846,3 +846,258 @@ Agent with tools.`)
 		t.Error("glob should not be in effective tools (not declared)")
 	}
 }
+
+func TestBuildAllowedToolsMap_EphemeralMode(t *testing.T) {
+	effective := map[string]bool{"bash": true, "read_file": true}
+	allowed := buildAllowedToolsMap(effective, config.ModeEphemeral, false)
+
+	// Ephemeral agents get spawn_agent but NOT coordinator or persistent tools.
+	if !allowed["spawn_agent"] {
+		t.Error("ephemeral agents should get spawn_agent")
+	}
+	if allowed["start_agent"] || allowed["stop_agent"] || allowed["send_message"] || allowed["list_agents"] {
+		t.Error("ephemeral agents should not get coordinator tools")
+	}
+	if allowed["memory_read"] || allowed["memory_write"] || allowed["todos"] {
+		t.Error("ephemeral agents should not get persistent tools")
+	}
+}
+
+func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
+	effective := map[string]bool{"bash": true}
+	allowed := buildAllowedToolsMap(effective, config.ModePersistent, false)
+
+	// Persistent agents get spawn_agent + persistent tools, but NOT coordinator tools.
+	if !allowed["spawn_agent"] {
+		t.Error("persistent agents should get spawn_agent")
+	}
+	if !allowed["memory_read"] || !allowed["memory_write"] || !allowed["todos"] ||
+		!allowed["history_search"] || !allowed["history_recall"] {
+		t.Error("persistent agents should get persistent tools")
+	}
+	if allowed["start_agent"] || allowed["stop_agent"] || allowed["send_message"] || allowed["list_agents"] {
+		t.Error("persistent agents should not get coordinator tools")
+	}
+}
+
+func TestBuildAllowedToolsMap_CoordinatorMode(t *testing.T) {
+	effective := map[string]bool{"bash": true}
+	allowed := buildAllowedToolsMap(effective, config.ModeCoordinator, false)
+
+	// Coordinator agents get everything: spawn + coordinator + persistent tools.
+	if !allowed["spawn_agent"] {
+		t.Error("coordinators should get spawn_agent")
+	}
+	if !allowed["start_agent"] || !allowed["stop_agent"] || !allowed["send_message"] || !allowed["list_agents"] {
+		t.Error("coordinators should get coordinator tools")
+	}
+	if !allowed["memory_read"] || !allowed["memory_write"] || !allowed["todos"] ||
+		!allowed["history_search"] || !allowed["history_recall"] {
+		t.Error("coordinators should get persistent tools")
+	}
+}
+
+func TestBuildAllowedToolsMap_WithSkills(t *testing.T) {
+	effective := map[string]bool{"bash": true}
+	allowed := buildAllowedToolsMap(effective, config.ModeEphemeral, true)
+	if !allowed["use_skill"] {
+		t.Error("use_skill should be included when hasSkills is true")
+	}
+}
+
+func TestManager_CoordinatorMode_RestoredOnRestart(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+mode: coordinator
+model: fake-model
+---
+Coordinator.`)
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	// Start coordinator, shut down
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil)
+	id, err := mgr1.StartAgent(ctx, "coord", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	mgr1.Shutdown()
+
+	// Restore — coordinator mode should survive (it's persistent)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil)
+	if err := mgr2.RestoreSessions(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	info, ok := mgr2.GetAgent(id)
+	if !ok {
+		t.Fatal("coordinator should be restored")
+	}
+	if info.Mode != config.ModeCoordinator {
+		t.Errorf("restored mode = %q, want coordinator", info.Mode)
+	}
+}
+
+func TestManager_CoordinatorMode_SessionNotCleaned(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+mode: coordinator
+model: fake-model
+---
+Coordinator.`)
+
+	id, _ := mgr.StartAgent(t.Context(), "coord", "")
+	sessDir := filepath.Join(dir, "sessions", id)
+
+	mgr.StopAgent(id)
+
+	if _, err := os.Stat(sessDir); os.IsNotExist(err) {
+		t.Error("coordinator session dir should survive stop (like persistent)")
+	}
+}
+
+func TestManager_CoordinatorTools_InSpawnConfig(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+mode: coordinator
+model: fake-model
+tools: [bash]
+---
+Coordinator.`)
+
+	_, err := mgr.StartAgent(t.Context(), "coord", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	cfg := (*configs)[0]
+	// Coordinator should have coordinator tools in effective tools
+	if !cfg.EffectiveTools["start_agent"] {
+		t.Error("coordinator should have start_agent in effective tools")
+	}
+	if !cfg.EffectiveTools["spawn_agent"] {
+		t.Error("coordinator should have spawn_agent in effective tools")
+	}
+	if !cfg.EffectiveTools["memory_read"] {
+		t.Error("coordinator should have memory_read in effective tools")
+	}
+}
+
+func TestManager_CoordinatorGroups_InSpawnConfig(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetCoordinatorGID(10001)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+mode: coordinator
+model: fake-model
+tools: [bash]
+---
+Coordinator.`)
+
+	_, err := mgr.StartAgent(t.Context(), "coord", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	cfg := (*configs)[0]
+	// Should have both primary group and coordinator group (order-independent).
+	groupSet := make(map[uint32]bool)
+	for _, g := range cfg.Groups {
+		groupSet[g] = true
+	}
+	if !groupSet[10000] {
+		t.Error("primary GID 10000 should be in groups")
+	}
+	if !groupSet[10001] {
+		t.Error("coordinator GID 10001 should be in groups")
+	}
+	if len(cfg.Groups) != 2 {
+		t.Errorf("expected 2 groups, got %v", cfg.Groups)
+	}
+}
+
+func TestManager_CoordinatorMode_NoGroupConfigured(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	// CoordinatorGID not set — pool.CoordinatorGID() == 0
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+mode: coordinator
+model: fake-model
+tools: [bash]
+---
+Coordinator.`)
+
+	_, err := mgr.StartAgent(t.Context(), "coord", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	cfg := (*configs)[0]
+	// Only primary group — no coordinator group available
+	if len(cfg.Groups) != 1 {
+		t.Fatalf("expected 1 group (primary only), got %v", cfg.Groups)
+	}
+	if cfg.Groups[0] != 10000 {
+		t.Errorf("group should be primary (10000), got %d", cfg.Groups[0])
+	}
+}
+
+func TestManager_NonCoordinator_NoCoordinatorGroup(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetCoordinatorGID(10001)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "worker", `---
+name: worker
+mode: persistent
+model: fake-model
+tools: [bash]
+---
+Worker.`)
+
+	_, err := mgr.StartAgent(t.Context(), "worker", "")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	cfg := (*configs)[0]
+	// Should only have primary group, no coordinator group
+	if len(cfg.Groups) != 1 {
+		t.Fatalf("expected 1 group, got %v", cfg.Groups)
+	}
+	if cfg.Groups[0] != 10000 {
+		t.Errorf("group should be primary (10000), got %d", cfg.Groups[0])
+	}
+}
+
+func TestManager_EphemeralAgent_NoCoordinatorTools(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	writeAgentMD(t, dir, "worker", `---
+name: worker
+mode: ephemeral
+model: fake-model
+tools: [bash]
+---
+Worker.`)
+
+	// Start an ephemeral agent directly
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("worker"))
+	mgr.startSession(t.Context(), "test-eph-id", cfg, "")
+
+	spawnCfg := (*configs)[0]
+	if spawnCfg.EffectiveTools["start_agent"] {
+		t.Error("ephemeral agent should NOT have start_agent")
+	}
+	if !spawnCfg.EffectiveTools["spawn_agent"] {
+		t.Error("ephemeral agent should have spawn_agent")
+	}
+	if spawnCfg.EffectiveTools["memory_read"] {
+		t.Error("ephemeral agent should NOT have memory_read")
+	}
+}

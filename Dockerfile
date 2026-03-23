@@ -24,8 +24,9 @@ FROM go-base AS test
 # Stub web UI so go:embed is satisfied without building the frontend.
 RUN mkdir -p web/ui/dist && echo '<!doctype html>' > web/ui/dist/index.html
 
-# Create agent user pool for isolation tests.
+# Create agent user pool and groups for isolation tests.
 RUN groupadd -g 10000 hive-agents \
+    && groupadd -g 10001 hive-coordinators \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
         useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
@@ -72,7 +73,9 @@ ENV LC_ALL=en_US.UTF-8
 
 # Create agent user pool for per-agent Unix user isolation.
 # Each agent process runs as a dedicated user from this pool.
+# hive-coordinators grants write access to agents/ and skills/ directories.
 RUN groupadd -g 10000 hive-agents \
+    && groupadd -g 10001 hive-coordinators \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
         useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
@@ -80,6 +83,8 @@ RUN groupadd -g 10000 hive-agents \
 
 # Workspace uses setgid (2775) so files created by any agent inherit the
 # hive-agents group and are group-writable for collaborative access.
+# agents/ and skills/ ownership is set by workspace.Init() at runtime
+# (hive-coordinators group with setgid for coordinator write access).
 RUN mkdir -p /workspace && chown root:hive-agents /workspace && chmod 2775 /workspace
 
 # Install mise (tool version manager). All mise state lives under /opt/mise —

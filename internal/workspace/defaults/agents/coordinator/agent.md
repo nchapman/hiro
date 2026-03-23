@@ -1,6 +1,6 @@
 ---
 name: coordinator
-mode: persistent
+mode: coordinator
 tools: [bash, read_file, write_file, edit, multiedit, list_files, glob, grep, fetch, job_output, job_kill]
 description: The leader agent — manages conversations, spawns subagents, and coordinates work across the swarm.
 ---

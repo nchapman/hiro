@@ -75,6 +75,10 @@ Agent Worker Process (hive agent)
 
 **Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Session dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
 
+**Group-based access control**: Two Unix groups control filesystem access:
+- `hive-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/workspace` and `/opt/mise`.
+- `hive-coordinators` (GID 10001) — supplementary group for coordinator-mode agents. Grants write access to `agents/` and `skills/` directories (setgid `2775`). Non-coordinator agents get read-only access via "other" bits. Group membership is assigned dynamically at spawn time via `SysProcAttr.Credential.Groups` — no UIDs are statically added to `hive-coordinators` in `/etc/group`.
+
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 
 ### Agent Lifecycle
@@ -91,9 +95,10 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager spawns worker p
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
-- **Sessions** are runtime state stored in `sessions/<uuid>/`. Persistent agents survive restarts via `RestoreSessions()`.
-- **Ephemeral agents** are spawned via `spawn_agent` tool, run a single prompt, and are cleaned up.
+- **Sessions** are runtime state stored in `sessions/<uuid>/`. Persistent and coordinator agents survive restarts via `RestoreSessions()`.
+- **Ephemeral agents** are spawned via `spawn_agent` tool (available to all agents), run a single prompt, and are cleaned up.
 - **Persistent agents** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
+- **Coordinator agents** are a superset of persistent — they additionally get agent management tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
 
 ### Agent Definition Structure
 
@@ -184,21 +189,28 @@ Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `int
 | `job_kill` | Terminate a background job | `job_id` | Immediately terminates the process |
 | `fetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
 
-### Manager Tools (agents that can have children)
+### Spawn Tool (all agents)
 
-Defined in `internal/agent/tools_manager.go` via `buildManagerTools(parentID)`. All scoped to calling agent's descendants via `IsDescendant()`.
+All agents can spawn ephemeral subagents via `BuildSpawnTool()`. Scoped to descendants via `IsDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
 | `spawn_agent` | Run ephemeral subagent to completion | `agent` (name), `prompt` | Blocks until done; forces ephemeral mode; cleans up after; 32KB max result |
+
+### Coordinator Tools (mode: coordinator only)
+
+Defined in `internal/agent/tools_manager.go` via `BuildCoordinatorTools()`. Only injected for coordinator-mode agents. Scoped to descendants via `IsDescendant()`.
+
+| Tool | Purpose | Key Params | Behavior |
+|------|---------|------------|----------|
 | `start_agent` | Start a persistent child agent | `agent` (name) | Returns agent ID; respects agent config mode |
 | `send_message` | Send message to child and get response | `agent_id`, `message` | Blocks; scoped to descendants; serialized per-agent (mutex); 32KB max result |
 | `stop_agent` | Stop agent and its subtree | `agent_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent agents |
 | `list_agents` | List direct child agents | *(none)* | Shows name, ID, mode, description for direct children only |
 
-### Persistent Agent Tools (mode: persistent only)
+### Persistent Agent Tools (mode: persistent or coordinator)
 
-Added in `startSession()` via `buildMemoryTools()`, `buildTodoTools()`, `buildHistoryTools()`.
+Added in `runAgent()` via `BuildMemoryTools()`, `BuildTodoTools()`, `BuildHistoryTools()`.
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
@@ -216,12 +228,13 @@ Added in `startSession()` via `buildMemoryTools()`, `buildTodoTools()`, `buildHi
 
 ### Tool Totals by Agent Type
 
-- **Ephemeral agents:** 11 built-in + 5 manager = 16 tools (+ 1 if skills)
-- **Persistent agents:** 11 built-in + 5 manager + 2 memory + 1 todos + 2 history = 21 tools (+ 1 if skills)
+- **Ephemeral agents:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
+- **Persistent agents:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
+- **Coordinator agents:** 11 built-in + 1 spawn + 4 coordinator + 2 memory + 1 todos + 2 history = 21 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
-The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It is a persistent agent with model `claude-sonnet-4-20250514`.
+The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It uses `mode: coordinator` with model `claude-sonnet-4-20250514`.
 
 **Bootstrap flow** (`cmd/hive/main.go`):
 1. Check `HIVE_API_KEY` is set
@@ -230,7 +243,7 @@ The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It is a 
 4. `AgentByName("coordinator")` — check if already running (from restore)
 5. If not running, `StartAgent(ctx, "coordinator", "")` — no parent, becomes root
 
-The coordinator has **no special code paths** — it's a regular persistent agent that happens to be started first.
+The coordinator uses `mode: coordinator`, which gives it persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents (including non-coordinators) get `spawn_agent` for firing off ephemeral subagents.
 
 ## Control Plane
 
@@ -276,13 +289,13 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 ## Conversation Modes
 
-- **Persistent agents** use `history.Engine` — messages are stored in SQLite, automatically compacted via LLM summarization, and assembled within a token budget.
+- **Coordinator and persistent agents** use `history.Engine` — messages are stored in SQLite, automatically compacted via LLM summarization, and assembled within a token budget.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
-- **WebSocket chat** creates per-connection conversations for ephemeral agents, or uses shared persistent history for persistent agents.
+- **WebSocket chat** creates per-connection conversations for ephemeral agents, or uses shared persistent history for persistent/coordinator agents.
 
 ### Agent Tool Scoping
 
-Manager tools are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+Coordinator tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) and `spawn_agent` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
 
 ## Testing Notes
 
@@ -293,4 +306,4 @@ Manager tools are scoped to the calling agent's descendants via `IsDescendant()`
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), workspace files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Outside Docker, isolation is disabled (no `hive-agents` group).
+- In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), workspace files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).
