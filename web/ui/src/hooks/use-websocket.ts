@@ -1,9 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 
 export interface ChatWireMessage {
-  type: "message" | "delta" | "done" | "error" | "system"
+  type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result"
   role?: "user" | "assistant"
   content?: string
+  tool_call_id?: string
+  tool_name?: string
+  input?: string
+  output?: string
+  is_error?: boolean
 }
 
 export function useWebSocket(agentId: string | null) {

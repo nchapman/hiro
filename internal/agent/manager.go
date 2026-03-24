@@ -122,8 +122,8 @@ func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string
 // the result. Blocks until the subagent completes. The agent always runs in
 // ephemeral mode regardless of its config file — the caller controls the lifecycle.
 // parentID identifies the spawning agent (empty for top-level spawns).
-// onDelta receives streaming deltas during execution (may be nil).
-func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onDelta func(string) error) (string, error) {
+// onEvent receives streaming events during execution (may be nil).
+func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -142,7 +142,7 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 	}
 
 	// Run the prompt and collect the result
-	result, err := m.SendMessage(ctx, agentID, prompt, onDelta)
+	result, err := m.SendMessage(ctx, agentID, prompt, onEvent)
 
 	// Clean up the ephemeral agent and its entire subtree
 	m.StopAgent(agentID)
@@ -154,9 +154,9 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 }
 
 // SendMessage sends a message to a running agent and streams the response.
-// onDelta is called for each token; it may be nil. Calls are serialized
+// onEvent is called for each streaming event; it may be nil. Calls are serialized
 // per agent to prevent conversation corruption.
-func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
+func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	ra := m.getAgent(agentID)
 	if ra == nil {
 		return "", fmt.Errorf("agent %q not found", agentID)
@@ -165,7 +165,7 @@ func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onDe
 	ra.mu.Lock()
 	defer ra.mu.Unlock()
 
-	return ra.worker.Chat(ctx, message, onDelta)
+	return ra.worker.Chat(ctx, message, onEvent)
 }
 
 // StopAgent stops a running agent and all its descendants.
@@ -240,6 +240,7 @@ func (m *Manager) ListChildren(callerID string) []ipc.AgentInfo {
 type HistoryMessage struct {
 	Role      string `json:"role"`
 	Content   string `json:"content"`
+	RawJSON   string `json:"raw_json,omitempty"` // full fantasy.Message JSON with tool calls
 	Timestamp string `json:"timestamp"`
 }
 
@@ -279,10 +280,11 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 
 	result := make([]HistoryMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		if msg.Role == "user" || msg.Role == "assistant" {
+		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "tool" {
 			result = append(result, HistoryMessage{
 				Role:      msg.Role,
 				Content:   msg.Content,
+				RawJSON:   msg.RawJSON,
 				Timestamp: msg.CreatedAt.Format(time.RFC3339),
 			})
 		}

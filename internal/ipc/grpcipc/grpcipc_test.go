@@ -31,13 +31,13 @@ type fakeManager struct {
 	lastStopReq  string
 }
 
-func (f *fakeManager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onDelta func(string) error) (string, error) {
+func (f *fakeManager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	f.lastSpawnReq.name = agentName
 	f.lastSpawnReq.prompt = prompt
 	f.lastSpawnReq.parentID = parentID
-	if onDelta != nil {
-		onDelta("thinking...")
-		onDelta("done thinking")
+	if onEvent != nil {
+		onEvent(ipc.ChatEvent{Type: "delta", Content: "thinking..."})
+		onEvent(ipc.ChatEvent{Type: "delta", Content: "done thinking"})
 	}
 	return f.spawnResult, nil
 }
@@ -48,11 +48,11 @@ func (f *fakeManager) StartAgent(ctx context.Context, name, parentID string) (st
 	return f.startID, nil
 }
 
-func (f *fakeManager) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
+func (f *fakeManager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	f.lastSendReq.id = agentID
 	f.lastSendReq.message = message
-	if onDelta != nil {
-		onDelta("streaming...")
+	if onEvent != nil {
+		onEvent(ipc.ChatEvent{Type: "delta", Content: "streaming..."})
 	}
 	return f.sendResult, nil
 }
@@ -91,10 +91,10 @@ type fakeWorker struct {
 	shutdown   bool
 }
 
-func (f *fakeWorker) Chat(ctx context.Context, message string, onDelta func(string) error) (string, error) {
-	if onDelta != nil {
-		onDelta("token1")
-		onDelta("token2")
+func (f *fakeWorker) Chat(ctx context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if onEvent != nil {
+		onEvent(ipc.ChatEvent{Type: "delta", Content: "token1"})
+		onEvent(ipc.ChatEvent{Type: "delta", Content: "token2"})
 	}
 	return f.chatResult, nil
 }
@@ -155,8 +155,10 @@ func TestHostRoundtrip_SpawnAgent(t *testing.T) {
 	client := setupHostTest(t, mgr, "parent-1")
 
 	var deltas []string
-	result, err := client.SpawnAgent(t.Context(), "researcher", "find info", func(text string) error {
-		deltas = append(deltas, text)
+	result, err := client.SpawnAgent(t.Context(), "researcher", "find info", func(evt ipc.ChatEvent) error {
+		if evt.Type == "delta" {
+			deltas = append(deltas, evt.Content)
+		}
 		return nil
 	})
 	if err != nil {
@@ -197,8 +199,10 @@ func TestHostRoundtrip_SendMessage(t *testing.T) {
 	client := setupHostTest(t, mgr, "parent-1")
 
 	var deltas []string
-	result, err := client.SendMessage(t.Context(), "agent-1", "hello", func(text string) error {
-		deltas = append(deltas, text)
+	result, err := client.SendMessage(t.Context(), "agent-1", "hello", func(evt ipc.ChatEvent) error {
+		if evt.Type == "delta" {
+			deltas = append(deltas, evt.Content)
+		}
 		return nil
 	})
 	if err != nil {
@@ -320,8 +324,10 @@ func TestWorkerRoundtrip_Chat(t *testing.T) {
 	client := setupWorkerTest(t, worker)
 
 	var deltas []string
-	result, err := client.Chat(t.Context(), "hello agent", func(text string) error {
-		deltas = append(deltas, text)
+	result, err := client.Chat(t.Context(), "hello agent", func(evt ipc.ChatEvent) error {
+		if evt.Type == "delta" {
+			deltas = append(deltas, evt.Content)
+		}
 		return nil
 	})
 	if err != nil {

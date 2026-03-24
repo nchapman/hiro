@@ -2,6 +2,7 @@ package grpcipc
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 
 	"github.com/nchapman/hivebot/internal/ipc"
@@ -27,7 +28,7 @@ func NewHostClient(cc grpc.ClientConnInterface, callerID string) *HostClient {
 	}
 }
 
-func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, onDelta func(string) error) (string, error) {
+func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	stream, err := c.client.SpawnAgent(ctx, &pb.SpawnAgentRequest{
 		AgentName: agentName,
 		Prompt:    prompt,
@@ -36,7 +37,7 @@ func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, o
 	if err != nil {
 		return "", err
 	}
-	return recvStream(stream, onDelta)
+	return recvStream(stream, onEvent)
 }
 
 func (c *HostClient) StartAgent(ctx context.Context, agentName string) (string, error) {
@@ -50,7 +51,7 @@ func (c *HostClient) StartAgent(ctx context.Context, agentName string) (string, 
 	return resp.SessionId, nil
 }
 
-func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error) {
+func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	stream, err := c.client.SendMessage(ctx, &pb.SendMessageRequest{
 		AgentId:  agentID,
 		Message:  message,
@@ -59,7 +60,7 @@ func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, o
 	if err != nil {
 		return "", err
 	}
-	return recvStream(stream, onDelta)
+	return recvStream(stream, onEvent)
 }
 
 func (c *HostClient) StopAgent(ctx context.Context, agentID string) error {
@@ -98,27 +99,82 @@ func (c *HostClient) GetSecrets(ctx context.Context) (names []string, env []stri
 	return resp.Names, resp.Env, nil
 }
 
-// recvStream reads ChatEvent messages from a server stream, calling onDelta
-// for each "delta" event and returning the content of the final "done" event.
-func recvStream(stream grpc.ServerStreamingClient[pb.ChatEvent], onDelta func(string) error) (string, error) {
-	var result string
+// recvStream reads ChatEvent messages from a server stream, calling onEvent
+// for each event and returning the content of the final "done" event.
+func recvStream(stream grpc.ServerStreamingClient[pb.ChatEvent], onEvent func(ipc.ChatEvent) error) (string, error) {
 	for {
 		event, err := stream.Recv()
 		if err == io.EOF {
-			return result, nil
+			return "", nil
 		}
 		if err != nil {
 			return "", err
 		}
-		switch event.Type {
-		case "delta":
-			if onDelta != nil {
-				if err := onDelta(event.Content); err != nil {
-					return "", err
-				}
-			}
-		case "done":
+		if event.Type == "done" {
 			return event.Content, nil
 		}
+		if onEvent != nil {
+			evt := protoToChatEvent(event)
+			if err := onEvent(evt); err != nil {
+				return "", err
+			}
+		}
+	}
+}
+
+// chatEventToProto converts an ipc.ChatEvent to a proto ChatEvent.
+// Tool call/result data is JSON-encoded in the content field.
+func chatEventToProto(evt ipc.ChatEvent) *pb.ChatEvent {
+	switch evt.Type {
+	case "tool_call":
+		data, _ := json.Marshal(map[string]string{
+			"tool_call_id": evt.ToolCallID,
+			"tool_name":    evt.ToolName,
+			"input":        evt.Input,
+		})
+		return &pb.ChatEvent{Type: "tool_call", Content: string(data)}
+	case "tool_result":
+		data, _ := json.Marshal(map[string]any{
+			"tool_call_id": evt.ToolCallID,
+			"output":       evt.Output,
+			"is_error":     evt.IsError,
+		})
+		return &pb.ChatEvent{Type: "tool_result", Content: string(data)}
+	default:
+		return &pb.ChatEvent{Type: evt.Type, Content: evt.Content}
+	}
+}
+
+// protoToChatEvent converts a proto ChatEvent to an ipc.ChatEvent.
+func protoToChatEvent(event *pb.ChatEvent) ipc.ChatEvent {
+	switch event.Type {
+	case "tool_call":
+		var data struct {
+			ToolCallID string `json:"tool_call_id"`
+			ToolName   string `json:"tool_name"`
+			Input      string `json:"input"`
+		}
+		json.Unmarshal([]byte(event.Content), &data)
+		return ipc.ChatEvent{
+			Type:       "tool_call",
+			ToolCallID: data.ToolCallID,
+			ToolName:   data.ToolName,
+			Input:      data.Input,
+		}
+	case "tool_result":
+		var data struct {
+			ToolCallID string `json:"tool_call_id"`
+			Output     string `json:"output"`
+			IsError    bool   `json:"is_error"`
+		}
+		json.Unmarshal([]byte(event.Content), &data)
+		return ipc.ChatEvent{
+			Type:       "tool_result",
+			ToolCallID: data.ToolCallID,
+			Output:     data.Output,
+			IsError:    data.IsError,
+		}
+	default:
+		return ipc.ChatEvent{Type: event.Type, Content: event.Content}
 	}
 }

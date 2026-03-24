@@ -10,13 +10,23 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hivebot/internal/ipc"
 )
 
 // ChatMessage is a message sent or received over the chat WebSocket.
+// For text deltas: type="delta", content="..."
+// For tool calls: type="tool_call", tool_call_id, tool_name, input
+// For tool results: type="tool_result", tool_call_id, content (output), is_error
+// For control: type="done"|"error"|"system"|"message"
 type ChatMessage struct {
-	Type    string `json:"type"`              // "message", "delta", "done", "error"
-	Role    string `json:"role,omitempty"`     // "user" or "assistant"
-	Content string `json:"content"`
+	Type       string `json:"type"`
+	Role       string `json:"role,omitempty"`
+	Content    string `json:"content,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	Input      string `json:"input,omitempty"`
+	Output     string `json:"output,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
 }
 
 // SetManager sets the agent manager and leader agent ID for handling chat.
@@ -107,9 +117,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			// Unrecognized command — fall through to agent as normal message.
 		}
 
-		onDelta := func(text string) error {
-			delta := ChatMessage{Type: "delta", Role: "assistant", Content: text}
-			b, err := json.Marshal(delta)
+		onEvent := func(evt ipc.ChatEvent) error {
+			wireMsg := ChatMessage{
+				Type:       evt.Type,
+				Role:       "assistant",
+				Content:    evt.Content,
+				ToolCallID: evt.ToolCallID,
+				ToolName:   evt.ToolName,
+				Input:      evt.Input,
+				Output:     evt.Output,
+				IsError:    evt.IsError,
+			}
+			b, err := json.Marshal(wireMsg)
 			if err != nil {
 				return err
 			}
@@ -117,7 +136,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Stream response — agent process owns the conversation.
-		_, streamErr := s.manager.SendMessage(ctx, agentID, msg.Content, onDelta)
+		_, streamErr := s.manager.SendMessage(ctx, agentID, msg.Content, onEvent)
 
 		if streamErr != nil {
 			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}

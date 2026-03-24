@@ -3,6 +3,7 @@ package grpcipc
 import (
 	"context"
 
+	"github.com/nchapman/hivebot/internal/ipc"
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
 )
@@ -17,12 +18,12 @@ func NewWorkerClient(cc grpc.ClientConnInterface) *WorkerClient {
 	return &WorkerClient{client: pb.NewAgentWorkerClient(cc)}
 }
 
-func (c *WorkerClient) Chat(ctx context.Context, message string, onDelta func(string) error) (string, error) {
+func (c *WorkerClient) Chat(ctx context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	stream, err := c.client.Chat(ctx, &pb.ChatRequest{Message: message})
 	if err != nil {
 		return "", err
 	}
-	return recvStream(stream, onDelta)
+	return recvStream(stream, onEvent)
 }
 
 func (c *WorkerClient) Shutdown(ctx context.Context) error {

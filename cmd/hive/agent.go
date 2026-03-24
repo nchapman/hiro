@@ -205,8 +205,8 @@ type agentWorker struct {
 	logger *slog.Logger
 }
 
-func (w *agentWorker) Chat(ctx context.Context, message string, onDelta func(string) error) (string, error) {
-	return w.agent.StreamChat(ctx, w.conv, message, onDelta)
+func (w *agentWorker) Chat(ctx context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return w.agent.StreamChat(ctx, w.conv, message, onEvent)
 }
 
 func (w *agentWorker) Shutdown(ctx context.Context) error {

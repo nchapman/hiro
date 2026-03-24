@@ -17,6 +17,7 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 
 	"github.com/nchapman/hivebot/internal/agent/tools"
+	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
 )
@@ -195,11 +196,11 @@ func NewConversationWithHistory(engine *history.Engine) *Conversation {
 // StreamChat sends a message in the context of a conversation, streaming
 // the response token-by-token. The conversation history is automatically
 // updated with both the user message and the assistant's response.
-// If onDelta returns an error, streaming stops.
+// If onEvent returns an error, streaming stops.
 //
 // When the conversation has a history engine, messages are persisted and
 // context is assembled from the DB within the token budget.
-func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt string, onDelta func(text string) error) (string, error) {
+func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	var messages []fantasy.Message
 
 	if conv.engine != nil {
@@ -215,6 +216,13 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 		messages = conv.Messages
 	}
 
+	emit := func(evt ipc.ChatEvent) error {
+		if onEvent != nil {
+			return onEvent(evt)
+		}
+		return nil
+	}
+
 	result, err := a.agent.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt:   prompt,
 		Messages: messages,
@@ -226,10 +234,24 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 			return ctx, fantasy.PrepareStepResult{}, nil
 		},
 		OnTextDelta: func(id, text string) error {
-			if onDelta != nil {
-				return onDelta(text)
-			}
-			return nil
+			return emit(ipc.ChatEvent{Type: "delta", Content: text})
+		},
+		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			return emit(ipc.ChatEvent{
+				Type:       "tool_call",
+				ToolCallID: tc.ToolCallID,
+				ToolName:   tc.ToolName,
+				Input:      tc.Input,
+			})
+		},
+		OnToolResult: func(tr fantasy.ToolResultContent) error {
+			output, isErr := extractToolResultOutput(tr.Result)
+			return emit(ipc.ChatEvent{
+				Type:       "tool_result",
+				ToolCallID: tr.ToolCallID,
+				Output:     output,
+				IsError:    isErr,
+			})
 		},
 	})
 	if err != nil {
@@ -277,7 +299,9 @@ func marshalMessage(msg fantasy.Message) string {
 	return string(data)
 }
 
-// extractText extracts all text content from a message for search indexing.
+// extractText extracts text content from a message for search indexing.
+// Tool calls are represented as simple markers; full structured data
+// is preserved in raw_json for the UI.
 func extractText(msg fantasy.Message) string {
 	var parts []string
 	for _, part := range msg.Content {
@@ -294,6 +318,20 @@ func extractText(msg fantasy.Message) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// extractToolResultOutput extracts the text output from a tool result.
+func extractToolResultOutput(content fantasy.ToolResultOutputContent) (string, bool) {
+	if content == nil {
+		return "", false
+	}
+	if text, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](content); ok {
+		return text.Text, false
+	}
+	if errContent, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](content); ok {
+		return errContent.Error.Error(), true
+	}
+	return "", false
 }
 
 // currentSystemPrompt rebuilds the system prompt from config and disk.

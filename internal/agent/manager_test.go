@@ -22,9 +22,9 @@ type testWorker struct {
 	closed   bool
 }
 
-func (w *testWorker) Chat(_ context.Context, message string, onDelta func(string) error) (string, error) {
-	if onDelta != nil {
-		onDelta(w.response)
+func (w *testWorker) Chat(_ context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if onEvent != nil {
+		onEvent(ipc.ChatEvent{Type: "delta", Content: w.response})
 	}
 	return w.response, nil
 }
@@ -153,16 +153,16 @@ func TestManager_SendMessage_WithDelta(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	var deltas []string
-	_, err = mgr.SendMessage(t.Context(), id, "hi", func(text string) error {
-		deltas = append(deltas, text)
+	var events []ipc.ChatEvent
+	_, err = mgr.SendMessage(t.Context(), id, "hi", func(evt ipc.ChatEvent) error {
+		events = append(events, evt)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	if len(deltas) == 0 {
-		t.Error("expected at least one delta callback")
+	if len(events) == 0 {
+		t.Error("expected at least one event callback")
 	}
 }
 

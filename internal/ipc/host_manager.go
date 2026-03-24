@@ -10,13 +10,13 @@ import "context"
 // The agent.Manager satisfies this interface directly.
 type HostManager interface {
 	// SpawnSubagent runs an ephemeral subagent and returns its result.
-	SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onDelta func(string) error) (string, error)
+	SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onEvent func(ChatEvent) error) (string, error)
 
 	// StartAgent starts a persistent child agent.
 	StartAgent(ctx context.Context, name, parentID string) (string, error)
 
 	// SendMessage sends a message to a running agent and returns the response.
-	SendMessage(ctx context.Context, agentID, message string, onDelta func(string) error) (string, error)
+	SendMessage(ctx context.Context, agentID, message string, onEvent func(ChatEvent) error) (string, error)
 
 	// StopAgent stops an agent and its entire subtree.
 	StopAgent(agentID string) (AgentInfo, error)

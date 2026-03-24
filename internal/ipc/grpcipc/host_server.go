@@ -35,11 +35,11 @@ func (s *HostServer) Register(registrar grpc.ServiceRegistrar) {
 // the caller IS the parent — parent_id is the caller's own ID, injected by HostClient.
 func (s *HostServer) SpawnAgent(req *pb.SpawnAgentRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
 	ctx := stream.Context()
-	onDelta := func(text string) error {
-		return stream.Send(&pb.ChatEvent{Type: "delta", Content: text})
+	onEvent := func(evt ipc.ChatEvent) error {
+		return stream.Send(chatEventToProto(evt))
 	}
 
-	result, err := s.mgr.SpawnSubagent(ctx, req.AgentName, req.Prompt, req.ParentId, onDelta)
+	result, err := s.mgr.SpawnSubagent(ctx, req.AgentName, req.Prompt, req.ParentId, onEvent)
 	if err != nil {
 		return status.Errorf(codes.Internal, "spawn agent: %v", err)
 	}
@@ -61,11 +61,11 @@ func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerS
 	}
 
 	ctx := stream.Context()
-	onDelta := func(text string) error {
-		return stream.Send(&pb.ChatEvent{Type: "delta", Content: text})
+	onEvent := func(evt ipc.ChatEvent) error {
+		return stream.Send(chatEventToProto(evt))
 	}
 
-	result, err := s.mgr.SendMessage(ctx, req.AgentId, req.Message, onDelta)
+	result, err := s.mgr.SendMessage(ctx, req.AgentId, req.Message, onEvent)
 	if err != nil {
 		return status.Errorf(codes.Internal, "send message: %v", err)
 	}

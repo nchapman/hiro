@@ -28,11 +28,11 @@ func (s *WorkerServer) Register(registrar grpc.ServiceRegistrar) {
 
 func (s *WorkerServer) Chat(req *pb.ChatRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
 	ctx := stream.Context()
-	onDelta := func(text string) error {
-		return stream.Send(&pb.ChatEvent{Type: "delta", Content: text})
+	onEvent := func(evt ipc.ChatEvent) error {
+		return stream.Send(chatEventToProto(evt))
 	}
 
-	result, err := s.worker.Chat(ctx, req.Message, onDelta)
+	result, err := s.worker.Chat(ctx, req.Message, onEvent)
 	if err != nil {
 		return status.Errorf(codes.Internal, "chat: %v", err)
 	}
