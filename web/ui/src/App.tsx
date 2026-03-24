@@ -7,10 +7,11 @@ import Login from "@/components/Login"
 import Setup from "@/components/Setup"
 import SettingsPage from "@/components/Settings"
 
-export interface AgentInfo {
+export interface SessionInfo {
   id: string
   name: string
   mode: string
+  status: "running" | "stopped"
   description?: string
 }
 
@@ -23,8 +24,8 @@ type AppState =
 export default function App() {
   const themeCtx = useThemeProvider()
   const [appState, setAppState] = useState<AppState>({ kind: "loading" })
-  const [agents, setAgents] = useState<AgentInfo[]>([])
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [view, setView] = useState<"chat" | "settings">("chat")
   const hasAutoSelected = useRef(false)
 
@@ -53,16 +54,18 @@ export default function App() {
     checkAuth()
   }, [checkAuth])
 
-  const fetchAgents = useCallback(async () => {
+  const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch("/api/agents")
+      const res = await fetch("/api/sessions")
       if (res.ok) {
-        const data: AgentInfo[] = await res.json()
-        setAgents(data)
+        const data: SessionInfo[] = await res.json()
+        setSessions(data)
         if (!hasAutoSelected.current && data.length > 0) {
-          const persistent = data.find((a) => a.mode === "persistent")
+          const persistent = data.find(
+            (s) => s.mode === "persistent" && s.status === "running"
+          )
           if (persistent) {
-            setSelectedAgentId(persistent.id)
+            setSelectedSessionId(persistent.id)
             hasAutoSelected.current = true
           }
         }
@@ -74,14 +77,14 @@ export default function App() {
 
   useEffect(() => {
     if (appState.kind !== "ready") return
-    fetchAgents()
-    const interval = setInterval(fetchAgents, 10000)
+    fetchSessions()
+    const interval = setInterval(fetchSessions, 10000)
     return () => clearInterval(interval)
-  }, [fetchAgents, appState.kind])
+  }, [fetchSessions, appState.kind])
 
   const handleSelect = useCallback((id: string) => {
     hasAutoSelected.current = true
-    setSelectedAgentId(id)
+    setSelectedSessionId(id)
   }, [])
 
   const handleLogout = useCallback(async () => {
@@ -91,12 +94,19 @@ export default function App() {
       /* best-effort */
     }
     setAppState({ kind: "login" })
-    setAgents([])
-    setSelectedAgentId(null)
+    setSessions([])
+    setSelectedSessionId(null)
     hasAutoSelected.current = false
   }, [])
 
-  const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null
+  const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
+
+  // Clear selection if the selected session was deleted.
+  useEffect(() => {
+    if (selectedSessionId && !sessions.find((s) => s.id === selectedSessionId)) {
+      setSelectedSessionId(null)
+    }
+  }, [sessions, selectedSessionId])
 
   return (
     <ThemeCtx.Provider value={themeCtx}>
@@ -118,15 +128,20 @@ export default function App() {
         {appState.kind === "ready" && (
           <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <Sidebar
-              agents={agents}
-              selectedId={selectedAgentId}
+              sessions={sessions}
+              selectedId={selectedSessionId}
               onSelect={handleSelect}
               view={view}
               onViewChange={setView}
               onLogout={handleLogout}
             />
             <main className="flex flex-1 flex-col overflow-hidden">
-              {view === "chat" && <Chat agent={selectedAgent} />}
+              {view === "chat" && (
+                <Chat
+                  session={selectedSession}
+                  onSessionsChanged={fetchSessions}
+                />
+              )}
               {view === "settings" && <SettingsPage />}
             </main>
           </div>

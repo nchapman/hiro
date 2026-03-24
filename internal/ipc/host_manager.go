@@ -9,23 +9,29 @@ import "context"
 //
 // The agent.Manager satisfies this interface directly.
 type HostManager interface {
-	// SpawnSubagent runs an ephemeral subagent and returns its result.
-	SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onEvent func(ChatEvent) error) (string, error)
+	// SpawnSession runs an ephemeral session and returns its result.
+	SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ChatEvent) error) (string, error)
 
-	// StartAgent starts a persistent child agent.
-	StartAgent(ctx context.Context, name, parentID string) (string, error)
+	// CreateSession creates and starts a new persistent child session.
+	CreateSession(ctx context.Context, name, parentID string) (string, error)
 
-	// SendMessage sends a message to a running agent and returns the response.
-	SendMessage(ctx context.Context, agentID, message string, onEvent func(ChatEvent) error) (string, error)
+	// SendMessage sends a message to a running session and returns the response.
+	SendMessage(ctx context.Context, sessionID, message string, onEvent func(ChatEvent) error) (string, error)
 
-	// StopAgent stops an agent and its entire subtree.
-	StopAgent(agentID string) (AgentInfo, error)
+	// StopSession stops a session and its entire subtree.
+	StopSession(sessionID string) (SessionInfo, error)
+
+	// StartSession restarts a stopped session.
+	StartSession(ctx context.Context, sessionID string) error
+
+	// DeleteSession stops and permanently removes a session and its subtree.
+	DeleteSession(sessionID string) error
 
 	// IsDescendant reports whether targetID is a descendant of ancestorID.
 	IsDescendant(targetID, ancestorID string) bool
 
-	// ListChildren returns direct children of the given agent.
-	ListChildren(callerID string) []AgentInfo
+	// ListChildSessions returns direct child sessions of the given parent.
+	ListChildSessions(callerID string) []SessionInfo
 
 	// SecretNames returns the names of available secrets.
 	SecretNames() []string

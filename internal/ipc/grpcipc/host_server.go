@@ -31,32 +31,32 @@ func (s *HostServer) Register(registrar grpc.ServiceRegistrar) {
 	pb.RegisterAgentHostServer(registrar, s)
 }
 
-// SpawnAgent creates a child of the caller. No descendant check needed because
+// SpawnSession creates a child of the caller. No descendant check needed because
 // the caller IS the parent — parent_id is the caller's own ID, injected by HostClient.
-func (s *HostServer) SpawnAgent(req *pb.SpawnAgentRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
+func (s *HostServer) SpawnSession(req *pb.SpawnSessionRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
 	ctx := stream.Context()
 	onEvent := func(evt ipc.ChatEvent) error {
 		return stream.Send(chatEventToProto(evt))
 	}
 
-	result, err := s.mgr.SpawnSubagent(ctx, req.AgentName, req.Prompt, req.ParentId, onEvent)
+	result, err := s.mgr.SpawnSession(ctx, req.AgentName, req.Prompt, req.ParentId, onEvent)
 	if err != nil {
-		return status.Errorf(codes.Internal, "spawn agent: %v", err)
+		return status.Errorf(codes.Internal, "spawn session: %v", err)
 	}
 
 	return stream.Send(&pb.ChatEvent{Type: "done", Content: result})
 }
 
-func (s *HostServer) StartAgent(ctx context.Context, req *pb.StartAgentRequest) (*pb.StartAgentResponse, error) {
-	id, err := s.mgr.StartAgent(ctx, req.AgentName, req.ParentId)
+func (s *HostServer) CreateSession(ctx context.Context, req *pb.CreateSessionRequest) (*pb.CreateSessionResponse, error) {
+	id, err := s.mgr.CreateSession(ctx, req.AgentName, req.ParentId)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "start agent: %v", err)
+		return nil, status.Errorf(codes.Internal, "create session: %v", err)
 	}
-	return &pb.StartAgentResponse{SessionId: id}, nil
+	return &pb.CreateSessionResponse{SessionId: id}, nil
 }
 
 func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerStreamingServer[pb.ChatEvent]) error {
-	if err := s.checkDescendant(req.AgentId, req.CallerId); err != nil {
+	if err := s.checkDescendant(req.SessionId, req.CallerId); err != nil {
 		return err
 	}
 
@@ -65,7 +65,7 @@ func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerS
 		return stream.Send(chatEventToProto(evt))
 	}
 
-	result, err := s.mgr.SendMessage(ctx, req.AgentId, req.Message, onEvent)
+	result, err := s.mgr.SendMessage(ctx, req.SessionId, req.Message, onEvent)
 	if err != nil {
 		return status.Errorf(codes.Internal, "send message: %v", err)
 	}
@@ -73,30 +73,53 @@ func (s *HostServer) SendMessage(req *pb.SendMessageRequest, stream grpc.ServerS
 	return stream.Send(&pb.ChatEvent{Type: "done", Content: result})
 }
 
-func (s *HostServer) StopAgent(ctx context.Context, req *pb.StopAgentRequest) (*pb.StopAgentResponse, error) {
-	if err := s.checkDescendant(req.AgentId, req.CallerId); err != nil {
+func (s *HostServer) StopSession(ctx context.Context, req *pb.StopSessionRequest) (*pb.StopSessionResponse, error) {
+	if err := s.checkDescendant(req.SessionId, req.CallerId); err != nil {
 		return nil, err
 	}
 
-	if _, err := s.mgr.StopAgent(req.AgentId); err != nil {
+	if _, err := s.mgr.StopSession(req.SessionId); err != nil {
 		return nil, err
 	}
-	return &pb.StopAgentResponse{}, nil
+	return &pb.StopSessionResponse{}, nil
 }
 
-func (s *HostServer) ListAgents(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error) {
-	agents := s.mgr.ListChildren(req.ParentId)
-	pbAgents := make([]*pb.AgentInfoProto, len(agents))
-	for i, a := range agents {
-		pbAgents[i] = &pb.AgentInfoProto{
-			Id:          a.ID,
-			Name:        a.Name,
-			Mode:        a.Mode,
-			Description: a.Description,
-			ParentId:    a.ParentID,
+func (s *HostServer) StartSession(ctx context.Context, req *pb.StartSessionRequest) (*pb.StartSessionResponse, error) {
+	if err := s.checkDescendant(req.SessionId, req.CallerId); err != nil {
+		return nil, err
+	}
+
+	if err := s.mgr.StartSession(ctx, req.SessionId); err != nil {
+		return nil, err
+	}
+	return &pb.StartSessionResponse{}, nil
+}
+
+func (s *HostServer) DeleteSession(ctx context.Context, req *pb.DeleteSessionRequest) (*pb.DeleteSessionResponse, error) {
+	if err := s.checkDescendant(req.SessionId, req.CallerId); err != nil {
+		return nil, err
+	}
+
+	if err := s.mgr.DeleteSession(req.SessionId); err != nil {
+		return nil, err
+	}
+	return &pb.DeleteSessionResponse{}, nil
+}
+
+func (s *HostServer) ListSessions(ctx context.Context, req *pb.ListSessionsRequest) (*pb.ListSessionsResponse, error) {
+	sessions := s.mgr.ListChildSessions(req.ParentId)
+	pbSessions := make([]*pb.SessionInfoProto, len(sessions))
+	for i, si := range sessions {
+		pbSessions[i] = &pb.SessionInfoProto{
+			Id:          si.ID,
+			Name:        si.Name,
+			Mode:        si.Mode,
+			Description: si.Description,
+			ParentId:    si.ParentID,
+			Status:      si.Status,
 		}
 	}
-	return &pb.ListAgentsResponse{Agents: pbAgents}, nil
+	return &pb.ListSessionsResponse{Sessions: pbSessions}, nil
 }
 
 func (s *HostServer) GetSecrets(ctx context.Context, req *pb.GetSecretsRequest) (*pb.GetSecretsResponse, error) {
@@ -113,7 +136,7 @@ func (s *HostServer) checkDescendant(targetID, callerID string) error {
 	}
 	if !s.mgr.IsDescendant(targetID, callerID) {
 		return status.Error(codes.PermissionDenied,
-			fmt.Sprintf("agent %q is not a descendant of caller %q", targetID, callerID))
+			fmt.Sprintf("session %q is not a descendant of caller %q", targetID, callerID))
 	}
 	return nil
 }

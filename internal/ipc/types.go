@@ -2,13 +2,14 @@
 // the control plane and agent worker processes.
 package ipc
 
-// AgentInfo describes a running agent for external consumers.
-type AgentInfo struct {
+// SessionInfo describes a session (agent instance) for external consumers.
+type SessionInfo struct {
 	ID          string
 	Name        string
 	Mode        string
 	Description string
 	ParentID    string
+	Status      string // "running" or "stopped"
 }
 
 // SpawnConfig is the configuration passed to an agent worker process at startup.

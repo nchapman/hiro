@@ -28,8 +28,8 @@ func NewHostClient(cc grpc.ClientConnInterface, callerID string) *HostClient {
 	}
 }
 
-func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	stream, err := c.client.SpawnAgent(ctx, &pb.SpawnAgentRequest{
+func (c *HostClient) SpawnSession(ctx context.Context, agentName, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	stream, err := c.client.SpawnSession(ctx, &pb.SpawnSessionRequest{
 		AgentName: agentName,
 		Prompt:    prompt,
 		ParentId:  c.callerID,
@@ -40,8 +40,8 @@ func (c *HostClient) SpawnAgent(ctx context.Context, agentName, prompt string, o
 	return recvStream(stream, onEvent)
 }
 
-func (c *HostClient) StartAgent(ctx context.Context, agentName string) (string, error) {
-	resp, err := c.client.StartAgent(ctx, &pb.StartAgentRequest{
+func (c *HostClient) CreateSession(ctx context.Context, agentName string) (string, error) {
+	resp, err := c.client.CreateSession(ctx, &pb.CreateSessionRequest{
 		AgentName: agentName,
 		ParentId:  c.callerID,
 	})
@@ -51,11 +51,11 @@ func (c *HostClient) StartAgent(ctx context.Context, agentName string) (string, 
 	return resp.SessionId, nil
 }
 
-func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (c *HostClient) SendMessage(ctx context.Context, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	stream, err := c.client.SendMessage(ctx, &pb.SendMessageRequest{
-		AgentId:  agentID,
-		Message:  message,
-		CallerId: c.callerID,
+		SessionId: sessionID,
+		Message:   message,
+		CallerId:  c.callerID,
 	})
 	if err != nil {
 		return "", err
@@ -63,29 +63,46 @@ func (c *HostClient) SendMessage(ctx context.Context, agentID, message string, o
 	return recvStream(stream, onEvent)
 }
 
-func (c *HostClient) StopAgent(ctx context.Context, agentID string) error {
-	_, err := c.client.StopAgent(ctx, &pb.StopAgentRequest{
-		AgentId:  agentID,
-		CallerId: c.callerID,
+func (c *HostClient) StopSession(ctx context.Context, sessionID string) error {
+	_, err := c.client.StopSession(ctx, &pb.StopSessionRequest{
+		SessionId: sessionID,
+		CallerId:  c.callerID,
 	})
 	return err
 }
 
-func (c *HostClient) ListAgents(ctx context.Context) ([]ipc.AgentInfo, error) {
-	resp, err := c.client.ListAgents(ctx, &pb.ListAgentsRequest{
+func (c *HostClient) StartSession(ctx context.Context, sessionID string) error {
+	_, err := c.client.StartSession(ctx, &pb.StartSessionRequest{
+		SessionId: sessionID,
+		CallerId:  c.callerID,
+	})
+	return err
+}
+
+func (c *HostClient) DeleteSession(ctx context.Context, sessionID string) error {
+	_, err := c.client.DeleteSession(ctx, &pb.DeleteSessionRequest{
+		SessionId: sessionID,
+		CallerId:  c.callerID,
+	})
+	return err
+}
+
+func (c *HostClient) ListSessions(ctx context.Context) ([]ipc.SessionInfo, error) {
+	resp, err := c.client.ListSessions(ctx, &pb.ListSessionsRequest{
 		ParentId: c.callerID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ipc.AgentInfo, len(resp.Agents))
-	for i, a := range resp.Agents {
-		result[i] = ipc.AgentInfo{
-			ID:          a.Id,
-			Name:        a.Name,
-			Mode:        a.Mode,
-			Description: a.Description,
-			ParentID:    a.ParentId,
+	result := make([]ipc.SessionInfo, len(resp.Sessions))
+	for i, s := range resp.Sessions {
+		result[i] = ipc.SessionInfo{
+			ID:          s.Id,
+			Name:        s.Name,
+			Mode:        s.Mode,
+			Description: s.Description,
+			ParentID:    s.ParentId,
+			Status:      s.Status,
 		}
 	}
 	return result, nil

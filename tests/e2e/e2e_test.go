@@ -90,30 +90,31 @@ func waitHealthy(ctx context.Context) error {
 	}
 }
 
-type agentInfo struct {
+type sessionInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Mode        string `json:"mode"`
+	Status      string `json:"status"`
 	Description string `json:"description,omitempty"`
 	ParentID    string `json:"parent_id,omitempty"`
 }
 
-func listAgents(t *testing.T) []agentInfo {
+func listSessions(t *testing.T) []sessionInfo {
 	t.Helper()
-	resp, err := http.Get(baseURL + "/api/agents")
+	resp, err := http.Get(baseURL + "/api/sessions")
 	if err != nil {
-		t.Fatalf("GET /api/agents: %v", err)
+		t.Fatalf("GET /api/sessions: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/agents: status %d: %s", resp.StatusCode, body)
+		t.Fatalf("GET /api/sessions: status %d: %s", resp.StatusCode, body)
 	}
-	var agents []agentInfo
-	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
-		t.Fatalf("decoding agents: %v", err)
+	var sessions []sessionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
+		t.Fatalf("decoding sessions: %v", err)
 	}
-	return agents
+	return sessions
 }
 
 func waitForCoordinator(ctx context.Context) (string, error) {
@@ -121,11 +122,11 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("timed out waiting for coordinator: %w", ctx.Err())
 		}
-		resp, err := http.Get(baseURL + "/api/agents")
+		resp, err := http.Get(baseURL + "/api/sessions")
 		if err == nil && resp.StatusCode == 200 {
-			var agents []agentInfo
-			if err := json.NewDecoder(resp.Body).Decode(&agents); err == nil {
-				for _, a := range agents {
+			var sessions []sessionInfo
+			if err := json.NewDecoder(resp.Body).Decode(&sessions); err == nil {
+				for _, a := range sessions {
 					if a.Name == "coordinator" {
 						resp.Body.Close()
 						return a.ID, nil
@@ -164,7 +165,7 @@ func openChat(t *testing.T, ctx context.Context, agentID string) *chatSession {
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL += "/ws/chat"
 	if agentID != "" {
-		wsURL += "?agent_id=" + agentID
+		wsURL += "?session_id=" + agentID
 	}
 
 	// Origin must match the server's Host for the origin check.

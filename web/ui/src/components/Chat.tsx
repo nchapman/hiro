@@ -1,10 +1,26 @@
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, Wrench, ChevronRight, ChevronDown } from "lucide-react"
+import {
+  ArrowUp,
+  Wrench,
+  ChevronRight,
+  ChevronDown,
+  MoreHorizontal,
+  Square,
+  Play,
+  Trash2,
+} from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useWebSocket } from "@/hooks/use-websocket"
 import type { ChatWireMessage } from "@/hooks/use-websocket"
-import type { AgentInfo } from "@/App"
+import type { SessionInfo } from "@/App"
 import {
   ChatContainerRoot,
   ChatContainerContent,
@@ -288,24 +304,36 @@ function AssistantMessage({ message }: { message: Message }) {
 
 // --- Chat component ---
 
-interface ChatProps {
-  agent: AgentInfo | null
+// Status dot color helper
+function statusDotColor(session: SessionInfo): string {
+  if (session.status === "stopped") return "bg-gray-400"
+  if (session.mode === "ephemeral") return "bg-violet-500"
+  return "bg-green-500"
 }
 
-export default function Chat({ agent }: ChatProps) {
+interface ChatProps {
+  session: SessionInfo | null
+  onSessionsChanged: () => void
+}
+
+export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const streamingMsgId = useRef<string | null>(null)
-  const agentGeneration = useRef(0)
-  const { send, connected, setOnMessage } = useWebSocket(agent?.id ?? null)
+  const sessionGeneration = useRef(0)
+  const isStopped = session?.status === "stopped"
+  const isRoot = session ? !session.mode || session.mode === "coordinator" : false
+  // Don't connect WebSocket for stopped sessions
+  const wsSessionId = isStopped ? null : (session?.id ?? null)
+  const { send, connected, setOnMessage } = useWebSocket(wsSessionId)
 
   // Load message history when agent changes
   useEffect(() => {
-    const gen = ++agentGeneration.current
+    const gen = ++sessionGeneration.current
 
-    if (!agent) {
+    if (!session) {
       setMessages([])
       return
     }
@@ -316,7 +344,7 @@ export default function Chat({ agent }: ChatProps) {
     streamingMsgId.current = null
     setLoadingHistory(true)
 
-    fetch(`/api/agents/${encodeURIComponent(agent.id)}/messages`, {
+    fetch(`/api/sessions/${encodeURIComponent(session.id)}/messages`, {
       signal: ac.signal,
     })
       .then((res) => {
@@ -324,12 +352,12 @@ export default function Chat({ agent }: ChatProps) {
         return res.json()
       })
       .then((history: HistoryMessage[]) => {
-        if (agentGeneration.current !== gen) return
+        if (sessionGeneration.current !== gen) return
         setMessages(mergeHistoryMessages(history))
       })
       .catch((err: Error) => {
         if (err.name === "AbortError") return
-        if (agentGeneration.current !== gen) return
+        if (sessionGeneration.current !== gen) return
         setMessages([
           {
             id: crypto.randomUUID(),
@@ -339,11 +367,11 @@ export default function Chat({ agent }: ChatProps) {
         ])
       })
       .finally(() => {
-        if (agentGeneration.current === gen) setLoadingHistory(false)
+        if (sessionGeneration.current === gen) setLoadingHistory(false)
       })
 
     setOnMessage((msg: ChatWireMessage) => {
-      if (agentGeneration.current !== gen) return
+      if (sessionGeneration.current !== gen) return
       switch (msg.type) {
         case "delta": {
           if (!streamingMsgId.current) {
@@ -436,11 +464,11 @@ export default function Chat({ agent }: ChatProps) {
     })
 
     return () => ac.abort()
-  }, [agent?.id, setOnMessage])
+  }, [session?.id, setOnMessage])
 
   const handleSend = () => {
     const text = input.trim()
-    if (!text || streaming || !connected) return
+    if (!text || streaming || !connected || isStopped) return
 
     setMessages((prev) => [
       ...prev,
@@ -451,16 +479,88 @@ export default function Chat({ agent }: ChatProps) {
     send({ type: "message", content: text })
   }
 
-  if (!agent) {
+  const handleStop = async () => {
+    if (!session) return
+    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/stop`, {
+      method: "POST",
+    })
+    if (!res.ok) console.error("Failed to stop session:", res.status, await res.text())
+    onSessionsChanged()
+  }
+
+  const handleStart = async () => {
+    if (!session) return
+    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/start`, {
+      method: "POST",
+    })
+    if (!res.ok) console.error("Failed to start session:", res.status, await res.text())
+    onSessionsChanged()
+  }
+
+  const handleDelete = async () => {
+    if (!session) return
+    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+      method: "DELETE",
+    })
+    if (!res.ok) console.error("Failed to delete session:", res.status, await res.text())
+    onSessionsChanged()
+  }
+
+  if (!session) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-        Select an agent from the sidebar to start chatting.
+        Select a session from the sidebar to start chatting.
       </div>
     )
   }
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b px-4 py-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={cn("h-2 w-2 shrink-0 rounded-full", statusDotColor(session))}
+          />
+          <span className="font-medium">{session.name}</span>
+          <span className="text-xs text-muted-foreground">{session.mode}</span>
+          {isStopped && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+              stopped
+            </span>
+          )}
+        </div>
+        {!isRoot && (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground">
+              <MoreHorizontal className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {!isStopped && (
+                <DropdownMenuItem onClick={handleStop}>
+                  <Square className="mr-2 h-4 w-4" />
+                  Stop
+                </DropdownMenuItem>
+              )}
+              {isStopped && (
+                <DropdownMenuItem onClick={handleStart}>
+                  <Play className="mr-2 h-4 w-4" />
+                  Start
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleDelete}
+                variant="destructive"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+
       {/* Messages */}
       {loadingHistory ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -469,12 +569,18 @@ export default function Chat({ agent }: ChatProps) {
       ) : messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2">
           <p className="text-lg font-medium text-foreground">
-            {agent.name}
+            {session.name}
           </p>
-          {agent.description && (
+          {session.description && (
             <p className="text-sm text-muted-foreground">
-              {agent.description}
+              {session.description}
             </p>
+          )}
+          {isStopped && (
+            <Button variant="outline" size="sm" onClick={handleStart}>
+              <Play className="mr-2 h-4 w-4" />
+              Start session
+            </Button>
           )}
         </div>
       ) : (
@@ -521,39 +627,51 @@ export default function Chat({ agent }: ChatProps) {
       )}
 
       {/* Input area */}
-      <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2">
-        <PromptInput
-          value={input}
-          onValueChange={setInput}
-          onSubmit={handleSend}
-          isLoading={streaming}
-          disabled={!connected}
-          className="bg-muted/50"
-        >
-          <PromptInputTextarea
-            placeholder={
-              connected ? `Message ${agent.name}...` : "Connecting..."
-            }
-            autoFocus
-          />
-          <PromptInputActions>
-            <Button
-              size="icon"
-              className="h-8 w-8 rounded-full"
-              onClick={handleSend}
-              disabled={streaming || !connected || !input.trim()}
-            >
-              <ArrowUp className="h-4 w-4" />
+      {isStopped ? (
+        <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2">
+          <div className="flex items-center justify-center gap-3 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+            Session is stopped.
+            <Button variant="outline" size="sm" onClick={handleStart}>
+              <Play className="mr-2 h-4 w-4" />
+              Start
             </Button>
-          </PromptInputActions>
-        </PromptInput>
+          </div>
+        </div>
+      ) : (
+        <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2">
+          <PromptInput
+            value={input}
+            onValueChange={setInput}
+            onSubmit={handleSend}
+            isLoading={streaming}
+            disabled={!connected}
+            className="bg-muted/50"
+          >
+            <PromptInputTextarea
+              placeholder={
+                connected ? `Message ${session.name}...` : "Connecting..."
+              }
+              autoFocus
+            />
+            <PromptInputActions>
+              <Button
+                size="icon"
+                className="h-8 w-8 rounded-full"
+                onClick={handleSend}
+                disabled={streaming || !connected || !input.trim()}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            </PromptInputActions>
+          </PromptInput>
 
-        {!connected && (
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            Connecting to {agent.name}...
-          </p>
-        )}
-      </div>
+          {!connected && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Connecting to {session.name}...
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

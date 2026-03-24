@@ -8,10 +8,10 @@ import {
 import { Settings, Sun, Moon, Monitor, LogOut } from "lucide-react"
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
-import type { AgentInfo } from "@/App"
+import type { SessionInfo } from "@/App"
 
 interface SidebarProps {
-  agents: AgentInfo[]
+  sessions: SessionInfo[]
   selectedId: string | null
   onSelect: (id: string) => void
   view: "chat" | "settings"
@@ -28,7 +28,7 @@ const themeIcons = {
 const themeOrder = ["system", "light", "dark"] as const
 
 export default function Sidebar({
-  agents,
+  sessions,
   selectedId,
   onSelect,
   view,
@@ -55,25 +55,25 @@ export default function Sidebar({
       </div>
       <Separator />
       <div className="px-4 pt-4 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Agents
+        Sessions
       </div>
       <ScrollArea className="flex-1 px-2">
-        {agents.length === 0 ? (
+        {sessions.length === 0 ? (
           <p className="px-2 py-2 text-sm italic text-muted-foreground">
-            No agents running
+            No sessions
           </p>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {agents.map((agent) => (
-              <Tooltip key={agent.id}>
+            {sessions.map((session) => (
+              <Tooltip key={session.id}>
                 <TooltipTrigger
                   onClick={() => {
-                    onSelect(agent.id)
+                    onSelect(session.id)
                     onViewChange("chat")
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-left transition-colors cursor-pointer",
-                    agent.id === selectedId && view === "chat"
+                    session.id === selectedId && view === "chat"
                       ? "bg-accent font-semibold text-accent-foreground"
                       : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
                   )}
@@ -81,15 +81,17 @@ export default function Sidebar({
                   <span
                     className={cn(
                       "h-1.5 w-1.5 shrink-0 rounded-full",
-                      agent.mode === "persistent" || agent.mode === "coordinator"
-                        ? "bg-green-500"
-                        : "bg-muted-foreground"
+                      session.status === "stopped"
+                        ? "bg-gray-400"
+                        : session.mode === "ephemeral"
+                          ? "bg-violet-500"
+                          : "bg-green-500"
                     )}
                   />
-                  <span className="truncate">{agent.name}</span>
+                  <span className="truncate">{session.name}</span>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  {agent.description || agent.name}
+                  {session.description || session.name}
                 </TooltipContent>
               </Tooltip>
             ))}

@@ -21,21 +21,23 @@ func truncateResult(s string) string {
 	return s[:maxAgentResultSize] + "\n\n(result truncated)"
 }
 
-// BuildSpawnTool returns the spawn_agent tool, available to all agents.
-// Spawning ephemeral subagents is universally safe — the subagent runs,
+// BuildSpawnTool returns the spawn_session tool, available to all agents.
+// Spawning ephemeral sessions is universally safe — the session runs,
 // returns a result, and is cleaned up.
 func BuildSpawnTool(host ipc.AgentHost) fantasy.AgentTool {
-	return toolSpawnAgent(host)
+	return toolSpawnSession(host)
 }
 
-// BuildCoordinatorTools returns tools for managing persistent agent lifecycles.
+// BuildCoordinatorTools returns tools for managing session lifecycles.
 // Only coordinator-mode agents should receive these.
 func BuildCoordinatorTools(host ipc.AgentHost) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		toolStartAgent(host),
-		toolListAgents(host),
+		toolCreateSession(host),
+		toolStartSession(host),
+		toolListSessions(host),
 		toolSendMessage(host),
-		toolStopAgent(host),
+		toolStopSession(host),
+		toolDeleteSession(host),
 	}
 }
 
@@ -64,17 +66,17 @@ func BuildTodoTools(sessionDir string) []fantasy.AgentTool {
 	}
 }
 
-// --- spawn_agent tool ---
+// --- spawn_session tool ---
 
-type spawnAgentInput struct {
+type spawnSessionInput struct {
 	Agent  string `json:"agent"  description:"The name of the agent definition to run (matches a directory name under agents/)."`
-	Prompt string `json:"prompt" description:"A clear, self-contained description of the task. Do not assume the agent has any prior context."`
+	Prompt string `json:"prompt" description:"A clear, self-contained description of the task. Do not assume the session has any prior context."`
 }
 
-func toolSpawnAgent(host ipc.AgentHost) fantasy.AgentTool {
-	return fantasy.NewAgentTool("spawn_agent",
-		"Spawn an ephemeral subagent to complete a task. The subagent runs the given prompt, returns the result, and is cleaned up. This call blocks until the subagent finishes.",
-		func(ctx context.Context, input spawnAgentInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func toolSpawnSession(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("spawn_session",
+		"Spawn an ephemeral session to complete a task. The session runs the given prompt, returns the result, and is cleaned up. This call blocks until the session finishes.",
+		func(ctx context.Context, input spawnSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
@@ -82,10 +84,10 @@ func toolSpawnAgent(host ipc.AgentHost) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
 
-			result, err := host.SpawnAgent(ctx, input.Agent, input.Prompt, nil)
+			result, err := host.SpawnSession(ctx, input.Agent, input.Prompt, nil)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("subagent failed: %v", err)), nil
+					fmt.Sprintf("session failed: %v", err)), nil
 			}
 
 			return fantasy.NewTextResponse(truncateResult(result)), nil
@@ -93,52 +95,78 @@ func toolSpawnAgent(host ipc.AgentHost) fantasy.AgentTool {
 	)
 }
 
-// --- start_agent tool ---
+// --- create_session tool ---
 
-type startAgentInput struct {
+type createSessionInput struct {
 	Agent string `json:"agent" description:"The name of the agent definition to start (matches a directory name under agents/)."`
 }
 
-func toolStartAgent(host ipc.AgentHost) fantasy.AgentTool {
-	return fantasy.NewAgentTool("start_agent",
-		"Start a persistent agent that stays running and can receive messages. Returns the agent's ID.",
-		func(ctx context.Context, input startAgentInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func toolCreateSession(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("create_session",
+		"Create and start a new persistent session from an agent definition. The session stays running and can receive messages. Returns the session ID.",
+		func(ctx context.Context, input createSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
 
-			id, err := host.StartAgent(ctx, input.Agent)
+			id, err := host.CreateSession(ctx, input.Agent)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("failed to start agent: %v", err)), nil
+					fmt.Sprintf("failed to create session: %v", err)), nil
 			}
 
 			return fantasy.NewTextResponse(
-				fmt.Sprintf("Agent %q started with ID: %s", input.Agent, id)), nil
+				fmt.Sprintf("Session created from %q with ID: %s", input.Agent, id)), nil
 		},
 	)
 }
 
-// --- list_agents tool ---
+// --- start_session tool ---
 
-func toolListAgents(host ipc.AgentHost) fantasy.AgentTool {
-	return fantasy.NewAgentTool("list_agents",
-		"List your child agents — agents you have started or spawned.",
-		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			agents, err := host.ListAgents(ctx)
+type startSessionInput struct {
+	SessionID string `json:"session_id" description:"The ID of a stopped session to restart."`
+}
+
+func toolStartSession(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("start_session",
+		"Restart a stopped session. The session resumes with its previous memory, history, and todos intact.",
+		func(ctx context.Context, input startSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.SessionID == "" {
+				return fantasy.NewTextErrorResponse("session_id is required"), nil
+			}
+
+			err := host.StartSession(ctx, input.SessionID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("failed to list agents: %v", err)), nil
+					fmt.Sprintf("failed to start session: %v", err)), nil
 			}
-			if len(agents) == 0 {
-				return fantasy.NewTextResponse("No child agents running."), nil
+
+			return fantasy.NewTextResponse(
+				fmt.Sprintf("Session %s started.", input.SessionID)), nil
+		},
+	)
+}
+
+// --- list_sessions tool ---
+
+func toolListSessions(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("list_sessions",
+		"List your child sessions — sessions you have created or spawned.",
+		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			sessions, err := host.ListSessions(ctx)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("failed to list sessions: %v", err)), nil
+			}
+			if len(sessions) == 0 {
+				return fantasy.NewTextResponse("No child sessions."), nil
 			}
 
 			var sb strings.Builder
-			for _, a := range agents {
-				fmt.Fprintf(&sb, "- **%s** (id: %s, mode: %s)", a.Name, a.ID, a.Mode)
-				if a.Description != "" {
-					fmt.Fprintf(&sb, ": %s", a.Description)
+			for _, s := range sessions {
+				fmt.Fprintf(&sb, "- **%s** (id: %s, mode: %s, status: %s)", s.Name, s.ID, s.Mode, s.Status)
+				if s.Description != "" {
+					fmt.Fprintf(&sb, ": %s", s.Description)
 				}
 				sb.WriteString("\n")
 			}
@@ -150,22 +178,22 @@ func toolListAgents(host ipc.AgentHost) fantasy.AgentTool {
 // --- send_message tool ---
 
 type sendMessageInput struct {
-	AgentID string `json:"agent_id" description:"The ID of the agent to send a message to. Must be one of your child agents."`
-	Message string `json:"message"  description:"The message to send to the agent."`
+	SessionID string `json:"session_id" description:"The ID of the session to send a message to. Must be one of your child sessions."`
+	Message   string `json:"message"    description:"The message to send to the session."`
 }
 
 func toolSendMessage(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("send_message",
-		"Send a message to one of your child agents and get its response.",
+		"Send a message to one of your child sessions and get its response.",
 		func(ctx context.Context, input sendMessageInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if input.AgentID == "" {
-				return fantasy.NewTextErrorResponse("agent_id is required"), nil
+			if input.SessionID == "" {
+				return fantasy.NewTextErrorResponse("session_id is required"), nil
 			}
 			if input.Message == "" {
 				return fantasy.NewTextErrorResponse("message is required"), nil
 			}
 
-			result, err := host.SendMessage(ctx, input.AgentID, input.Message, nil)
+			result, err := host.SendMessage(ctx, input.SessionID, input.Message, nil)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("send_message failed: %v", err)), nil
@@ -176,28 +204,54 @@ func toolSendMessage(host ipc.AgentHost) fantasy.AgentTool {
 	)
 }
 
-// --- stop_agent tool ---
+// --- stop_session tool ---
 
-type stopAgentInput struct {
-	AgentID string `json:"agent_id" description:"The ID of the agent to stop. Must be one of your child agents."`
+type stopSessionInput struct {
+	SessionID string `json:"session_id" description:"The ID of the session to stop. Must be one of your child sessions."`
 }
 
-func toolStopAgent(host ipc.AgentHost) fantasy.AgentTool {
-	return fantasy.NewAgentTool("stop_agent",
-		"Stop one of your child agents and all of its descendants.",
-		func(ctx context.Context, input stopAgentInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if input.AgentID == "" {
-				return fantasy.NewTextErrorResponse("agent_id is required"), nil
+func toolStopSession(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("stop_session",
+		"Stop a session and all of its descendants. The session keeps its data (memory, history, todos) and can be restarted with start_session. Use delete_session to permanently remove.",
+		func(ctx context.Context, input stopSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.SessionID == "" {
+				return fantasy.NewTextErrorResponse("session_id is required"), nil
 			}
 
-			err := host.StopAgent(ctx, input.AgentID)
+			err := host.StopSession(ctx, input.SessionID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("failed to stop agent: %v", err)), nil
+					fmt.Sprintf("failed to stop session: %v", err)), nil
 			}
 
 			return fantasy.NewTextResponse(
-				fmt.Sprintf("Agent %s stopped.", input.AgentID)), nil
+				fmt.Sprintf("Session %s stopped.", input.SessionID)), nil
+		},
+	)
+}
+
+// --- delete_session tool ---
+
+type deleteSessionInput struct {
+	SessionID string `json:"session_id" description:"The ID of the session to delete. Must be one of your child sessions."`
+}
+
+func toolDeleteSession(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("delete_session",
+		"Permanently delete a session and all of its descendants. Stops the session if running and removes all data (memory, history, todos). This cannot be undone.",
+		func(ctx context.Context, input deleteSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.SessionID == "" {
+				return fantasy.NewTextErrorResponse("session_id is required"), nil
+			}
+
+			err := host.DeleteSession(ctx, input.SessionID)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("failed to delete session: %v", err)), nil
+			}
+
+			return fantasy.NewTextResponse(
+				fmt.Sprintf("Session %s deleted.", input.SessionID)), nil
 		},
 	)
 }

@@ -151,10 +151,10 @@ func run() error {
 		}
 
 		// Start coordinator if not already restored from a previous run
-		leaderID, alreadyRunning := mgr.AgentByName("coordinator")
+		leaderID, alreadyRunning := mgr.SessionByAgentName("coordinator")
 		if !alreadyRunning {
 			var err error
-			leaderID, err = mgr.StartAgent(ctx, "coordinator", "")
+			leaderID, err = mgr.CreateSession(ctx, "coordinator", "")
 			if err != nil {
 				if os.IsNotExist(err) {
 					logger.Info("no coordinator agent defined, skipping")

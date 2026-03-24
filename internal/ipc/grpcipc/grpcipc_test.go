@@ -18,20 +18,20 @@ const bufSize = 1024 * 1024
 // fakeManager implements ipc.HostManager for testing.
 type fakeManager struct {
 	spawnResult string
-	startID     string
+	createID    string
 	sendResult  string
-	children    []ipc.AgentInfo
+	children    []ipc.SessionInfo
 	secretNames []string
 	secretEnv   []string
 	descendants map[string]string // targetID -> ancestorID (for IsDescendant)
 
-	lastSpawnReq struct{ name, prompt, parentID string }
-	lastSendReq  struct{ id, message string }
-	lastStartReq struct{ name, parentID string }
-	lastStopReq  string
+	lastSpawnReq  struct{ name, prompt, parentID string }
+	lastSendReq   struct{ id, message string }
+	lastCreateReq struct{ name, parentID string }
+	lastStopReq   string
 }
 
-func (f *fakeManager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (f *fakeManager) SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	f.lastSpawnReq.name = agentName
 	f.lastSpawnReq.prompt = prompt
 	f.lastSpawnReq.parentID = parentID
@@ -42,14 +42,14 @@ func (f *fakeManager) SpawnSubagent(ctx context.Context, agentName, prompt, pare
 	return f.spawnResult, nil
 }
 
-func (f *fakeManager) StartAgent(ctx context.Context, name, parentID string) (string, error) {
-	f.lastStartReq.name = name
-	f.lastStartReq.parentID = parentID
-	return f.startID, nil
+func (f *fakeManager) CreateSession(ctx context.Context, name, parentID string) (string, error) {
+	f.lastCreateReq.name = name
+	f.lastCreateReq.parentID = parentID
+	return f.createID, nil
 }
 
-func (f *fakeManager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	f.lastSendReq.id = agentID
+func (f *fakeManager) SendMessage(ctx context.Context, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	f.lastSendReq.id = sessionID
 	f.lastSendReq.message = message
 	if onEvent != nil {
 		onEvent(ipc.ChatEvent{Type: "delta", Content: "streaming..."})
@@ -57,12 +57,26 @@ func (f *fakeManager) SendMessage(ctx context.Context, agentID, message string, 
 	return f.sendResult, nil
 }
 
-func (f *fakeManager) StopAgent(agentID string) (ipc.AgentInfo, error) {
-	f.lastStopReq = agentID
-	if agentID == "not-found" {
-		return ipc.AgentInfo{}, fmt.Errorf("agent %q not found", agentID)
+func (f *fakeManager) StopSession(sessionID string) (ipc.SessionInfo, error) {
+	f.lastStopReq = sessionID
+	if sessionID == "not-found" {
+		return ipc.SessionInfo{}, fmt.Errorf("session %q not found", sessionID)
 	}
-	return ipc.AgentInfo{ID: agentID}, nil
+	return ipc.SessionInfo{ID: sessionID}, nil
+}
+
+func (f *fakeManager) StartSession(ctx context.Context, sessionID string) error {
+	if sessionID == "not-found" {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+	return nil
+}
+
+func (f *fakeManager) DeleteSession(sessionID string) error {
+	if sessionID == "not-found" {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+	return nil
 }
 
 func (f *fakeManager) IsDescendant(targetID, ancestorID string) bool {
@@ -73,7 +87,7 @@ func (f *fakeManager) IsDescendant(targetID, ancestorID string) bool {
 	return ok && ancestor == ancestorID
 }
 
-func (f *fakeManager) ListChildren(callerID string) []ipc.AgentInfo {
+func (f *fakeManager) ListChildSessions(callerID string) []ipc.SessionInfo {
 	return f.children
 }
 
@@ -150,19 +164,19 @@ func setupWorkerTest(t *testing.T, worker ipc.AgentWorker) *grpcipc.WorkerClient
 	return grpcipc.NewWorkerClient(conn)
 }
 
-func TestHostRoundtrip_SpawnAgent(t *testing.T) {
+func TestHostRoundtrip_SpawnSession(t *testing.T) {
 	mgr := &fakeManager{spawnResult: "task completed successfully"}
 	client := setupHostTest(t, mgr, "parent-1")
 
 	var deltas []string
-	result, err := client.SpawnAgent(t.Context(), "researcher", "find info", func(evt ipc.ChatEvent) error {
+	result, err := client.SpawnSession(t.Context(), "researcher", "find info", func(evt ipc.ChatEvent) error {
 		if evt.Type == "delta" {
 			deltas = append(deltas, evt.Content)
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
+		t.Fatalf("SpawnSession: %v", err)
 	}
 	if result != "task completed successfully" {
 		t.Errorf("result = %q, want %q", result, "task completed successfully")
@@ -178,19 +192,19 @@ func TestHostRoundtrip_SpawnAgent(t *testing.T) {
 	}
 }
 
-func TestHostRoundtrip_StartAgent(t *testing.T) {
-	mgr := &fakeManager{startID: "session-123"}
+func TestHostRoundtrip_CreateSession(t *testing.T) {
+	mgr := &fakeManager{createID: "session-123"}
 	client := setupHostTest(t, mgr, "parent-1")
 
-	id, err := client.StartAgent(t.Context(), "coordinator")
+	id, err := client.CreateSession(t.Context(), "coordinator")
 	if err != nil {
-		t.Fatalf("StartAgent: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	if id != "session-123" {
 		t.Errorf("id = %q, want session-123", id)
 	}
-	if mgr.lastStartReq.parentID != "parent-1" {
-		t.Errorf("parent_id = %q, want parent-1", mgr.lastStartReq.parentID)
+	if mgr.lastCreateReq.parentID != "parent-1" {
+		t.Errorf("parent_id = %q, want parent-1", mgr.lastCreateReq.parentID)
 	}
 }
 
@@ -199,7 +213,7 @@ func TestHostRoundtrip_SendMessage(t *testing.T) {
 	client := setupHostTest(t, mgr, "parent-1")
 
 	var deltas []string
-	result, err := client.SendMessage(t.Context(), "agent-1", "hello", func(evt ipc.ChatEvent) error {
+	result, err := client.SendMessage(t.Context(), "session-1", "hello", func(evt ipc.ChatEvent) error {
 		if evt.Type == "delta" {
 			deltas = append(deltas, evt.Content)
 		}
@@ -216,49 +230,90 @@ func TestHostRoundtrip_SendMessage(t *testing.T) {
 	}
 }
 
-func TestHostRoundtrip_StopAgent(t *testing.T) {
+func TestHostRoundtrip_StopSession(t *testing.T) {
 	mgr := &fakeManager{}
 	client := setupHostTest(t, mgr, "parent-1")
 
-	if err := client.StopAgent(t.Context(), "agent-1"); err != nil {
-		t.Fatalf("StopAgent: %v", err)
+	if err := client.StopSession(t.Context(), "session-1"); err != nil {
+		t.Fatalf("StopSession: %v", err)
 	}
-	if mgr.lastStopReq != "agent-1" {
-		t.Errorf("stopped = %q, want agent-1", mgr.lastStopReq)
+	if mgr.lastStopReq != "session-1" {
+		t.Errorf("stopped = %q, want session-1", mgr.lastStopReq)
 	}
 }
 
-func TestHostRoundtrip_StopAgent_NotFound(t *testing.T) {
+func TestHostRoundtrip_StopSession_NotFound(t *testing.T) {
 	mgr := &fakeManager{}
 	client := setupHostTest(t, mgr, "parent-1")
 
-	err := client.StopAgent(t.Context(), "not-found")
+	err := client.StopSession(t.Context(), "not-found")
 	if err == nil {
-		t.Fatal("expected error for not-found agent")
+		t.Fatal("expected error for not-found session")
 	}
 }
 
-func TestHostRoundtrip_ListAgents(t *testing.T) {
+func TestHostRoundtrip_StartSession(t *testing.T) {
+	mgr := &fakeManager{}
+	client := setupHostTest(t, mgr, "parent-1")
+
+	if err := client.StartSession(t.Context(), "session-1"); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+}
+
+func TestHostRoundtrip_StartSession_NotFound(t *testing.T) {
+	mgr := &fakeManager{}
+	client := setupHostTest(t, mgr, "parent-1")
+
+	err := client.StartSession(t.Context(), "not-found")
+	if err == nil {
+		t.Fatal("expected error for not-found session")
+	}
+}
+
+func TestHostRoundtrip_DeleteSession(t *testing.T) {
+	mgr := &fakeManager{}
+	client := setupHostTest(t, mgr, "parent-1")
+
+	if err := client.DeleteSession(t.Context(), "session-1"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+}
+
+func TestHostRoundtrip_DeleteSession_NotFound(t *testing.T) {
+	mgr := &fakeManager{}
+	client := setupHostTest(t, mgr, "parent-1")
+
+	err := client.DeleteSession(t.Context(), "not-found")
+	if err == nil {
+		t.Fatal("expected error for not-found session")
+	}
+}
+
+func TestHostRoundtrip_ListSessions(t *testing.T) {
 	mgr := &fakeManager{
-		children: []ipc.AgentInfo{
-			{ID: "a1", Name: "researcher", Mode: "ephemeral", Description: "finds stuff"},
-			{ID: "a2", Name: "writer", Mode: "persistent"},
+		children: []ipc.SessionInfo{
+			{ID: "s1", Name: "researcher", Mode: "ephemeral", Description: "finds stuff", Status: "running"},
+			{ID: "s2", Name: "writer", Mode: "persistent", Status: "stopped"},
 		},
 	}
 	client := setupHostTest(t, mgr, "parent-1")
 
-	agents, err := client.ListAgents(t.Context())
+	sessions, err := client.ListSessions(t.Context())
 	if err != nil {
-		t.Fatalf("ListAgents: %v", err)
+		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(agents) != 2 {
-		t.Fatalf("got %d agents, want 2", len(agents))
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(sessions))
 	}
-	if agents[0].Name != "researcher" {
-		t.Errorf("agent[0].Name = %q, want researcher", agents[0].Name)
+	if sessions[0].Name != "researcher" {
+		t.Errorf("sessions[0].Name = %q, want researcher", sessions[0].Name)
 	}
-	if agents[1].Description != "" {
-		t.Errorf("agent[1].Description = %q, want empty", agents[1].Description)
+	if sessions[0].Status != "running" {
+		t.Errorf("sessions[0].Status = %q, want running", sessions[0].Status)
+	}
+	if sessions[1].Status != "stopped" {
+		t.Errorf("sessions[1].Status = %q, want stopped", sessions[1].Status)
 	}
 }
 
@@ -304,7 +359,7 @@ func TestHostRoundtrip_SendMessage_DescendantCheck(t *testing.T) {
 	}
 }
 
-func TestHostRoundtrip_StopAgent_DescendantCheck(t *testing.T) {
+func TestHostRoundtrip_StopSession_DescendantCheck(t *testing.T) {
 	mgr := &fakeManager{
 		descendants: map[string]string{
 			"child-1": "parent-1",
@@ -313,9 +368,39 @@ func TestHostRoundtrip_StopAgent_DescendantCheck(t *testing.T) {
 
 	// parent-2 cannot stop child-1
 	client := setupHostTest(t, mgr, "parent-2")
-	err := client.StopAgent(t.Context(), "child-1")
+	err := client.StopSession(t.Context(), "child-1")
 	if err == nil {
-		t.Fatal("expected StopAgent to fail for non-descendant")
+		t.Fatal("expected StopSession to fail for non-descendant")
+	}
+}
+
+func TestHostRoundtrip_DeleteSession_DescendantCheck(t *testing.T) {
+	mgr := &fakeManager{
+		descendants: map[string]string{
+			"child-1": "parent-1",
+		},
+	}
+
+	// parent-2 cannot delete child-1
+	client := setupHostTest(t, mgr, "parent-2")
+	err := client.DeleteSession(t.Context(), "child-1")
+	if err == nil {
+		t.Fatal("expected DeleteSession to fail for non-descendant")
+	}
+}
+
+func TestHostRoundtrip_StartSession_DescendantCheck(t *testing.T) {
+	mgr := &fakeManager{
+		descendants: map[string]string{
+			"child-1": "parent-1",
+		},
+	}
+
+	// parent-2 cannot start child-1
+	client := setupHostTest(t, mgr, "parent-2")
+	err := client.StartSession(t.Context(), "child-1")
+	if err == nil {
+		t.Fatal("expected StartSession to fail for non-descendant")
 	}
 }
 

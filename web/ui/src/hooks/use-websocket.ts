@@ -11,12 +11,12 @@ export interface ChatWireMessage {
   is_error?: boolean
 }
 
-export function useWebSocket(agentId: string | null) {
+export function useWebSocket(sessionId: string | null) {
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const onMessageRef = useRef<(msg: ChatWireMessage) => void>(() => {})
   const reconnectTimer = useRef<number | undefined>(undefined)
-  const currentAgentId = useRef<string | null>(null)
+  const currentSessionId = useRef<string | null>(null)
 
   const cleanup = useCallback(() => {
     clearTimeout(reconnectTimer.current)
@@ -32,18 +32,18 @@ export function useWebSocket(agentId: string | null) {
   const connectWs = useCallback(
     (id: string) => {
       cleanup()
-      currentAgentId.current = id
+      currentSessionId.current = id
 
       const protocol =
         window.location.protocol === "https:" ? "wss:" : "ws:"
       const ws = new WebSocket(
-        `${protocol}//${window.location.host}/ws/chat?agent_id=${encodeURIComponent(id)}`
+        `${protocol}//${window.location.host}/ws/chat?session_id=${encodeURIComponent(id)}`
       )
 
       ws.onopen = () => setConnected(true)
       ws.onclose = () => {
         setConnected(false)
-        if (currentAgentId.current === id) {
+        if (currentSessionId.current === id) {
           reconnectTimer.current = window.setTimeout(
             () => connectWs(id),
             3000
@@ -64,13 +64,13 @@ export function useWebSocket(agentId: string | null) {
   )
 
   useEffect(() => {
-    if (agentId) {
-      connectWs(agentId)
+    if (sessionId) {
+      connectWs(sessionId)
     } else {
       cleanup()
     }
     return cleanup
-  }, [agentId, connectWs, cleanup])
+  }, [sessionId, connectWs, cleanup])
 
   const send = useCallback((msg: ChatWireMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

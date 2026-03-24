@@ -60,14 +60,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Allow targeting a specific agent via query param, default to leader
-	agentID := r.URL.Query().Get("agent_id")
-	if agentID == "" {
-		agentID = s.leaderID
+	// Allow targeting a specific session via query param, default to leader
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		sessionID = s.leaderID
 	}
-	info, ok := s.manager.GetAgent(agentID)
+	info, ok := s.manager.GetSession(sessionID)
 	if !ok || info.Mode == config.ModeEphemeral {
-		http.Error(w, "agent not found", http.StatusNotFound)
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if info.Status == agent.SessionStatusStopped {
+		http.Error(w, "session is stopped", http.StatusConflict)
 		return
 	}
 
@@ -137,7 +141,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Stream response — agent process owns the conversation.
-		_, streamErr := s.manager.SendMessage(ctx, agentID, msg.Content, onEvent)
+		_, streamErr := s.manager.SendMessage(ctx, sessionID, msg.Content, onEvent)
 
 		if streamErr != nil {
 			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}

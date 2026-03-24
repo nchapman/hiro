@@ -30,8 +30,8 @@ func TestE2E_Health(t *testing.T) {
 	}
 }
 
-func TestE2E_ListAgents(t *testing.T) {
-	agents := listAgents(t)
+func TestE2E_ListSessions(t *testing.T) {
+	agents := listSessions(t)
 	if len(agents) == 0 {
 		t.Fatal("expected at least one agent (coordinator)")
 	}

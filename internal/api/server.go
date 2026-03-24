@@ -21,11 +21,11 @@ type CommandHandler interface {
 
 // Server is the HTTP server for the Hive leader.
 type Server struct {
-	manager      *agent.Manager          // agent manager (nil = no agents)
-	leaderID     string                  // ID of the leader agent for chat
+	manager      *agent.Manager          // session manager (nil = no sessions)
+	leaderID     string                  // ID of the leader session for chat
 	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
 	cp           *controlplane.ControlPlane // control plane (for auth + settings)
-	startManager func() error            // callback to start the agent manager (set by main)
+	startManager func() error            // callback to start the session manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	mux          *http.ServeMux
 	logger       *slog.Logger
@@ -64,10 +64,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))
 	s.mux.HandleFunc("POST /api/settings/providers/{type}/test", s.requireAuth(s.handleTestProviderByType))
 
-	// API routes (authenticated)
+	// Session API routes (authenticated)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/agents", s.requireAuth(s.handleListAgents))
-	s.mux.HandleFunc("GET /api/agents/{id}/messages", s.requireAuth(s.handleAgentMessages))
+	s.mux.HandleFunc("GET /api/sessions", s.requireAuth(s.handleListSessions))
+	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleSessionMessages))
+	s.mux.HandleFunc("POST /api/sessions/{id}/stop", s.requireAuth(s.handleStopSession))
+	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
+	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 
 	// WebSocket endpoint for web UI chat
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
@@ -111,53 +114,139 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 	modeFilter := r.URL.Query().Get("mode")
-	agents := s.manager.ListAgents()
-	type agentResponse struct {
+	sessions := s.manager.ListSessions()
+	type sessionResponse struct {
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Mode        string `json:"mode"`
+		Status      string `json:"status"`
 		Description string `json:"description,omitempty"`
 		ParentID    string `json:"parent_id,omitempty"`
 	}
-	result := make([]agentResponse, 0, len(agents))
-	for _, a := range agents {
-		if modeFilter != "" && string(a.Mode) != modeFilter {
+	result := make([]sessionResponse, 0, len(sessions))
+	for _, si := range sessions {
+		if modeFilter != "" && string(si.Mode) != modeFilter {
 			continue
 		}
-		result = append(result, agentResponse{
-			ID:          a.ID,
-			Name:        a.Name,
-			Mode:        string(a.Mode),
-			Description: a.Description,
-			ParentID:    a.ParentID,
+		result = append(result, sessionResponse{
+			ID:          si.ID,
+			Name:        si.Name,
+			Mode:        string(si.Mode),
+			Status:      string(si.Status),
+			Description: si.Description,
+			ParentID:    si.ParentID,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleAgentMessages(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
-		http.Error(w, "no agent manager", http.StatusServiceUnavailable)
+		http.Error(w, "no session manager", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
 	msgs, err := s.manager.GetHistory(id, 100)
 	if err != nil {
-		if errors.Is(err, agent.ErrAgentNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
+		if errors.Is(err, agent.ErrSessionNotFound) {
+			http.Error(w, "session not found", http.StatusNotFound)
 		} else {
-			s.logger.Error("failed to read agent history", "id", id, "error", err)
+			s.logger.Error("failed to read session history", "id", id, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 		return
 	}
 	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (s *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+
+	// Protect root session (coordinator).
+	info, ok := s.manager.GetSession(id)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if info.ParentID == "" {
+		http.Error(w, "cannot stop the root session", http.StatusForbidden)
+		return
+	}
+
+	if _, err := s.manager.StopSession(id); err != nil {
+		s.logger.Error("failed to stop session", "id", id, "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+
+	// Protect root session (coordinator).
+	info, ok := s.manager.GetSession(id)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if info.ParentID == "" {
+		http.Error(w, "cannot restart the root session", http.StatusForbidden)
+		return
+	}
+
+	if err := s.manager.StartSession(r.Context(), id); err != nil {
+		if errors.Is(err, agent.ErrSessionNotFound) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else if errors.Is(err, agent.ErrSessionNotStopped) {
+			http.Error(w, "session is not stopped", http.StatusConflict)
+		} else {
+			s.logger.Error("failed to start session", "id", id, "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+
+	// Protect root session (coordinator).
+	info, ok := s.manager.GetSession(id)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if info.ParentID == "" {
+		http.Error(w, "cannot delete the root session", http.StatusForbidden)
+		return
+	}
+
+	if err := s.manager.DeleteSession(id); err != nil {
+		s.logger.Error("failed to delete session", "id", id, "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // isSameOrigin checks that the request's Origin header (if present) matches

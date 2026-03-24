@@ -21,13 +21,22 @@ import (
 	"github.com/nchapman/hivebot/internal/uidpool"
 )
 
-// AgentInfo describes a running agent for external consumers.
-type AgentInfo struct {
+// SessionStatus represents the lifecycle state of an agent.
+type SessionStatus string
+
+const (
+	SessionStatusRunning SessionStatus = "running"
+	SessionStatusStopped SessionStatus = "stopped"
+)
+
+// SessionInfo describes an agent for external consumers.
+type SessionInfo struct {
 	ID          string
 	Name        string
 	Mode        config.AgentMode
 	Description string
 	ParentID    string // empty for top-level agents
+	Status      SessionStatus
 }
 
 // WorkerHandle represents a running agent worker (process or mock).
@@ -42,10 +51,10 @@ type WorkerHandle struct {
 // OS processes. Tests inject alternatives that return fake workers.
 type WorkerFactory func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error)
 
-// runningAgent tracks a live agent session within the manager.
-type runningAgent struct {
+// session tracks a live agent session within the manager.
+type session struct {
 	mu             sync.Mutex // serializes calls through the worker
-	info           AgentInfo
+	info           SessionInfo
 	worker         ipc.AgentWorker
 	handle         *WorkerHandle
 	effectiveTools map[string]bool // built-in tools this agent is allowed; nil = unrestricted
@@ -54,7 +63,7 @@ type runningAgent struct {
 // Manager supervises agent lifecycles on a single node.
 type Manager struct {
 	mu       sync.RWMutex
-	agents   map[string]*runningAgent // agent ID -> running agent
+	sessions map[string]*session // agent ID -> running agent
 	children map[string][]string      // parent ID -> child IDs
 
 	ctx     context.Context // long-lived context for persistent agents
@@ -88,7 +97,7 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 		wf = defaultWorkerFactory
 	}
 	return &Manager{
-		agents:        make(map[string]*runningAgent),
+		sessions:      make(map[string]*session),
 		children:      make(map[string][]string),
 		ctx:           ctx,
 		rootDir:  rootDir,
@@ -105,7 +114,7 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 // agent supervised by the manager's lifetime context. The ctx parameter is used
 // only for config loading and worker spawning, not for the running agent's lifetime.
 // parentID tracks lineage; pass "" for top-level agents.
-func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string, error) {
+func (m *Manager) CreateSession(ctx context.Context, name, parentID string) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
 	}
@@ -124,7 +133,7 @@ func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string
 // ephemeral mode regardless of its config file — the caller controls the lifecycle.
 // parentID identifies the spawning agent (empty for top-level spawns).
 // onEvent receives streaming events during execution (may be nil).
-func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -146,7 +155,7 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 	result, err := m.SendMessage(ctx, agentID, prompt, onEvent)
 
 	// Clean up the ephemeral agent and its entire subtree
-	m.StopAgent(agentID)
+	m.StopSession(agentID)
 
 	if err != nil {
 		return "", fmt.Errorf("subagent %q failed: %w", agentName, err)
@@ -158,61 +167,222 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 // onEvent is called for each streaming event; it may be nil. Calls are serialized
 // per agent to prevent conversation corruption.
 func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	ra := m.getAgent(agentID)
+	ra := m.getSession(agentID)
 	if ra == nil {
-		return "", fmt.Errorf("agent %q not found", agentID)
+		return "", fmt.Errorf("session %q not found", agentID)
+	}
+	if ra.info.Status == SessionStatusStopped {
+		return "", fmt.Errorf("session %q is stopped", agentID)
 	}
 
 	ra.mu.Lock()
 	defer ra.mu.Unlock()
 
+	// Re-check after acquiring the per-session lock — softStop may have
+	// niled out the worker between the status check above and here.
+	if ra.worker == nil {
+		return "", fmt.Errorf("session %q is stopped", agentID)
+	}
 	return ra.worker.Chat(ctx, message, onEvent)
 }
 
 // StopAgent stops a running agent and all its descendants.
-// Returns the info of the stopped root agent.
-func (m *Manager) StopAgent(agentID string) (ipc.AgentInfo, error) {
+// Persistent agents are soft-stopped (process killed, kept in registry as "stopped").
+// Ephemeral agents are fully removed. Returns the info of the stopped root agent.
+func (m *Manager) StopSession(agentID string) (ipc.SessionInfo, error) {
 	// Collect the entire subtree in one snapshot, then stop leaf-first
 	toStop := m.collectDescendants(agentID)
 	if len(toStop) == 0 {
-		return ipc.AgentInfo{}, fmt.Errorf("agent %q not found", agentID)
+		return ipc.SessionInfo{}, fmt.Errorf("session %q not found", agentID)
 	}
 
-	// Save root info before removal
-	rootInfo, _ := m.GetAgent(agentID)
+	// Check if already stopped
+	rootInfo, _ := m.GetSession(agentID)
+	if rootInfo.Status == SessionStatusStopped {
+		return m.sessionInfoToIPC(rootInfo), nil
+	}
 
 	for i := len(toStop) - 1; i >= 0; i-- {
 		id := toStop[i]
-		m.removeAgent(id)
-		m.logger.Info("agent stopped", "id", id)
+		ra := m.getSession(id)
+		if ra == nil || ra.info.Status == SessionStatusStopped {
+			continue
+		}
+		if ra.info.Mode.IsPersistent() {
+			m.softStop(id)
+		} else {
+			m.removeSession(id)
+		}
+		m.logger.Info("session stopped", "id", id)
 	}
-	return ipc.AgentInfo{
-		ID:          rootInfo.ID,
-		Name:        rootInfo.Name,
-		Mode:        string(rootInfo.Mode),
-		Description: rootInfo.Description,
-		ParentID:    rootInfo.ParentID,
-	}, nil
+
+	// Re-read info after stop (status may have changed)
+	rootInfo, _ = m.GetSession(agentID)
+	return m.sessionInfoToIPC(rootInfo), nil
 }
 
-// GetAgent returns info about a running agent.
-func (m *Manager) GetAgent(agentID string) (AgentInfo, bool) {
+// DeleteAgent stops and permanently removes an agent and all its descendants.
+// Session directories are always deleted regardless of agent mode.
+func (m *Manager) DeleteSession(agentID string) error {
+	toStop := m.collectDescendants(agentID)
+	if len(toStop) == 0 {
+		return fmt.Errorf("session %q not found", agentID)
+	}
+
+	for i := len(toStop) - 1; i >= 0; i-- {
+		id := toStop[i]
+		m.mu.RLock()
+		ra, ok := m.sessions[id]
+		m.mu.RUnlock()
+		if !ok {
+			continue
+		}
+
+		if ra.info.Status == SessionStatusStopped {
+			// Already stopped — just unregister and delete session dir.
+			m.mu.Lock()
+			m.unregisterLocked(id, ra)
+			m.mu.Unlock()
+		} else {
+			// Running — do full graceful shutdown + unregister.
+			m.removeSession(id)
+		}
+
+		// Always delete session dir regardless of mode.
+		os.RemoveAll(m.sessionDir(id))
+		m.logger.Info("session deleted", "id", id)
+	}
+	return nil
+}
+
+// RestartAgent restarts a stopped persistent agent, reusing its session directory.
+func (m *Manager) StartSession(ctx context.Context, agentID string) error {
+	m.mu.RLock()
+	ra, ok := m.sessions[agentID]
+	m.mu.RUnlock()
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if ra.info.Status != SessionStatusStopped {
+		return ErrSessionNotStopped
+	}
+
+	name := ra.info.Name
+	parentID := ra.info.ParentID
+
+	// Remove the stopped entry so startSession can re-register it.
+	m.mu.Lock()
+	m.unregisterLocked(agentID, ra)
+	m.mu.Unlock()
+
+	cfg, err := config.LoadAgentDir(m.agentDefDir(name))
+	if err != nil {
+		// Re-register as stopped so the session remains visible.
+		m.reregisterStopped(agentID, ra)
+		return fmt.Errorf("loading agent %q: %w", name, err)
+	}
+
+	if _, err = m.startSession(ctx, agentID, cfg, parentID); err != nil {
+		// Re-register as stopped so the session remains visible.
+		m.reregisterStopped(agentID, ra)
+		return err
+	}
+
+	// Clear the stopped flag so the agent starts on next server restart.
+	m.setManifestStopped(agentID, false)
+	return nil
+}
+
+// softStop gracefully shuts down a persistent agent's worker process
+// but keeps it in the registry with status "stopped".
+func (m *Manager) softStop(id string) {
+	m.mu.RLock()
+	ra, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	// Graceful shutdown: ask the worker to stop, then wait for exit
+	// under a single deadline.
+	const shutdownGrace = 5 * time.Second
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	ra.worker.Shutdown(shutCtx)
+
+	select {
+	case <-ra.handle.Done:
+		// Process exited cleanly.
+	case <-shutCtx.Done():
+		// Deadline expired — force-kill and wait.
+		if ra.handle.Kill != nil {
+			ra.handle.Kill()
+		}
+		<-ra.handle.Done
+	}
+
+	// Mark stopped BEFORE cleanup so watchWorker sees it and bails out.
+	// Capture handle under the lock for cleanup outside.
+	m.mu.Lock()
+	h := ra.handle
+	ra.worker = nil
+	ra.handle = nil
+	ra.info.Status = SessionStatusStopped
+	m.mu.Unlock()
+
+	if h != nil {
+		h.Close()
+	}
+	if m.uidPool != nil {
+		m.uidPool.Release(id)
+	}
+
+	// Persist stopped state so it survives server restarts.
+	m.setManifestStopped(id, true)
+}
+
+// reregisterStopped puts a session back into the registry as stopped.
+// Used when StartSession fails after unregistering.
+func (m *Manager) reregisterStopped(id string, s *session) {
+	s.info.Status = SessionStatusStopped
+	m.mu.Lock()
+	m.sessions[id] = s
+	if s.info.ParentID != "" {
+		m.children[s.info.ParentID] = append(m.children[s.info.ParentID], id)
+	}
+	m.mu.Unlock()
+}
+
+// sessionInfoToIPC converts an SessionInfo to ipc.SessionInfo.
+func (m *Manager) sessionInfoToIPC(info SessionInfo) ipc.SessionInfo {
+	return ipc.SessionInfo{
+		ID:          info.ID,
+		Name:        info.Name,
+		Mode:        string(info.Mode),
+		Description: info.Description,
+		ParentID:    info.ParentID,
+		Status:      string(info.Status),
+	}
+}
+
+// GetAgent returns info about an agent (running or stopped).
+func (m *Manager) GetSession(agentID string) (SessionInfo, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	ra, ok := m.agents[agentID]
+	ra, ok := m.sessions[agentID]
 	if !ok {
-		return AgentInfo{}, false
+		return SessionInfo{}, false
 	}
 	return ra.info, true
 }
 
-// ListAgents returns a snapshot of all running agents sorted by creation order.
+// ListAgents returns a snapshot of all agents (running and stopped) sorted by creation order.
 // Agent IDs are UUIDv7 (time-ordered), so lexicographic sort gives creation order.
-func (m *Manager) ListAgents() []AgentInfo {
+func (m *Manager) ListSessions() []SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	result := make([]AgentInfo, 0, len(m.agents))
-	for _, ra := range m.agents {
+	result := make([]SessionInfo, 0, len(m.sessions))
+	for _, ra := range m.sessions {
 		result = append(result, ra.info)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -220,19 +390,20 @@ func (m *Manager) ListAgents() []AgentInfo {
 }
 
 // ListChildren returns a snapshot of agents that are direct children of callerID.
-func (m *Manager) ListChildren(callerID string) []ipc.AgentInfo {
+func (m *Manager) ListChildSessions(callerID string) []ipc.SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	childIDs := m.children[callerID]
-	result := make([]ipc.AgentInfo, 0, len(childIDs))
+	result := make([]ipc.SessionInfo, 0, len(childIDs))
 	for _, cid := range childIDs {
-		if ra, ok := m.agents[cid]; ok {
-			result = append(result, ipc.AgentInfo{
+		if ra, ok := m.sessions[cid]; ok {
+			result = append(result, ipc.SessionInfo{
 				ID:          ra.info.ID,
 				Name:        ra.info.Name,
 				Mode:        string(ra.info.Mode),
 				Description: ra.info.Description,
 				ParentID:    ra.info.ParentID,
+				Status:      string(ra.info.Status),
 			})
 		}
 	}
@@ -247,18 +418,21 @@ type HistoryMessage struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// ErrAgentNotFound is returned when an agent ID does not match a running agent.
-var ErrAgentNotFound = errors.New("agent not found")
+// ErrSessionNotFound is returned when an agent ID does not match a known agent.
+var ErrSessionNotFound = errors.New("session not found")
+
+// ErrSessionNotStopped is returned when an operation requires a stopped agent.
+var ErrSessionNotStopped = errors.New("session is not stopped")
 
 // GetHistory returns recent messages from a persistent agent's conversation history.
 // Opens the agent's history DB read-only, queries, and closes immediately to
 // avoid blocking WAL checkpointing in the agent process.
 func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()
-	ra, ok := m.agents[agentID]
+	ra, ok := m.sessions[agentID]
 	m.mu.RUnlock()
 	if !ok {
-		return nil, ErrAgentNotFound
+		return nil, ErrSessionNotFound
 	}
 
 	if !ra.info.Mode.IsPersistent() {
@@ -296,12 +470,13 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 }
 
 // AgentByName returns the ID of a running agent by name.
-// If multiple agents share a name, the result is nondeterministic.
-func (m *Manager) AgentByName(name string) (string, bool) {
+// Stopped agents are not matched. If multiple running agents share
+// a name, the result is nondeterministic.
+func (m *Manager) SessionByAgentName(name string) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for id, ra := range m.agents {
-		if ra.info.Name == name {
+	for id, ra := range m.sessions {
+		if ra.info.Name == name && ra.info.Status == SessionStatusRunning {
 			return id, true
 		}
 	}
@@ -383,6 +558,29 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 			continue
 		}
 
+		if manifest.Stopped {
+			// Register as stopped without spawning a worker process.
+			ra := &session{
+				info: SessionInfo{
+					ID:          manifest.ID,
+					Name:        cfg.Name,
+					Mode:        cfg.Mode,
+					Description: cfg.Description,
+					ParentID:    manifest.ParentID,
+					Status:      SessionStatusStopped,
+				},
+			}
+			m.mu.Lock()
+			m.sessions[manifest.ID] = ra
+			if manifest.ParentID != "" {
+				m.children[manifest.ParentID] = append(m.children[manifest.ParentID], manifest.ID)
+			}
+			m.mu.Unlock()
+			m.logger.Info("restored stopped agent",
+				"id", manifest.ID, "name", cfg.Name)
+			continue
+		}
+
 		_, err = m.startSession(ctx, manifest.ID, cfg, manifest.ParentID)
 		if err != nil {
 			m.logger.Warn("failed to restore agent",
@@ -393,10 +591,11 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 }
 
 // Shutdown stops all running agents. Ephemeral session directories are cleaned up.
+// Stopped agents are unregistered without attempting worker shutdown.
 func (m *Manager) Shutdown() {
 	m.mu.RLock()
-	ids := make([]string, 0, len(m.agents))
-	for id := range m.agents {
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
@@ -415,10 +614,19 @@ func (m *Manager) Shutdown() {
 	}
 
 	for i := len(ordered) - 1; i >= 0; i-- {
-		m.removeAgent(ordered[i])
+		id := ordered[i]
+		ra := m.getSession(id)
+		if ra != nil && ra.info.Status == SessionStatusStopped {
+			// Already stopped — just unregister.
+			m.mu.Lock()
+			m.unregisterLocked(id, ra)
+			m.mu.Unlock()
+			continue
+		}
+		m.removeSession(id)
 	}
 
-	m.logger.Info("agent manager shut down")
+	m.logger.Info("session manager shut down")
 }
 
 // startSession creates a session directory, spawns a worker process,
@@ -575,13 +783,14 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
 	}
 
-	ra := &runningAgent{
-		info: AgentInfo{
+	ra := &session{
+		info: SessionInfo{
 			ID:          id,
 			Name:        cfg.Name,
 			Mode:        cfg.Mode,
 			Description: cfg.Description,
 			ParentID:    parentID,
+			Status:      SessionStatusRunning,
 		},
 		worker:         handle.Worker,
 		handle:         handle,
@@ -589,7 +798,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	}
 
 	m.mu.Lock()
-	m.agents[id] = ra
+	m.sessions[id] = ra
 	if parentID != "" {
 		m.children[parentID] = append(m.children[parentID], id)
 	}
@@ -598,7 +807,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	// Start death-watcher goroutine for unexpected process exits.
 	go m.watchWorker(id, handle.Done)
 
-	m.logger.Info("agent started",
+	m.logger.Info("session started",
 		"id", id,
 		"name", cfg.Name,
 		"mode", cfg.Mode,
@@ -613,48 +822,76 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 	<-done
 
 	m.mu.RLock()
-	ra, ok := m.agents[agentID]
+	ra, ok := m.sessions[agentID]
 	m.mu.RUnlock()
-	if !ok {
-		return // already removed (normal shutdown)
+	if !ok || ra.info.Status == SessionStatusStopped {
+		return // already removed or intentionally stopped
 	}
 
-	m.logger.Warn("agent process exited unexpectedly",
+	m.logger.Warn("session process exited unexpectedly",
 		"id", agentID,
 		"name", ra.info.Name,
 	)
 
-	// Unregister the dead agent and its children.
+	// Handle the dead agent and its children.
 	descendants := m.collectDescendants(agentID)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		id := descendants[i]
-		m.mu.Lock()
-		deadRA, exists := m.agents[id]
-		m.unregisterLocked(id, deadRA)
-		m.mu.Unlock()
+		m.mu.RLock()
+		deadRA, exists := m.sessions[id]
+		m.mu.RUnlock()
+		if !exists || deadRA.info.Status == SessionStatusStopped {
+			continue
+		}
 
-		if exists {
-			deadRA.handle.Close()
+		if deadRA.info.Mode.IsPersistent() {
+			// Persistent sessions become "stopped" — visible but not running.
+			// Capture handle under lock and set status atomically to prevent
+			// double-cleanup race with softStop.
+			m.mu.Lock()
+			if deadRA.info.Status == SessionStatusStopped {
+				m.mu.Unlock()
+				continue // softStop already handled this
+			}
+			h := deadRA.handle
+			deadRA.worker = nil
+			deadRA.handle = nil
+			deadRA.info.Status = SessionStatusStopped
+			m.mu.Unlock()
+
+			if h != nil {
+				h.Close()
+			}
 			if m.uidPool != nil {
 				m.uidPool.Release(id)
 			}
-			if !deadRA.info.Mode.IsPersistent() {
-				os.RemoveAll(m.sessionDir(id))
+		} else {
+			// Ephemeral sessions are fully removed.
+			m.mu.Lock()
+			h := deadRA.handle
+			m.unregisterLocked(id, deadRA)
+			m.mu.Unlock()
+			if h != nil {
+				h.Close()
 			}
+			if m.uidPool != nil {
+				m.uidPool.Release(id)
+			}
+			os.RemoveAll(m.sessionDir(id))
 		}
 	}
 }
 
-// removeAgent gracefully shuts down and removes an agent from the registry.
+// removeSession gracefully shuts down and removes an agent from the registry.
 // Ephemeral session directories are cleaned up.
-func (m *Manager) removeAgent(id string) {
+func (m *Manager) removeSession(id string) {
 	m.mu.Lock()
-	ra, ok := m.agents[id]
+	ra, ok := m.sessions[id]
 	m.unregisterLocked(id, ra)
 	m.mu.Unlock()
 
-	if !ok {
-		return
+	if !ok || ra.worker == nil {
+		return // not found or already soft-stopped
 	}
 
 	// Graceful shutdown: ask the worker to stop, then wait for exit
@@ -686,17 +923,17 @@ func (m *Manager) removeAgent(id string) {
 	}
 }
 
-// getAgent returns the runningAgent for the given ID, or nil.
-func (m *Manager) getAgent(id string) *runningAgent {
+// getSession returns the session for the given ID, or nil.
+func (m *Manager) getSession(id string) *session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.agents[id]
+	return m.sessions[id]
 }
 
 // unregisterLocked removes an agent from the registry and its parent's children
 // list. Must be called with m.mu held.
-func (m *Manager) unregisterLocked(id string, ra *runningAgent) {
-	delete(m.agents, id)
+func (m *Manager) unregisterLocked(id string, ra *session) {
+	delete(m.sessions, id)
 	delete(m.children, id)
 	if ra != nil && ra.info.ParentID != "" {
 		siblings := m.children[ra.info.ParentID]
@@ -716,7 +953,7 @@ func (m *Manager) collectDescendants(agentID string) []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if _, ok := m.agents[agentID]; !ok {
+	if _, ok := m.sessions[agentID]; !ok {
 		return nil
 	}
 
@@ -733,12 +970,12 @@ func (m *Manager) collectDescendants(agentID string) []string {
 
 // spawnTool is injected into all agents — spawning ephemeral subagents is
 // universally available since the subagent is fire-and-forget.
-var spawnTool = "spawn_agent"
+var spawnTool = "spawn_session"
 
 // coordinatorTools are injected only for coordinator-mode agents. These
 // manage persistent agent lifecycles and require hive-coordinators group.
 var coordinatorTools = []string{
-	"start_agent", "list_agents", "send_message", "stop_agent",
+	"create_session", "start_session", "list_sessions", "send_message", "stop_session", "delete_session",
 }
 
 // persistentTools are injected for persistent and coordinator agents.
@@ -785,7 +1022,7 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 	// Intersect with parent's effective tools if parent exists.
 	if parentID != "" {
 		m.mu.RLock()
-		parent, ok := m.agents[parentID]
+		parent, ok := m.sessions[parentID]
 		m.mu.RUnlock()
 		if ok && parent.effectiveTools != nil {
 			for t := range effective {
@@ -846,6 +1083,21 @@ func (m *Manager) sessionsDir() string {
 
 func (m *Manager) sessionDir(id string) string {
 	return filepath.Join(m.rootDir, "sessions", id)
+}
+
+// setManifestStopped updates the stopped field in an agent's manifest on disk.
+// Best-effort: errors are logged but not returned.
+func (m *Manager) setManifestStopped(id string, stopped bool) {
+	manifestPath := filepath.Join(m.sessionDir(id), "manifest.yaml")
+	manifest, err := config.ReadManifest(manifestPath)
+	if err != nil {
+		m.logger.Warn("failed to read manifest for stopped update", "id", id, "error", err)
+		return
+	}
+	manifest.Stopped = stopped
+	if err := config.WriteManifest(manifestPath, manifest); err != nil {
+		m.logger.Warn("failed to write manifest for stopped update", "id", id, "error", err)
+	}
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

@@ -21,7 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ChatEvent is a streaming event sent during Chat, SpawnAgent, or SendMessage.
+// ChatEvent is a streaming event sent during Chat, SpawnSession, or SendMessage.
 type ChatEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// type is "delta" for incremental text, "done" for final result, or "error".
@@ -75,7 +75,7 @@ func (x *ChatEvent) GetContent() string {
 	return ""
 }
 
-type SpawnAgentRequest struct {
+type SpawnSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
 	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
@@ -84,20 +84,20 @@ type SpawnAgentRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SpawnAgentRequest) Reset() {
-	*x = SpawnAgentRequest{}
+func (x *SpawnSessionRequest) Reset() {
+	*x = SpawnSessionRequest{}
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SpawnAgentRequest) String() string {
+func (x *SpawnSessionRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SpawnAgentRequest) ProtoMessage() {}
+func (*SpawnSessionRequest) ProtoMessage() {}
 
-func (x *SpawnAgentRequest) ProtoReflect() protoreflect.Message {
+func (x *SpawnSessionRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -109,33 +109,33 @@ func (x *SpawnAgentRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SpawnAgentRequest.ProtoReflect.Descriptor instead.
-func (*SpawnAgentRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SpawnSessionRequest.ProtoReflect.Descriptor instead.
+func (*SpawnSessionRequest) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *SpawnAgentRequest) GetAgentName() string {
+func (x *SpawnSessionRequest) GetAgentName() string {
 	if x != nil {
 		return x.AgentName
 	}
 	return ""
 }
 
-func (x *SpawnAgentRequest) GetPrompt() string {
+func (x *SpawnSessionRequest) GetPrompt() string {
 	if x != nil {
 		return x.Prompt
 	}
 	return ""
 }
 
-func (x *SpawnAgentRequest) GetParentId() string {
+func (x *SpawnSessionRequest) GetParentId() string {
 	if x != nil {
 		return x.ParentId
 	}
 	return ""
 }
 
-type StartAgentRequest struct {
+type CreateSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
 	ParentId      string                 `protobuf:"bytes,2,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
@@ -143,20 +143,20 @@ type StartAgentRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StartAgentRequest) Reset() {
-	*x = StartAgentRequest{}
+func (x *CreateSessionRequest) Reset() {
+	*x = CreateSessionRequest{}
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StartAgentRequest) String() string {
+func (x *CreateSessionRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StartAgentRequest) ProtoMessage() {}
+func (*CreateSessionRequest) ProtoMessage() {}
 
-func (x *StartAgentRequest) ProtoReflect() protoreflect.Message {
+func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -168,46 +168,46 @@ func (x *StartAgentRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StartAgentRequest.ProtoReflect.Descriptor instead.
-func (*StartAgentRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateSessionRequest.ProtoReflect.Descriptor instead.
+func (*CreateSessionRequest) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *StartAgentRequest) GetAgentName() string {
+func (x *CreateSessionRequest) GetAgentName() string {
 	if x != nil {
 		return x.AgentName
 	}
 	return ""
 }
 
-func (x *StartAgentRequest) GetParentId() string {
+func (x *CreateSessionRequest) GetParentId() string {
 	if x != nil {
 		return x.ParentId
 	}
 	return ""
 }
 
-type StartAgentResponse struct {
+type CreateSessionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StartAgentResponse) Reset() {
-	*x = StartAgentResponse{}
+func (x *CreateSessionResponse) Reset() {
+	*x = CreateSessionResponse{}
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StartAgentResponse) String() string {
+func (x *CreateSessionResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StartAgentResponse) ProtoMessage() {}
+func (*CreateSessionResponse) ProtoMessage() {}
 
-func (x *StartAgentResponse) ProtoReflect() protoreflect.Message {
+func (x *CreateSessionResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -219,12 +219,12 @@ func (x *StartAgentResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StartAgentResponse.ProtoReflect.Descriptor instead.
-func (*StartAgentResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateSessionResponse.ProtoReflect.Descriptor instead.
+func (*CreateSessionResponse) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *StartAgentResponse) GetSessionId() string {
+func (x *CreateSessionResponse) GetSessionId() string {
 	if x != nil {
 		return x.SessionId
 	}
@@ -233,7 +233,7 @@ func (x *StartAgentResponse) GetSessionId() string {
 
 type SendMessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	CallerId      string                 `protobuf:"bytes,3,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -270,9 +270,9 @@ func (*SendMessageRequest) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *SendMessageRequest) GetAgentId() string {
+func (x *SendMessageRequest) GetSessionId() string {
 	if x != nil {
-		return x.AgentId
+		return x.SessionId
 	}
 	return ""
 }
@@ -291,28 +291,28 @@ func (x *SendMessageRequest) GetCallerId() string {
 	return ""
 }
 
-type StopAgentRequest struct {
+type StopSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StopAgentRequest) Reset() {
-	*x = StopAgentRequest{}
+func (x *StopSessionRequest) Reset() {
+	*x = StopSessionRequest{}
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StopAgentRequest) String() string {
+func (x *StopSessionRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StopAgentRequest) ProtoMessage() {}
+func (*StopSessionRequest) ProtoMessage() {}
 
-func (x *StopAgentRequest) ProtoReflect() protoreflect.Message {
+func (x *StopSessionRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -324,45 +324,45 @@ func (x *StopAgentRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StopAgentRequest.ProtoReflect.Descriptor instead.
-func (*StopAgentRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use StopSessionRequest.ProtoReflect.Descriptor instead.
+func (*StopSessionRequest) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *StopAgentRequest) GetAgentId() string {
+func (x *StopSessionRequest) GetSessionId() string {
 	if x != nil {
-		return x.AgentId
+		return x.SessionId
 	}
 	return ""
 }
 
-func (x *StopAgentRequest) GetCallerId() string {
+func (x *StopSessionRequest) GetCallerId() string {
 	if x != nil {
 		return x.CallerId
 	}
 	return ""
 }
 
-type StopAgentResponse struct {
+type StopSessionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StopAgentResponse) Reset() {
-	*x = StopAgentResponse{}
+func (x *StopSessionResponse) Reset() {
+	*x = StopSessionResponse{}
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StopAgentResponse) String() string {
+func (x *StopSessionResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StopAgentResponse) ProtoMessage() {}
+func (*StopSessionResponse) ProtoMessage() {}
 
-func (x *StopAgentResponse) ProtoReflect() protoreflect.Message {
+func (x *StopSessionResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -374,33 +374,209 @@ func (x *StopAgentResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StopAgentResponse.ProtoReflect.Descriptor instead.
-func (*StopAgentResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use StopSessionResponse.ProtoReflect.Descriptor instead.
+func (*StopSessionResponse) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{6}
 }
 
-type ListAgentsRequest struct {
+type StartSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartSessionRequest) Reset() {
+	*x = StartSessionRequest{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartSessionRequest) ProtoMessage() {}
+
+func (x *StartSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartSessionRequest.ProtoReflect.Descriptor instead.
+func (*StartSessionRequest) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *StartSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *StartSessionRequest) GetCallerId() string {
+	if x != nil {
+		return x.CallerId
+	}
+	return ""
+}
+
+type StartSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartSessionResponse) Reset() {
+	*x = StartSessionResponse{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartSessionResponse) ProtoMessage() {}
+
+func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartSessionResponse.ProtoReflect.Descriptor instead.
+func (*StartSessionResponse) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{8}
+}
+
+type DeleteSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteSessionRequest) Reset() {
+	*x = DeleteSessionRequest{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteSessionRequest) ProtoMessage() {}
+
+func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteSessionRequest.ProtoReflect.Descriptor instead.
+func (*DeleteSessionRequest) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DeleteSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *DeleteSessionRequest) GetCallerId() string {
+	if x != nil {
+		return x.CallerId
+	}
+	return ""
+}
+
+type DeleteSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteSessionResponse) Reset() {
+	*x = DeleteSessionResponse{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteSessionResponse) ProtoMessage() {}
+
+func (x *DeleteSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteSessionResponse.ProtoReflect.Descriptor instead.
+func (*DeleteSessionResponse) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{10}
+}
+
+type ListSessionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ParentId      string                 `protobuf:"bytes,1,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListAgentsRequest) Reset() {
-	*x = ListAgentsRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+func (x *ListSessionsRequest) Reset() {
+	*x = ListSessionsRequest{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListAgentsRequest) String() string {
+func (x *ListSessionsRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListAgentsRequest) ProtoMessage() {}
+func (*ListSessionsRequest) ProtoMessage() {}
 
-func (x *ListAgentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,40 +587,40 @@ func (x *ListAgentsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListAgentsRequest.ProtoReflect.Descriptor instead.
-func (*ListAgentsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{7}
+// Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
+func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *ListAgentsRequest) GetParentId() string {
+func (x *ListSessionsRequest) GetParentId() string {
 	if x != nil {
 		return x.ParentId
 	}
 	return ""
 }
 
-type ListAgentsResponse struct {
+type ListSessionsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Agents        []*AgentInfoProto      `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	Sessions      []*SessionInfoProto    `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListAgentsResponse) Reset() {
-	*x = ListAgentsResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+func (x *ListSessionsResponse) Reset() {
+	*x = ListSessionsResponse{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListAgentsResponse) String() string {
+func (x *ListSessionsResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListAgentsResponse) ProtoMessage() {}
+func (*ListSessionsResponse) ProtoMessage() {}
 
-func (x *ListAgentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -455,44 +631,45 @@ func (x *ListAgentsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListAgentsResponse.ProtoReflect.Descriptor instead.
-func (*ListAgentsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{8}
+// Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
+func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *ListAgentsResponse) GetAgents() []*AgentInfoProto {
+func (x *ListSessionsResponse) GetSessions() []*SessionInfoProto {
 	if x != nil {
-		return x.Agents
+		return x.Sessions
 	}
 	return nil
 }
 
-type AgentInfoProto struct {
+type SessionInfoProto struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Mode          string                 `protobuf:"bytes,3,opt,name=mode,proto3" json:"mode,omitempty"`
 	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	ParentId      string                 `protobuf:"bytes,5,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	Status        string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AgentInfoProto) Reset() {
-	*x = AgentInfoProto{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+func (x *SessionInfoProto) Reset() {
+	*x = SessionInfoProto{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AgentInfoProto) String() string {
+func (x *SessionInfoProto) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AgentInfoProto) ProtoMessage() {}
+func (*SessionInfoProto) ProtoMessage() {}
 
-func (x *AgentInfoProto) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+func (x *SessionInfoProto) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -503,42 +680,49 @@ func (x *AgentInfoProto) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AgentInfoProto.ProtoReflect.Descriptor instead.
-func (*AgentInfoProto) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{9}
+// Deprecated: Use SessionInfoProto.ProtoReflect.Descriptor instead.
+func (*SessionInfoProto) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *AgentInfoProto) GetId() string {
+func (x *SessionInfoProto) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *AgentInfoProto) GetName() string {
+func (x *SessionInfoProto) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *AgentInfoProto) GetMode() string {
+func (x *SessionInfoProto) GetMode() string {
 	if x != nil {
 		return x.Mode
 	}
 	return ""
 }
 
-func (x *AgentInfoProto) GetDescription() string {
+func (x *SessionInfoProto) GetDescription() string {
 	if x != nil {
 		return x.Description
 	}
 	return ""
 }
 
-func (x *AgentInfoProto) GetParentId() string {
+func (x *SessionInfoProto) GetParentId() string {
 	if x != nil {
 		return x.ParentId
+	}
+	return ""
+}
+
+func (x *SessionInfoProto) GetStatus() string {
+	if x != nil {
+		return x.Status
 	}
 	return ""
 }
@@ -551,7 +735,7 @@ type GetSecretsRequest struct {
 
 func (x *GetSecretsRequest) Reset() {
 	*x = GetSecretsRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +747,7 @@ func (x *GetSecretsRequest) String() string {
 func (*GetSecretsRequest) ProtoMessage() {}
 
 func (x *GetSecretsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +760,7 @@ func (x *GetSecretsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretsRequest.ProtoReflect.Descriptor instead.
 func (*GetSecretsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{10}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{14}
 }
 
 type GetSecretsResponse struct {
@@ -589,7 +773,7 @@ type GetSecretsResponse struct {
 
 func (x *GetSecretsResponse) Reset() {
 	*x = GetSecretsResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -601,7 +785,7 @@ func (x *GetSecretsResponse) String() string {
 func (*GetSecretsResponse) ProtoMessage() {}
 
 func (x *GetSecretsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -614,7 +798,7 @@ func (x *GetSecretsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretsResponse.ProtoReflect.Descriptor instead.
 func (*GetSecretsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{11}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetSecretsResponse) GetNames() []string {
@@ -640,7 +824,7 @@ type ChatRequest struct {
 
 func (x *ChatRequest) Reset() {
 	*x = ChatRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +836,7 @@ func (x *ChatRequest) String() string {
 func (*ChatRequest) ProtoMessage() {}
 
 func (x *ChatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +849,7 @@ func (x *ChatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatRequest.ProtoReflect.Descriptor instead.
 func (*ChatRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{12}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ChatRequest) GetMessage() string {
@@ -683,7 +867,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +879,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +892,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{13}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{17}
 }
 
 type ShutdownResponse struct {
@@ -719,7 +903,7 @@ type ShutdownResponse struct {
 
 func (x *ShutdownResponse) Reset() {
 	*x = ShutdownResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -731,7 +915,7 @@ func (x *ShutdownResponse) String() string {
 func (*ShutdownResponse) ProtoMessage() {}
 
 func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -744,7 +928,7 @@ func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
 func (*ShutdownResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{14}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{18}
 }
 
 var File_internal_ipc_proto_hive_proto protoreflect.FileDescriptor
@@ -754,37 +938,50 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\x1dinternal/ipc/proto/hive.proto\x12\x04hive\"9\n" +
 	"\tChatEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\tR\acontent\"g\n" +
-	"\x11SpawnAgentRequest\x12\x1d\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\"i\n" +
+	"\x13SpawnSessionRequest\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x1b\n" +
-	"\tparent_id\x18\x03 \x01(\tR\bparentId\"O\n" +
-	"\x11StartAgentRequest\x12\x1d\n" +
+	"\tparent_id\x18\x03 \x01(\tR\bparentId\"R\n" +
+	"\x14CreateSessionRequest\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x1b\n" +
-	"\tparent_id\x18\x02 \x01(\tR\bparentId\"3\n" +
-	"\x12StartAgentResponse\x12\x1d\n" +
+	"\tparent_id\x18\x02 \x01(\tR\bparentId\"6\n" +
+	"\x15CreateSessionResponse\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"f\n" +
-	"\x12SendMessageRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x18\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"j\n" +
+	"\x12SendMessageRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
-	"\tcaller_id\x18\x03 \x01(\tR\bcallerId\"J\n" +
-	"\x10StopAgentRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1b\n" +
-	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x13\n" +
-	"\x11StopAgentResponse\"0\n" +
-	"\x11ListAgentsRequest\x12\x1b\n" +
-	"\tparent_id\x18\x01 \x01(\tR\bparentId\"B\n" +
-	"\x12ListAgentsResponse\x12,\n" +
-	"\x06agents\x18\x01 \x03(\v2\x14.hive.AgentInfoProtoR\x06agents\"\x87\x01\n" +
-	"\x0eAgentInfoProto\x12\x0e\n" +
+	"\tcaller_id\x18\x03 \x01(\tR\bcallerId\"P\n" +
+	"\x12StopSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x15\n" +
+	"\x13StopSessionResponse\"Q\n" +
+	"\x13StartSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x16\n" +
+	"\x14StartSessionResponse\"R\n" +
+	"\x14DeleteSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x17\n" +
+	"\x15DeleteSessionResponse\"2\n" +
+	"\x13ListSessionsRequest\x12\x1b\n" +
+	"\tparent_id\x18\x01 \x01(\tR\bparentId\"J\n" +
+	"\x14ListSessionsResponse\x122\n" +
+	"\bsessions\x18\x01 \x03(\v2\x16.hive.SessionInfoProtoR\bsessions\"\xa1\x01\n" +
+	"\x10SessionInfoProto\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\tR\x04mode\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1b\n" +
-	"\tparent_id\x18\x05 \x01(\tR\bparentId\"\x13\n" +
+	"\tparent_id\x18\x05 \x01(\tR\bparentId\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\tR\x06status\"\x13\n" +
 	"\x11GetSecretsRequest\"<\n" +
 	"\x12GetSecretsResponse\x12\x14\n" +
 	"\x05names\x18\x01 \x03(\tR\x05names\x12\x10\n" +
@@ -792,16 +989,15 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\vChatRequest\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\x11\n" +
 	"\x0fShutdownRequest\"\x12\n" +
-	"\x10ShutdownResponse2\x82\x03\n" +
-	"\tAgentHost\x128\n" +
-	"\n" +
-	"SpawnAgent\x12\x17.hive.SpawnAgentRequest\x1a\x0f.hive.ChatEvent0\x01\x12?\n" +
-	"\n" +
-	"StartAgent\x12\x17.hive.StartAgentRequest\x1a\x18.hive.StartAgentResponse\x12:\n" +
-	"\vSendMessage\x12\x18.hive.SendMessageRequest\x1a\x0f.hive.ChatEvent0\x01\x12<\n" +
-	"\tStopAgent\x12\x16.hive.StopAgentRequest\x1a\x17.hive.StopAgentResponse\x12?\n" +
-	"\n" +
-	"ListAgents\x12\x17.hive.ListAgentsRequest\x1a\x18.hive.ListAgentsResponse\x12?\n" +
+	"\x10ShutdownResponse2\xac\x04\n" +
+	"\tAgentHost\x12<\n" +
+	"\fSpawnSession\x12\x19.hive.SpawnSessionRequest\x1a\x0f.hive.ChatEvent0\x01\x12H\n" +
+	"\rCreateSession\x12\x1a.hive.CreateSessionRequest\x1a\x1b.hive.CreateSessionResponse\x12:\n" +
+	"\vSendMessage\x12\x18.hive.SendMessageRequest\x1a\x0f.hive.ChatEvent0\x01\x12B\n" +
+	"\vStopSession\x12\x18.hive.StopSessionRequest\x1a\x19.hive.StopSessionResponse\x12E\n" +
+	"\fStartSession\x12\x19.hive.StartSessionRequest\x1a\x1a.hive.StartSessionResponse\x12H\n" +
+	"\rDeleteSession\x12\x1a.hive.DeleteSessionRequest\x1a\x1b.hive.DeleteSessionResponse\x12E\n" +
+	"\fListSessions\x12\x19.hive.ListSessionsRequest\x1a\x1a.hive.ListSessionsResponse\x12?\n" +
 	"\n" +
 	"GetSecrets\x12\x17.hive.GetSecretsRequest\x1a\x18.hive.GetSecretsResponse2v\n" +
 	"\vAgentWorker\x12,\n" +
@@ -820,44 +1016,52 @@ func file_internal_ipc_proto_hive_proto_rawDescGZIP() []byte {
 	return file_internal_ipc_proto_hive_proto_rawDescData
 }
 
-var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_internal_ipc_proto_hive_proto_goTypes = []any{
-	(*ChatEvent)(nil),          // 0: hive.ChatEvent
-	(*SpawnAgentRequest)(nil),  // 1: hive.SpawnAgentRequest
-	(*StartAgentRequest)(nil),  // 2: hive.StartAgentRequest
-	(*StartAgentResponse)(nil), // 3: hive.StartAgentResponse
-	(*SendMessageRequest)(nil), // 4: hive.SendMessageRequest
-	(*StopAgentRequest)(nil),   // 5: hive.StopAgentRequest
-	(*StopAgentResponse)(nil),  // 6: hive.StopAgentResponse
-	(*ListAgentsRequest)(nil),  // 7: hive.ListAgentsRequest
-	(*ListAgentsResponse)(nil), // 8: hive.ListAgentsResponse
-	(*AgentInfoProto)(nil),     // 9: hive.AgentInfoProto
-	(*GetSecretsRequest)(nil),  // 10: hive.GetSecretsRequest
-	(*GetSecretsResponse)(nil), // 11: hive.GetSecretsResponse
-	(*ChatRequest)(nil),        // 12: hive.ChatRequest
-	(*ShutdownRequest)(nil),    // 13: hive.ShutdownRequest
-	(*ShutdownResponse)(nil),   // 14: hive.ShutdownResponse
+	(*ChatEvent)(nil),             // 0: hive.ChatEvent
+	(*SpawnSessionRequest)(nil),   // 1: hive.SpawnSessionRequest
+	(*CreateSessionRequest)(nil),  // 2: hive.CreateSessionRequest
+	(*CreateSessionResponse)(nil), // 3: hive.CreateSessionResponse
+	(*SendMessageRequest)(nil),    // 4: hive.SendMessageRequest
+	(*StopSessionRequest)(nil),    // 5: hive.StopSessionRequest
+	(*StopSessionResponse)(nil),   // 6: hive.StopSessionResponse
+	(*StartSessionRequest)(nil),   // 7: hive.StartSessionRequest
+	(*StartSessionResponse)(nil),  // 8: hive.StartSessionResponse
+	(*DeleteSessionRequest)(nil),  // 9: hive.DeleteSessionRequest
+	(*DeleteSessionResponse)(nil), // 10: hive.DeleteSessionResponse
+	(*ListSessionsRequest)(nil),   // 11: hive.ListSessionsRequest
+	(*ListSessionsResponse)(nil),  // 12: hive.ListSessionsResponse
+	(*SessionInfoProto)(nil),      // 13: hive.SessionInfoProto
+	(*GetSecretsRequest)(nil),     // 14: hive.GetSecretsRequest
+	(*GetSecretsResponse)(nil),    // 15: hive.GetSecretsResponse
+	(*ChatRequest)(nil),           // 16: hive.ChatRequest
+	(*ShutdownRequest)(nil),       // 17: hive.ShutdownRequest
+	(*ShutdownResponse)(nil),      // 18: hive.ShutdownResponse
 }
 var file_internal_ipc_proto_hive_proto_depIdxs = []int32{
-	9,  // 0: hive.ListAgentsResponse.agents:type_name -> hive.AgentInfoProto
-	1,  // 1: hive.AgentHost.SpawnAgent:input_type -> hive.SpawnAgentRequest
-	2,  // 2: hive.AgentHost.StartAgent:input_type -> hive.StartAgentRequest
+	13, // 0: hive.ListSessionsResponse.sessions:type_name -> hive.SessionInfoProto
+	1,  // 1: hive.AgentHost.SpawnSession:input_type -> hive.SpawnSessionRequest
+	2,  // 2: hive.AgentHost.CreateSession:input_type -> hive.CreateSessionRequest
 	4,  // 3: hive.AgentHost.SendMessage:input_type -> hive.SendMessageRequest
-	5,  // 4: hive.AgentHost.StopAgent:input_type -> hive.StopAgentRequest
-	7,  // 5: hive.AgentHost.ListAgents:input_type -> hive.ListAgentsRequest
-	10, // 6: hive.AgentHost.GetSecrets:input_type -> hive.GetSecretsRequest
-	12, // 7: hive.AgentWorker.Chat:input_type -> hive.ChatRequest
-	13, // 8: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
-	0,  // 9: hive.AgentHost.SpawnAgent:output_type -> hive.ChatEvent
-	3,  // 10: hive.AgentHost.StartAgent:output_type -> hive.StartAgentResponse
-	0,  // 11: hive.AgentHost.SendMessage:output_type -> hive.ChatEvent
-	6,  // 12: hive.AgentHost.StopAgent:output_type -> hive.StopAgentResponse
-	8,  // 13: hive.AgentHost.ListAgents:output_type -> hive.ListAgentsResponse
-	11, // 14: hive.AgentHost.GetSecrets:output_type -> hive.GetSecretsResponse
-	0,  // 15: hive.AgentWorker.Chat:output_type -> hive.ChatEvent
-	14, // 16: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
-	9,  // [9:17] is the sub-list for method output_type
-	1,  // [1:9] is the sub-list for method input_type
+	5,  // 4: hive.AgentHost.StopSession:input_type -> hive.StopSessionRequest
+	7,  // 5: hive.AgentHost.StartSession:input_type -> hive.StartSessionRequest
+	9,  // 6: hive.AgentHost.DeleteSession:input_type -> hive.DeleteSessionRequest
+	11, // 7: hive.AgentHost.ListSessions:input_type -> hive.ListSessionsRequest
+	14, // 8: hive.AgentHost.GetSecrets:input_type -> hive.GetSecretsRequest
+	16, // 9: hive.AgentWorker.Chat:input_type -> hive.ChatRequest
+	17, // 10: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
+	0,  // 11: hive.AgentHost.SpawnSession:output_type -> hive.ChatEvent
+	3,  // 12: hive.AgentHost.CreateSession:output_type -> hive.CreateSessionResponse
+	0,  // 13: hive.AgentHost.SendMessage:output_type -> hive.ChatEvent
+	6,  // 14: hive.AgentHost.StopSession:output_type -> hive.StopSessionResponse
+	8,  // 15: hive.AgentHost.StartSession:output_type -> hive.StartSessionResponse
+	10, // 16: hive.AgentHost.DeleteSession:output_type -> hive.DeleteSessionResponse
+	12, // 17: hive.AgentHost.ListSessions:output_type -> hive.ListSessionsResponse
+	15, // 18: hive.AgentHost.GetSecrets:output_type -> hive.GetSecretsResponse
+	0,  // 19: hive.AgentWorker.Chat:output_type -> hive.ChatEvent
+	18, // 20: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
+	11, // [11:21] is the sub-list for method output_type
+	1,  // [1:11] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -874,7 +1078,7 @@ func file_internal_ipc_proto_hive_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hive_proto_rawDesc), len(file_internal_ipc_proto_hive_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

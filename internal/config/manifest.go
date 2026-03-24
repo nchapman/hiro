@@ -7,13 +7,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Manifest describes a running agent session persisted to disk.
+// Manifest describes an agent session persisted to disk.
 type Manifest struct {
 	ID        string    `yaml:"id"`
 	Agent     string    `yaml:"agent"` // definition name (directory under agents/)
 	Mode      AgentMode `yaml:"mode"`
 	ParentID  string    `yaml:"parent_id,omitempty"`
 	CreatedAt time.Time `yaml:"created_at"`
+	Stopped   bool      `yaml:"stopped,omitempty"` // true if explicitly stopped (survives restart)
 }
 
 // WriteManifest writes a manifest to the given path as YAML.
