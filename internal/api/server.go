@@ -9,10 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/auth"
 	"github.com/nchapman/hivebot/internal/controlplane"
 )
 
@@ -27,7 +25,6 @@ type Server struct {
 	leaderID     string                  // ID of the leader agent for chat
 	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
 	cp           *controlplane.ControlPlane // control plane (for auth + settings)
-	sessions     *auth.SessionManager    // session manager for auth
 	startManager func() error            // callback to start the agent manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	mux          *http.ServeMux
@@ -38,21 +35,11 @@ type Server struct {
 // will be served for any request that doesn't match an API route.
 func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
 	s := &Server{
-		webFS:    webFS,
-		mux:      http.NewServeMux(),
-		sessions: auth.NewSessionManager(24 * time.Hour),
-		logger:   logger,
+		webFS:  webFS,
+		mux:    http.NewServeMux(),
+		logger: logger,
 	}
 	s.routes()
-
-	// Periodically clean up expired sessions.
-	go func() {
-		for {
-			time.Sleep(time.Hour)
-			s.sessions.Cleanup()
-		}
-	}()
-
 	return s
 }
 

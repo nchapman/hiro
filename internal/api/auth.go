@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nchapman/hivebot/internal/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -44,6 +45,19 @@ func (l *loginLimiter) record(ip string) {
 	l.mu.Lock()
 	l.attempts[ip] = append(l.attempts[ip], time.Now())
 	l.mu.Unlock()
+}
+
+// tokenSigner returns the cached TokenSigner from the control plane.
+func (s *Server) tokenSigner() *auth.TokenSigner {
+	if s.cp == nil {
+		return nil
+	}
+	signer, err := s.cp.TokenSigner()
+	if err != nil {
+		s.logger.Error("failed to get token signer", "error", err)
+		return nil
+	}
+	return signer
 }
 
 // authStatusResponse is the response for GET /api/auth/status.
@@ -97,12 +111,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.sessions.Create()
-	if err != nil {
-		s.logger.Error("failed to create session", "error", err)
+	signer := s.tokenSigner()
+	if signer == nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	token := signer.Create()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "hive_session",
@@ -110,17 +124,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(24 * time.Hour / time.Second),
+		MaxAge:   86400, // 24 hours
 	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("hive_session"); err == nil {
-		s.sessions.Revoke(cookie.Value)
-	}
-
 	http.SetCookie(w, &http.Cookie{
 		Name:     "hive_session",
 		Value:    "",
@@ -166,26 +176,29 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SetPasswordHash also rotates the session secret, invalidating all sessions.
 	s.cp.SetPasswordHash(string(newHash))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// isAuthenticated checks if the request has a valid session.
-// If valid, the session TTL is extended (sliding window).
+// isAuthenticated checks if the request has a valid signed session token.
 func (s *Server) isAuthenticated(r *http.Request) bool {
+	signer := s.tokenSigner()
+	if signer == nil {
+		return false
+	}
+
 	// Check cookie first
 	if cookie, err := r.Cookie("hive_session"); err == nil {
-		if s.sessions.Valid(cookie.Value) {
-			s.sessions.Refresh(cookie.Value)
+		if signer.Valid(cookie.Value) {
 			return true
 		}
 	}
 
 	// Check Authorization header
-	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if s.sessions.Valid(token) {
-			s.sessions.Refresh(token)
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		token := strings.TrimPrefix(h, "Bearer ")
+		if signer.Valid(token) {
 			return true
 		}
 	}

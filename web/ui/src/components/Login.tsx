@@ -29,6 +29,7 @@ export default function Login({ onSuccess }: LoginProps) {
         onSuccess()
       } else {
         setError("Invalid password")
+        setPassword("")
       }
     } catch {
       setError("Connection failed")

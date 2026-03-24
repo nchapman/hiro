@@ -5,6 +5,7 @@
 package controlplane
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,13 +13,18 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/nchapman/hivebot/internal/auth"
 	"gopkg.in/yaml.v3"
 )
 
+const sessionTTL = 24 * time.Hour
+
 // AuthConfig holds authentication settings.
 type AuthConfig struct {
-	PasswordHash string `yaml:"password_hash,omitempty"`
+	PasswordHash  string `yaml:"password_hash,omitempty"`
+	SessionSecret string `yaml:"session_secret,omitempty"` // hex-encoded HMAC signing key
 }
 
 // ProviderConfig defines an LLM provider. The map key is the provider
@@ -48,6 +54,7 @@ type Config struct {
 type ControlPlane struct {
 	mu     sync.RWMutex
 	config Config
+	signer *auth.TokenSigner // cached; invalidated on secret rotation
 	path   string
 	logger *slog.Logger
 }
@@ -100,7 +107,11 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 func (cp *ControlPlane) Save() error {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
+	return cp.saveUnlocked()
+}
 
+// saveUnlocked writes config to disk. Caller must hold mu (read or write).
+func (cp *ControlPlane) saveUnlocked() error {
 	// Don't write an empty file if there's nothing to persist.
 	if !cp.hasContent() {
 		return nil
@@ -128,6 +139,7 @@ func (cp *ControlPlane) Save() error {
 // Must be called with mu held.
 func (cp *ControlPlane) hasContent() bool {
 	return cp.config.Auth.PasswordHash != "" ||
+		cp.config.Auth.SessionSecret != "" ||
 		len(cp.config.Providers) > 0 ||
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
@@ -155,11 +167,53 @@ func (cp *ControlPlane) PasswordHash() string {
 	return cp.config.Auth.PasswordHash
 }
 
-// SetPasswordHash stores the bcrypt password hash.
+// SetPasswordHash stores the bcrypt password hash and rotates the session
+// secret, invalidating all existing sessions.
 func (cp *ControlPlane) SetPasswordHash(hash string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.config.Auth.PasswordHash = hash
+	// Rotate session secret to invalidate existing sessions.
+	cp.config.Auth.SessionSecret = ""
+	cp.signer = nil
+}
+
+// TokenSigner returns a cached HMAC token signer for session authentication.
+// On first call, it generates a signing secret and persists it to config.yaml
+// so sessions survive restarts. The signer is invalidated when the password
+// changes (which rotates the secret).
+func (cp *ControlPlane) TokenSigner() (*auth.TokenSigner, error) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	if cp.signer != nil {
+		return cp.signer, nil
+	}
+
+	var secret []byte
+	if cp.config.Auth.SessionSecret != "" {
+		var err error
+		secret, err = hex.DecodeString(cp.config.Auth.SessionSecret)
+		if err != nil {
+			return nil, fmt.Errorf("decoding session secret: %w", err)
+		}
+	} else {
+		var err error
+		secret, err = auth.GenerateSecret()
+		if err != nil {
+			return nil, fmt.Errorf("generating session secret: %w", err)
+		}
+		cp.config.Auth.SessionSecret = hex.EncodeToString(secret)
+
+		// Persist immediately so the secret survives crashes.
+		if err := cp.saveUnlocked(); err != nil {
+			cp.config.Auth.SessionSecret = "" // roll back
+			return nil, fmt.Errorf("persisting session secret: %w", err)
+		}
+	}
+
+	cp.signer = auth.NewTokenSigner(secret, sessionTTL)
+	return cp.signer, nil
 }
 
 // --- Providers ---

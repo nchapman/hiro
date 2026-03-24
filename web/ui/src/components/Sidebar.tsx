@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Settings, Sun, Moon, Monitor } from "lucide-react"
+import { Settings, Sun, Moon, Monitor, LogOut } from "lucide-react"
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 import type { AgentInfo } from "@/App"
@@ -16,6 +16,7 @@ interface SidebarProps {
   onSelect: (id: string) => void
   view: "chat" | "settings"
   onViewChange: (view: "chat" | "settings") => void
+  onLogout: () => void
 }
 
 const themeIcons = {
@@ -32,6 +33,7 @@ export default function Sidebar({
   onSelect,
   view,
   onViewChange,
+  onLogout,
 }: SidebarProps) {
   const { theme, setTheme } = useTheme()
   const ThemeIcon = themeIcons[theme]
@@ -120,6 +122,16 @@ export default function Sidebar({
           <TooltipContent side="right">
             Theme: {theme}
           </TooltipContent>
+        </Tooltip>
+        <div className="flex-1" />
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onLogout}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <LogOut className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Log out</TooltipContent>
         </Tooltip>
       </div>
     </aside>

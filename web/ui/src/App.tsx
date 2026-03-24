@@ -84,6 +84,18 @@ export default function App() {
     setSelectedAgentId(id)
   }, [])
 
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" })
+    } catch {
+      /* best-effort */
+    }
+    setAppState({ kind: "login" })
+    setAgents([])
+    setSelectedAgentId(null)
+    hasAutoSelected.current = false
+  }, [])
+
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null
 
   return (
@@ -111,6 +123,7 @@ export default function App() {
               onSelect={handleSelect}
               view={view}
               onViewChange={setView}
+              onLogout={handleLogout}
             />
             <main className="flex flex-1 flex-col overflow-hidden">
               {view === "chat" && <Chat agent={selectedAgent} />}

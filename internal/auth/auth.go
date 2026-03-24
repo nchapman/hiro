@@ -1,87 +1,97 @@
-// Package auth provides session-based authentication for the Hive web UI.
+// Package auth provides HMAC-signed token authentication for the Hive web UI.
+// Tokens are stateless — the server only needs a persistent signing secret
+// (stored in config.yaml) to validate them across restarts.
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"sync"
 	"time"
 )
 
-// SessionManager manages in-memory session tokens with expiration.
-// Sessions are lost on restart — users simply re-authenticate.
-type SessionManager struct {
-	mu       sync.RWMutex
-	sessions map[string]time.Time // token -> expiry
-	ttl      time.Duration
+// TokenSigner creates and validates HMAC-signed session tokens.
+// Tokens encode an expiry timestamp signed with a secret key,
+// so no server-side session state is needed.
+type TokenSigner struct {
+	secret []byte
+	ttl    time.Duration
 }
 
-// NewSessionManager creates a session manager with the given TTL.
-func NewSessionManager(ttl time.Duration) *SessionManager {
-	return &SessionManager{
-		sessions: make(map[string]time.Time),
-		ttl:      ttl,
+// NewTokenSigner creates a token signer with the given secret and TTL.
+// The secret must be at least 32 bytes.
+func NewTokenSigner(secret []byte, ttl time.Duration) *TokenSigner {
+	return &TokenSigner{
+		secret: secret,
+		ttl:    ttl,
 	}
 }
 
-// Create generates a new session token and stores it.
-func (sm *SessionManager) Create() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(b)
-
-	sm.mu.Lock()
-	sm.sessions[token] = time.Now().Add(sm.ttl)
-	sm.mu.Unlock()
-
-	return token, nil
+// Create generates a new signed token with an expiry of now + TTL.
+func (ts *TokenSigner) Create() string {
+	expiry := time.Now().Add(ts.ttl).Unix()
+	return ts.createWithExpiry(expiry)
 }
 
-// Valid returns true if the token exists and hasn't expired.
-func (sm *SessionManager) Valid(token string) bool {
+func (ts *TokenSigner) createWithExpiry(expiry int64) string {
+	eb := make([]byte, 8)
+	binary.BigEndian.PutUint64(eb, uint64(expiry))
+
+	mac := hmac.New(sha256.New, ts.secret)
+	mac.Write(eb)
+	sig := mac.Sum(nil)
+
+	return hex.EncodeToString(eb) + "." + hex.EncodeToString(sig)
+}
+
+// Valid returns true if the token has a valid signature and hasn't expired.
+func (ts *TokenSigner) Valid(token string) bool {
 	if token == "" {
 		return false
 	}
-	sm.mu.RLock()
-	expiry, ok := sm.sessions[token]
-	sm.mu.RUnlock()
 
-	if !ok {
-		return false
-	}
-	if time.Now().After(expiry) {
-		sm.Revoke(token)
-		return false
-	}
-	return true
-}
-
-// Refresh extends a session's expiry to now + TTL.
-func (sm *SessionManager) Refresh(token string) {
-	sm.mu.Lock()
-	if _, ok := sm.sessions[token]; ok {
-		sm.sessions[token] = time.Now().Add(sm.ttl)
-	}
-	sm.mu.Unlock()
-}
-
-// Revoke removes a session token.
-func (sm *SessionManager) Revoke(token string) {
-	sm.mu.Lock()
-	delete(sm.sessions, token)
-	sm.mu.Unlock()
-}
-
-// Cleanup removes all expired sessions. Call periodically.
-func (sm *SessionManager) Cleanup() {
-	now := time.Now()
-	sm.mu.Lock()
-	for token, expiry := range sm.sessions {
-		if now.After(expiry) {
-			delete(sm.sessions, token)
+	// Split into expiry.signature
+	dot := -1
+	for i, c := range token {
+		if c == '.' {
+			dot = i
+			break
 		}
 	}
-	sm.mu.Unlock()
+	if dot < 0 {
+		return false
+	}
+
+	eb, err := hex.DecodeString(token[:dot])
+	if err != nil || len(eb) != 8 {
+		return false
+	}
+
+	sig, err := hex.DecodeString(token[dot+1:])
+	if err != nil {
+		return false
+	}
+
+	// Verify HMAC
+	mac := hmac.New(sha256.New, ts.secret)
+	mac.Write(eb)
+	expected := mac.Sum(nil)
+	if !hmac.Equal(sig, expected) {
+		return false
+	}
+
+	// Check expiry
+	expiry := int64(binary.BigEndian.Uint64(eb))
+	return time.Now().Unix() <= expiry
+}
+
+// GenerateSecret generates a cryptographically random 32-byte secret.
+func GenerateSecret() ([]byte, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	return b, nil
 }

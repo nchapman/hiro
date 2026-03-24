@@ -80,13 +80,14 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create a session so the user is logged in
-	token, err := s.sessions.Create()
-	if err != nil {
-		s.logger.Error("failed to create session", "error", err)
+	// Create a signed session token so the user is logged in
+	signer := s.tokenSigner()
+	if signer == nil {
+		s.logger.Error("failed to get token signer after setup")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	token := signer.Create()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "hive_session",
@@ -94,7 +95,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(24 * time.Hour / time.Second),
+		MaxAge:   86400, // 24 hours
 	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
