@@ -458,10 +458,14 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 	result := make([]HistoryMessage, 0, len(msgs))
 	for _, msg := range msgs {
 		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "tool" {
+			rawJSON := msg.RawJSON
+			if msg.Role == "assistant" && rawJSON != "" {
+				rawJSON = injectStatusMessages(rawJSON)
+			}
 			result = append(result, HistoryMessage{
 				Role:      msg.Role,
 				Content:   msg.Content,
-				RawJSON:   msg.RawJSON,
+				RawJSON:   rawJSON,
 				Timestamp: msg.CreatedAt.Format(time.RFC3339),
 			})
 		}

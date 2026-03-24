@@ -42,6 +42,7 @@ interface ToolCall {
   input?: string
   output?: string
   isError?: boolean
+  status?: string
 }
 
 interface Message {
@@ -85,6 +86,7 @@ function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: Too
             id: (part.data.tool_call_id as string) || crypto.randomUUID(),
             name: (part.data.tool_name as string) || "unknown",
             input: part.data.input as string | undefined,
+            status: part.data.status as string | undefined,
           })
           break
         case "tool-result": {
@@ -220,7 +222,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
         )}
       >
         <Wrench className="h-3 w-3 shrink-0" />
-        {toolCall.name}
+        {toolCall.status || toolCall.name}
         <span className="flex-1" />
         {hasDetails && (
           expanded
@@ -408,6 +410,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             id: msg.tool_call_id || crypto.randomUUID(),
             name: msg.tool_name || "unknown",
             input: msg.input,
+            status: msg.status,
           }
           setMessages((prev) =>
             prev.map((m) =>

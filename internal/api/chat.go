@@ -28,6 +28,7 @@ type ChatMessage struct {
 	Input      string `json:"input,omitempty"`
 	Output     string `json:"output,omitempty"`
 	IsError    bool   `json:"is_error,omitempty"`
+	Status     string `json:"status,omitempty"`
 }
 
 // SetManager sets the agent manager and leader agent ID for handling chat.
@@ -132,6 +133,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				Input:      evt.Input,
 				Output:     evt.Output,
 				IsError:    evt.IsError,
+				Status:     evt.Status,
 			}
 			b, err := json.Marshal(wireMsg)
 			if err != nil {

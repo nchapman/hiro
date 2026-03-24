@@ -242,6 +242,7 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 				ToolCallID: tc.ToolCallID,
 				ToolName:   tc.ToolName,
 				Input:      tc.Input,
+				Status:     resolveStatusMessage(tc.ToolName, tc.Input),
 			})
 		},
 		OnToolResult: func(tr fantasy.ToolResultContent) error {

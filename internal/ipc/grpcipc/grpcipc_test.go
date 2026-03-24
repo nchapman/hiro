@@ -429,6 +429,84 @@ func TestWorkerRoundtrip_Chat(t *testing.T) {
 	}
 }
 
+func TestWorkerRoundtrip_ToolCallEvents(t *testing.T) {
+	// Use a custom worker that emits tool_call and tool_result events.
+	worker := &fakeToolWorker{}
+	client := setupWorkerTest(t, worker)
+
+	var events []ipc.ChatEvent
+	result, err := client.Chat(t.Context(), "run tools", func(evt ipc.ChatEvent) error {
+		events = append(events, evt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if result != "done" {
+		t.Errorf("result = %q, want %q", result, "done")
+	}
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2", len(events))
+	}
+
+	// Verify tool_call round-trips all fields including status.
+	tc := events[0]
+	if tc.Type != "tool_call" {
+		t.Errorf("events[0].Type = %q, want tool_call", tc.Type)
+	}
+	if tc.ToolCallID != "call-1" {
+		t.Errorf("ToolCallID = %q, want call-1", tc.ToolCallID)
+	}
+	if tc.ToolName != "read_file" {
+		t.Errorf("ToolName = %q, want read_file", tc.ToolName)
+	}
+	if tc.Input != `{"path":"main.go"}` {
+		t.Errorf("Input = %q, want %q", tc.Input, `{"path":"main.go"}`)
+	}
+	if tc.Status != "Reading main.go" {
+		t.Errorf("Status = %q, want %q", tc.Status, "Reading main.go")
+	}
+
+	// Verify tool_result round-trips all fields.
+	tr := events[1]
+	if tr.Type != "tool_result" {
+		t.Errorf("events[1].Type = %q, want tool_result", tr.Type)
+	}
+	if tr.ToolCallID != "call-1" {
+		t.Errorf("ToolCallID = %q, want call-1", tr.ToolCallID)
+	}
+	if tr.Output != "file contents here" {
+		t.Errorf("Output = %q, want %q", tr.Output, "file contents here")
+	}
+	if tr.IsError {
+		t.Error("IsError = true, want false")
+	}
+}
+
+// fakeToolWorker emits tool_call and tool_result events for testing gRPC round-trip.
+type fakeToolWorker struct{}
+
+func (f *fakeToolWorker) Chat(_ context.Context, _ string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if onEvent != nil {
+		onEvent(ipc.ChatEvent{
+			Type:       "tool_call",
+			ToolCallID: "call-1",
+			ToolName:   "read_file",
+			Input:      `{"path":"main.go"}`,
+			Status:     "Reading main.go",
+		})
+		onEvent(ipc.ChatEvent{
+			Type:       "tool_result",
+			ToolCallID: "call-1",
+			Output:     "file contents here",
+			IsError:    false,
+		})
+	}
+	return "done", nil
+}
+
+func (f *fakeToolWorker) Shutdown(_ context.Context) error { return nil }
+
 func TestWorkerRoundtrip_Shutdown(t *testing.T) {
 	worker := &fakeWorker{}
 	client := setupWorkerTest(t, worker)

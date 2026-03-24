@@ -9,6 +9,7 @@ export interface ChatWireMessage {
   input?: string
   output?: string
   is_error?: boolean
+  status?: string
 }
 
 export function useWebSocket(sessionId: string | null) {

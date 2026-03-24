@@ -148,6 +148,7 @@ func chatEventToProto(evt ipc.ChatEvent) *pb.ChatEvent {
 			"tool_call_id": evt.ToolCallID,
 			"tool_name":    evt.ToolName,
 			"input":        evt.Input,
+			"status":       evt.Status,
 		})
 		return &pb.ChatEvent{Type: "tool_call", Content: string(data)}
 	case "tool_result":
@@ -170,6 +171,7 @@ func protoToChatEvent(event *pb.ChatEvent) ipc.ChatEvent {
 			ToolCallID string `json:"tool_call_id"`
 			ToolName   string `json:"tool_name"`
 			Input      string `json:"input"`
+			Status     string `json:"status"`
 		}
 		json.Unmarshal([]byte(event.Content), &data)
 		return ipc.ChatEvent{
@@ -177,6 +179,7 @@ func protoToChatEvent(event *pb.ChatEvent) ipc.ChatEvent {
 			ToolCallID: data.ToolCallID,
 			ToolName:   data.ToolName,
 			Input:      data.Input,
+			Status:     data.Status,
 		}
 	case "tool_result":
 		var data struct {
