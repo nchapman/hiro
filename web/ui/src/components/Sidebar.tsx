@@ -81,7 +81,7 @@ export default function Sidebar({
                   <span
                     className={cn(
                       "h-1.5 w-1.5 shrink-0 rounded-full",
-                      agent.mode === "persistent"
+                      agent.mode === "persistent" || agent.mode === "coordinator"
                         ? "bg-green-500"
                         : "bg-muted-foreground"
                     )}

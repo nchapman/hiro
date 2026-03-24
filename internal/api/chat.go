@@ -9,6 +9,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/nchapman/hivebot/internal/agent"
+	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc"
 )
@@ -65,7 +66,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		agentID = s.leaderID
 	}
 	info, ok := s.manager.GetAgent(agentID)
-	if !ok || info.ParentID != "" {
+	if !ok || info.Mode == config.ModeEphemeral {
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
 	}
