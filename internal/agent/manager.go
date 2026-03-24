@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 
@@ -114,7 +115,7 @@ func (m *Manager) StartAgent(ctx context.Context, name, parentID string) (string
 		return "", fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
-	id := uuid.New().String()
+	id := uuid.Must(uuid.NewV7()).String()
 	return m.startSession(ctx, id, cfg, parentID)
 }
 
@@ -135,7 +136,7 @@ func (m *Manager) SpawnSubagent(ctx context.Context, agentName, prompt, parentID
 	// Always ephemeral — the caller controls the lifecycle, not the config.
 	cfg.Mode = config.ModeEphemeral
 
-	id := uuid.New().String()
+	id := uuid.Must(uuid.NewV7()).String()
 	agentID, err := m.startSession(ctx, id, cfg, parentID)
 	if err != nil {
 		return "", err
@@ -205,7 +206,8 @@ func (m *Manager) GetAgent(agentID string) (AgentInfo, bool) {
 	return ra.info, true
 }
 
-// ListAgents returns a snapshot of all running agents.
+// ListAgents returns a snapshot of all running agents sorted by creation order.
+// Agent IDs are UUIDv7 (time-ordered), so lexicographic sort gives creation order.
 func (m *Manager) ListAgents() []AgentInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -213,6 +215,7 @@ func (m *Manager) ListAgents() []AgentInfo {
 	for _, ra := range m.agents {
 		result = append(result, ra.info)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
 
