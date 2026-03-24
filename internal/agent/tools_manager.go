@@ -75,7 +75,7 @@ type spawnSessionInput struct {
 
 func toolSpawnSession(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("spawn_session",
-		"Spawn an ephemeral session to complete a task. The session runs the given prompt, returns the result, and is cleaned up. This call blocks until the session finishes.",
+		"Run an ephemeral session that executes a prompt and returns the result. Blocks until done; the session is cleaned up automatically.",
 		func(ctx context.Context, input spawnSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -103,7 +103,7 @@ type createSessionInput struct {
 
 func toolCreateSession(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("create_session",
-		"Create and start a new persistent session from an agent definition. The session stays running and can receive messages. Returns the session ID.",
+		"Create a new persistent session from an agent definition. The session stays running until explicitly stopped. Returns the session ID; use send_message to interact with it.",
 		func(ctx context.Context, input createSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -129,7 +129,7 @@ type startSessionInput struct {
 
 func toolStartSession(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("start_session",
-		"Restart a stopped session. The session resumes with its previous memory, history, and todos intact.",
+		"Restart a stopped session. Resumes with its previous memory, history, and todos.",
 		func(ctx context.Context, input startSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
@@ -151,7 +151,7 @@ func toolStartSession(host ipc.AgentHost) fantasy.AgentTool {
 
 func toolListSessions(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("list_sessions",
-		"List your child sessions — sessions you have created or spawned.",
+		"List your direct child sessions with their name, mode, and status.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessions, err := host.ListSessions(ctx)
 			if err != nil {
@@ -184,7 +184,7 @@ type sendMessageInput struct {
 
 func toolSendMessage(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("send_message",
-		"Send a message to one of your child sessions and get its response.",
+		"Send a message to a running child session and get its response. Blocks until the session replies.",
 		func(ctx context.Context, input sendMessageInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
@@ -212,7 +212,7 @@ type stopSessionInput struct {
 
 func toolStopSession(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("stop_session",
-		"Stop a session and all of its descendants. The session keeps its data (memory, history, todos) and can be restarted with start_session. Use delete_session to permanently remove.",
+		"Stop a session and its descendants. Data is preserved — use start_session to resume, or delete_session to remove permanently.",
 		func(ctx context.Context, input stopSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
@@ -238,7 +238,7 @@ type deleteSessionInput struct {
 
 func toolDeleteSession(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("delete_session",
-		"Permanently delete a session and all of its descendants. Stops the session if running and removes all data (memory, history, todos). This cannot be undone.",
+		"Permanently delete a session and its descendants, removing all data. Stops it first if running. Cannot be undone.",
 		func(ctx context.Context, input deleteSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
@@ -265,7 +265,7 @@ type historySearchInput struct {
 
 func toolHistorySearch(engine *history.Engine) fantasy.AgentTool {
 	return fantasy.NewAgentTool("history_search",
-		"Search your conversation history for past messages and summaries. Use this when you need to recall something discussed earlier that may have been compacted out of your active context.",
+		"Search your conversation history for past messages and summaries. Use when you need to recall something that may have been compacted out of your active context.",
 		func(ctx context.Context, input historySearchInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil
@@ -314,7 +314,7 @@ type historyRecallInput struct {
 
 func toolHistoryRecall(engine *history.Engine) fantasy.AgentTool {
 	return fantasy.NewAgentTool("history_recall",
-		"Drill into a conversation summary to see more detail. Returns the summary's full content plus its children (the lower-level summaries or original messages it was created from).",
+		"Expand a conversation summary to see its full content and the lower-level summaries or messages it was created from.",
 		func(ctx context.Context, input historyRecallInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SummaryID == "" {
 				return fantasy.NewTextErrorResponse("summary_id is required"), nil
@@ -381,7 +381,7 @@ func toolHistoryRecall(engine *history.Engine) fantasy.AgentTool {
 
 func toolMemoryRead(sessionDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool("memory_read",
-		"Read your persistent memory. Returns the current contents of your memory file, which contains facts, preferences, and knowledge you've chosen to remember across conversations.",
+		"Read your persistent memory file. Contains facts and context you've chosen to retain across conversations. Read before writing to avoid overwriting entries.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			content, err := config.ReadMemoryFile(sessionDir)
 			if err != nil {
@@ -404,7 +404,7 @@ type memoryWriteInput struct {
 
 func toolMemoryWrite(sessionDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool("memory_write",
-		"Write your persistent memory. Overwrites the entire memory file with the provided content. Always read your current memory first, then include both existing and new entries. Your memories are included in your system prompt on every turn, so they're always available to you.",
+		"Overwrite your persistent memory file. Read first to avoid losing existing entries. Changes appear in your system prompt from the next turn onward.",
 		func(ctx context.Context, input memoryWriteInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Content == "" {
 				return fantasy.NewTextErrorResponse("content is required"), nil
@@ -435,7 +435,7 @@ type todoItem struct {
 
 func toolTodos(sessionDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool("todos",
-		"Manage your task list. Send the complete updated list each time — you can add, remove, reorder, and update statuses in one call. Your tasks are shown in your system prompt so you always know what's next. Use this for multi-step work to track progress.",
+		"Replace your task list. Send the full updated list — add, remove, reorder, and change statuses in one call. Use for multi-step work. Tasks appear in your system prompt.",
 		func(ctx context.Context, input todosInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Read old todos for change tracking
 			oldTodos, _ := config.ReadTodos(sessionDir)
