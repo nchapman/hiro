@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ThemeCtx, useThemeProvider } from "@/hooks/use-theme"
+import ActivityBar from "@/components/ActivityBar"
+import type { Activity } from "@/components/ActivityBar"
 import Sidebar from "@/components/Sidebar"
 import Chat from "@/components/Chat"
 import Login from "@/components/Login"
@@ -8,6 +10,7 @@ import Setup from "@/components/Setup"
 import SettingsPage from "@/components/Settings"
 
 const TerminalPage = lazy(() => import("@/pages/TerminalPage"))
+const WorkspacePage = lazy(() => import("@/pages/WorkspacePage"))
 
 export interface SessionInfo {
   id: string
@@ -28,7 +31,7 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>({ kind: "loading" })
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
-  const [view, setView] = useState<"chat" | "settings">("chat")
+  const [activity, setActivity] = useState<Activity>("chat")
   const hasAutoSelected = useRef(false)
 
   const checkAuth = useCallback(async () => {
@@ -87,6 +90,7 @@ export default function App() {
   const handleSelect = useCallback((id: string) => {
     hasAutoSelected.current = true
     setSelectedSessionId(id)
+    setActivity("chat")
   }, [])
 
   const handleLogout = useCallback(async () => {
@@ -138,23 +142,38 @@ export default function App() {
 
         {appState.kind === "ready" && (
           <div className="flex h-screen overflow-hidden bg-background text-foreground">
-            <Sidebar
-              sessions={sessions}
-              selectedId={selectedSessionId}
-              onSelect={handleSelect}
-              view={view}
-              onViewChange={setView}
+            <ActivityBar
+              activity={activity}
+              onActivityChange={setActivity}
               onLogout={handleLogout}
             />
-            <main className="flex flex-1 flex-col overflow-hidden">
-              {view === "chat" && (
-                <Chat
-                  session={selectedSession}
-                  onSessionsChanged={fetchSessions}
-                />
+            <div className="flex flex-1 overflow-hidden">
+              {activity === "chat" && (
+                <>
+                  <Sidebar
+                    sessions={sessions}
+                    selectedId={selectedSessionId}
+                    onSelect={handleSelect}
+                  />
+                  <main className="flex flex-1 flex-col overflow-hidden">
+                    <Chat
+                      session={selectedSession}
+                      onSessionsChanged={fetchSessions}
+                    />
+                  </main>
+                </>
               )}
-              {view === "settings" && <SettingsPage />}
-            </main>
+              {activity === "workspace" && (
+                <Suspense>
+                  <WorkspacePage />
+                </Suspense>
+              )}
+              {activity === "settings" && (
+                <main className="flex flex-1 flex-col overflow-hidden">
+                  <SettingsPage />
+                </main>
+              )}
+            </div>
           </div>
         )}
       </TooltipProvider>

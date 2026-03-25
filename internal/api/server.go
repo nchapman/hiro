@@ -73,6 +73,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 
+	// Workspace file browser (authenticated)
+	s.mux.HandleFunc("GET /api/workspace/tree", s.requireAuth(s.handleWorkspaceTree))
+	s.mux.HandleFunc("GET /api/workspace/file", s.requireAuth(s.handleWorkspaceFileRead))
+	s.mux.HandleFunc("PUT /api/workspace/file", s.requireAuth(s.handleWorkspaceFileWrite))
+
 	// WebSocket endpoints
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
 	s.mux.HandleFunc("/ws/terminal", s.requireAuth(s.handleTerminal))

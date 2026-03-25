@@ -21,7 +21,7 @@ var requiredDirs = []string{
 	"agents",
 	"sessions",
 	"skills",
-	"workspace", // inherits hive-agents group via setgid on parent
+	"workspace", // setgid so files created inside inherit the hive-agents group
 }
 
 // coordinatorDirs are directories owned by the hive-coordinators group.
@@ -35,8 +35,9 @@ var coordinatorDirs = map[string]bool{
 // agent definitions if the platform is new. It is safe to call on an
 // existing platform — it will not overwrite files that already exist.
 func Init(dir string, logger *slog.Logger) error {
-	// Detect hive-coordinators group for directory ownership.
+	// Detect groups for directory ownership.
 	coordGID := lookupGroupGID("hive-coordinators")
+	agentsGID := lookupGroupGID("hive-agents")
 
 	for _, d := range requiredDirs {
 		path := filepath.Join(dir, d)
@@ -50,6 +51,15 @@ func Init(dir string, logger *slog.Logger) error {
 		if coordGID >= 0 && coordinatorDirs[d] {
 			if err := applyCoordinatorOwnership(path, coordGID, logger); err != nil {
 				logger.Warn("failed to apply coordinator ownership", "dir", d, "error", err)
+			}
+		}
+		// workspace/ is group-writable by all agents (hive-agents) with
+		// setgid so files created inside inherit the group.
+		if agentsGID >= 0 && d == "workspace" {
+			if err := os.Chown(path, -1, agentsGID); err != nil {
+				logger.Warn("failed to chown workspace to hive-agents", "error", err)
+			} else if err := os.Chmod(path, 02775); err != nil {
+				logger.Warn("failed to set setgid on workspace", "error", err)
 			}
 		}
 	}
