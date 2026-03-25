@@ -1,0 +1,53 @@
+# Starship prompt config for Hive terminal
+# Minimal, fast, informative
+
+format = """$directory$git_branch$git_status$python$nodejs$character"""
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+
+[directory]
+truncation_length = 3
+truncation_symbol = "…/"
+style = "bold cyan"
+
+[git_branch]
+format = " [$branch]($style)"
+style = "bold purple"
+
+[git_status]
+format = "[$all_status$ahead_behind]($style) "
+style = "bold yellow"
+
+[python]
+format = " [py $version]($style)"
+style = "dim green"
+detect_files = []
+detect_extensions = []
+detect_folders = []
+
+[nodejs]
+format = " [node $version]($style)"
+style = "dim green"
+detect_files = []
+detect_extensions = []
+detect_folders = []
+
+# Hide things that add clutter in a container
+[username]
+disabled = true
+
+[hostname]
+disabled = true
+
+[container]
+disabled = true
+
+[package]
+disabled = true
+
+[cmd_duration]
+min_time = 3000
+format = " [$duration]($style)"
+style = "dim yellow"

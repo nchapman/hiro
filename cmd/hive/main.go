@@ -85,6 +85,7 @@ func run() error {
 	defer cancel()
 
 	srv := api.NewServer(logger, webFS)
+	srv.SetRootDir(absRootDir)
 	srv.SetControlPlane(cp)
 
 	// Shared state for the manager lifecycle — the manager can be started

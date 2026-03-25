@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ThemeCtx, useThemeProvider } from "@/hooks/use-theme"
 import Sidebar from "@/components/Sidebar"
@@ -6,6 +6,8 @@ import Chat from "@/components/Chat"
 import Login from "@/components/Login"
 import Setup from "@/components/Setup"
 import SettingsPage from "@/components/Settings"
+
+const TerminalPage = lazy(() => import("@/pages/TerminalPage"))
 
 export interface SessionInfo {
   id: string
@@ -107,6 +109,15 @@ export default function App() {
       setSelectedSessionId(null)
     }
   }, [sessions, selectedSessionId])
+
+  // Standalone terminal page — rendered in its own browser tab.
+  if (window.location.pathname === "/terminal") {
+    return (
+      <Suspense>
+        <TerminalPage />
+      </Suspense>
+    )
+  }
 
   return (
     <ThemeCtx.Provider value={themeCtx}>

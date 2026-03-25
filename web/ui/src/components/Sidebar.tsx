@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Settings, Sun, Moon, Monitor, LogOut } from "lucide-react"
+import { Settings, Sun, Moon, Monitor, LogOut, TerminalSquare } from "lucide-react"
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 import type { SessionInfo } from "@/App"
@@ -113,6 +113,15 @@ export default function Sidebar({
             <Settings className="h-4 w-4" />
           </TooltipTrigger>
           <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            onClick={() => window.open("/terminal", "_blank", "width=960,height=600,noopener,noreferrer")}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <TerminalSquare className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Terminal</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger

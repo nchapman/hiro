@@ -49,6 +49,11 @@ func (s *Server) SetStartManager(fn func() error) {
 	s.startManager = fn
 }
 
+// SetRootDir sets the platform root directory (used as the terminal working dir).
+func (s *Server) SetRootDir(dir string) {
+	s.rootDir = dir
+}
+
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Enforce auth on WebSocket upgrade (browser sends cookies automatically).
 	if s.cp != nil && !s.cp.NeedsSetup() && !s.isAuthenticated(r) {

@@ -56,15 +56,21 @@ FROM ubuntu:24.04
 # System tools
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     # essentials
-    ca-certificates curl wget git openssh-client \
+    ca-certificates curl wget git openssh-client rsync \
     # build tools (agents may compile native extensions at runtime)
     build-essential pkg-config cmake \
+    # editors
+    nano vim-tiny \
     # utilities
-    jq ripgrep tree unzip zip tar gzip file less \
+    jq ripgrep tree unzip zip tar gzip file less bc sqlite3 gettext-base zstd \
+    # process tools
+    htop strace lsof \
+    # terminal multiplexer (persistent sessions across disconnects)
+    tmux \
     # networking
-    dnsutils iputils-ping net-tools \
-    # misc
-    locales \
+    dnsutils iputils-ping net-tools netcat-openbsd socat \
+    # system
+    sudo locales \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -113,12 +119,32 @@ RUN mise use -g node@24 python@3.12 uv@latest ruff@latest \
         httpx \
     && node --version && python3 --version && which eslint && ruff --version
 
+# Modern CLI tools — installed via mise for easy versioning.
+RUN mise use -g eza@latest bat@latest fd@latest fzf@latest zoxide@latest delta@latest starship@latest \
+    && eza --version && bat --version && fd --version && fzf --version \
+    && zoxide --version && delta --version && starship --version
+
 # Make tool installations group-writable so agent users (hive-agents) can
 # install additional tools at runtime via mise. Setgid ensures new files
 # inherit the hive-agents group.
 RUN chgrp -R hive-agents /opt/mise \
     && chmod -R g+rwX /opt/mise \
     && find /opt/mise -type d -exec chmod g+s {} +
+
+# Shell configuration — polished terminal experience for all users.
+COPY docker/shell/bashrc /etc/hive.bashrc
+COPY docker/shell/starship.toml /etc/starship.toml
+ENV STARSHIP_CONFIG=/etc/starship.toml
+RUN echo 'source /etc/hive.bashrc' >> /etc/bash.bashrc
+
+# Git defaults for a pleasant experience.
+RUN git config --system init.defaultBranch main \
+    && git config --system core.pager delta \
+    && git config --system interactive.diffFilter 'delta --color-only' \
+    && git config --system delta.navigate true \
+    && git config --system delta.syntax-theme Dracula \
+    && git config --system delta.line-numbers true \
+    && git config --system merge.conflictstyle zdiff3
 
 WORKDIR /hive
 

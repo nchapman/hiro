@@ -27,6 +27,7 @@ type Server struct {
 	cp           *controlplane.ControlPlane // control plane (for auth + settings)
 	startManager func() error            // callback to start the session manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
+	rootDir      string                  // platform root directory (for terminal working dir)
 	mux          *http.ServeMux
 	logger       *slog.Logger
 }
@@ -72,8 +73,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 
-	// WebSocket endpoint for web UI chat
+	// WebSocket endpoints
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
+	s.mux.HandleFunc("/ws/terminal", s.requireAuth(s.handleTerminal))
 
 	// Catch-all: serve web UI or 404
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
