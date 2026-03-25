@@ -81,6 +81,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/files/file", s.requireAuth(s.handleFilesDelete))
 	s.mux.HandleFunc("POST /api/files/rename", s.requireAuth(s.handleFilesRename))
 
+	// Shared file viewer (unauthenticated — token is the access control)
+	s.mux.HandleFunc("POST /api/files/share", s.requireAuth(s.handleShareCreate))
+	s.mux.HandleFunc("GET /api/shared/{token}", s.handleSharedFileInfo)
+	s.mux.HandleFunc("GET /api/shared/{token}/raw", s.handleSharedFileRaw)
+
 	// WebSocket endpoints
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
 	s.mux.HandleFunc("/ws/terminal", s.requireAuth(s.handleTerminal))

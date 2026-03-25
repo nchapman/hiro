@@ -10,9 +10,10 @@ import { css } from "@codemirror/lang-css"
 import { yaml } from "@codemirror/lang-yaml"
 import { keymap } from "@codemirror/view"
 import { Button } from "@/components/ui/button"
-import { Save } from "lucide-react"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { Save, Share2, Check, Loader2, X } from "lucide-react"
 import { useTheme } from "@/hooks/use-theme"
-import { readFile, writeFile } from "@/hooks/use-files"
+import { readFile, writeFile, shareFile } from "@/hooks/use-files"
 import type { Extension } from "@codemirror/state"
 
 // Extensions the browser can render inline (image/video/audio/pdf).
@@ -111,6 +112,8 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
   const [binary, setBinary] = useState(false)
   const saveRef = useRef<() => void>(() => {})
 
+  const [shareState, setShareState] = useState<"idle" | "sharing" | "copied" | "error">("idle")
+
   const dirty = content !== savedContent
 
   // Notify parent of dirty state changes. Use a ref to avoid re-firing
@@ -139,6 +142,20 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
       setSaving(false)
     }
   }, [path, content, dirty, onSaved])
+
+  const handleShare = useCallback(async () => {
+    setShareState("sharing")
+    try {
+      const token = await shareFile(path)
+      const url = `${window.location.origin}/shared/${token}`
+      await navigator.clipboard.writeText(url)
+      setShareState("copied")
+      setTimeout(() => setShareState("idle"), 2000)
+    } catch {
+      setShareState("error")
+      setTimeout(() => setShareState("idle"), 2000)
+    }
+  }, [path])
 
   // Keep saveRef current so the keymap closure always calls the latest save.
   saveRef.current = handleSave
@@ -184,6 +201,35 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
     return exts
   }, [path])
 
+  const shareButton = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleShare}
+            disabled={shareState === "sharing"}
+            className="h-7 w-7"
+          >
+            {shareState === "copied" ? (
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
+            ) : shareState === "error" ? (
+              <X className="h-3.5 w-3.5 text-destructive" />
+            ) : shareState === "sharing" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Share2 className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        }
+      />
+      <TooltipContent>
+        {shareState === "copied" ? "Link copied!" : shareState === "error" ? "Failed to share" : "Share file"}
+      </TooltipContent>
+    </Tooltip>
+  )
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -204,12 +250,18 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
     const previewType = getPreviewType(path)
     const fileUrl = `/api/files/file?path=${encodeURIComponent(path)}`
 
+    const binaryHeader = (
+      <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+        <span className="truncate font-mono text-muted-foreground">{path}</span>
+        <div className="flex-1" />
+        {shareButton}
+      </div>
+    )
+
     if (previewType === "image") {
       return (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
-            <span className="truncate font-mono text-muted-foreground">{path}</span>
-          </div>
+          {binaryHeader}
           <div className="flex flex-1 items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(var(--color-muted)_0%_25%,transparent_0%_50%)_50%/16px_16px]">
             <img src={fileUrl} alt={path} className="max-w-full max-h-full object-contain" />
           </div>
@@ -220,9 +272,7 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
     if (previewType === "video") {
       return (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
-            <span className="truncate font-mono text-muted-foreground">{path}</span>
-          </div>
+          {binaryHeader}
           <div className="flex flex-1 items-center justify-center p-4">
             <video src={fileUrl} controls className="max-w-full max-h-full" />
           </div>
@@ -233,9 +283,7 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
     if (previewType === "audio") {
       return (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
-            <span className="truncate font-mono text-muted-foreground">{path}</span>
-          </div>
+          {binaryHeader}
           <div className="flex flex-1 items-center justify-center p-4">
             <audio src={fileUrl} controls />
           </div>
@@ -246,18 +294,19 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
     if (previewType === "pdf") {
       return (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
-            <span className="truncate font-mono text-muted-foreground">{path}</span>
-          </div>
+          {binaryHeader}
           <iframe src={fileUrl} className="flex-1 w-full border-0" title={path} />
         </div>
       )
     }
 
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
-        <span className="text-4xl">Binary file</span>
-        <span className="text-sm">{path}</span>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {binaryHeader}
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
+          <span className="text-4xl">Binary file</span>
+          <span className="text-sm">{path}</span>
+        </div>
       </div>
     )
   }
@@ -276,16 +325,27 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
         {error && (
           <span className="shrink-0 text-xs text-destructive">{error}</span>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleSave}
-          disabled={!dirty || saving}
-          className="h-7 gap-1.5"
-        >
-          <Save className="h-3.5 w-3.5" />
-          {saving ? "Saving..." : "Save"}
-        </Button>
+        {shareButton}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleSave}
+                disabled={!dirty || saving}
+                className="h-7 w-7"
+              >
+                {saving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            }
+          />
+          <TooltipContent>Save</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Editor */}

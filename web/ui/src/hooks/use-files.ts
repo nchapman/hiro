@@ -72,6 +72,20 @@ export async function uploadFile(
   if (!res.ok) throw new Error(`Failed to upload file: ${res.statusText}`)
 }
 
+export async function shareFile(path: string): Promise<string> {
+  const res = await fetch("/api/files/share", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) throw new Error(`Failed to create share link: ${res.statusText}`)
+  const data = await res.json()
+  if (typeof data.token !== "string" || !data.token) {
+    throw new Error("Invalid share response from server")
+  }
+  return data.token
+}
+
 export async function renameEntry(
   from: string,
   to: string

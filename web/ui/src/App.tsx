@@ -12,6 +12,7 @@ import SettingsPage from "@/components/Settings"
 
 const TerminalPage = lazy(() => import("@/pages/TerminalPage"))
 const FilesPage = lazy(() => import("@/pages/FilesPage"))
+const SharedFilePage = lazy(() => import("@/pages/SharedFilePage"))
 
 export interface SessionInfo {
   id: string
@@ -198,6 +199,19 @@ export default function App() {
       setSelectedSessionId(null)
     }
   }, [sessions, selectedSessionId])
+
+  // Shared file viewer lives outside the auth gate entirely.
+  if (location.pathname.startsWith("/shared/")) {
+    return (
+      <ThemeCtx.Provider value={themeCtx}>
+        <Suspense fallback={suspenseFallback}>
+          <Routes>
+            <Route path="/shared/:token" element={<SharedFilePage />} />
+          </Routes>
+        </Suspense>
+      </ThemeCtx.Provider>
+    )
+  }
 
   return (
     <ThemeCtx.Provider value={themeCtx}>

@@ -29,6 +29,12 @@ func NewTokenSigner(secret []byte, ttl time.Duration) *TokenSigner {
 	}
 }
 
+// Secret returns the raw signing key. Used by the share token subsystem
+// which reuses this secret for AES-GCM encryption.
+func (ts *TokenSigner) Secret() []byte {
+	return ts.secret
+}
+
 // Create generates a new signed token with an expiry of now + TTL.
 func (ts *TokenSigner) Create() string {
 	expiry := time.Now().Add(ts.ttl).Unix()
