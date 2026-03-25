@@ -71,11 +71,19 @@ export default function SharedFilePage() {
       .finally(() => setLoading(false))
   }, [token])
 
-  // For markdown files, render as-is. For other text files, wrap in a code fence.
+  // For markdown files, strip YAML frontmatter and render it in a code fence,
+  // then render the body as markdown. For other text files, wrap everything
+  // in a code fence with the detected language.
   const markdownContent = useMemo(() => {
     if (!file?.content) return ""
     const ext = getFileExt(file.name)
-    if (ext === "md") return file.content
+    if (ext === "md") {
+      const fm = file.content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
+      if (fm) {
+        return "```yaml\n" + fm[1] + "\n```\n\n" + fm[2]
+      }
+      return file.content
+    }
     const lang = langMap[ext] ?? ""
     return "```" + lang + "\n" + file.content + "\n```"
   }, [file])
