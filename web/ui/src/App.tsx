@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
+import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ThemeCtx, useThemeProvider } from "@/hooks/use-theme"
 import ActivityBar from "@/components/ActivityBar"
@@ -26,13 +27,96 @@ type AppState =
   | { kind: "login" }
   | { kind: "ready" }
 
+const suspenseFallback = (
+  <div className="flex flex-1 items-center justify-center text-muted-foreground">
+    Loading...
+  </div>
+)
+
+/** Derives the current activity from the URL pathname. */
+function activityFromPath(pathname: string): Activity {
+  if (pathname.startsWith("/workspace")) return "workspace"
+  if (pathname.startsWith("/settings")) return "settings"
+  return "chat"
+}
+
+/** The main chat view, reading sessionId from the URL. */
+function ChatRoute({
+  sessions,
+  selectedSessionId,
+  onSelect,
+  onSessionsChanged,
+}: {
+  sessions: SessionInfo[]
+  selectedSessionId: string | null
+  onSelect: (id: string) => void
+  onSessionsChanged: () => void
+}) {
+  const { sessionId } = useParams()
+  const navigate = useNavigate()
+  const effectiveId = sessionId ?? selectedSessionId
+
+  // Sync URL param → parent state on mount / param change
+  useEffect(() => {
+    if (sessionId && sessionId !== selectedSessionId) {
+      onSelect(sessionId)
+    }
+  }, [sessionId, selectedSessionId, onSelect])
+
+  // Redirect to /chat if the URL session ID doesn't exist
+  useEffect(() => {
+    if (!sessionId || sessions.length === 0) return
+    const exists = sessions.some((s) => s.id === sessionId)
+    if (!exists) {
+      navigate("/chat", { replace: true })
+    }
+  }, [sessionId, sessions, navigate])
+
+  const handleSelect = useCallback(
+    (id: string) => {
+      onSelect(id)
+      navigate(`/chat/${id}`)
+    },
+    [onSelect, navigate],
+  )
+
+  const selectedSession = sessions.find((s) => s.id === effectiveId) ?? null
+
+  return (
+    <>
+      <Sidebar
+        sessions={sessions}
+        selectedId={effectiveId}
+        onSelect={handleSelect}
+      />
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <Chat session={selectedSession} onSessionsChanged={onSessionsChanged} />
+      </main>
+    </>
+  )
+}
+
 export default function App() {
   const themeCtx = useThemeProvider()
   const [appState, setAppState] = useState<AppState>({ kind: "loading" })
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
-  const [activity, setActivity] = useState<Activity>("chat")
   const hasAutoSelected = useRef(false)
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const activity = activityFromPath(location.pathname)
+
+  const handleActivityChange = useCallback(
+    (a: Activity) => {
+      if (a === "chat") {
+        navigate(selectedSessionId ? `/chat/${selectedSessionId}` : "/chat")
+      } else {
+        navigate(`/${a}`)
+      }
+    },
+    [navigate, selectedSessionId],
+  )
 
   const checkAuth = useCallback(async () => {
     try {
@@ -50,7 +134,6 @@ export default function App() {
         setAppState({ kind: "ready" })
       }
     } catch {
-      // API not available yet — show loading
       setAppState({ kind: "loading" })
     }
   }, [])
@@ -65,15 +148,6 @@ export default function App() {
       if (res.ok) {
         const data: SessionInfo[] = await res.json()
         setSessions(data)
-        if (!hasAutoSelected.current && data.length > 0) {
-          const persistent = data.find(
-            (s) => s.mode === "persistent" && s.status === "running"
-          )
-          if (persistent) {
-            setSelectedSessionId(persistent.id)
-            hasAutoSelected.current = true
-          }
-        }
       }
     } catch {
       /* API unavailable */
@@ -87,10 +161,23 @@ export default function App() {
     return () => clearInterval(interval)
   }, [fetchSessions, appState.kind])
 
+  // Auto-select first persistent running session (once)
+  useEffect(() => {
+    if (hasAutoSelected.current || sessions.length === 0) return
+    const persistent = sessions.find(
+      (s) => s.mode === "persistent" && s.status === "running",
+    )
+    if (!persistent) return
+    setSelectedSessionId(persistent.id)
+    hasAutoSelected.current = true
+    if (location.pathname === "/chat" || location.pathname === "/") {
+      navigate(`/chat/${persistent.id}`, { replace: true })
+    }
+  }, [sessions, location.pathname, navigate])
+
   const handleSelect = useCallback((id: string) => {
     hasAutoSelected.current = true
     setSelectedSessionId(id)
-    setActivity("chat")
   }, [])
 
   const handleLogout = useCallback(async () => {
@@ -105,23 +192,12 @@ export default function App() {
     hasAutoSelected.current = false
   }, [])
 
-  const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
-
   // Clear selection if the selected session was deleted.
   useEffect(() => {
     if (selectedSessionId && !sessions.find((s) => s.id === selectedSessionId)) {
       setSelectedSessionId(null)
     }
   }, [sessions, selectedSessionId])
-
-  // Standalone terminal page — rendered in its own browser tab.
-  if (window.location.pathname === "/terminal") {
-    return (
-      <Suspense>
-        <TerminalPage />
-      </Suspense>
-    )
-  }
 
   return (
     <ThemeCtx.Provider value={themeCtx}>
@@ -144,35 +220,48 @@ export default function App() {
           <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <ActivityBar
               activity={activity}
-              onActivityChange={setActivity}
+              onActivityChange={handleActivityChange}
               onLogout={handleLogout}
             />
             <div className="flex flex-1 overflow-hidden">
-              {activity === "chat" && (
-                <>
-                  <Sidebar
-                    sessions={sessions}
-                    selectedId={selectedSessionId}
-                    onSelect={handleSelect}
-                  />
-                  <main className="flex flex-1 flex-col overflow-hidden">
-                    <Chat
-                      session={selectedSession}
+              <Routes>
+                <Route
+                  path="/chat/:sessionId?"
+                  element={
+                    <ChatRoute
+                      sessions={sessions}
+                      selectedSessionId={selectedSessionId}
+                      onSelect={handleSelect}
                       onSessionsChanged={fetchSessions}
                     />
-                  </main>
-                </>
-              )}
-              {activity === "workspace" && (
-                <Suspense>
-                  <WorkspacePage />
-                </Suspense>
-              )}
-              {activity === "settings" && (
-                <main className="flex flex-1 flex-col overflow-hidden">
-                  <SettingsPage />
-                </main>
-              )}
+                  }
+                />
+                <Route
+                  path="/workspace"
+                  element={
+                    <Suspense fallback={suspenseFallback}>
+                      <WorkspacePage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <main className="flex flex-1 flex-col overflow-hidden">
+                      <SettingsPage />
+                    </main>
+                  }
+                />
+                <Route
+                  path="/terminal"
+                  element={
+                    <Suspense fallback={suspenseFallback}>
+                      <TerminalPage />
+                    </Suspense>
+                  }
+                />
+                <Route path="*" element={<Navigate to="/chat" replace />} />
+              </Routes>
             </div>
           </div>
         )}
