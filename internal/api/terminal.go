@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"strconv"
 	"sync/atomic"
 	"syscall"
@@ -62,6 +64,17 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 
 	cmd := exec.Command(shell)
 	cmd.Dir = s.rootDir
+
+	// Optional working directory relative to platform root.
+	if dir := r.URL.Query().Get("dir"); dir != "" {
+		absDir := filepath.Join(s.rootDir, filepath.Clean(dir))
+		// Ensure the resolved path stays within rootDir.
+		if strings.HasPrefix(absDir, s.rootDir+string(filepath.Separator)) || absDir == s.rootDir {
+			if info, err := os.Stat(absDir); err == nil && info.IsDir() {
+				cmd.Dir = absDir
+			}
+		}
+	}
 	cmd.Env = terminalEnv()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})

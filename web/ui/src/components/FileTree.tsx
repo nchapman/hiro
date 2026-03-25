@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from "react"
-import { Folder, FolderOpen, File, ChevronRight, ChevronDown, FilePlus, FolderPlus, Pencil, Trash2 } from "lucide-react"
+import { Folder, FolderOpen, File, ChevronRight, ChevronDown, FilePlus, FolderPlus, Pencil, Trash2, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { listDir, writeFile, mkdir, deleteEntry, renameEntry } from "@/hooks/use-workspace"
 import type { FileEntry } from "@/hooks/use-workspace"
@@ -300,6 +300,19 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
         },
       },
     ]
+
+    // Open Terminal — for directories and background (workspace root).
+    if (!entry || entry.type === "dir") {
+      items.push({
+        label: "Open Terminal",
+        icon: <TerminalSquare className="h-4 w-4" />,
+        onClick: () => {
+          const dir = entry?.type === "dir" ? entry.path : ""
+          const params = dir ? `?dir=${encodeURIComponent(dir)}` : ""
+          window.open(`/terminal${params}`, "_blank", "width=960,height=600,noopener,noreferrer")
+        },
+      })
+    }
 
     if (entry) {
       items.push({

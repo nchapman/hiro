@@ -48,8 +48,12 @@ export default function TerminalPage() {
 
     // Connect WebSocket.
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const dims = `cols=${term.cols}&rows=${term.rows}`
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/terminal?${dims}`)
+    const params = new URLSearchParams({ cols: String(term.cols), rows: String(term.rows) })
+    // Forward dir param from page URL to WebSocket if present.
+    const pageParams = new URLSearchParams(window.location.search)
+    const dir = pageParams.get("dir")
+    if (dir) params.set("dir", dir)
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws/terminal?${params}`)
     ws.binaryType = "arraybuffer"
 
     ws.onopen = () => {
