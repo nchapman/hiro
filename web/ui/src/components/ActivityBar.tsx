@@ -16,7 +16,7 @@ import {
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 
-export type Activity = "chat" | "workspace" | "settings"
+export type Activity = "chat" | "files" | "settings"
 
 interface ActivityBarProps {
   activity: Activity
@@ -34,7 +34,7 @@ const themeOrder = ["system", "light", "dark"] as const
 
 const activities: { id: Activity; icon: typeof MessageSquare; label: string }[] = [
   { id: "chat", icon: MessageSquare, label: "Chat" },
-  { id: "workspace", icon: FolderOpen, label: "Workspace" },
+  { id: "files", icon: FolderOpen, label: "Files" },
   { id: "settings", icon: Settings, label: "Settings" },
 ]
 

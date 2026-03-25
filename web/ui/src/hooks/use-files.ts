@@ -7,8 +7,8 @@ export interface FileEntry {
 
 export async function listDir(path?: string): Promise<FileEntry[]> {
   const url = path
-    ? `/api/workspace/tree?path=${encodeURIComponent(path)}`
-    : "/api/workspace/tree"
+    ? `/api/files/tree?path=${encodeURIComponent(path)}`
+    : "/api/files/tree"
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Failed to list directory: ${res.statusText}`)
   return res.json()
@@ -16,7 +16,7 @@ export async function listDir(path?: string): Promise<FileEntry[]> {
 
 export async function readFile(path: string): Promise<string> {
   const res = await fetch(
-    `/api/workspace/file?path=${encodeURIComponent(path)}`
+    `/api/files/file?path=${encodeURIComponent(path)}`
   )
   if (res.status === 413) throw new Error("File too large to display")
   if (!res.ok) throw new Error(`Failed to read file: ${res.statusText}`)
@@ -28,7 +28,7 @@ export async function writeFile(
   content: string
 ): Promise<void> {
   const res = await fetch(
-    `/api/workspace/file?path=${encodeURIComponent(path)}`,
+    `/api/files/file?path=${encodeURIComponent(path)}`,
     {
       method: "PUT",
       headers: { "Content-Type": "text/plain" },
@@ -40,7 +40,7 @@ export async function writeFile(
 
 export async function mkdir(path: string): Promise<void> {
   const res = await fetch(
-    `/api/workspace/mkdir?path=${encodeURIComponent(path)}`,
+    `/api/files/mkdir?path=${encodeURIComponent(path)}`,
     { method: "POST" }
   )
   if (!res.ok) throw new Error(`Failed to create directory: ${res.statusText}`)
@@ -48,7 +48,7 @@ export async function mkdir(path: string): Promise<void> {
 
 export async function deleteEntry(path: string): Promise<void> {
   const res = await fetch(
-    `/api/workspace/file?path=${encodeURIComponent(path)}`,
+    `/api/files/file?path=${encodeURIComponent(path)}`,
     { method: "DELETE" }
   )
   if (!res.ok) throw new Error(`Failed to delete: ${res.statusText}`)
@@ -59,7 +59,7 @@ export async function renameEntry(
   to: string
 ): Promise<void> {
   const res = await fetch(
-    `/api/workspace/rename?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    `/api/files/rename?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     { method: "POST" }
   )
   if (res.status === 409) throw new Error("Destination already exists")

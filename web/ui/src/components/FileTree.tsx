@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from "react"
 import { Folder, FolderOpen, File, ChevronRight, ChevronDown, FilePlus, FolderPlus, Pencil, Trash2, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { listDir, writeFile, mkdir, deleteEntry, renameEntry } from "@/hooks/use-workspace"
-import type { FileEntry } from "@/hooks/use-workspace"
+import { listDir, writeFile, mkdir, deleteEntry, renameEntry } from "@/hooks/use-files"
+import type { FileEntry } from "@/hooks/use-files"
+
+// Platform-critical paths that cannot be deleted or renamed.
+// Must match protectedPaths in internal/api/files.go.
+const protectedPaths = new Set(["agents", "sessions", "skills", "workspace", "config.yaml"])
 
 export interface FileTreeHandle {
   refresh: () => void
@@ -123,7 +127,7 @@ function ContextMenu({
 interface ContextMenuState {
   x: number
   y: number
-  entry: FileEntry | null // null = background (workspace root)
+  entry: FileEntry | null // null = background (root)
   parentPath: string
 }
 
@@ -301,7 +305,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       },
     ]
 
-    // Open Terminal — for directories and background (workspace root).
+    // Open Terminal — for directories and background (root).
     if (!entry || entry.type === "dir") {
       items.push({
         label: "Open Terminal",
@@ -314,7 +318,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       })
     }
 
-    if (entry) {
+    if (entry && !protectedPaths.has(entry.path)) {
       items.push({
         label: "Rename",
         icon: <Pencil className="h-4 w-4" />,
@@ -458,7 +462,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
         className="p-4 text-sm italic text-muted-foreground"
         onContextMenu={(e) => handleContextMenu(e, null, "")}
       >
-        Workspace is empty
+        No files
       </div>
     )
   }

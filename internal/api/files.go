@@ -14,24 +14,24 @@ import (
 
 const maxFileSize = 2 << 20 // 2 MB
 
-// resolveWorkspacePath validates and resolves a relative path within the
-// workspace directory. It returns an error if the resolved path escapes the
-// workspace root (path traversal), including via symlinks.
-func resolveWorkspacePath(rootDir, relPath string) (string, error) {
-	wsRoot := filepath.Join(rootDir, "workspace")
-	if relPath == "" {
-		return wsRoot, nil
-	}
-	joined := filepath.Join(wsRoot, relPath)
-	cleaned := filepath.Clean(joined)
-	// Lexical check: ensure the cleaned path is within the workspace root.
-	if !strings.HasPrefix(cleaned, wsRoot+string(filepath.Separator)) && cleaned != wsRoot {
-		return "", fmt.Errorf("path escapes workspace")
-	}
-	// Resolve the workspace root once (it may itself be a symlink mount).
-	realRoot, err := filepath.EvalSymlinks(wsRoot)
+// resolveFilesPath validates and resolves a relative path within the
+// platform root directory. It returns an error if the resolved path escapes
+// the root (path traversal), including via symlinks.
+func resolveFilesPath(rootDir, relPath string) (string, error) {
+	// Resolve the root once up front so all checks use the canonical path.
+	realRoot, err := filepath.EvalSymlinks(rootDir)
 	if err != nil {
-		return "", fmt.Errorf("workspace root resolution failed: %w", err)
+		return "", fmt.Errorf("root resolution failed: %w", err)
+	}
+
+	if relPath == "" {
+		return realRoot, nil
+	}
+	joined := filepath.Join(realRoot, relPath)
+	cleaned := filepath.Clean(joined)
+	// Lexical check: ensure the cleaned path is within the root.
+	if !strings.HasPrefix(cleaned, realRoot+string(filepath.Separator)) && cleaned != realRoot {
+		return "", fmt.Errorf("path escapes root")
 	}
 
 	// Symlink check: resolve symlinks and re-validate to prevent escape.
@@ -44,7 +44,7 @@ func resolveWorkspacePath(rootDir, relPath string) (string, error) {
 		// deepest existing ancestor and verify it doesn't escape via
 		// symlink, closing the TOCTOU window for partial-path attacks.
 		ancestor := filepath.Dir(cleaned)
-		for ancestor != wsRoot && ancestor != filepath.Dir(ancestor) {
+		for ancestor != realRoot && ancestor != filepath.Dir(ancestor) {
 			if _, statErr := os.Lstat(ancestor); statErr == nil {
 				break
 			}
@@ -55,15 +55,35 @@ func resolveWorkspacePath(rootDir, relPath string) (string, error) {
 			return "", fmt.Errorf("path resolution failed: %w", err)
 		}
 		if !strings.HasPrefix(realAncestor, realRoot+string(filepath.Separator)) && realAncestor != realRoot {
-			return "", fmt.Errorf("path escapes workspace")
+			return "", fmt.Errorf("path escapes root")
 		}
 		return cleaned, nil
 	}
 
 	if !strings.HasPrefix(real, realRoot+string(filepath.Separator)) && real != realRoot {
-		return "", fmt.Errorf("path escapes workspace")
+		return "", fmt.Errorf("path escapes root")
 	}
 	return real, nil
+}
+
+// protectedPaths are platform-critical paths (relative to root) that cannot
+// be deleted or renamed through the file browser API.
+var protectedPaths = map[string]bool{
+	"agents":      true,
+	"sessions":    true,
+	"skills":      true,
+	"workspace":   true,
+	"config.yaml": true,
+}
+
+// isProtectedPath returns true if absPath is a platform-critical path that
+// should not be deleted or renamed.
+func isProtectedPath(rootDir, absPath string) bool {
+	rel, err := filepath.Rel(rootDir, absPath)
+	if err != nil {
+		return false
+	}
+	return protectedPaths[rel]
 }
 
 type treeEntry struct {
@@ -73,9 +93,9 @@ type treeEntry struct {
 	Size int64  `json:"size,omitempty"`
 }
 
-func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
-	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	absPath, err := resolveFilesPath(s.rootDir, relPath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
@@ -87,16 +107,24 @@ func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "directory not found", http.StatusNotFound)
 			return
 		}
-		s.logger.Error("workspace tree read failed", "path", absPath, "error", err)
+		s.logger.Error("files tree read failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	wsRoot := filepath.Join(s.rootDir, "workspace")
+	// Resolve the root so Rel produces clean paths (absPath is already resolved).
+	realRoot, err := filepath.EvalSymlinks(s.rootDir)
+	if err != nil {
+		s.logger.Error("root resolution failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	result := make([]treeEntry, 0, len(entries))
 	truncated := false
 	for _, e := range entries {
-		// Skip hidden files and symlinks.
+		// Skip hidden files (dot-prefix) and symlinks. At the platform root
+		// this also prevents exposing .env, .git, and other sensitive paths.
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
@@ -104,7 +132,7 @@ func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		entryAbs := filepath.Join(absPath, e.Name())
-		entryRel, _ := filepath.Rel(wsRoot, entryAbs)
+		entryRel, _ := filepath.Rel(realRoot, entryAbs)
 
 		te := treeEntry{
 			Name: e.Name(),
@@ -139,13 +167,13 @@ func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleWorkspaceFileRead(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFilesFileRead(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	if relPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
-	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	absPath, err := resolveFilesPath(s.rootDir, relPath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
@@ -157,7 +185,7 @@ func (s *Server) handleWorkspaceFileRead(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "file not found", http.StatusNotFound)
 			return
 		}
-		s.logger.Error("workspace file stat failed", "path", absPath, "error", err)
+		s.logger.Error("files file stat failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -175,7 +203,7 @@ func (s *Server) handleWorkspaceFileRead(w http.ResponseWriter, r *http.Request)
 	// Content-Type detection, range requests, and caching headers.
 	f, err := os.Open(absPath)
 	if err != nil {
-		s.logger.Error("workspace file open failed", "path", absPath, "error", err)
+		s.logger.Error("files file open failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -183,13 +211,13 @@ func (s *Server) handleWorkspaceFileRead(w http.ResponseWriter, r *http.Request)
 	http.ServeContent(w, r, filepath.Base(absPath), info.ModTime(), f)
 }
 
-func (s *Server) handleWorkspaceFileWrite(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	if relPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
-	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	absPath, err := resolveFilesPath(s.rootDir, relPath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
@@ -209,13 +237,13 @@ func (s *Server) handleWorkspaceFileWrite(w http.ResponseWriter, r *http.Request
 	// so agent processes (hive-agents group) can also write into these dirs.
 	dir := filepath.Dir(absPath)
 	if err := os.MkdirAll(dir, 02775); err != nil {
-		s.logger.Error("workspace mkdir failed", "path", dir, "error", err)
+		s.logger.Error("files mkdir failed", "path", dir, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	if err := os.WriteFile(absPath, body, 0664); err != nil {
-		s.logger.Error("workspace file write failed", "path", absPath, "error", err)
+		s.logger.Error("files file write failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -223,20 +251,20 @@ func (s *Server) handleWorkspaceFileWrite(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleWorkspaceMkdir(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFilesMkdir(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	if relPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
-	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	absPath, err := resolveFilesPath(s.rootDir, relPath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
 
 	if err := os.MkdirAll(absPath, 02775); err != nil {
-		s.logger.Error("workspace mkdir failed", "path", absPath, "error", err)
+		s.logger.Error("files mkdir failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -244,28 +272,32 @@ func (s *Server) handleWorkspaceMkdir(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFilesDelete(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	if relPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
-	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	absPath, err := resolveFilesPath(s.rootDir, relPath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
 
-	// Don't allow deleting the workspace root itself.
-	wsRoot := filepath.Join(s.rootDir, "workspace")
-	realRoot, err := filepath.EvalSymlinks(wsRoot)
+	// Don't allow deleting the platform root or top-level directories
+	// (agents/, sessions/, skills/, etc.) to prevent accidental data loss.
+	realRoot, err := filepath.EvalSymlinks(s.rootDir)
 	if err != nil {
-		s.logger.Error("workspace root resolution failed", "error", err)
+		s.logger.Error("root resolution failed", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if absPath == wsRoot || absPath == realRoot {
-		http.Error(w, "cannot delete workspace root", http.StatusForbidden)
+	if absPath == s.rootDir || absPath == realRoot {
+		http.Error(w, "cannot delete root", http.StatusForbidden)
+		return
+	}
+	if isProtectedPath(realRoot, absPath) {
+		http.Error(w, "cannot delete protected path", http.StatusForbidden)
 		return
 	}
 
@@ -277,7 +309,7 @@ func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		s.logger.Error("workspace delete lstat failed", "path", absPath, "error", err)
+		s.logger.Error("files delete lstat failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -287,7 +319,7 @@ func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := os.RemoveAll(absPath); err != nil {
-		s.logger.Error("workspace delete failed", "path", absPath, "error", err)
+		s.logger.Error("files delete failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -295,21 +327,34 @@ func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleWorkspaceRename(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFilesRename(w http.ResponseWriter, r *http.Request) {
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	if from == "" || to == "" {
 		http.Error(w, "from and to parameters required", http.StatusBadRequest)
 		return
 	}
-	absFrom, err := resolveWorkspacePath(s.rootDir, from)
+	absFrom, err := resolveFilesPath(s.rootDir, from)
 	if err != nil {
 		http.Error(w, "invalid source path", http.StatusBadRequest)
 		return
 	}
-	absTo, err := resolveWorkspacePath(s.rootDir, to)
+	absTo, err := resolveFilesPath(s.rootDir, to)
 	if err != nil {
 		http.Error(w, "invalid destination path", http.StatusBadRequest)
+		return
+	}
+
+	// Don't allow renaming protected platform paths.
+	// Use the resolved root since resolveFilesPath returns resolved paths.
+	realRoot, err := filepath.EvalSymlinks(s.rootDir)
+	if err != nil {
+		s.logger.Error("root resolution failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if isProtectedPath(realRoot, absFrom) {
+		http.Error(w, "cannot rename protected path", http.StatusForbidden)
 		return
 	}
 
@@ -334,13 +379,13 @@ func (s *Server) handleWorkspaceRename(w http.ResponseWriter, r *http.Request) {
 
 	// Create parent dirs for destination if needed.
 	if err := os.MkdirAll(filepath.Dir(absTo), 02775); err != nil {
-		s.logger.Error("workspace rename mkdir failed", "path", absTo, "error", err)
+		s.logger.Error("files rename mkdir failed", "path", absTo, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	if err := os.Rename(absFrom, absTo); err != nil {
-		s.logger.Error("workspace rename failed", "from", absFrom, "to", absTo, "error", err)
+		s.logger.Error("files rename failed", "from", absFrom, "to", absTo, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

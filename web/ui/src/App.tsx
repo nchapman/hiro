@@ -11,7 +11,7 @@ import Setup from "@/components/Setup"
 import SettingsPage from "@/components/Settings"
 
 const TerminalPage = lazy(() => import("@/pages/TerminalPage"))
-const WorkspacePage = lazy(() => import("@/pages/WorkspacePage"))
+const FilesPage = lazy(() => import("@/pages/FilesPage"))
 
 export interface SessionInfo {
   id: string
@@ -35,7 +35,7 @@ const suspenseFallback = (
 
 /** Derives the current activity from the URL pathname. */
 function activityFromPath(pathname: string): Activity {
-  if (pathname.startsWith("/workspace")) return "workspace"
+  if (pathname.startsWith("/files")) return "files"
   if (pathname.startsWith("/settings")) return "settings"
   return "chat"
 }
@@ -237,10 +237,10 @@ export default function App() {
                   }
                 />
                 <Route
-                  path="/workspace"
+                  path="/files"
                   element={
                     <Suspense fallback={suspenseFallback}>
-                      <WorkspacePage />
+                      <FilesPage />
                     </Suspense>
                   }
                 />

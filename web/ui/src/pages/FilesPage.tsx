@@ -17,7 +17,7 @@ interface OpenTab {
   dirty: boolean
 }
 
-export default function WorkspacePage() {
+export default function FilesPage() {
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const treeRef = useRef<FileTreeHandle>(null)
@@ -96,7 +96,7 @@ export default function WorkspacePage() {
       <aside className="flex h-full w-60 min-w-60 flex-col border-r bg-card">
         <div className="flex items-center justify-between px-4 py-4">
           <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Workspace
+            Files
           </span>
           <Tooltip>
             <TooltipTrigger

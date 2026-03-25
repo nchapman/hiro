@@ -12,7 +12,7 @@ import { keymap } from "@codemirror/view"
 import { Button } from "@/components/ui/button"
 import { Save } from "lucide-react"
 import { useTheme } from "@/hooks/use-theme"
-import { readFile, writeFile } from "@/hooks/use-workspace"
+import { readFile, writeFile } from "@/hooks/use-files"
 import type { Extension } from "@codemirror/state"
 
 // Extensions the browser can render inline (image/video/audio/pdf).
@@ -202,7 +202,7 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
 
   if (binary) {
     const previewType = getPreviewType(path)
-    const fileUrl = `/api/workspace/file?path=${encodeURIComponent(path)}`
+    const fileUrl = `/api/files/file?path=${encodeURIComponent(path)}`
 
     if (previewType === "image") {
       return (
