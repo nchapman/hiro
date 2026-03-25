@@ -77,6 +77,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/workspace/tree", s.requireAuth(s.handleWorkspaceTree))
 	s.mux.HandleFunc("GET /api/workspace/file", s.requireAuth(s.handleWorkspaceFileRead))
 	s.mux.HandleFunc("PUT /api/workspace/file", s.requireAuth(s.handleWorkspaceFileWrite))
+	s.mux.HandleFunc("POST /api/workspace/mkdir", s.requireAuth(s.handleWorkspaceMkdir))
+	s.mux.HandleFunc("DELETE /api/workspace/file", s.requireAuth(s.handleWorkspaceDelete))
+	s.mux.HandleFunc("POST /api/workspace/rename", s.requireAuth(s.handleWorkspaceRename))
 
 	// WebSocket endpoints
 	s.mux.HandleFunc("/ws/chat", s.handleChat)

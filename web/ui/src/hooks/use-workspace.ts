@@ -37,3 +37,31 @@ export async function writeFile(
   )
   if (!res.ok) throw new Error(`Failed to save file: ${res.statusText}`)
 }
+
+export async function mkdir(path: string): Promise<void> {
+  const res = await fetch(
+    `/api/workspace/mkdir?path=${encodeURIComponent(path)}`,
+    { method: "POST" }
+  )
+  if (!res.ok) throw new Error(`Failed to create directory: ${res.statusText}`)
+}
+
+export async function deleteEntry(path: string): Promise<void> {
+  const res = await fetch(
+    `/api/workspace/file?path=${encodeURIComponent(path)}`,
+    { method: "DELETE" }
+  )
+  if (!res.ok) throw new Error(`Failed to delete: ${res.statusText}`)
+}
+
+export async function renameEntry(
+  from: string,
+  to: string
+): Promise<void> {
+  const res = await fetch(
+    `/api/workspace/rename?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    { method: "POST" }
+  )
+  if (res.status === 409) throw new Error("Destination already exists")
+  if (!res.ok) throw new Error(`Failed to rename: ${res.statusText}`)
+}

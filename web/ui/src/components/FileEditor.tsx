@@ -15,6 +15,50 @@ import { useTheme } from "@/hooks/use-theme"
 import { readFile, writeFile } from "@/hooks/use-workspace"
 import type { Extension } from "@codemirror/state"
 
+// Extensions the browser can render inline (image/video/audio/pdf).
+const previewableExtensions: Record<string, "image" | "video" | "audio" | "pdf"> = {
+  png: "image", jpg: "image", jpeg: "image", gif: "image",
+  bmp: "image", ico: "image", webp: "image", svg: "image",
+  mp4: "video", webm: "video", ogg: "video",
+  mp3: "audio", wav: "audio", flac: "audio",
+  pdf: "pdf",
+}
+
+const binaryExtensions = new Set([
+  // Images
+  "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svg", "tiff", "tif",
+  // Audio/Video
+  "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "ogg", "webm",
+  // Archives
+  "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst",
+  // Compiled/Binary
+  "exe", "dll", "so", "dylib", "o", "a", "class", "pyc", "pyo",
+  "wasm", "bin", "dat",
+  // Documents
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  // Databases
+  "db", "sqlite", "sqlite3",
+  // Fonts
+  "ttf", "otf", "woff", "woff2", "eot",
+])
+
+function getFileExt(path: string): string {
+  return path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? ""
+}
+
+function isBinaryPath(path: string): boolean {
+  return binaryExtensions.has(getFileExt(path))
+}
+
+function getPreviewType(path: string): "image" | "video" | "audio" | "pdf" | null {
+  return previewableExtensions[getFileExt(path)] ?? null
+}
+
+function isBinaryContent(content: string): boolean {
+  const sample = content.slice(0, 8192)
+  return sample.includes("\0")
+}
+
 function getLanguage(path: string): Extension | null {
   const ext = path.split(".").pop()?.toLowerCase()
   switch (ext) {
@@ -54,18 +98,32 @@ function getLanguage(path: string): Extension | null {
 interface FileEditorProps {
   path: string
   onSaved?: () => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
-export default function FileEditor({ path, onSaved }: FileEditorProps) {
+export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorProps) {
   const { resolved: theme } = useTheme()
   const [content, setContent] = useState<string>("")
   const [savedContent, setSavedContent] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [binary, setBinary] = useState(false)
   const saveRef = useRef<() => void>(() => {})
 
   const dirty = content !== savedContent
+
+  // Notify parent of dirty state changes. Use a ref to avoid re-firing
+  // when the callback identity changes (inline arrow in parent).
+  const dirtyChangeRef = useRef(onDirtyChange)
+  dirtyChangeRef.current = onDirtyChange
+  const prevDirtyRef = useRef(dirty)
+  useEffect(() => {
+    if (prevDirtyRef.current !== dirty) {
+      prevDirtyRef.current = dirty
+      dirtyChangeRef.current?.(dirty)
+    }
+  }, [dirty])
 
   const handleSave = useCallback(async () => {
     if (!dirty) return
@@ -87,10 +145,20 @@ export default function FileEditor({ path, onSaved }: FileEditorProps) {
 
   // Load file content when path changes.
   useEffect(() => {
+    setBinary(false)
+    if (isBinaryPath(path)) {
+      setBinary(true)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     readFile(path)
       .then((text) => {
+        if (isBinaryContent(text)) {
+          setBinary(true)
+          return
+        }
         setContent(text)
         setSavedContent(text)
       })
@@ -128,6 +196,68 @@ export default function FileEditor({ path, onSaved }: FileEditorProps) {
     return (
       <div className="flex flex-1 items-center justify-center text-destructive">
         {error}
+      </div>
+    )
+  }
+
+  if (binary) {
+    const previewType = getPreviewType(path)
+    const fileUrl = `/api/workspace/file?path=${encodeURIComponent(path)}`
+
+    if (previewType === "image") {
+      return (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+            <span className="truncate font-mono text-muted-foreground">{path}</span>
+          </div>
+          <div className="flex flex-1 items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(var(--color-muted)_0%_25%,transparent_0%_50%)_50%/16px_16px]">
+            <img src={fileUrl} alt={path} className="max-w-full max-h-full object-contain" />
+          </div>
+        </div>
+      )
+    }
+
+    if (previewType === "video") {
+      return (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+            <span className="truncate font-mono text-muted-foreground">{path}</span>
+          </div>
+          <div className="flex flex-1 items-center justify-center p-4">
+            <video src={fileUrl} controls className="max-w-full max-h-full" />
+          </div>
+        </div>
+      )
+    }
+
+    if (previewType === "audio") {
+      return (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+            <span className="truncate font-mono text-muted-foreground">{path}</span>
+          </div>
+          <div className="flex flex-1 items-center justify-center p-4">
+            <audio src={fileUrl} controls />
+          </div>
+        </div>
+      )
+    }
+
+    if (previewType === "pdf") {
+      return (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+            <span className="truncate font-mono text-muted-foreground">{path}</span>
+          </div>
+          <iframe src={fileUrl} className="flex-1 w-full border-0" title={path} />
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
+        <span className="text-4xl">Binary file</span>
+        <span className="text-sm">{path}</span>
       </div>
     )
   }

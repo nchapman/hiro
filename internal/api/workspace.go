@@ -170,17 +170,17 @@ func (s *Server) handleWorkspaceFileRead(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	data, err := os.ReadFile(absPath)
+	// Use ServeContent (not ServeFile) to avoid redirect behavior that
+	// breaks query-parameter-based routing. ServeContent still handles
+	// Content-Type detection, range requests, and caching headers.
+	f, err := os.Open(absPath)
 	if err != nil {
-		s.logger.Error("workspace file read failed", "path", absPath, "error", err)
+		s.logger.Error("workspace file open failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	defer f.Close()
+	http.ServeContent(w, r, filepath.Base(absPath), info.ModTime(), f)
 }
 
 func (s *Server) handleWorkspaceFileWrite(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +216,131 @@ func (s *Server) handleWorkspaceFileWrite(w http.ResponseWriter, r *http.Request
 
 	if err := os.WriteFile(absPath, body, 0664); err != nil {
 		s.logger.Error("workspace file write failed", "path", absPath, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleWorkspaceMkdir(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if err := os.MkdirAll(absPath, 02775); err != nil {
+		s.logger.Error("workspace mkdir failed", "path", absPath, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+	absPath, err := resolveWorkspacePath(s.rootDir, relPath)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Don't allow deleting the workspace root itself.
+	wsRoot := filepath.Join(s.rootDir, "workspace")
+	realRoot, err := filepath.EvalSymlinks(wsRoot)
+	if err != nil {
+		s.logger.Error("workspace root resolution failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if absPath == wsRoot || absPath == realRoot {
+		http.Error(w, "cannot delete workspace root", http.StatusForbidden)
+		return
+	}
+
+	// Re-check for symlink substitution between resolve and delete to
+	// close the TOCTOU window where an agent swaps the path for a symlink.
+	linfo, err := os.Lstat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		s.logger.Error("workspace delete lstat failed", "path", absPath, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if linfo.Mode()&os.ModeSymlink != 0 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if err := os.RemoveAll(absPath); err != nil {
+		s.logger.Error("workspace delete failed", "path", absPath, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleWorkspaceRename(w http.ResponseWriter, r *http.Request) {
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	if from == "" || to == "" {
+		http.Error(w, "from and to parameters required", http.StatusBadRequest)
+		return
+	}
+	absFrom, err := resolveWorkspacePath(s.rootDir, from)
+	if err != nil {
+		http.Error(w, "invalid source path", http.StatusBadRequest)
+		return
+	}
+	absTo, err := resolveWorkspacePath(s.rootDir, to)
+	if err != nil {
+		http.Error(w, "invalid destination path", http.StatusBadRequest)
+		return
+	}
+
+	// Re-check source for symlink substitution (TOCTOU mitigation).
+	if linfo, err := os.Lstat(absFrom); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "source not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	} else if linfo.Mode()&os.ModeSymlink != 0 {
+		http.Error(w, "invalid source path", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure destination doesn't already exist.
+	if _, err := os.Stat(absTo); err == nil {
+		http.Error(w, "destination already exists", http.StatusConflict)
+		return
+	}
+
+	// Create parent dirs for destination if needed.
+	if err := os.MkdirAll(filepath.Dir(absTo), 02775); err != nil {
+		s.logger.Error("workspace rename mkdir failed", "path", absTo, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.Rename(absFrom, absTo); err != nil {
+		s.logger.Error("workspace rename failed", "from", absFrom, "to", absTo, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
