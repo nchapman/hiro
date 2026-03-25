@@ -55,11 +55,7 @@ function InlineInput({
           }
           if (e.key === "Escape") onCancel()
         }}
-        onBlur={(e) => {
-          const val = e.currentTarget.value.trim()
-          if (val && val !== defaultValue) onSubmit(val)
-          else onCancel()
-        }}
+        onBlur={() => onCancel()}
       />
     </div>
   )
@@ -86,6 +82,15 @@ function ContextMenu({
     document.addEventListener("mousedown", handler)
     return () => document.removeEventListener("mousedown", handler)
   }, [onClose])
+
+  // Clamp to viewport after mount.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    if (rect.right > window.innerWidth) el.style.left = `${x - rect.width}px`
+    if (rect.bottom > window.innerHeight) el.style.top = `${y - rect.height}px`
+  }, [x, y])
 
   return (
     <div
