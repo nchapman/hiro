@@ -54,6 +54,24 @@ export async function deleteEntry(path: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete: ${res.statusText}`)
 }
 
+export async function uploadFile(
+  path: string,
+  file: File
+): Promise<void> {
+  const res = await fetch(
+    `/api/files/file?path=${encodeURIComponent(path)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    }
+  )
+  if (res.status === 413) throw new Error("File too large (max 50 MB)")
+  if (!res.ok) throw new Error(`Failed to upload file: ${res.statusText}`)
+}
+
 export async function renameEntry(
   from: string,
   to: string

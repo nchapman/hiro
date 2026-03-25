@@ -12,7 +12,8 @@ import (
 	"strings"
 )
 
-const maxFileSize = 2 << 20 // 2 MB
+const maxFileReadSize = 2 << 20  // 2 MB — fits comfortably in the browser editor
+const maxFileWriteSize = 50 << 20 // 50 MB — generous limit for drag-and-drop uploads
 
 // resolveFilesPath validates and resolves a relative path within the
 // platform root directory. It returns an error if the resolved path escapes
@@ -193,7 +194,7 @@ func (s *Server) handleFilesFileRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "path is a directory", http.StatusBadRequest)
 		return
 	}
-	if info.Size() > maxFileSize {
+	if info.Size() > maxFileReadSize {
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -223,16 +224,6 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxFileSize+1))
-	if err != nil {
-		http.Error(w, "read error", http.StatusInternalServerError)
-		return
-	}
-	if int64(len(body)) > maxFileSize {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-
 	// Create parent directories if needed. Use 02775 (setgid + group-writable)
 	// so agent processes (hive-agents group) can also write into these dirs.
 	dir := filepath.Dir(absPath)
@@ -242,11 +233,45 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.WriteFile(absPath, body, 0664); err != nil {
+	// Stream to a temp file to avoid buffering large uploads in RAM.
+	// The temp file lives in the same directory so os.Rename is atomic.
+	tmp, err := os.CreateTemp(dir, ".upload-*")
+	if err != nil {
+		s.logger.Error("files upload temp create failed", "path", dir, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		tmp.Close()
+		if tmpName != "" {
+			os.Remove(tmpName)
+		}
+	}()
+
+	n, err := io.Copy(tmp, io.LimitReader(r.Body, maxFileWriteSize+1))
+	if err != nil {
+		s.logger.Error("files upload copy failed", "path", absPath, "error", err)
+		http.Error(w, "read error", http.StatusInternalServerError)
+		return
+	}
+	if n > maxFileWriteSize {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if err := tmp.Chmod(0664); err != nil {
+		s.logger.Error("files upload chmod failed", "path", tmpName, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+
+	if err := os.Rename(tmpName, absPath); err != nil {
 		s.logger.Error("files file write failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	tmpName = "" // disarm deferred remove
 
 	w.WriteHeader(http.StatusNoContent)
 }

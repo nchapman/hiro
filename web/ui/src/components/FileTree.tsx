@@ -1,12 +1,37 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from "react"
-import { Folder, FolderOpen, File, ChevronRight, ChevronDown, FilePlus, FolderPlus, Pencil, Trash2, TerminalSquare } from "lucide-react"
+import { Folder, FolderOpen, File, ChevronRight, ChevronDown, FilePlus, FolderPlus, Pencil, Trash2, TerminalSquare, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { listDir, writeFile, mkdir, deleteEntry, renameEntry } from "@/hooks/use-files"
+import { listDir, writeFile, mkdir, deleteEntry, renameEntry, uploadFile } from "@/hooks/use-files"
 import type { FileEntry } from "@/hooks/use-files"
+
+const MAX_UPLOAD_SIZE = 50 << 20 // 50 MB — matches server maxFileWriteSize
+const MAX_UPLOAD_LABEL = `${MAX_UPLOAD_SIZE >> 20} MB`
 
 // Platform-critical paths that cannot be deleted or renamed.
 // Must match protectedPaths in internal/api/files.go.
 const protectedPaths = new Set(["agents", "sessions", "skills", "workspace", "config.yaml"])
+
+// Pure path helpers for drag-and-drop.
+const parentOf = (path: string) =>
+  path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : ""
+
+const nameOf = (path: string) =>
+  path.includes("/") ? path.substring(path.lastIndexOf("/") + 1) : path
+
+/** Returns true if `path` is equal to or nested under `ancestor`. */
+const isAncestorOrSelf = (ancestor: string, path: string) =>
+  path === ancestor || path.startsWith(ancestor + "/")
+
+/** Resolve the target directory for a drop — directory entries are targets, files resolve to their parent. */
+const resolveDropDir = (entry: FileEntry | null): string =>
+  entry === null ? "" : entry.type === "dir" ? entry.path : parentOf(entry.path)
+
+/** Strip path separators and reject `.`/`..` to prevent path manipulation from File.name. */
+function sanitizeFilename(name: string): string | null {
+  const base = name.split("/").pop()?.split("\\").pop() ?? ""
+  if (!base || base === "." || base === "..") return null
+  return base
+}
 
 export interface FileTreeHandle {
   refresh: () => void
@@ -146,6 +171,11 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [inlineAction, setInlineAction] = useState<InlineAction | null>(null)
 
+  // Drag-and-drop state
+  const [dropTarget, setDropTarget] = useState<string | null>(null) // dir path being hovered, "" = root
+  const dragExpandTimer = useRef<ReturnType<typeof setTimeout>>(null)
+  const dragCounter = useRef(0) // track nested dragenter/dragleave on root
+
   const loadRoot = useCallback(() => {
     listDir()
       .then((entries) => setChildren((prev) => ({ ...prev, "": entries })))
@@ -268,6 +298,147 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     setInlineAction(null)
   }, [refreshDir, onRenamed])
 
+  // --- Drag-and-drop helpers ---
+
+  const clearDragState = useCallback(() => {
+    setDropTarget(null)
+    dragCounter.current = 0
+    if (dragExpandTimer.current) {
+      clearTimeout(dragExpandTimer.current)
+      dragExpandTimer.current = null
+    }
+  }, [])
+
+  const handleDragStart = useCallback((e: React.DragEvent, entry: FileEntry) => {
+    if (protectedPaths.has(entry.path)) {
+      e.preventDefault()
+      return
+    }
+    e.dataTransfer.setData("application/x-filetree-path", entry.path)
+    e.dataTransfer.effectAllowed = "move"
+  }, [])
+
+  const handleEntryDragOver = useCallback((e: React.DragEvent, entry: FileEntry) => {
+    // Accept internal moves or external file drops
+    const hasInternal = e.dataTransfer.types.includes("application/x-filetree-path")
+    const hasFiles = e.dataTransfer.types.includes("Files")
+    if (!hasInternal && !hasFiles) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = hasInternal ? "move" : "copy"
+
+    setDropTarget(resolveDropDir(entry))
+
+    // Clear any pending expand timer from a previously hovered directory
+    if (dragExpandTimer.current) {
+      clearTimeout(dragExpandTimer.current)
+      dragExpandTimer.current = null
+    }
+
+    // Auto-expand directories after hovering for 500ms
+    if (entry.type === "dir" && !expanded.has(entry.path)) {
+      dragExpandTimer.current = setTimeout(() => {
+        toggleDir(entry.path)
+      }, 500)
+    }
+  }, [expanded, toggleDir])
+
+  const handleEntryDragLeave = useCallback((e: React.DragEvent) => {
+    e.stopPropagation()
+    if (dragExpandTimer.current) {
+      clearTimeout(dragExpandTimer.current)
+      dragExpandTimer.current = null
+    }
+    // Only clear if we're leaving to outside the tree (handled by root dragleave)
+  }, [])
+
+  const handleEntryDrop = useCallback(async (e: React.DragEvent, entry: FileEntry | null) => {
+    e.preventDefault()
+    e.stopPropagation()
+    clearDragState()
+
+    const targetDir = resolveDropDir(entry)
+
+    // Internal move takes priority over file drops
+    const srcPath = e.dataTransfer.getData("application/x-filetree-path")
+    if (srcPath) {
+      const srcName = nameOf(srcPath)
+      const srcParent = parentOf(srcPath)
+      const newPath = targetDir ? `${targetDir}/${srcName}` : srcName
+
+      // No-op: same location
+      if (newPath === srcPath) return
+      // Prevent moving folder into itself or descendant
+      if (isAncestorOrSelf(srcPath, targetDir)) return
+
+      try {
+        await renameEntry(srcPath, newPath)
+        refreshDir(srcParent)
+        if (srcParent !== targetDir) refreshDir(targetDir)
+        onRenamed?.(srcPath, newPath)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to move")
+      }
+      return
+    }
+
+    // External file upload (parallel)
+    if (e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files)
+      const results = await Promise.allSettled(
+        files.map(async (file) => {
+          const safeName = sanitizeFilename(file.name)
+          if (!safeName) throw new Error(`${file.name}: invalid filename`)
+          if (file.size > MAX_UPLOAD_SIZE) throw new Error(`${safeName}: too large (max ${MAX_UPLOAD_LABEL})`)
+          const destPath = targetDir ? `${targetDir}/${safeName}` : safeName
+          await uploadFile(destPath, file)
+        })
+      )
+      const errors = results
+        .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+        .map((r) => r.reason instanceof Error ? r.reason.message : "upload failed")
+      if (results.some((r) => r.status === "fulfilled")) refreshDir(targetDir)
+      if (errors.length > 0) setError(errors.join("; "))
+    }
+  }, [clearDragState, refreshDir, onRenamed])
+
+  // Root-level drag handlers for external file drops and visual feedback
+  const handleRootDragEnter = useCallback((e: React.DragEvent) => {
+    const hasInternal = e.dataTransfer.types.includes("application/x-filetree-path")
+    const hasFiles = e.dataTransfer.types.includes("Files")
+    if (!hasInternal && !hasFiles) return
+    e.preventDefault()
+    dragCounter.current++
+    // Only set root as drop target if not already hovering a specific entry
+    setDropTarget((prev) => prev === null ? "" : prev)
+  }, [])
+
+  const handleRootDragOver = useCallback((e: React.DragEvent) => {
+    const hasInternal = e.dataTransfer.types.includes("application/x-filetree-path")
+    const hasFiles = e.dataTransfer.types.includes("Files")
+    if (!hasInternal && !hasFiles) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = hasInternal ? "move" : "copy"
+    // If the event isn't on a tree entry, target is root
+    if (!(e.target as HTMLElement).closest("[data-tree-entry]")) {
+      setDropTarget("")
+    }
+  }, [])
+
+  const handleRootDragLeave = useCallback((_e: React.DragEvent) => {
+    dragCounter.current = Math.max(0, dragCounter.current - 1)
+    if (dragCounter.current === 0) {
+      clearDragState()
+    }
+  }, [clearDragState])
+
+  const handleRootDrop = useCallback((e: React.DragEvent) => {
+    // Only handle if not already captured by an entry
+    if ((e.target as HTMLElement).closest("[data-tree-entry]")) return
+    handleEntryDrop(e, null)
+  }, [handleEntryDrop])
+
   const getContextMenuItems = useCallback((entry: FileEntry | null, parentPath: string): { label: string; icon: React.ReactNode; onClick: () => void; variant?: "destructive" }[] => {
     const targetDir = entry?.type === "dir" ? entry.path : parentPath
     const items: { label: string; icon: React.ReactNode; onClick: () => void; variant?: "destructive" }[] = [
@@ -368,10 +539,14 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
         )
       }
 
+      const entryDropDir = isDir ? entry.path : parentOf(entry.path)
+      const isDragTarget = dropTarget === entryDropDir && dropTarget !== null
+
       return (
         <div key={entry.path}>
           <button
             data-tree-entry
+            draggable={!protectedPaths.has(entry.path)}
             onClick={() => {
               if (isDir) {
                 toggleDir(entry.path)
@@ -380,11 +555,18 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
               }
             }}
             onContextMenu={(e) => handleContextMenu(e, entry, parentPath)}
+            onDragStart={(e) => handleDragStart(e, entry)}
+            onDragEnd={clearDragState}
+            onDragOver={(e) => handleEntryDragOver(e, entry)}
+            onDragLeave={handleEntryDragLeave}
+            onDrop={(e) => handleEntryDrop(e, entry)}
             className={cn(
               "flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm text-left transition-colors cursor-pointer",
-              isSelected
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
+              isDragTarget
+                ? "bg-accent/70 ring-1 ring-accent-foreground/20"
+                : isSelected
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
             )}
             style={{ paddingLeft: `${depth * 16 + 8}px` }}
           >
@@ -441,14 +623,6 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     })
   }
 
-  if (error) {
-    return (
-      <div className="p-4 text-sm text-destructive">
-        Error: {error}
-      </div>
-    )
-  }
-
   const rootEntries = children[""]
   if (!rootEntries) {
     return (
@@ -456,27 +630,60 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     )
   }
 
+  const isRootDropTarget = dropTarget === ""
+
   if (rootEntries.length === 0 && !inlineAction) {
     return (
       <div
-        className="p-4 text-sm italic text-muted-foreground"
+        className={cn(
+          "flex min-h-full flex-col p-4 text-sm italic text-muted-foreground",
+          isRootDropTarget && "bg-accent/30 ring-1 ring-inset ring-accent-foreground/20"
+        )}
         onContextMenu={(e) => handleContextMenu(e, null, "")}
+        onDragEnter={handleRootDragEnter}
+        onDragOver={handleRootDragOver}
+        onDragLeave={handleRootDragLeave}
+        onDragEnd={clearDragState}
+        onDrop={(e) => handleEntryDrop(e, null)}
       >
-        No files
+        {isRootDropTarget ? (
+          <span className="flex items-center gap-1.5">
+            <Upload className="h-4 w-4" /> Drop files to upload
+          </span>
+        ) : (
+          "No files"
+        )}
       </div>
     )
   }
 
   return (
     <>
+      {error && (
+        <button
+          className="flex w-full items-start gap-1.5 px-3 py-2 text-xs text-destructive bg-destructive/10 cursor-pointer hover:bg-destructive/15"
+          onClick={() => setError(null)}
+        >
+          <span className="flex-1 text-left">{error}</span>
+          <span className="shrink-0">&times;</span>
+        </button>
+      )}
       <div
-        className="flex min-h-full flex-col py-1"
+        className={cn(
+          "flex min-h-full flex-col py-1",
+          isRootDropTarget && "bg-accent/30"
+        )}
         onContextMenu={(e) => {
           // Fire on any background area (not already handled by an entry).
           if ((e.target as HTMLElement).closest("[data-tree-entry]")) return
           e.preventDefault()
           handleContextMenu(e, null, "")
         }}
+        onDragEnter={handleRootDragEnter}
+        onDragOver={handleRootDragOver}
+        onDragLeave={handleRootDragLeave}
+        onDragEnd={clearDragState}
+        onDrop={handleRootDrop}
       >
         {/* Inline input at root level */}
         {inlineAction &&
