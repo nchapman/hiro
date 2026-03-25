@@ -23,8 +23,9 @@ import (
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
-	"github.com/nchapman/hivebot/internal/uidpool"
 	"github.com/nchapman/hivebot/internal/platform"
+	"github.com/nchapman/hivebot/internal/uidpool"
+	"github.com/nchapman/hivebot/internal/watcher"
 	"github.com/nchapman/hivebot/web"
 )
 
@@ -80,6 +81,13 @@ func run() error {
 		return fmt.Errorf("loading web UI: %w", err)
 	}
 
+	// Start filesystem watcher for HIVE_ROOT.
+	fsWatcher, err := watcher.New(absRootDir, logger)
+	if err != nil {
+		return fmt.Errorf("starting filesystem watcher: %w", err)
+	}
+	defer fsWatcher.Close()
+
 	// Set up signal handling early so the manager gets a cancellable context
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -87,6 +95,7 @@ func run() error {
 	srv := api.NewServer(logger, webFS)
 	srv.SetRootDir(absRootDir)
 	srv.SetControlPlane(cp)
+	srv.SetWatcher(fsWatcher)
 
 	// Shared state for the manager lifecycle — the manager can be started
 	// at boot (if providers are configured) or later via the setup API.

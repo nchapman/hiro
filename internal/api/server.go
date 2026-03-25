@@ -12,6 +12,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hivebot/internal/watcher"
 )
 
 // CommandHandler handles slash commands from the chat interface.
@@ -28,6 +29,7 @@ type Server struct {
 	startManager func() error            // callback to start the session manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
+	watcher      *watcher.Watcher        // filesystem watcher for HIVE_ROOT (nil = no watching)
 	mux          *http.ServeMux
 	logger       *slog.Logger
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/watcher"
 )
 
 // ChatMessage is a message sent or received over the chat WebSocket.
@@ -52,6 +53,11 @@ func (s *Server) SetStartManager(fn func() error) {
 // SetRootDir sets the platform root directory (used as the terminal working dir).
 func (s *Server) SetRootDir(dir string) {
 	s.rootDir = dir
+}
+
+// SetWatcher sets the filesystem watcher for pushing live updates.
+func (s *Server) SetWatcher(w *watcher.Watcher) {
+	s.watcher = w
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
