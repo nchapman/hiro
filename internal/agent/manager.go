@@ -587,6 +587,14 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 			continue
 		}
 
+		// Verify session dir exists — without it, history and state are lost.
+		if _, err := os.Stat(m.sessionDir(s.ID)); os.IsNotExist(err) {
+			m.logger.Warn("session dir missing, removing orphaned DB record",
+				"id", s.ID, "agent", s.AgentName)
+			m.pdb.DeleteSession(s.ID)
+			continue
+		}
+
 		_, err = m.startSession(ctx, s.ID, cfg, s.ParentID, mode)
 		if err != nil {
 			m.logger.Warn("failed to restore agent",
@@ -640,7 +648,8 @@ func (m *Manager) Shutdown() {
 func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string, mode config.AgentMode) (string, error) {
 	// Create session directory and standard subdirectories.
 	sessDir := m.sessionDir(id)
-	_, freshDir := os.Stat(sessDir) // freshDir != nil means dir didn't exist
+	_, statErr := os.Stat(sessDir)
+	dirIsNew := os.IsNotExist(statErr)
 	if err := os.MkdirAll(sessDir, 0700); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
@@ -657,11 +666,9 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			AgentName: cfg.Name,
 			Mode:      string(mode),
 			ParentID:  parentID,
-		}); err != nil {
-			// Ignore duplicate — session may already exist from a previous run (restore path).
-			if !strings.Contains(err.Error(), "UNIQUE constraint") {
-				return "", fmt.Errorf("creating session in db: %w", err)
-			}
+		}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
+			// ErrDuplicate is expected on the restore path — session already exists.
+			return "", fmt.Errorf("creating session in db: %w", err)
 		}
 	}
 
@@ -754,7 +761,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			m.uidPool.Release(id)
 		}
 		// Clean up session dir on failure (only if we just created it)
-		if freshDir != nil {
+		if dirIsNew {
 			os.RemoveAll(sessDir)
 		}
 		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
@@ -842,6 +849,7 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 			if m.uidPool != nil {
 				m.uidPool.Release(id)
 			}
+			m.setSessionStatus(id, "stopped")
 		} else {
 			// Ephemeral sessions are fully removed.
 			m.mu.Lock()

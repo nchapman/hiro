@@ -4,11 +4,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("not found")
+
+// ErrDuplicate is returned when an insert violates a uniqueness constraint.
+var ErrDuplicate = errors.New("already exists")
+
+// isUniqueViolation checks if an error is a SQLite UNIQUE constraint violation.
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
 
 // Session represents a row in the sessions table.
 type Session struct {
@@ -32,6 +41,9 @@ func (d *DB) CreateSession(s Session) error {
 		s.ID, s.AgentName, s.Mode, parentID, "running",
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("session %s: %w", s.ID, ErrDuplicate)
+		}
 		return fmt.Errorf("inserting session: %w", err)
 	}
 	return nil
