@@ -219,8 +219,8 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult) {
 	}
 	l.pdb.RecordUsage(platformdb.UsageEvent{
 		SessionID:        l.sessionID,
-		Model:            "unknown", // TODO: get from LM
-		Provider:         "unknown", // TODO: get from config
+		Model:            l.agentConfig.Model,
+		Provider:         l.agentConfig.Provider,
 		InputTokens:      result.TotalUsage.InputTokens,
 		OutputTokens:     result.TotalUsage.OutputTokens,
 		ReasoningTokens:  result.TotalUsage.ReasoningTokens,
