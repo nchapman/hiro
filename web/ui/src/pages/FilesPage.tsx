@@ -11,10 +11,16 @@ import { cn } from "@/lib/utils"
 import FileTree from "@/components/FileTree"
 import type { FileTreeHandle } from "@/components/FileTree"
 import FileEditor from "@/components/FileEditor"
+import { useFileWatch } from "@/hooks/use-file-watch"
+import type { FileChangeEvent } from "@/hooks/use-file-watch"
 
 interface OpenTab {
   path: string
   dirty: boolean
+  /** Bumped to trigger a re-fetch in the editor when the file changes on disk. */
+  reloadKey: number
+  /** Set when an external change is detected while the editor has unsaved work. */
+  externalChange: "modified" | "removed" | null
 }
 
 export default function FilesPage() {
@@ -25,7 +31,7 @@ export default function FilesPage() {
   const openFile = useCallback((path: string) => {
     setTabs((prev) => {
       if (prev.some((t) => t.path === path)) return prev
-      return [...prev, { path, dirty: false }]
+      return [...prev, { path, dirty: false, reloadKey: 0, externalChange: null }]
     })
     setActiveTab(path)
   }, [])
@@ -89,6 +95,67 @@ export default function FilesPage() {
       return prev
     })
   }, [])
+
+  // Handle external file changes detected via SSE.
+  const handleExternalChange = useCallback((path: string, op: FileChangeEvent["op"]) => {
+    setTabs((prev) =>
+      prev.map((t) => {
+        if (t.path !== path) return t
+        if (op === "remove" || op === "rename") {
+          return { ...t, externalChange: "removed" }
+        }
+        // op === "write" — file modified externally.
+        if (t.dirty) {
+          // User has unsaved changes — show notification, don't auto-reload.
+          return { ...t, externalChange: "modified" }
+        }
+        // File is clean — auto-reload silently by bumping reloadKey.
+        return { ...t, reloadKey: t.reloadKey + 1, externalChange: null }
+      })
+    )
+  }, [])
+
+  // Handle user clicking "Reload" on the conflict notification.
+  const handleReloadRequested = useCallback((path: string) => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.path === path
+          ? { ...t, reloadKey: t.reloadKey + 1, externalChange: null, dirty: false }
+          : t
+      )
+    )
+  }, [])
+
+  // Handle user clicking "Keep mine" on the conflict notification.
+  const handleDismissChange = useCallback((path: string) => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.path === path ? { ...t, externalChange: null } : t
+      )
+    )
+  }, [])
+
+  // Subscribe to file change events from the server.
+  useFileWatch((events) => {
+    // Refresh affected directories in the tree.
+    const dirs = new Set<string>()
+    for (const ev of events) {
+      const parent = ev.path.includes("/")
+        ? ev.path.substring(0, ev.path.lastIndexOf("/"))
+        : ""
+      dirs.add(parent)
+    }
+    for (const dir of dirs) {
+      treeRef.current?.refreshDir(dir)
+    }
+
+    // Notify open editors of external changes.
+    for (const ev of events) {
+      if (ev.op === "write" || ev.op === "remove" || ev.op === "rename") {
+        handleExternalChange(ev.path, ev.op)
+      }
+    }
+  })
 
   return (
     <div className="flex h-full flex-1 overflow-hidden">
@@ -176,8 +243,12 @@ export default function FilesPage() {
           >
             <FileEditor
               path={tab.path}
+              reloadKey={tab.reloadKey}
+              externalChange={tab.externalChange}
               onSaved={handleSaved}
               onDirtyChange={(dirty) => markDirty(tab.path, dirty)}
+              onReloadRequested={() => handleReloadRequested(tab.path)}
+              onDismissChange={() => handleDismissChange(tab.path)}
             />
           </div>
         ))}

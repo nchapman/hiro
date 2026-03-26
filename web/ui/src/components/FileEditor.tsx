@@ -12,6 +12,7 @@ import { keymap } from "@codemirror/view"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { Save, Share2, Check, Loader2, X } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { readFile, writeFile, shareFile } from "@/hooks/use-files"
 import type { Extension } from "@codemirror/state"
@@ -98,11 +99,27 @@ function getLanguage(path: string): Extension | null {
 
 interface FileEditorProps {
   path: string
+  /** Bump to trigger a re-fetch of the file content (e.g., after external modification). */
+  reloadKey?: number
+  /** Set when the file was modified or removed externally while the editor has unsaved work. */
+  externalChange?: "modified" | "removed" | null
   onSaved?: () => void
   onDirtyChange?: (dirty: boolean) => void
+  /** Called when the user clicks "Reload" on the external change notification. */
+  onReloadRequested?: () => void
+  /** Called when the user clicks "Keep mine" to dismiss the external change notification. */
+  onDismissChange?: () => void
 }
 
-export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorProps) {
+export default function FileEditor({
+  path,
+  reloadKey = 0,
+  externalChange,
+  onSaved,
+  onDirtyChange,
+  onReloadRequested,
+  onDismissChange,
+}: FileEditorProps) {
   const { resolved: theme } = useTheme()
   const [content, setContent] = useState<string>("")
   const [savedContent, setSavedContent] = useState<string>("")
@@ -160,7 +177,7 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
   // Keep saveRef current so the keymap closure always calls the latest save.
   saveRef.current = handleSave
 
-  // Load file content when path changes.
+  // Load file content when path changes or reloadKey is bumped (external change).
   useEffect(() => {
     setBinary(false)
     if (isBinaryPath(path)) {
@@ -181,7 +198,7 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
-  }, [path])
+  }, [path, reloadKey])
 
   const extensions = useMemo(() => {
     const exts: Extension[] = []
@@ -347,6 +364,46 @@ export default function FileEditor({ path, onSaved, onDirtyChange }: FileEditorP
           <TooltipContent>Save</TooltipContent>
         </Tooltip>
       </div>
+
+      {/* External change notification */}
+      {externalChange && (
+        <div className={cn(
+          "flex items-center gap-2 px-4 py-1.5 text-sm border-b",
+          externalChange === "removed"
+            ? "bg-destructive/10 text-destructive"
+            : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+        )}>
+          <span className="flex-1">
+            {externalChange === "removed"
+              ? "This file was deleted."
+              : "This file was changed on disk."}
+          </span>
+          {externalChange === "modified" && (
+            <>
+              <button
+                onClick={onReloadRequested}
+                className="text-xs font-medium underline underline-offset-2 hover:no-underline"
+              >
+                Reload
+              </button>
+              <button
+                onClick={onDismissChange}
+                className="text-xs font-medium underline underline-offset-2 hover:no-underline"
+              >
+                Keep mine
+              </button>
+            </>
+          )}
+          {externalChange === "removed" && (
+            <button
+              onClick={onDismissChange}
+              className="text-xs font-medium underline underline-offset-2 hover:no-underline"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Editor */}
       <div className="flex-1 overflow-hidden">

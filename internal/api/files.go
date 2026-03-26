@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/nchapman/hivebot/internal/watcher"
 )
 
 const maxFileReadSize = 2 << 20  // 2 MB — fits comfortably in the browser editor
@@ -416,4 +419,72 @@ func (s *Server) handleFilesRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Server-Sent Events for file watching ---
+
+type fileEvent struct {
+	Path string `json:"path"`
+	Op   string `json:"op"` // "create", "write", "remove", "rename"
+}
+
+type fileEventBatch struct {
+	Events []fileEvent `json:"events"`
+}
+
+// handleFilesWatch streams filesystem change events via Server-Sent Events.
+// The watcher already debounces at 100ms, so each SSE message contains a
+// batch of coalesced changes.
+func (s *Server) handleFilesWatch(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	if s.watcher == nil {
+		http.Error(w, "file watching not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable proxy buffering (Nginx etc.)
+	flusher.Flush()
+
+	// Channel bridges the watcher goroutine to the SSE write loop.
+	ch := make(chan []watcher.Event, 16)
+
+	unsub := s.watcher.Subscribe("**", func(events []watcher.Event) {
+		select {
+		case ch <- events:
+		default:
+			s.logger.Debug("SSE client too slow, dropping file events", "count", len(events))
+		}
+	})
+	defer unsub()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case events := <-ch:
+			batch := fileEventBatch{
+				Events: make([]fileEvent, 0, len(events)),
+			}
+			for _, ev := range events {
+				batch.Events = append(batch.Events, fileEvent{
+					Path: ev.Path,
+					Op:   ev.Op.String(),
+				})
+			}
+			data, err := json.Marshal(batch)
+			if err != nil {
+				s.logger.Warn("failed to marshal file events", "error", err)
+				continue
+			}
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
 }

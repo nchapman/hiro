@@ -82,6 +82,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/files/mkdir", s.requireAuth(s.handleFilesMkdir))
 	s.mux.HandleFunc("DELETE /api/files/file", s.requireAuth(s.handleFilesDelete))
 	s.mux.HandleFunc("POST /api/files/rename", s.requireAuth(s.handleFilesRename))
+	s.mux.HandleFunc("GET /api/files/events", s.requireAuth(s.handleFilesWatch))
 
 	// Shared file viewer (unauthenticated — token is the access control)
 	s.mux.HandleFunc("POST /api/files/share", s.requireAuth(s.handleShareCreate))

@@ -35,6 +35,7 @@ function sanitizeFilename(name: string): string | null {
 
 export interface FileTreeHandle {
   refresh: () => void
+  refreshDir: (dirPath: string) => void
 }
 
 interface FileTreeProps {
@@ -205,7 +206,12 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
         setChildren(Object.fromEntries(results))
       })
     },
-  }), [expanded])
+    refreshDir(dirPath: string) {
+      // Only refresh if the directory is currently visible (root or expanded).
+      if (dirPath !== "" && !expanded.has(dirPath)) return
+      refreshDir(dirPath)
+    },
+  }), [expanded, refreshDir])
 
   const toggleDir = useCallback(
     (path: string) => {
