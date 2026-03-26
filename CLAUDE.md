@@ -22,7 +22,7 @@ make proto        # Regenerate protobuf (requires protoc)
 
 Run a single test:
 ```bash
-go test ./internal/history/... -run TestCompaction -v -count=1
+go test ./internal/platform/db/... -run TestCompaction -v -count=1
 ```
 
 Run integration tests that hit real APIs (excluded from normal `make test`):
@@ -52,26 +52,26 @@ A `.env` file is loaded automatically via godotenv (does not override existing v
 
 ### Process Model
 
-Hive uses **process isolation**: the control plane and each agent run as separate OS processes from the same binary. Communication is via gRPC over Unix sockets.
+Hive uses **process isolation**: the control plane owns all inference (LLM calls, conversation history, system prompt assembly) while tool execution runs in separate worker processes under isolated Unix UIDs. Communication is via gRPC over Unix sockets.
 
 ```
 Control Plane Process (hive)
 ├── HTTP/WS API (web UI, REST, chat)
-├── gRPC AgentHost server (Unix socket)
-├── Agent process lifecycle (spawn/kill)
+├── Inference loops (fantasy agent per session)
+├── Unified database (db/hive.db — sessions, messages, usage)
+├── System prompt assembly, context management, compaction
+├── Local tools: memory, todos, history, spawn, coordinator, skills
 ├── Secrets + tool policies (config.yaml)
-├── Process registry + message routing
-└── Spawns: hive agent (one per session)
+├── Process registry + session lifecycle
+└── Spawns: hive agent (one worker per session)
 
 Agent Worker Process (hive agent)
-├── Fantasy agent loop (LLM calls)
-├── All built-in tools (local, no IPC)
-├── Persistent tools: memory, todos, history
-├── gRPC AgentWorker server (receives messages)
-└── gRPC AgentHost client (manager tool calls)
+├── Tool execution sandbox (bash, file ops, glob, grep, fetch)
+├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
+└── Runs under isolated UID for security
 ```
 
-**Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Agent starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects. When UID isolation is enabled, each agent runs as a dedicated Unix user via `SysProcAttr.Credential`.
+**Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
 
 **Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Session dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
 
@@ -84,17 +84,15 @@ Agent Worker Process (hive agent)
 ### Agent Lifecycle
 
 ```
-agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager spawns worker process
+agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inference Loop + spawns worker
                                                                        ↓
                                                               sessions/<uuid>/
-                                                                manifest.yaml
                                                                 memory.md
                                                                 identity.md
                                                                 todos.yaml
-                                                                db/
-                                                                  history.db
                                                                 scratch/
                                                                 tmp/
+                                                              db/hive.db (shared, all sessions)
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
@@ -159,15 +157,16 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 ### Key Packages
 
-- **`cmd/hive`** — Entry point. `run()` starts the control plane (HTTP, gRPC host server, manager). `runAgent()` is the agent worker entry point (reads SpawnConfig from stdin, runs fantasy agent loop, serves AgentWorker gRPC).
-- **`internal/agent`** — Agent runtime. `Agent` wraps a `fantasy.Agent` (runs in worker process); `Manager` supervises process lifecycles, spawns workers via `WorkerFactory`, routes messages via gRPC.
-- **`internal/ipc`** — IPC interfaces and types. `AgentHost` (agent→control plane), `AgentWorker` (control plane→agent), `HostManager` (gRPC server→manager), `SpawnConfig` (passed to workers at startup).
-- **`internal/ipc/grpcipc`** — gRPC adapters: `HostServer`/`HostClient` for AgentHost, `WorkerServer`/`WorkerClient` for AgentWorker. `HostClient` injects caller_id for authorization scoping.
+- **`cmd/hive`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC).
+- **`internal/agent`** — Session management. `Manager` supervises session lifecycles, spawns workers via `WorkerFactory`, creates inference loops. `CreateLanguageModel` handles LLM provider setup.
+- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per session. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, coordinator, skills). `ScopedManager` enforces descendant scoping. Context-based cycle detection prevents re-entrant deadlocks.
+- **`internal/platform/db`** — Unified SQLite database (`db/hive.db`). Stores sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
+- **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
+- **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
-- **`internal/agent/tools/`** — All built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch).
-- **`internal/controlplane`** — Control plane: operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
-- **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, manifest/memory/todos persistence.
-- **`internal/history`** — SQLite-backed conversation history with automatic LLM-driven compaction. `Engine` coordinates `Store` (persistence) + `Compactor` (summarization) + `Assemble` (context assembly within token budget). SQLite runs in WAL mode with FTS5 for full-text search; migrations are embedded via `//go:embed` from `migrations/*.sql`.
+- **`internal/agent/tools/`** — Built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch). These run in worker processes.
+- **`internal/controlplane`** — Operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
+- **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, memory/todos persistence.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
 - **`internal/transport`** — Wire protocol (WebSocket JSON envelopes) for leader↔worker communication.
 - **`internal/api`** — HTTP server with REST endpoints (`/api/health`, `/api/agents`, `/api/agents/{id}/messages`) and WebSocket chat (`/ws/chat`).
@@ -177,7 +176,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 ### Built-in Tools (11 total, agents must declare which they use)
 
-Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `internal/agent/tools/*.go`.
+Implementations in `internal/agent/tools/*.go`. These run in worker processes and are dispatched via `ExecuteTool` gRPC from the control plane.
 
 | Tool | Purpose | Key Params | Constraints |
 |------|---------|------------|-------------|
@@ -195,7 +194,7 @@ Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `int
 
 ### Spawn Tool (all agents)
 
-All agents get `spawn_session` via `BuildSpawnTool()`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral.
+All agents get `spawn_session`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/local_tools.go`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
@@ -203,7 +202,7 @@ All agents get `spawn_session` via `BuildSpawnTool()`. The `mode` parameter cont
 
 ### Coordinator Tools (coordinator mode only)
 
-Defined in `internal/agent/tools_manager.go` via `BuildCoordinatorTools()`. Only injected for coordinator-mode sessions. Scoped to descendants via `IsDescendant()`.
+Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mode sessions. Scoped to descendants via `ScopedManager.checkDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
@@ -215,7 +214,7 @@ Defined in `internal/agent/tools_manager.go` via `BuildCoordinatorTools()`. Only
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
-Added in `runAgent()` via `BuildMemoryTools()`, `BuildTodoTools()`, `BuildHistoryTools()`.
+Defined in `internal/inference/local_tools.go`. Run in the control plane process (not in workers).
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
@@ -290,13 +289,13 @@ Agents can create new agent definitions at runtime using their file tools:
 2. Use `spawn_session` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 
-Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next `StreamChat` call.
+Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next inference loop turn.
 
 ## Conversation Modes
 
-- **Coordinator and persistent agents** use `history.Engine` — messages are stored in SQLite, automatically compacted via LLM summarization, and assembled within a token budget.
+- **Coordinator and persistent agents** use the unified platform database (`db/hive.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-session locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
-- **WebSocket chat** creates per-connection conversations for ephemeral agents, or uses shared persistent history for persistent/coordinator agents.
+- **WebSocket chat** sends messages to the coordinator's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
 
 ### Agent Tool Scoping
 
@@ -304,11 +303,11 @@ Coordinator tools (`resume_session`, `stop_session`, `send_message`, `list_sessi
 
 ## Testing Notes
 
-- Manager tests inject a `testWorkerFactory` that returns fake `ipc.AgentWorker` implementations — no real processes or LLM calls.
-- `history` tests use `NewEngineWithSummarizer()` with a mock summarizer.
+- Manager tests inject a `testWorkerFactory` that returns fake `ipc.AgentWorker` implementations — no real processes or LLM calls. Without a provider configured, sessions have no inference loop (SendMessage returns an error).
+- Platform DB tests (`internal/platform/db`) test the unified database schema, CRUD operations, FTS search, usage tracking, and cascade deletes.
 - The `tools/` package tests run actual file/process operations in temp directories.
-- gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing.
+- gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing of `ExecuteTool` and `Shutdown` RPCs.
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each agent runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).
+- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).
