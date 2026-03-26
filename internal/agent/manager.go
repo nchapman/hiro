@@ -709,7 +709,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		}
 		// Transfer ownership of the session dir to the agent user.
 		// WalkDir handles both fresh dirs (just the dir itself) and
-		// restored sessions (dir + existing files like history.db).
+		// restored sessions (dir + existing files like memory.md, todos.yaml).
 		if err := filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, err error) error {
 			if err != nil {
 				return err

@@ -16,7 +16,6 @@ import (
 
 // ScopedManager wraps an ipc.HostManager with a caller ID, enforcing
 // descendant scoping on all session management operations.
-// This replaces the scoping that host_server.go previously provided.
 type ScopedManager struct {
 	mgr      ipc.HostManager
 	callerID string

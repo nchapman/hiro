@@ -65,7 +65,7 @@ type Loop struct {
 	// Compaction runs async after each turn.
 	compactMu sync.Mutex
 
-	// Config update support (same pattern as current Agent).
+	// Config update support — applied at the start of the next Chat call.
 	updateMu      sync.Mutex
 	pendingUpdate *ipc.ConfigUpdate
 }

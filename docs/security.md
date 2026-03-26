@@ -10,8 +10,8 @@ Hive runs untrusted LLM-driven agents that can execute arbitrary code. The secur
 │                                                     │
 │  Control Plane (root)                               │
 │  ├── config.yaml (0600, secrets + tool policies)    │
-│  ├── Host gRPC server (Unix socket, 0777)           │
-│  └── Agent lifecycle management                     │
+│  ├── Inference loops (fantasy agent per session)     │
+│  └── Session lifecycle management                   │
 │                                                     │
 │  ┌──────────────┐  ┌──────────────┐                 │
 │  │ Agent (UID A) │  │ Agent (UID B) │  ...           │
@@ -44,7 +44,7 @@ Each agent runs as a separate OS process, spawned from the same `hive` binary wi
 3. The agent process starts a gRPC server on its Unix socket and writes `ready` to stdout.
 4. The control plane connects to the agent's socket as a gRPC client.
 
-The API key is passed via the `HIVE_API_KEY` environment variable and stripped from the JSON payload before serialization, so it never appears in `/proc/{pid}/fd/0` or logs.
+Worker processes are thin tool-execution sandboxes — they receive `ExecuteTool` RPCs and run tools under the isolated UID. All inference (LLM calls, conversation history, system prompt assembly) happens in the control plane.
 
 ### 3. Unix User Isolation
 
@@ -75,10 +75,10 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 | `agents/` | `2775` (setgid) | root:hive-coordinators | Agent definitions. Readable by all (via "other" bits), writable by coordinator agents only. |
 | `skills/` | `2775` (setgid) | root:hive-coordinators | Shared skills. Same access as `agents/`. |
 | `workspace/` | `0775` | root:hive-agents | Shared collaborative space. All agents can read and write. |
-| `sessions/{id}/` | `0700` | agent-user | Private per-agent data (memory, history, todos, manifest, scratch, tmp). Only the owning agent can access. |
+| `sessions/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, todos, scratch, tmp). Only the owning agent can access. |
+| `db/hive.db` | default | root | Unified platform database (sessions, messages, usage). Accessed only by the control plane process. |
 | `/opt/mise/` | `2775` (setgid) | root:hive-agents | Shared tool installations (mise, node, python, etc.). All agents can read, write, and install new tools. |
-| Host socket | `0777` | root | gRPC server for agent→control plane calls. Must be accessible by all agent UIDs. |
-| Agent socket | default | agent-user | gRPC server for control plane→agent calls. Located at `/tmp/hive-agent-{session-id}.sock`. |
+| Agent socket | default | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hive-agent-{session-id}.sock`. |
 
 ### 5. Tool Capability System
 
@@ -95,8 +95,8 @@ Effective tools = declared tools ∩ control plane policy ∩ parent's effective
 **Parent inheritance:** A child agent's effective tools are intersected with its parent's effective tools. A child can never have more capabilities than its parent.
 
 **Structural tools** bypass this system — they are intrinsic to the agent's mode:
-- `spawn_agent` is available to all agents.
-- Coordinator tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) are only available to coordinator-mode agents.
+- `spawn_session` is available to all agents.
+- Coordinator tools (`resume_session`, `stop_session`, `delete_session`, `send_message`, `list_sessions`) are only available to coordinator-mode agents.
 - Persistent tools (`memory_read`, `memory_write`, `todos`, `history_search`, `history_recall`) are available to persistent and coordinator agents.
 
 ### 6. Secrets Management
@@ -107,43 +107,44 @@ Secrets are stored in `config.yaml` (root-only, `0600`) and managed via the `/se
 
 1. Secret *names* are listed in the agent's system prompt so the LLM knows what's available.
 2. Secret *values* are injected as environment variables into bash commands at execution time.
-3. Agents fetch the current secret list from the control plane via gRPC on each bash invocation, so changes take effect immediately.
+3. The control plane sends secret values with each `ExecuteTool` RPC via the `secret_env` proto field, so changes take effect immediately.
 
 This design ensures secret values never appear in conversation history, system prompts, or LLM context — only in the ephemeral environment of shell commands.
 
 ### 7. Agent Authorization Scoping
 
-Agents can only manage their own descendants. This is enforced at the gRPC server level.
+Agents can only manage their own descendants. This is enforced by the `ScopedManager` wrapper in the inference package.
 
 **How it works:**
 
-1. Each agent's gRPC client (`HostClient`) is initialized with the agent's session ID as its `callerID`.
-2. Every manager RPC (`send_message`, `stop_agent`) includes this `callerID` in the request.
-3. The gRPC server calls `IsDescendant(targetID, callerID)` before executing the operation. If the target is not a descendant of the caller, the request is rejected with `PermissionDenied`.
+1. Each session's inference loop receives its session ID as a `callerID` via context propagation.
+2. Coordinator tools (`send_message`, `stop_session`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
+3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the platform DB. If the target is not a descendant of the caller, the request is rejected.
 
 **Scoping rules:**
 
 | Operation | Authorization |
 |---|---|
-| `spawn_agent` | No check needed — caller becomes the parent. |
-| `start_agent` | No check needed — caller becomes the parent. Coordinator mode only. |
+| `spawn_session` | No check needed — caller becomes the parent. |
+| `resume_session` | Target must be a descendant of caller. Coordinator mode only. |
 | `send_message` | Target must be a descendant of caller. Coordinator mode only. |
-| `stop_agent` | Target must be a descendant of caller. Coordinator mode only. |
-| `list_agents` | Returns only direct children of caller. Coordinator mode only. |
+| `stop_session` | Target must be a descendant of caller. Coordinator mode only. |
+| `delete_session` | Target must be a descendant of caller. Coordinator mode only. |
+| `list_sessions` | Returns only direct children of caller. Coordinator mode only. |
 
 An agent cannot send messages to, stop, or inspect siblings, ancestors, or unrelated agents.
 
 ### 8. IPC Security
 
-All inter-process communication uses gRPC over Unix domain sockets. No TCP ports are opened between agents and the control plane.
+All inter-process communication uses gRPC over Unix domain sockets. No TCP ports are opened between workers and the control plane.
 
-**Two socket directions:**
+**Single socket direction:**
 
-- **Host socket** (`/tmp/hive-host-{pid}.sock`): Owned by the control plane. All agents connect to this as clients to make manager calls (spawn, send, stop, list, get secrets). Made world-readable (`0777`) when UID isolation is enabled so all agent users can connect.
+- **Agent sockets** (`/tmp/hive-agent-{session-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
 
-- **Agent sockets** (`/tmp/hive-agent-{session-id}.sock`): One per agent. The control plane connects to these as a client to send messages and shutdown requests. Owned by the agent's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`), so other agents in the `hive-agents` group can technically open the socket — but protocol-level authentication (caller ID injection and descendant checks) prevents unauthorized operations.
+There is no worker→control plane socket. All inference, session management, and coordinator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
 
-gRPC uses `insecure.NewCredentials()` for transport — this is safe because Unix sockets are local-only. Authentication is handled by the caller ID injection and descendant checks described above, not by socket file permissions.
+gRPC uses `insecure.NewCredentials()` for transport — this is safe because Unix sockets are local-only.
 
 ## Threat Model
 
@@ -159,7 +160,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 - Read other agents' session data (memory, history, todos) — blocked by `0700` ownership.
 - Read `config.yaml` or secret values directly — blocked by `0600` root ownership.
-- Manage agents outside their descendant tree — blocked by gRPC descendant checks.
+- Manage agents outside their descendant tree — blocked by ScopedManager descendant checks.
 - Use tools they weren't granted — blocked by the three-layer capability intersection.
 - Write to `agents/` or `skills/` (unless coordinator mode) — blocked by `hive-coordinators` group ownership.
 - Rewrite seeded agent definitions — blocked by `0644` root ownership on seeded files.

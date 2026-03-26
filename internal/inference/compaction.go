@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 
@@ -368,5 +367,3 @@ func fallbackTruncate(content string, maxTokens int) string {
 	return content[:maxChars] + "\n[Truncated for context management]"
 }
 
-// NewCompactorForSession is unused but keeps the function signature consistent.
-var _ = time.Now // suppress unused import if needed
