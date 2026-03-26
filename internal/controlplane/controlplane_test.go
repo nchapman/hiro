@@ -317,6 +317,195 @@ func TestCommandToolsRm(t *testing.T) {
 	}
 }
 
+// --- Reload tests ---
+
+func TestReload_ExternalEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cp.SecretNames()) != 1 {
+		t.Fatalf("expected 1 secret, got %d", len(cp.SecretNames()))
+	}
+
+	// Simulate external edit: add a second secret.
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n  B: \"2\"\n"), 0600)
+	if err := cp.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	names := cp.SecretNames()
+	if len(names) != 2 {
+		t.Fatalf("expected 2 secrets after reload, got %d: %v", len(names), names)
+	}
+}
+
+func TestReload_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write invalid YAML (tabs are illegal in YAML).
+	os.WriteFile(path, []byte("\t\tinvalid"), 0600)
+	if err := cp.Reload(); err != nil {
+		t.Fatal("expected nil error for invalid YAML, got", err)
+	}
+
+	// State should be preserved.
+	if len(cp.SecretNames()) != 1 {
+		t.Errorf("expected state preserved after invalid YAML reload, got %d secrets", len(cp.SecretNames()))
+	}
+}
+
+func TestReload_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the file.
+	os.Remove(path)
+	if err := cp.Reload(); err != nil {
+		t.Fatal("expected nil error for missing file, got", err)
+	}
+
+	// State should be preserved.
+	if len(cp.SecretNames()) != 1 {
+		t.Errorf("expected state preserved after missing file reload")
+	}
+}
+
+func TestReload_PreservesSignerOnSamePassword(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$test\"\n  session_secret: \"abcd1234\"\n"), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force signer creation.
+	signer, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload with same password hash — signer should be preserved.
+	// Re-read the file since TokenSigner may have updated the session_secret.
+	data, _ := os.ReadFile(path)
+	os.WriteFile(path, data, 0600)
+
+	if err := cp.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	signer2, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer != signer2 {
+		t.Error("expected same signer instance after reload with unchanged password")
+	}
+}
+
+func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"abcd1234\"\n"), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force signer creation.
+	signer, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = signer
+
+	// Reload with different password hash.
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$changed\"\n  session_secret: \"abcd1234\"\n"), 0600)
+	if err := cp.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Signer should have been invalidated — a new call should return a different instance.
+	signer2, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer2 == signer {
+		t.Error("expected new signer instance after password change reload")
+	}
+}
+
+func TestReload_InvalidatesSignerOnSecretRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"aabbccdd\"\n"), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signer, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rotate session_secret only (password hash unchanged).
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"11223344\"\n"), 0600)
+	if err := cp.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	signer2, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer2 == signer {
+		t.Error("expected new signer instance after session secret rotation")
+	}
+}
+
+func TestHandleCommand_SavesToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cp, _ := Load(path, testLogger())
+
+	_, err := cp.HandleCommand("/secrets set TOKEN=secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify config.yaml was written.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("config.yaml should exist after mutation: %v", err)
+	}
+	if !strings.Contains(string(data), "TOKEN") {
+		t.Errorf("config.yaml should contain 'TOKEN', got: %s", string(data))
+	}
+}
+
 func TestCommandUnknown(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 

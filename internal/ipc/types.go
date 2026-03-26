@@ -12,6 +12,18 @@ type SessionInfo struct {
 	Status      string // "running" or "stopped"
 }
 
+// ConfigUpdate carries resolved structural config pushed from the control plane
+// to a running agent worker. The control plane computes these values (which
+// require control-plane-only data like tool policies and provider config) and
+// pushes them when the underlying config changes.
+type ConfigUpdate struct {
+	EffectiveTools map[string]bool // nil = unrestricted, non-nil = allowed set
+	Model          string          // resolved model (frontmatter → CP default)
+	Provider       string          // resolved provider type
+	APIKey         string          // resolved provider API key
+	Description    string          // current description from agent.md frontmatter
+}
+
 // SpawnConfig is the configuration passed to an agent worker process at startup.
 type SpawnConfig struct {
 	SessionID      string          `json:"session_id"`

@@ -40,6 +40,10 @@ service AgentWorker {
 
   // Shutdown gracefully stops the agent worker process.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+
+  // ConfigChanged pushes resolved structural config when definitions or
+  // control plane config change. The agent applies updates on its next turn.
+  rpc ConfigChanged(ConfigChangedRequest) returns (ConfigChangedResponse);
 }
 
 // ChatEvent is a streaming event sent during Chat, SpawnSession, or SendMessage.
@@ -126,3 +130,14 @@ message ChatRequest {
 message ShutdownRequest {}
 
 message ShutdownResponse {}
+
+message ConfigChangedRequest {
+  map<string, bool> effective_tools = 1; // nil map = unrestricted
+  bool has_tool_restriction = 2;         // distinguishes nil from empty
+  string model = 3;
+  string provider = 4;
+  string api_key = 5;
+  string description = 6;
+}
+
+message ConfigChangedResponse {}

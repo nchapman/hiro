@@ -40,6 +40,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	s.cp.SetDefaultProvider(req.DefaultProvider)
 	s.cp.SetDefaultModel(req.DefaultModel)
+	if err := s.cp.Save(); err != nil {
+		s.logger.Warn("failed to save config after settings update", "error", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -91,6 +94,9 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	if len(providers) == 1 {
 		s.cp.SetDefaultProvider(providerType)
 	}
+	if err := s.cp.Save(); err != nil {
+		s.logger.Warn("failed to save config after provider update", "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -114,6 +120,9 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cp.DeleteProvider(providerType)
+	if err := s.cp.Save(); err != nil {
+		s.logger.Warn("failed to save config after provider delete", "error", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

@@ -931,6 +931,126 @@ func (*ShutdownResponse) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{18}
 }
 
+type ConfigChangedRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	EffectiveTools     map[string]bool        `protobuf:"bytes,1,rep,name=effective_tools,json=effectiveTools,proto3" json:"effective_tools,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // nil map = unrestricted
+	HasToolRestriction bool                   `protobuf:"varint,2,opt,name=has_tool_restriction,json=hasToolRestriction,proto3" json:"has_tool_restriction,omitempty"`                                                             // distinguishes nil from empty
+	Model              string                 `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	Provider           string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
+	ApiKey             string                 `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
+	Description        string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ConfigChangedRequest) Reset() {
+	*x = ConfigChangedRequest{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigChangedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigChangedRequest) ProtoMessage() {}
+
+func (x *ConfigChangedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigChangedRequest.ProtoReflect.Descriptor instead.
+func (*ConfigChangedRequest) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ConfigChangedRequest) GetEffectiveTools() map[string]bool {
+	if x != nil {
+		return x.EffectiveTools
+	}
+	return nil
+}
+
+func (x *ConfigChangedRequest) GetHasToolRestriction() bool {
+	if x != nil {
+		return x.HasToolRestriction
+	}
+	return false
+}
+
+func (x *ConfigChangedRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ConfigChangedRequest) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *ConfigChangedRequest) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
+func (x *ConfigChangedRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+type ConfigChangedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigChangedResponse) Reset() {
+	*x = ConfigChangedResponse{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigChangedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigChangedResponse) ProtoMessage() {}
+
+func (x *ConfigChangedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigChangedResponse.ProtoReflect.Descriptor instead.
+func (*ConfigChangedResponse) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{20}
+}
+
 var File_internal_ipc_proto_hive_proto protoreflect.FileDescriptor
 
 const file_internal_ipc_proto_hive_proto_rawDesc = "" +
@@ -989,7 +1109,18 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\vChatRequest\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\x11\n" +
 	"\x0fShutdownRequest\"\x12\n" +
-	"\x10ShutdownResponse2\xac\x04\n" +
+	"\x10ShutdownResponse\"\xd1\x02\n" +
+	"\x14ConfigChangedRequest\x12W\n" +
+	"\x0feffective_tools\x18\x01 \x03(\v2..hive.ConfigChangedRequest.EffectiveToolsEntryR\x0eeffectiveTools\x120\n" +
+	"\x14has_tool_restriction\x18\x02 \x01(\bR\x12hasToolRestriction\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\x12\x1a\n" +
+	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x17\n" +
+	"\aapi_key\x18\x05 \x01(\tR\x06apiKey\x12 \n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\x1aA\n" +
+	"\x13EffectiveToolsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x17\n" +
+	"\x15ConfigChangedResponse2\xac\x04\n" +
 	"\tAgentHost\x12<\n" +
 	"\fSpawnSession\x12\x19.hive.SpawnSessionRequest\x1a\x0f.hive.ChatEvent0\x01\x12H\n" +
 	"\rCreateSession\x12\x1a.hive.CreateSessionRequest\x1a\x1b.hive.CreateSessionResponse\x12:\n" +
@@ -999,10 +1130,11 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\rDeleteSession\x12\x1a.hive.DeleteSessionRequest\x1a\x1b.hive.DeleteSessionResponse\x12E\n" +
 	"\fListSessions\x12\x19.hive.ListSessionsRequest\x1a\x1a.hive.ListSessionsResponse\x12?\n" +
 	"\n" +
-	"GetSecrets\x12\x17.hive.GetSecretsRequest\x1a\x18.hive.GetSecretsResponse2v\n" +
+	"GetSecrets\x12\x17.hive.GetSecretsRequest\x1a\x18.hive.GetSecretsResponse2\xc0\x01\n" +
 	"\vAgentWorker\x12,\n" +
 	"\x04Chat\x12\x11.hive.ChatRequest\x1a\x0f.hive.ChatEvent0\x01\x129\n" +
-	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponseB0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
+	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponse\x12H\n" +
+	"\rConfigChanged\x12\x1a.hive.ConfigChangedRequest\x1a\x1b.hive.ConfigChangedResponseB0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
 
 var (
 	file_internal_ipc_proto_hive_proto_rawDescOnce sync.Once
@@ -1016,7 +1148,7 @@ func file_internal_ipc_proto_hive_proto_rawDescGZIP() []byte {
 	return file_internal_ipc_proto_hive_proto_rawDescData
 }
 
-var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_internal_ipc_proto_hive_proto_goTypes = []any{
 	(*ChatEvent)(nil),             // 0: hive.ChatEvent
 	(*SpawnSessionRequest)(nil),   // 1: hive.SpawnSessionRequest
@@ -1037,34 +1169,40 @@ var file_internal_ipc_proto_hive_proto_goTypes = []any{
 	(*ChatRequest)(nil),           // 16: hive.ChatRequest
 	(*ShutdownRequest)(nil),       // 17: hive.ShutdownRequest
 	(*ShutdownResponse)(nil),      // 18: hive.ShutdownResponse
+	(*ConfigChangedRequest)(nil),  // 19: hive.ConfigChangedRequest
+	(*ConfigChangedResponse)(nil), // 20: hive.ConfigChangedResponse
+	nil,                           // 21: hive.ConfigChangedRequest.EffectiveToolsEntry
 }
 var file_internal_ipc_proto_hive_proto_depIdxs = []int32{
 	13, // 0: hive.ListSessionsResponse.sessions:type_name -> hive.SessionInfoProto
-	1,  // 1: hive.AgentHost.SpawnSession:input_type -> hive.SpawnSessionRequest
-	2,  // 2: hive.AgentHost.CreateSession:input_type -> hive.CreateSessionRequest
-	4,  // 3: hive.AgentHost.SendMessage:input_type -> hive.SendMessageRequest
-	5,  // 4: hive.AgentHost.StopSession:input_type -> hive.StopSessionRequest
-	7,  // 5: hive.AgentHost.StartSession:input_type -> hive.StartSessionRequest
-	9,  // 6: hive.AgentHost.DeleteSession:input_type -> hive.DeleteSessionRequest
-	11, // 7: hive.AgentHost.ListSessions:input_type -> hive.ListSessionsRequest
-	14, // 8: hive.AgentHost.GetSecrets:input_type -> hive.GetSecretsRequest
-	16, // 9: hive.AgentWorker.Chat:input_type -> hive.ChatRequest
-	17, // 10: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
-	0,  // 11: hive.AgentHost.SpawnSession:output_type -> hive.ChatEvent
-	3,  // 12: hive.AgentHost.CreateSession:output_type -> hive.CreateSessionResponse
-	0,  // 13: hive.AgentHost.SendMessage:output_type -> hive.ChatEvent
-	6,  // 14: hive.AgentHost.StopSession:output_type -> hive.StopSessionResponse
-	8,  // 15: hive.AgentHost.StartSession:output_type -> hive.StartSessionResponse
-	10, // 16: hive.AgentHost.DeleteSession:output_type -> hive.DeleteSessionResponse
-	12, // 17: hive.AgentHost.ListSessions:output_type -> hive.ListSessionsResponse
-	15, // 18: hive.AgentHost.GetSecrets:output_type -> hive.GetSecretsResponse
-	0,  // 19: hive.AgentWorker.Chat:output_type -> hive.ChatEvent
-	18, // 20: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
-	11, // [11:21] is the sub-list for method output_type
-	1,  // [1:11] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	21, // 1: hive.ConfigChangedRequest.effective_tools:type_name -> hive.ConfigChangedRequest.EffectiveToolsEntry
+	1,  // 2: hive.AgentHost.SpawnSession:input_type -> hive.SpawnSessionRequest
+	2,  // 3: hive.AgentHost.CreateSession:input_type -> hive.CreateSessionRequest
+	4,  // 4: hive.AgentHost.SendMessage:input_type -> hive.SendMessageRequest
+	5,  // 5: hive.AgentHost.StopSession:input_type -> hive.StopSessionRequest
+	7,  // 6: hive.AgentHost.StartSession:input_type -> hive.StartSessionRequest
+	9,  // 7: hive.AgentHost.DeleteSession:input_type -> hive.DeleteSessionRequest
+	11, // 8: hive.AgentHost.ListSessions:input_type -> hive.ListSessionsRequest
+	14, // 9: hive.AgentHost.GetSecrets:input_type -> hive.GetSecretsRequest
+	16, // 10: hive.AgentWorker.Chat:input_type -> hive.ChatRequest
+	17, // 11: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
+	19, // 12: hive.AgentWorker.ConfigChanged:input_type -> hive.ConfigChangedRequest
+	0,  // 13: hive.AgentHost.SpawnSession:output_type -> hive.ChatEvent
+	3,  // 14: hive.AgentHost.CreateSession:output_type -> hive.CreateSessionResponse
+	0,  // 15: hive.AgentHost.SendMessage:output_type -> hive.ChatEvent
+	6,  // 16: hive.AgentHost.StopSession:output_type -> hive.StopSessionResponse
+	8,  // 17: hive.AgentHost.StartSession:output_type -> hive.StartSessionResponse
+	10, // 18: hive.AgentHost.DeleteSession:output_type -> hive.DeleteSessionResponse
+	12, // 19: hive.AgentHost.ListSessions:output_type -> hive.ListSessionsResponse
+	15, // 20: hive.AgentHost.GetSecrets:output_type -> hive.GetSecretsResponse
+	0,  // 21: hive.AgentWorker.Chat:output_type -> hive.ChatEvent
+	18, // 22: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
+	20, // 23: hive.AgentWorker.ConfigChanged:output_type -> hive.ConfigChangedResponse
+	13, // [13:24] is the sub-list for method output_type
+	2,  // [2:13] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_internal_ipc_proto_hive_proto_init() }
@@ -1078,7 +1216,7 @@ func file_internal_ipc_proto_hive_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hive_proto_rawDesc), len(file_internal_ipc_proto_hive_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

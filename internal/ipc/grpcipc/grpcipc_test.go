@@ -101,8 +101,9 @@ func (f *fakeManager) SecretEnv() []string {
 
 // fakeWorker implements ipc.AgentWorker for testing.
 type fakeWorker struct {
-	chatResult string
-	shutdown   bool
+	chatResult       string
+	shutdown         bool
+	lastConfigUpdate *ipc.ConfigUpdate
 }
 
 func (f *fakeWorker) Chat(ctx context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
@@ -115,6 +116,11 @@ func (f *fakeWorker) Chat(ctx context.Context, message string, onEvent func(ipc.
 
 func (f *fakeWorker) Shutdown(ctx context.Context) error {
 	f.shutdown = true
+	return nil
+}
+
+func (f *fakeWorker) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate) error {
+	f.lastConfigUpdate = &update
 	return nil
 }
 
@@ -506,6 +512,58 @@ func (f *fakeToolWorker) Chat(_ context.Context, _ string, onEvent func(ipc.Chat
 }
 
 func (f *fakeToolWorker) Shutdown(_ context.Context) error { return nil }
+
+func (f *fakeToolWorker) ConfigChanged(_ context.Context, _ ipc.ConfigUpdate) error { return nil }
+
+func TestWorkerRoundtrip_ConfigChanged(t *testing.T) {
+	worker := &fakeWorker{}
+	client := setupWorkerTest(t, worker)
+
+	update := ipc.ConfigUpdate{
+		EffectiveTools: map[string]bool{"bash": true, "read_file": true},
+		Model:          "claude-sonnet-4-20250514",
+		Provider:       "anthropic",
+		APIKey:         "sk-test",
+		Description:    "updated desc",
+	}
+	if err := client.ConfigChanged(t.Context(), update); err != nil {
+		t.Fatalf("ConfigChanged: %v", err)
+	}
+
+	got := worker.lastConfigUpdate
+	if got == nil {
+		t.Fatal("expected config update to be received")
+	}
+	if got.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("model = %q, want %q", got.Model, "claude-sonnet-4-20250514")
+	}
+	if got.Provider != "anthropic" {
+		t.Errorf("provider = %q, want %q", got.Provider, "anthropic")
+	}
+	if got.Description != "updated desc" {
+		t.Errorf("description = %q, want %q", got.Description, "updated desc")
+	}
+	if !got.EffectiveTools["bash"] || !got.EffectiveTools["read_file"] {
+		t.Errorf("effective tools = %v, want bash+read_file", got.EffectiveTools)
+	}
+}
+
+func TestWorkerRoundtrip_ConfigChanged_Unrestricted(t *testing.T) {
+	worker := &fakeWorker{}
+	client := setupWorkerTest(t, worker)
+
+	// nil EffectiveTools = unrestricted
+	update := ipc.ConfigUpdate{
+		Model:    "gpt-4",
+		Provider: "openrouter",
+	}
+	if err := client.ConfigChanged(t.Context(), update); err != nil {
+		t.Fatalf("ConfigChanged: %v", err)
+	}
+	if worker.lastConfigUpdate.EffectiveTools != nil {
+		t.Errorf("expected nil EffectiveTools for unrestricted, got %v", worker.lastConfigUpdate.EffectiveTools)
+	}
+}
 
 func TestWorkerRoundtrip_Shutdown(t *testing.T) {
 	worker := &fakeWorker{}

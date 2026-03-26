@@ -46,3 +46,22 @@ func (s *WorkerServer) Shutdown(ctx context.Context, req *pb.ShutdownRequest) (*
 	}
 	return &pb.ShutdownResponse{}, nil
 }
+
+func (s *WorkerServer) ConfigChanged(ctx context.Context, req *pb.ConfigChangedRequest) (*pb.ConfigChangedResponse, error) {
+	update := ipc.ConfigUpdate{
+		Model:       req.Model,
+		Provider:    req.Provider,
+		APIKey:      req.ApiKey,
+		Description: req.Description,
+	}
+	if req.HasToolRestriction {
+		update.EffectiveTools = make(map[string]bool, len(req.EffectiveTools))
+		for k, v := range req.EffectiveTools {
+			update.EffectiveTools[k] = v
+		}
+	}
+	if err := s.worker.ConfigChanged(ctx, update); err != nil {
+		return nil, status.Errorf(codes.Internal, "config changed: %v", err)
+	}
+	return &pb.ConfigChangedResponse{}, nil
+}

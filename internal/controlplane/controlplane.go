@@ -103,14 +103,14 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 }
 
 // Save writes the current in-memory state back to the config file.
-// Called during graceful shutdown.
+// Uses a write lock to prevent concurrent disk writes from racing.
 func (cp *ControlPlane) Save() error {
-	cp.mu.RLock()
-	defer cp.mu.RUnlock()
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
 	return cp.saveUnlocked()
 }
 
-// saveUnlocked writes config to disk. Caller must hold mu (read or write).
+// saveUnlocked writes config to disk. Caller must hold mu for writing.
 func (cp *ControlPlane) saveUnlocked() error {
 	// Don't write an empty file if there's nothing to persist.
 	if !cp.hasContent() {
@@ -144,6 +144,54 @@ func (cp *ControlPlane) hasContent() bool {
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
 		len(cp.config.Agents) > 0
+}
+
+// Reload re-reads config.yaml from disk and replaces the in-memory state.
+// If the file is missing or contains invalid YAML, the current state is
+// preserved and a warning is logged (no error returned — the system keeps
+// running with its current config). The cached TokenSigner is invalidated
+// only if the password hash changed.
+func (cp *ControlPlane) Reload() error {
+	data, err := os.ReadFile(cp.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			cp.logger.Warn("config.yaml not found during reload, keeping current state", "path", cp.path)
+			return nil
+		}
+		return fmt.Errorf("reading config.yaml for reload: %w", err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		cp.logger.Warn("invalid YAML in config.yaml, keeping current state", "path", cp.path, "error", err)
+		return nil
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]ProviderConfig)
+	}
+	if cfg.Secrets == nil {
+		cfg.Secrets = make(map[string]string)
+	}
+	if cfg.Agents == nil {
+		cfg.Agents = make(map[string]AgentPolicy)
+	}
+
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	// Invalidate signer if either the password hash or session secret changed.
+	// This covers both password rotation (which changes the hash) and manual
+	// session secret rotation (e.g., emergency session invalidation).
+	if cfg.Auth.PasswordHash != cp.config.Auth.PasswordHash ||
+		cfg.Auth.SessionSecret != cp.config.Auth.SessionSecret {
+		cp.signer = nil
+	}
+
+	cp.config = cfg
+	cp.logger.Info("reloaded config.yaml from disk", "path", cp.path,
+		"providers", len(cfg.Providers), "secrets", len(cfg.Secrets),
+		"agent_policies", len(cfg.Agents))
+	return nil
 }
 
 // Path returns the absolute path to the config file.

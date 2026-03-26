@@ -102,6 +102,19 @@ func run() error {
 	var mgr *agent.Manager
 	var grpcSrv *grpc.Server
 
+	// Reload config.yaml when it changes on disk (external edits, coordinator writes).
+	// After reloading, push resolved config to all running agents since provider,
+	// model defaults, or tool policies may have changed.
+	fsWatcher.Subscribe("config.yaml", func(events []watcher.Event) {
+		if err := cp.Reload(); err != nil {
+			logger.Warn("failed to reload config.yaml", "error", err)
+			return
+		}
+		if mgr != nil {
+			mgr.PushConfigUpdateAll()
+		}
+	})
+
 	// startManager boots the agent manager, gRPC server, and coordinator.
 	// It is idempotent — calling it when a manager already exists is a no-op.
 	startManager := func() error {
@@ -146,6 +159,9 @@ func run() error {
 		mgr = agent.NewManager(ctx, rootDir, agent.Options{
 			WorkingDir: absRootDir,
 		}, cp, logger, hostSocket, nil, pool)
+
+		// Watch agent definitions for config changes and push to running agents.
+		mgr.WatchAgentDefinitions(fsWatcher)
 
 		grpcSrv = grpc.NewServer()
 		grpcipc.NewHostServer(mgr).Register(grpcSrv)

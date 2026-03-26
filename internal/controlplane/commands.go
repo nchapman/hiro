@@ -24,92 +24,107 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 	}
 	args := parts[2:]
 
+	var result string
+	var mutated bool
+	var err error
 	switch noun {
 	case "secrets":
-		return cp.handleSecrets(verb, args)
+		result, mutated, err = cp.handleSecrets(verb, args)
 	case "tools":
-		return cp.handleTools(verb, args)
+		result, mutated, err = cp.handleTools(verb, args)
 	default:
 		return "", fmt.Errorf("unknown command: %s", noun)
 	}
+	if err != nil {
+		return result, err
+	}
+
+	// Save to disk after any mutation so config.yaml stays in sync.
+	if mutated {
+		if saveErr := cp.Save(); saveErr != nil {
+			cp.logger.Warn("failed to save config after command", "error", saveErr)
+		}
+	}
+
+	return result, nil
 }
 
-func (cp *ControlPlane) handleSecrets(verb string, args []string) (string, error) {
+func (cp *ControlPlane) handleSecrets(verb string, args []string) (string, bool, error) {
 	switch verb {
 	case "set":
 		if len(args) < 1 {
-			return "Usage: /secrets set NAME=VALUE", nil
+			return "Usage: /secrets set NAME=VALUE", false, nil
 		}
 		// Support both "NAME=VALUE" and "NAME VALUE" forms.
 		name, value, ok := parseKeyValue(args)
 		if !ok {
-			return "Usage: /secrets set NAME=VALUE", nil
+			return "Usage: /secrets set NAME=VALUE", false, nil
 		}
 		cp.SetSecret(name, value)
-		return fmt.Sprintf("Secret %q set.", name), nil
+		return fmt.Sprintf("Secret %q set.", name), true, nil
 
 	case "rm", "remove", "delete":
 		if len(args) < 1 {
-			return "Usage: /secrets rm NAME", nil
+			return "Usage: /secrets rm NAME", false, nil
 		}
 		name := args[0]
 		cp.DeleteSecret(name)
-		return fmt.Sprintf("Secret %q removed.", name), nil
+		return fmt.Sprintf("Secret %q removed.", name), true, nil
 
 	case "list", "ls":
 		names := cp.SecretNames()
 		if len(names) == 0 {
-			return "No secrets configured.", nil
+			return "No secrets configured.", false, nil
 		}
 		var b strings.Builder
 		b.WriteString("Secrets:\n")
 		for _, name := range names {
 			fmt.Fprintf(&b, "  • %s\n", name)
 		}
-		return strings.TrimRight(b.String(), "\n"), nil
+		return strings.TrimRight(b.String(), "\n"), false, nil
 
 	case "":
-		return "Usage: /secrets <set|rm|list>", nil
+		return "Usage: /secrets <set|rm|list>", false, nil
 
 	default:
-		return "", fmt.Errorf("unknown secrets command: %s", verb)
+		return "", false, fmt.Errorf("unknown secrets command: %s", verb)
 	}
 }
 
-func (cp *ControlPlane) handleTools(verb string, args []string) (string, error) {
+func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, error) {
 	switch verb {
 	case "set":
 		if len(args) < 2 {
-			return "Usage: /tools set <agent> <tool1,tool2,...>", nil
+			return "Usage: /tools set <agent> <tool1,tool2,...>", false, nil
 		}
 		agentName := args[0]
 		toolList := parseToolList(args[1:])
 		if len(toolList) == 0 {
-			return "Usage: /tools set <agent> <tool1,tool2,...>", nil
+			return "Usage: /tools set <agent> <tool1,tool2,...>", false, nil
 		}
 		cp.SetAgentTools(agentName, toolList)
-		return fmt.Sprintf("Tools for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), nil
+		return fmt.Sprintf("Tools for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
 
 	case "rm", "remove", "clear":
 		if len(args) < 1 {
-			return "Usage: /tools rm <agent>", nil
+			return "Usage: /tools rm <agent>", false, nil
 		}
 		agentName := args[0]
 		cp.ClearAgentTools(agentName)
-		return fmt.Sprintf("Tool override for %q cleared. Agent will use its declared tools.", agentName), nil
+		return fmt.Sprintf("Tool override for %q cleared. Agent will use its declared tools.", agentName), true, nil
 
 	case "list", "ls":
 		if len(args) > 0 {
 			agentName := args[0]
 			tools, ok := cp.AgentTools(agentName)
 			if !ok {
-				return fmt.Sprintf("No tool override for %q. Agent uses its declared tools.", agentName), nil
+				return fmt.Sprintf("No tool override for %q. Agent uses its declared tools.", agentName), false, nil
 			}
-			return fmt.Sprintf("Tool override for %q: %s", agentName, strings.Join(tools, ", ")), nil
+			return fmt.Sprintf("Tool override for %q: %s", agentName, strings.Join(tools, ", ")), false, nil
 		}
 		policies := cp.AllPolicies()
 		if len(policies) == 0 {
-			return "No tool overrides configured. All agents use their declared tools.", nil
+			return "No tool overrides configured. All agents use their declared tools.", false, nil
 		}
 		// Sort agent names for consistent output.
 		names := make([]string, 0, len(policies))
@@ -123,13 +138,13 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, error) 
 		for _, name := range names {
 			fmt.Fprintf(&b, "  %s: %s\n", name, strings.Join(policies[name].Tools, ", "))
 		}
-		return strings.TrimRight(b.String(), "\n"), nil
+		return strings.TrimRight(b.String(), "\n"), false, nil
 
 	case "":
-		return "Usage: /tools <set|rm|list>", nil
+		return "Usage: /tools <set|rm|list>", false, nil
 
 	default:
-		return "", fmt.Errorf("unknown tools command: %s", verb)
+		return "", false, fmt.Errorf("unknown tools command: %s", verb)
 	}
 }
 

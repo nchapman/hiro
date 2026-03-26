@@ -621,6 +621,64 @@ func TestLoadSkills_PathIsAbsolute(t *testing.T) {
 	}
 }
 
+func TestReloadAgentTexts(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nOriginal prompt."), 0644)
+	os.WriteFile(filepath.Join(dir, "soul.md"), []byte("Be helpful."), 0644)
+	os.WriteFile(filepath.Join(dir, "tools.md"), []byte("Use grep carefully."), 0644)
+
+	prompt, soul, tools, err := ReloadAgentTexts(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "Original prompt." {
+		t.Errorf("prompt = %q, want %q", prompt, "Original prompt.")
+	}
+	if soul != "Be helpful." {
+		t.Errorf("soul = %q, want %q", soul, "Be helpful.")
+	}
+	if tools != "Use grep carefully." {
+		t.Errorf("tools = %q, want %q", tools, "Use grep carefully.")
+	}
+
+	// Modify agent.md body and re-read — should pick up new text.
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nUpdated prompt."), 0644)
+	prompt, _, _, err = ReloadAgentTexts(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "Updated prompt." {
+		t.Errorf("prompt = %q, want %q", prompt, "Updated prompt.")
+	}
+}
+
+func TestReloadAgentTexts_MissingOptional(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nJust prompt."), 0644)
+
+	prompt, soul, tools, err := ReloadAgentTexts(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "Just prompt." {
+		t.Errorf("prompt = %q", prompt)
+	}
+	if soul != "" {
+		t.Errorf("soul should be empty, got %q", soul)
+	}
+	if tools != "" {
+		t.Errorf("tools should be empty, got %q", tools)
+	}
+}
+
+func TestReloadAgentTexts_MissingAgent(t *testing.T) {
+	dir := t.TempDir()
+	_, _, _, err := ReloadAgentTexts(dir)
+	if err == nil {
+		t.Fatal("expected error for missing agent.md")
+	}
+}
+
 func TestMergeSkills_EmptyInputs(t *testing.T) {
 	// Both empty
 	merged := MergeSkills(nil, nil)

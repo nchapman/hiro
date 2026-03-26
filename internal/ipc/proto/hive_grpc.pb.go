@@ -416,8 +416,9 @@ var AgentHost_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	AgentWorker_Chat_FullMethodName     = "/hive.AgentWorker/Chat"
-	AgentWorker_Shutdown_FullMethodName = "/hive.AgentWorker/Shutdown"
+	AgentWorker_Chat_FullMethodName          = "/hive.AgentWorker/Chat"
+	AgentWorker_Shutdown_FullMethodName      = "/hive.AgentWorker/Shutdown"
+	AgentWorker_ConfigChanged_FullMethodName = "/hive.AgentWorker/ConfigChanged"
 )
 
 // AgentWorkerClient is the client API for AgentWorker service.
@@ -431,6 +432,9 @@ type AgentWorkerClient interface {
 	Chat(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error)
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
+	// ConfigChanged pushes resolved structural config when definitions or
+	// control plane config change. The agent applies updates on its next turn.
+	ConfigChanged(ctx context.Context, in *ConfigChangedRequest, opts ...grpc.CallOption) (*ConfigChangedResponse, error)
 }
 
 type agentWorkerClient struct {
@@ -470,6 +474,16 @@ func (c *agentWorkerClient) Shutdown(ctx context.Context, in *ShutdownRequest, o
 	return out, nil
 }
 
+func (c *agentWorkerClient) ConfigChanged(ctx context.Context, in *ConfigChangedRequest, opts ...grpc.CallOption) (*ConfigChangedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigChangedResponse)
+	err := c.cc.Invoke(ctx, AgentWorker_ConfigChanged_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentWorkerServer is the server API for AgentWorker service.
 // All implementations must embed UnimplementedAgentWorkerServer
 // for forward compatibility.
@@ -481,6 +495,9 @@ type AgentWorkerServer interface {
 	Chat(*ChatRequest, grpc.ServerStreamingServer[ChatEvent]) error
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
+	// ConfigChanged pushes resolved structural config when definitions or
+	// control plane config change. The agent applies updates on its next turn.
+	ConfigChanged(context.Context, *ConfigChangedRequest) (*ConfigChangedResponse, error)
 	mustEmbedUnimplementedAgentWorkerServer()
 }
 
@@ -496,6 +513,9 @@ func (UnimplementedAgentWorkerServer) Chat(*ChatRequest, grpc.ServerStreamingSer
 }
 func (UnimplementedAgentWorkerServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedAgentWorkerServer) ConfigChanged(context.Context, *ConfigChangedRequest) (*ConfigChangedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfigChanged not implemented")
 }
 func (UnimplementedAgentWorkerServer) mustEmbedUnimplementedAgentWorkerServer() {}
 func (UnimplementedAgentWorkerServer) testEmbeddedByValue()                     {}
@@ -547,6 +567,24 @@ func _AgentWorker_Shutdown_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentWorker_ConfigChanged_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigChangedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentWorkerServer).ConfigChanged(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentWorker_ConfigChanged_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentWorkerServer).ConfigChanged(ctx, req.(*ConfigChangedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentWorker_ServiceDesc is the grpc.ServiceDesc for AgentWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -557,6 +595,10 @@ var AgentWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Shutdown",
 			Handler:    _AgentWorker_Shutdown_Handler,
+		},
+		{
+			MethodName: "ConfigChanged",
+			Handler:    _AgentWorker_ConfigChanged_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

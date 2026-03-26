@@ -17,10 +17,11 @@ import (
 
 // testWorker implements ipc.AgentWorker for testing.
 type testWorker struct {
-	response string
-	shutdown bool
-	done     chan struct{}
-	closed   bool
+	response         string
+	shutdown         bool
+	done             chan struct{}
+	closed           bool
+	lastConfigUpdate *ipc.ConfigUpdate
 }
 
 func (w *testWorker) Chat(_ context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
@@ -33,6 +34,11 @@ func (w *testWorker) Chat(_ context.Context, message string, onEvent func(ipc.Ch
 func (w *testWorker) Shutdown(_ context.Context) error {
 	w.shutdown = true
 	w.closeDone()
+	return nil
+}
+
+func (w *testWorker) ConfigChanged(_ context.Context, update ipc.ConfigUpdate) error {
+	w.lastConfigUpdate = &update
 	return nil
 }
 
@@ -1380,5 +1386,150 @@ Worker.`)
 	}
 	if spawnCfg.EffectiveTools["memory_read"] {
 		t.Error("ephemeral should NOT have memory_read")
+	}
+}
+
+// --- Config push tests ---
+
+func TestExtractAgentName(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"agents/foo/agent.md", "foo"},
+		{"agents/my-agent/agent.md", "my-agent"},
+		{"agents/bar/soul.md", "bar"},
+		{"other/foo/agent.md", ""},
+		{"agents", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := extractAgentName(tt.path); got != tt.want {
+			t.Errorf("extractAgentName(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestManager_PushConfigUpdate(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+
+	// Write agent definition
+	agentDir := filepath.Join(dir, "agents", "worker")
+	os.MkdirAll(agentDir, 0755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\nmodel: claude-sonnet-4-20250514\ntools: [bash, read_file]\n---\nWork."), 0644)
+
+	// Start a session
+	id, err := mgr.CreateSession(t.Context(), "worker", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Update agent.md with new model
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\nmodel: claude-opus-4-20250514\ntools: [bash, read_file, grep]\n---\nUpdated work."), 0644)
+
+	// Push config update
+	mgr.pushConfigUpdate("worker")
+
+	// Verify the worker received the update
+	mgr.mu.RLock()
+	s := mgr.sessions[id]
+	w := s.worker.(*testWorker)
+	mgr.mu.RUnlock()
+
+	if w.lastConfigUpdate == nil {
+		t.Fatal("expected config update to be pushed to worker")
+	}
+	if w.lastConfigUpdate.Model != "claude-opus-4-20250514" {
+		t.Errorf("model = %q, want %q", w.lastConfigUpdate.Model, "claude-opus-4-20250514")
+	}
+}
+
+func TestManager_PushConfigUpdate_SkipsStopped(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+
+	// Write agent definition
+	agentDir := filepath.Join(dir, "agents", "worker")
+	os.MkdirAll(agentDir, 0755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\n---\nWork."), 0644)
+
+	// Start and stop a session
+	id, err := mgr.CreateSession(t.Context(), "worker", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.StopSession(id)
+
+	// Push — should not crash or send to stopped agent
+	mgr.pushConfigUpdate("worker")
+
+	// Verify no update was sent (worker is nil after stop)
+	mgr.mu.RLock()
+	s := mgr.sessions[id]
+	mgr.mu.RUnlock()
+
+	if s.info.Status != SessionStatusStopped {
+		t.Error("expected session to be stopped")
+	}
+}
+
+func TestManager_PushConfigUpdate_UpdatesDescription(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+
+	agentDir := filepath.Join(dir, "agents", "worker")
+	os.MkdirAll(agentDir, 0755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\n---\nWork."), 0644)
+
+	id, err := mgr.CreateSession(t.Context(), "worker", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Update description
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\n---\nWork."), 0644)
+	mgr.pushConfigUpdate("worker")
+
+	info, ok := mgr.GetSession(id)
+	if !ok {
+		t.Fatal("session not found")
+	}
+	if info.Description != "New desc" {
+		t.Errorf("description = %q, want %q", info.Description, "New desc")
+	}
+}
+
+func TestManager_PushConfigUpdateAll(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+
+	// Create two different agents.
+	for _, name := range []string{"alpha", "beta"} {
+		agentDir := filepath.Join(dir, "agents", name)
+		os.MkdirAll(agentDir, 0755)
+		os.WriteFile(filepath.Join(agentDir, "agent.md"),
+			[]byte("---\nname: "+name+"\ntools: [bash]\n---\nDo stuff."), 0644)
+	}
+
+	idA, err := mgr.CreateSession(t.Context(), "alpha", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := mgr.CreateSession(t.Context(), "beta", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Push to all.
+	mgr.PushConfigUpdateAll()
+
+	// Both workers should have received an update.
+	mgr.mu.RLock()
+	wA := mgr.sessions[idA].worker.(*testWorker)
+	wB := mgr.sessions[idB].worker.(*testWorker)
+	mgr.mu.RUnlock()
+
+	if wA.lastConfigUpdate == nil {
+		t.Error("alpha worker did not receive config update")
+	}
+	if wB.lastConfigUpdate == nil {
+		t.Error("beta worker did not receive config update")
 	}
 }

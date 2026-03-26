@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/nchapman/hivebot/internal/history"
 	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/uidpool"
+	"github.com/nchapman/hivebot/internal/watcher"
 )
 
 // SessionStatus represents the lifecycle state of an agent.
@@ -722,39 +724,12 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		}
 	}
 
-	// Resolve provider from control plane (dynamic — picks up latest config).
-	// When cp is nil (tests), provider/apiKey stay empty — the test worker
-	// factory doesn't need them.
-	var provider, apiKey string
-	if m.cp != nil {
-		if cfg.Provider != "" {
-			// Agent specifies a provider override — look it up directly.
-			var ok bool
-			apiKey, ok = m.cp.ProviderByType(cfg.Provider)
-			if !ok {
-				return "", fmt.Errorf("agent %q requests provider %q which is not configured", cfg.Name, cfg.Provider)
-			}
-			provider = cfg.Provider
-		} else {
-			// Use the default provider.
-			var ok bool
-			provider, apiKey, ok = m.cp.ProviderInfo()
-			if !ok {
-				return "", fmt.Errorf("no LLM provider configured")
-			}
-		}
+	// Resolve provider and model from control plane config.
+	provider, apiKey, err := m.resolveProvider(cfg)
+	if err != nil {
+		return "", err
 	}
-
-	// Resolve model: agent config → control plane default → empty (provider default).
-	model := cfg.Model
-	if m.cp != nil {
-		if dm := m.cp.DefaultModel(); dm != "" && model == "" {
-			model = dm
-		}
-	}
-	if m.opts.Model != "" {
-		model = m.opts.Model
-	}
+	model := m.resolveModel(cfg)
 
 	spawnCfg := ipc.SpawnConfig{
 		SessionID:      id,
@@ -1069,6 +1044,166 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 		allowed["use_skill"] = true
 	}
 	return allowed
+}
+
+// --- Config resolution and push ---
+
+// resolveProvider returns the provider type and API key for an agent config.
+// Uses the agent's provider override if set, otherwise the default.
+func (m *Manager) resolveProvider(cfg config.AgentConfig) (provider, apiKey string, err error) {
+	if m.cp == nil {
+		return "", "", nil
+	}
+	if cfg.Provider != "" {
+		apiKey, ok := m.cp.ProviderByType(cfg.Provider)
+		if !ok {
+			return "", "", fmt.Errorf("agent %q requests provider %q which is not configured", cfg.Name, cfg.Provider)
+		}
+		return cfg.Provider, apiKey, nil
+	}
+	provider, apiKey, ok := m.cp.ProviderInfo()
+	if !ok {
+		return "", "", fmt.Errorf("no LLM provider configured")
+	}
+	return provider, apiKey, nil
+}
+
+// resolveModel returns the resolved model for an agent config.
+// Priority: env override → agent config → control plane default.
+func (m *Manager) resolveModel(cfg config.AgentConfig) string {
+	model := cfg.Model
+	if m.cp != nil {
+		if dm := m.cp.DefaultModel(); dm != "" && model == "" {
+			model = dm
+		}
+	}
+	if m.opts.Model != "" {
+		model = m.opts.Model
+	}
+	return model
+}
+
+// WatchAgentDefinitions subscribes to agent.md changes via the filesystem
+// watcher and pushes resolved structural config (model, provider, tools,
+// description) to affected running agents. Only watches agent.md because
+// structural config lives in its YAML frontmatter; text-only files
+// (soul.md, tools.md, skills/) are re-read from disk every turn by the
+// agent process itself.
+func (m *Manager) WatchAgentDefinitions(w *watcher.Watcher) {
+	w.Subscribe("agents/*/agent.md", func(events []watcher.Event) {
+		seen := make(map[string]bool)
+		for _, ev := range events {
+			name := extractAgentName(ev.Path)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			m.pushConfigUpdate(name)
+		}
+	})
+}
+
+// pushConfigUpdate reloads an agent definition from disk and pushes the
+// resolved config to all running sessions of that agent.
+func (m *Manager) pushConfigUpdate(agentName string) {
+	// Load config and resolve provider/model outside the lock to avoid
+	// disk I/O under the session mutex.
+	cfg, err := config.LoadAgentDir(m.agentDefDir(agentName))
+	if err != nil {
+		m.logger.Warn("failed to load agent definition for config push",
+			"agent", agentName, "error", err)
+		return
+	}
+
+	provider, apiKey, err := m.resolveProvider(cfg)
+	if err != nil {
+		m.logger.Warn("failed to resolve provider for config push",
+			"agent", agentName, "error", err)
+		return
+	}
+	model := m.resolveModel(cfg)
+
+	// Check for skills directory (disk I/O, done outside lock).
+	hasSkills := len(cfg.Skills) > 0
+	if !hasSkills {
+		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
+		if _, err := os.Stat(skillsDir); err == nil {
+			hasSkills = true
+		}
+	}
+
+	// Snapshot running sessions under RLock, then release before pushing.
+	type pushTarget struct {
+		id       string
+		parentID string
+		worker   ipc.AgentWorker
+	}
+
+	m.mu.RLock()
+	var targets []pushTarget
+	for id, s := range m.sessions {
+		if s.info.Name == agentName && s.info.Status == SessionStatusRunning && s.worker != nil {
+			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, worker: s.worker})
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, t := range targets {
+		effectiveTools := m.computeEffectiveTools(cfg, t.parentID)
+		allowedTools := buildAllowedToolsMap(effectiveTools, cfg.Mode, hasSkills)
+
+		update := ipc.ConfigUpdate{
+			EffectiveTools: allowedTools,
+			Model:          model,
+			Provider:       provider,
+			APIKey:         apiKey,
+			Description:    cfg.Description,
+		}
+
+		if err := t.worker.ConfigChanged(context.Background(), update); err != nil {
+			m.logger.Warn("failed to push config update to agent",
+				"agent", agentName, "session", t.id, "error", err)
+		} else {
+			m.logger.Info("pushed config update to agent",
+				"agent", agentName, "session", t.id, "model", model)
+		}
+
+		// Update cached description under write lock so API handlers
+		// reading SessionInfo don't race.
+		m.mu.Lock()
+		if s, ok := m.sessions[t.id]; ok {
+			s.info.Description = cfg.Description
+		}
+		m.mu.Unlock()
+	}
+}
+
+// PushConfigUpdateAll recomputes and pushes config to all running agents.
+// Called when config.yaml changes (provider/model defaults or tool policies may have changed).
+func (m *Manager) PushConfigUpdateAll() {
+	// Collect unique agent names from running sessions.
+	m.mu.RLock()
+	names := make(map[string]bool)
+	for _, s := range m.sessions {
+		if s.info.Status == SessionStatusRunning {
+			names[s.info.Name] = true
+		}
+	}
+	m.mu.RUnlock()
+
+	for name := range names {
+		m.pushConfigUpdate(name)
+	}
+}
+
+// extractAgentName extracts the agent name from a watcher path like "agents/foo/agent.md".
+func extractAgentName(path string) string {
+	// Expected format: "agents/<name>/agent.md" or "agents/<name>/soul.md" etc.
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 || parts[0] != "agents" {
+		return ""
+	}
+	return parts[1]
 }
 
 // Path helpers

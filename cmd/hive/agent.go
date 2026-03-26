@@ -214,3 +214,9 @@ func (w *agentWorker) Shutdown(ctx context.Context) error {
 	w.cancel()
 	return nil
 }
+
+func (w *agentWorker) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate) error {
+	w.logger.Info("config update received", "model", update.Model, "provider", update.Provider)
+	w.agent.ApplyConfigUpdate(update)
+	return nil
+}

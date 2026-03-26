@@ -11,4 +11,9 @@ type AgentWorker interface {
 
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(ctx context.Context) error
+
+	// ConfigChanged pushes resolved structural config to the agent.
+	// Called by the control plane when agent definitions or control plane
+	// config change. The agent applies the update on its next turn.
+	ConfigChanged(ctx context.Context, update ConfigUpdate) error
 }

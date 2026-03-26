@@ -178,6 +178,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	// SetPasswordHash also rotates the session secret, invalidating all sessions.
 	s.cp.SetPasswordHash(string(newHash))
+	if err := s.cp.Save(); err != nil {
+		s.logger.Warn("failed to save config after password change", "error", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

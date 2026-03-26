@@ -268,6 +268,30 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	return agent, nil
 }
 
+// ReloadAgentTexts re-reads the text content of an agent definition from disk.
+// It returns the prompt body (from agent.md), soul (from soul.md), and tool
+// notes (from tools.md). Structural frontmatter (name, model, mode, tools) is
+// parsed but discarded — only the body text matters for hot-reload.
+func ReloadAgentTexts(dir string) (prompt, soul, tools string, err error) {
+	parsed, err := ParseMarkdownFile(filepath.Join(dir, "agent.md"))
+	if err != nil {
+		return "", "", "", fmt.Errorf("reloading agent.md: %w", err)
+	}
+	prompt = parsed.Body
+
+	soul, err = ReadOptionalFile(filepath.Join(dir, "soul.md"))
+	if err != nil {
+		return "", "", "", fmt.Errorf("reloading soul.md: %w", err)
+	}
+
+	tools, err = ReadOptionalFile(filepath.Join(dir, "tools.md"))
+	if err != nil {
+		return "", "", "", fmt.Errorf("reloading tools.md: %w", err)
+	}
+
+	return prompt, soul, tools, nil
+}
+
 // LoadSkills loads all skill configs from a skills directory.
 // Supports both flat files (skill.md) and directories (skill/SKILL.md).
 // Returns nil and no error if the directory does not exist.

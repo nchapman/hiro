@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -42,6 +43,21 @@ type Agent struct {
 	bgMgr          *tools.BackgroundJobManager
 	secretNamesFn  func() []string // returns secret names for system prompt (nil if no control plane)
 	logger         *slog.Logger
+
+	// Retained from Options for tool rebuilding on config updates.
+	extraTools  []fantasy.AgentTool
+	secretEnvFn func() []string
+
+	// Config update fields — set by ApplyConfigUpdate (gRPC goroutine),
+	// consumed by PrepareStep (StreamChat goroutine). The update is
+	// eventually consistent: it takes effect at the start of the next
+	// turn, not mid-turn. Each update is a full resolved snapshot, so
+	// the latest always supersedes all prior updates.
+	pendingUpdate   *ipc.ConfigUpdate
+	updateMu        sync.Mutex
+	currentModel    string          // model string of the active LM
+	currentProvider string          // provider type of the active LM
+	allowedTools    map[string]bool // current effective tool set (nil = unrestricted)
 }
 
 // Options configures how an agent connects to an LLM provider.
@@ -91,15 +107,27 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 		}
 	}
 
+	// Determine initial model/provider for change detection.
+	initialModel := cfg.Model
+	if opts.Model != "" {
+		initialModel = opts.Model
+	}
+	initialProvider := string(opts.Provider)
+
 	a := &Agent{
-		config:         cfg,
-		workingDir:     workingDir,
-		sessionDir:     opts.SessionDir,
-		agentDefDir:    opts.AgentDefDir,
-		sharedSkillDir: opts.SharedSkillDir,
-		bgMgr:          tools.NewBackgroundJobManager(opts.SecretEnvFn),
-		secretNamesFn:  opts.SecretNamesFn,
-		logger:         logger,
+		config:          cfg,
+		workingDir:      workingDir,
+		sessionDir:      opts.SessionDir,
+		agentDefDir:     opts.AgentDefDir,
+		sharedSkillDir:  opts.SharedSkillDir,
+		bgMgr:           tools.NewBackgroundJobManager(opts.SecretEnvFn),
+		secretNamesFn:   opts.SecretNamesFn,
+		logger:          logger,
+		currentModel:    initialModel,
+		currentProvider: initialProvider,
+		allowedTools:    opts.AllowedTools,
+		extraTools:      opts.ExtraTools,
+		secretEnvFn:     opts.SecretEnvFn,
 	}
 
 	agentTools := a.buildTools()
@@ -170,6 +198,106 @@ func (a *Agent) Config() config.AgentConfig {
 	return a.config
 }
 
+// ApplyConfigUpdate stores a pending config update pushed from the control plane.
+// Thread-safe: called from the gRPC goroutine, consumed by PrepareStep.
+func (a *Agent) ApplyConfigUpdate(update ipc.ConfigUpdate) {
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	a.pendingUpdate = &update
+}
+
+// consumePendingUpdate atomically retrieves and clears the pending config update.
+func (a *Agent) consumePendingUpdate() *ipc.ConfigUpdate {
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	u := a.pendingUpdate
+	a.pendingUpdate = nil
+	return u
+}
+
+// applyConfigUpdate processes a config update pushed from the control plane.
+// It swaps the language model if model/provider changed, and rebuilds the tool
+// set if effective tools changed. Changes are applied via PrepareStepResult.
+func (a *Agent) applyConfigUpdate(ctx context.Context, update *ipc.ConfigUpdate, result *fantasy.PrepareStepResult) {
+	// Swap language model if model or provider changed.
+	if update.Model != a.currentModel || update.Provider != a.currentProvider {
+		lm, err := CreateLanguageModel(ctx, ProviderType(update.Provider), update.APIKey, update.Model)
+		if err != nil {
+			a.logger.Error("failed to create language model for config update, keeping current",
+				"model", update.Model, "provider", update.Provider, "error", err)
+		} else {
+			a.logger.Info("switching language model",
+				"old_model", a.currentModel, "new_model", update.Model,
+				"old_provider", a.currentProvider, "new_provider", update.Provider)
+			result.Model = lm
+			a.currentModel = update.Model
+			a.currentProvider = update.Provider
+		}
+	}
+
+	// Rebuild tool set if effective tools changed.
+	if !toolsEqual(update.EffectiveTools, a.allowedTools) {
+		a.logger.Info("updating effective tools")
+		a.allowedTools = update.EffectiveTools
+
+		agentTools := a.buildTools()
+		agentTools = append(agentTools, a.extraTools...)
+
+		if a.allowedTools != nil {
+			filtered := make([]fantasy.AgentTool, 0, len(agentTools))
+			for _, t := range agentTools {
+				if a.allowedTools[t.Info().Name] {
+					filtered = append(filtered, t)
+				}
+			}
+			agentTools = filtered
+		}
+
+		// Re-add use_skill if it's in the allowed set (set by the control
+		// plane via buildAllowedToolsMap which checks for skills on disk).
+		if a.allowedTools == nil || a.allowedTools["use_skill"] {
+			var allowedDirs []string
+			if a.agentDefDir != "" {
+				dir := filepath.Join(a.agentDefDir, "skills")
+				if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+					dir = resolved
+				}
+				allowedDirs = append(allowedDirs, dir)
+			}
+			if a.sharedSkillDir != "" {
+				dir := a.sharedSkillDir
+				if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+					dir = resolved
+				}
+				allowedDirs = append(allowedDirs, dir)
+			}
+			agentTools = append(agentTools, buildSkillTool(&a.config, allowedDirs))
+		}
+
+		// Re-wrap with redactor.
+		redactor := NewRedactor(a.secretEnvFn)
+		agentTools = wrapToolsWithRedactor(agentTools, redactor)
+
+		result.Tools = agentTools
+	}
+}
+
+// toolsEqual compares two effective tool maps for equality.
+func toolsEqual(a, b map[string]bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // Cleanup kills all background jobs. Call when shutting down the agent.
 func (a *Agent) Cleanup() {
 	a.bgMgr.KillAll()
@@ -229,7 +357,14 @@ func (a *Agent) StreamChat(ctx context.Context, conv *Conversation, prompt strin
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
 			if opts.StepNumber == 0 {
 				sp := a.currentSystemPrompt()
-				return ctx, fantasy.PrepareStepResult{System: &sp}, nil
+				result := fantasy.PrepareStepResult{System: &sp}
+
+				// Apply any pending config update pushed from the control plane.
+				if update := a.consumePendingUpdate(); update != nil {
+					a.applyConfigUpdate(ctx, update, &result)
+				}
+
+				return ctx, result, nil
 			}
 			return ctx, fantasy.PrepareStepResult{}, nil
 		},
@@ -361,10 +496,22 @@ func (a *Agent) currentSystemPrompt() string {
 		}
 	}
 
-	// Re-scan skills from disk each turn (skills may be added at runtime).
+	// Re-read agent definition text from disk each turn so edits to
+	// agent.md, soul.md, and tools.md take effect immediately.
 	// Safe without a mutex: the manager serializes StreamChat calls per agent
-	// (via runningAgent.mu), so this write and the read in buildSkillTool's
-	// closure never race.
+	// (via runningAgent.mu), so these writes never race with reads.
+	if a.agentDefDir != "" {
+		prompt, soul, toolNotes, reloadErr := config.ReloadAgentTexts(a.agentDefDir)
+		if reloadErr != nil {
+			a.logger.Warn("could not reload agent texts, retaining previous", "error", reloadErr)
+		} else {
+			a.config.Prompt = prompt
+			a.config.Soul = soul
+			a.config.Tools = toolNotes
+		}
+	}
+
+	// Re-scan skills from disk each turn (skills may be added at runtime).
 	if a.agentDefDir != "" {
 		agentSkills, err := config.LoadSkills(filepath.Join(a.agentDefDir, "skills"))
 		if err != nil {
