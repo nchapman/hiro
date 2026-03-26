@@ -12,8 +12,23 @@ import (
 
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
+	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
 )
+
+// openTestPDB opens a platform DB in the given directory for testing.
+func openTestPDB(t *testing.T, dir string) *platformdb.DB {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "db"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	pdb, err := platformdb.Open(filepath.Join(dir, "db", "hive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pdb.Close() })
+	return pdb
+}
 
 // testWorker implements ipc.AgentWorker for testing.
 type testWorker struct {
@@ -70,7 +85,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello from agent"), nil)
+	}, nil, logger, "", testWorkerFactory("hello from agent"), nil, nil)
 	return mgr, dir
 }
 
@@ -667,9 +682,9 @@ func TestManager_SessionDirCreated(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	manifestPath := filepath.Join(dir, "sessions", id, "manifest.yaml")
-	if _, err := os.Stat(manifestPath); err != nil {
-		t.Fatalf("manifest.yaml should exist at %s: %v", manifestPath, err)
+	sessDir := filepath.Join(dir, "sessions", id)
+	if _, err := os.Stat(sessDir); err != nil {
+		t.Fatalf("session dir should exist at %s: %v", sessDir, err)
 	}
 }
 
@@ -736,13 +751,14 @@ func TestManager_PersistentNotCleaned(t *testing.T) {
 func TestManager_RestoreSessions(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
+	pdb := openTestPDB(t, dir)
 
 	// Create a manager, start an agent, then shut down
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil)
+	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
 
 	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
 	if err != nil {
@@ -753,7 +769,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil)
+	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -771,13 +787,14 @@ func TestManager_RestoreSessions(t *testing.T) {
 func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
+	pdb := openTestPDB(t, dir)
 
 	// Create a manager, start an agent, stop it, then shut down.
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil)
+	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
 
 	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
 	if err != nil {
@@ -789,7 +806,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	// Create a new manager and restore.
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil)
+	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -881,7 +898,7 @@ func setupTestManagerWithPool(t *testing.T, pool *uidpool.Pool) (*Manager, strin
 	factory, configs := capturingWorkerFactory("hello")
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", factory, pool)
+	}, nil, logger, "", factory, pool, nil)
 	return mgr, dir, configs
 }
 
@@ -980,7 +997,7 @@ func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", failingWorkerFactory(), pool)
+	}, nil, logger, "", failingWorkerFactory(), pool, nil)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	_, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
@@ -1044,6 +1061,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
 	dir := t.TempDir()
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
+	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
@@ -1051,7 +1069,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", factory1, pool)
+	}, nil, logger, "", factory1, pool, pdb)
 
 	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
 	if err != nil {
@@ -1067,7 +1085,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", factory2, pool2)
+	}, nil, logger, "", factory2, pool2, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1210,7 +1228,8 @@ Coordinator.`)
 	ctx := t.Context()
 
 	// Start coordinator, shut down
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil)
+	pdb := openTestPDB(t, dir)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
 	id, err := mgr1.CreateSession(ctx, "coord", "", "coordinator")
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -1218,7 +1237,7 @@ Coordinator.`)
 	mgr1.Shutdown()
 
 	// Restore — coordinator mode should survive (it's persistent)
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}

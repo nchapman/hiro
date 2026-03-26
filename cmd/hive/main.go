@@ -24,6 +24,7 @@ import (
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	"github.com/nchapman/hivebot/internal/platform"
+	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
 	"github.com/nchapman/hivebot/internal/watcher"
 	"github.com/nchapman/hivebot/web"
@@ -69,6 +70,13 @@ func run() error {
 	if err := platform.Init(rootDir, logger); err != nil {
 		return fmt.Errorf("initializing platform: %w", err)
 	}
+
+	// Open the unified platform database.
+	pdb, err := platformdb.Open(filepath.Join(absRootDir, "db", "hive.db"))
+	if err != nil {
+		return fmt.Errorf("opening platform database: %w", err)
+	}
+	defer pdb.Close()
 
 	// Load control plane config (secrets, tool policies, providers).
 	cp, err := controlplane.Load(cpPath, logger)
@@ -158,7 +166,7 @@ func run() error {
 
 		mgr = agent.NewManager(ctx, rootDir, agent.Options{
 			WorkingDir: absRootDir,
-		}, cp, logger, hostSocket, nil, pool)
+		}, cp, logger, hostSocket, nil, pool, pdb)
 
 		// Watch agent definitions for config changes and push to running agents.
 		mgr.WatchAgentDefinitions(fsWatcher)

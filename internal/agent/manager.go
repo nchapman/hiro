@@ -19,6 +19,7 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/history"
 	"github.com/nchapman/hivebot/internal/ipc"
+	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
 	"github.com/nchapman/hivebot/internal/watcher"
 )
@@ -77,6 +78,7 @@ type Manager struct {
 	hostSocket    string        // path to host gRPC socket
 	workerFactory WorkerFactory // creates agent workers (default = OS processes)
 	uidPool       *uidpool.Pool // per-agent Unix user isolation; nil = disabled
+	pdb           *platformdb.DB // unified platform database
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.
@@ -94,7 +96,7 @@ type ControlPlane interface {
 // containing agents/, sessions/, skills/, and workspace/ subdirectories. The context
 // controls the lifetime of persistent agents. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.
-func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory, pool *uidpool.Pool) *Manager {
+func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory, pool *uidpool.Pool, pdb *platformdb.DB) *Manager {
 	if wf == nil {
 		wf = defaultWorkerFactory
 	}
@@ -109,6 +111,7 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 		hostSocket:    hostSocket,
 		workerFactory: wf,
 		uidPool:       pool,
+		pdb:           pdb,
 	}
 }
 
@@ -258,8 +261,11 @@ func (m *Manager) DeleteSession(agentID string) error {
 			m.removeSession(id)
 		}
 
-		// Always delete session dir regardless of mode.
+		// Always delete session dir and DB record regardless of mode.
 		os.RemoveAll(m.sessionDir(id))
+		if m.pdb != nil {
+			m.pdb.DeleteSession(id)
+		}
 		m.logger.Info("session deleted", "id", id)
 	}
 	return nil
@@ -300,7 +306,7 @@ func (m *Manager) StartSession(ctx context.Context, agentID string) error {
 	}
 
 	// Clear the stopped flag so the agent starts on next server restart.
-	m.setManifestStopped(agentID, false)
+	m.setSessionStatus(agentID, "running")
 	return nil
 }
 
@@ -349,7 +355,7 @@ func (m *Manager) softStop(id string) {
 	}
 
 	// Persist stopped state so it survives server restarts.
-	m.setManifestStopped(id, true)
+	m.setSessionStatus(id, "stopped")
 }
 
 // reregisterStopped puts a session back into the registry as stopped.
@@ -525,81 +531,66 @@ func (m *Manager) SecretEnv() []string {
 	return m.cp.SecretEnv()
 }
 
-// RestoreSessions scans the sessions/ directory and restarts any
-// persistent agents that have manifests. Call once after NewManager.
+// RestoreSessions reads persistent/coordinator sessions from the platform
+// database and restarts them. Call once after NewManager.
 func (m *Manager) RestoreSessions(ctx context.Context) error {
-	dir := m.sessionsDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("scanning sessions: %w", err)
+	if m.pdb == nil {
+		return nil
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		manifestPath := filepath.Join(dir, entry.Name(), "manifest.yaml")
-		manifest, err := config.ReadManifest(manifestPath)
-		if err != nil {
-			m.logger.Warn("skipping session with unreadable manifest",
-				"dir", entry.Name(), "error", err)
-			continue
-		}
-		if !manifest.Mode.IsPersistent() {
-			// Clean up stale ephemeral session dirs
-			os.RemoveAll(filepath.Join(dir, entry.Name()))
+	sessions, err := m.pdb.ListSessions("", "")
+	if err != nil {
+		return fmt.Errorf("listing sessions from db: %w", err)
+	}
+
+	for _, s := range sessions {
+		mode := config.AgentMode(s.Mode)
+		if !mode.IsPersistent() {
+			// Clean up stale ephemeral sessions from db and disk.
+			m.pdb.DeleteSession(s.ID)
+			os.RemoveAll(m.sessionDir(s.ID))
 			continue
 		}
 
-		// Validate manifest fields to prevent path traversal
-		if err := validateAgentName(manifest.Agent); err != nil {
+		if err := validateAgentName(s.AgentName); err != nil {
 			m.logger.Warn("skipping session with invalid agent name",
-				"dir", entry.Name(), "agent", manifest.Agent, "error", err)
-			continue
-		}
-		if manifest.ID != entry.Name() {
-			m.logger.Warn("skipping session where manifest ID does not match directory",
-				"dir", entry.Name(), "manifest_id", manifest.ID)
+				"id", s.ID, "agent", s.AgentName, "error", err)
 			continue
 		}
 
-		cfg, err := config.LoadAgentDir(m.agentDefDir(manifest.Agent))
+		cfg, err := config.LoadAgentDir(m.agentDefDir(s.AgentName))
 		if err != nil {
 			m.logger.Warn("skipping session with missing agent definition",
-				"agent", manifest.Agent, "error", err)
+				"agent", s.AgentName, "error", err)
 			continue
 		}
 
-		if manifest.Stopped {
-			// Register as stopped without spawning a worker process.
+		if s.Status == "stopped" {
 			ra := &session{
 				info: SessionInfo{
-					ID:          manifest.ID,
+					ID:          s.ID,
 					Name:        cfg.Name,
-					Mode:        manifest.Mode,
+					Mode:        mode,
 					Description: cfg.Description,
-					ParentID:    manifest.ParentID,
+					ParentID:    s.ParentID,
 					Status:      SessionStatusStopped,
 				},
 			}
 			m.mu.Lock()
-			m.sessions[manifest.ID] = ra
-			if manifest.ParentID != "" {
-				m.children[manifest.ParentID] = append(m.children[manifest.ParentID], manifest.ID)
+			m.sessions[s.ID] = ra
+			if s.ParentID != "" {
+				m.children[s.ParentID] = append(m.children[s.ParentID], s.ID)
 			}
 			m.mu.Unlock()
 			m.logger.Info("restored stopped agent",
-				"id", manifest.ID, "name", cfg.Name)
+				"id", s.ID, "name", cfg.Name)
 			continue
 		}
 
-		_, err = m.startSession(ctx, manifest.ID, cfg, manifest.ParentID, manifest.Mode)
+		_, err = m.startSession(ctx, s.ID, cfg, s.ParentID, mode)
 		if err != nil {
 			m.logger.Warn("failed to restore agent",
-				"id", manifest.ID, "agent", manifest.Agent, "error", err)
+				"id", s.ID, "agent", s.AgentName, "error", err)
 		}
 	}
 	return nil
@@ -649,6 +640,7 @@ func (m *Manager) Shutdown() {
 func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string, mode config.AgentMode) (string, error) {
 	// Create session directory and standard subdirectories.
 	sessDir := m.sessionDir(id)
+	_, freshDir := os.Stat(sessDir) // freshDir != nil means dir didn't exist
 	if err := os.MkdirAll(sessDir, 0700); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
@@ -658,22 +650,19 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		}
 	}
 
-	manifestPath := filepath.Join(sessDir, "manifest.yaml")
-	_, statErr := os.Stat(manifestPath)
-	switch {
-	case os.IsNotExist(statErr):
-		manifest := config.Manifest{
+	// Register session in the platform database.
+	if m.pdb != nil {
+		if err := m.pdb.CreateSession(platformdb.Session{
 			ID:        id,
-			Agent:     cfg.Name,
-			Mode:      mode,
+			AgentName: cfg.Name,
+			Mode:      string(mode),
 			ParentID:  parentID,
-			CreatedAt: time.Now(),
+		}); err != nil {
+			// Ignore duplicate — session may already exist from a previous run (restore path).
+			if !strings.Contains(err.Error(), "UNIQUE constraint") {
+				return "", fmt.Errorf("creating session in db: %w", err)
+			}
 		}
-		if err := config.WriteManifest(manifestPath, manifest); err != nil {
-			return "", fmt.Errorf("writing manifest: %w", err)
-		}
-	case statErr != nil:
-		return "", fmt.Errorf("checking manifest: %w", statErr)
 	}
 
 	// Compute effective tool set: declared tools ∩ control plane ∩ parent caps.
@@ -765,7 +754,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			m.uidPool.Release(id)
 		}
 		// Clean up session dir on failure (only if we just created it)
-		if os.IsNotExist(statErr) {
+		if freshDir != nil {
 			os.RemoveAll(sessDir)
 		}
 		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
@@ -1234,18 +1223,14 @@ func (m *Manager) sessionDir(id string) string {
 	return filepath.Join(m.rootDir, "sessions", id)
 }
 
-// setManifestStopped updates the stopped field in an agent's manifest on disk.
+// setSessionStatus updates the session status in the platform database.
 // Best-effort: errors are logged but not returned.
-func (m *Manager) setManifestStopped(id string, stopped bool) {
-	manifestPath := filepath.Join(m.sessionDir(id), "manifest.yaml")
-	manifest, err := config.ReadManifest(manifestPath)
-	if err != nil {
-		m.logger.Warn("failed to read manifest for stopped update", "id", id, "error", err)
+func (m *Manager) setSessionStatus(id, status string) {
+	if m.pdb == nil {
 		return
 	}
-	manifest.Stopped = stopped
-	if err := config.WriteManifest(manifestPath, manifest); err != nil {
-		m.logger.Warn("failed to write manifest for stopped update", "id", id, "error", err)
+	if err := m.pdb.UpdateSessionStatus(id, status); err != nil {
+		m.logger.Warn("failed to update session status in db", "id", id, "status", status, "error", err)
 	}
 }
 

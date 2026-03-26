@@ -19,6 +19,7 @@ var defaultAgents embed.FS
 // requiredDirs are the top-level directories that must exist in the platform root.
 var requiredDirs = []string{
 	"agents",
+	"db",
 	"sessions",
 	"skills",
 	"workspace", // setgid so files created inside inherit the hive-agents group
