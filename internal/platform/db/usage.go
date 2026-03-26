@@ -1,0 +1,213 @@
+package db
+
+import (
+	"fmt"
+	"time"
+)
+
+// UsageEvent represents a single LLM call's token consumption.
+type UsageEvent struct {
+	ID               int64
+	SessionID        string
+	Model            string
+	Provider         string
+	InputTokens      int64
+	OutputTokens     int64
+	ReasoningTokens  int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	Cost             float64
+	CreatedAt        time.Time
+}
+
+// UsageSummary aggregates usage across multiple events.
+type UsageSummary struct {
+	TotalInputTokens      int64
+	TotalOutputTokens     int64
+	TotalReasoningTokens  int64
+	TotalCacheReadTokens  int64
+	TotalCacheWriteTokens int64
+	TotalCost             float64
+	EventCount            int64
+}
+
+// ModelUsage aggregates usage per model.
+type ModelUsage struct {
+	Model    string
+	Provider string
+	UsageSummary
+}
+
+// DailyUsage aggregates usage per day.
+type DailyUsage struct {
+	Date string // "2006-01-02"
+	UsageSummary
+}
+
+// RecordUsage inserts a usage event.
+func (d *DB) RecordUsage(e UsageEvent) error {
+	_, err := d.db.Exec(
+		`INSERT INTO usage_events (session_id, model, provider, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.SessionID, e.Model, e.Provider,
+		e.InputTokens, e.OutputTokens, e.ReasoningTokens,
+		e.CacheReadTokens, e.CacheWriteTokens, e.Cost,
+	)
+	if err != nil {
+		return fmt.Errorf("recording usage: %w", err)
+	}
+	return nil
+}
+
+// GetSessionUsage returns aggregated usage for a session.
+func (d *DB) GetSessionUsage(sessionID string) (UsageSummary, error) {
+	return d.queryUsageSummary(
+		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
+		 FROM usage_events WHERE session_id = ?`, sessionID,
+	)
+}
+
+// GetTotalUsage returns aggregated usage across all sessions.
+func (d *DB) GetTotalUsage() (UsageSummary, error) {
+	return d.queryUsageSummary(
+		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
+		 FROM usage_events`,
+	)
+}
+
+// GetUsageByModel returns usage aggregated per model.
+func (d *DB) GetUsageByModel() ([]ModelUsage, error) {
+	rows, err := d.db.Query(
+		`SELECT model, provider,
+		        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
+		 FROM usage_events GROUP BY model, provider ORDER BY SUM(cost) DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ModelUsage
+	for rows.Next() {
+		var m ModelUsage
+		if err := rows.Scan(
+			&m.Model, &m.Provider,
+			&m.TotalInputTokens, &m.TotalOutputTokens,
+			&m.TotalReasoningTokens, &m.TotalCacheReadTokens,
+			&m.TotalCacheWriteTokens, &m.TotalCost, &m.EventCount,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, m)
+	}
+	return results, rows.Err()
+}
+
+// GetUsageByDay returns usage aggregated per day.
+func (d *DB) GetUsageByDay(limit int) ([]DailyUsage, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	rows, err := d.db.Query(
+		`SELECT date(created_at) as day,
+		        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
+		 FROM usage_events GROUP BY day ORDER BY day DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []DailyUsage
+	for rows.Next() {
+		var du DailyUsage
+		if err := rows.Scan(
+			&du.Date,
+			&du.TotalInputTokens, &du.TotalOutputTokens,
+			&du.TotalReasoningTokens, &du.TotalCacheReadTokens,
+			&du.TotalCacheWriteTokens, &du.TotalCost, &du.EventCount,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, du)
+	}
+	return results, rows.Err()
+}
+
+func (d *DB) queryUsageSummary(query string, args ...any) (UsageSummary, error) {
+	var u UsageSummary
+	err := d.db.QueryRow(query, args...).Scan(
+		&u.TotalInputTokens, &u.TotalOutputTokens,
+		&u.TotalReasoningTokens, &u.TotalCacheReadTokens,
+		&u.TotalCacheWriteTokens, &u.TotalCost, &u.EventCount,
+	)
+	return u, err
+}
+
+// --- Request Log ---
+
+// RequestLogEntry represents a full LLM request/response record.
+type RequestLogEntry struct {
+	ID         int64
+	SessionID  string
+	Model      string
+	Request    string
+	Response   string
+	DurationMs int64
+	Error      string
+	CreatedAt  time.Time
+}
+
+// LogRequest inserts a request/response record.
+func (d *DB) LogRequest(e RequestLogEntry) error {
+	var errPtr *string
+	if e.Error != "" {
+		errPtr = &e.Error
+	}
+	_, err := d.db.Exec(
+		`INSERT INTO request_log (session_id, model, request, response, duration_ms, error)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		e.SessionID, e.Model, e.Request, e.Response, e.DurationMs, errPtr,
+	)
+	if err != nil {
+		return fmt.Errorf("logging request: %w", err)
+	}
+	return nil
+}
+
+// GetRequestLog returns recent request log entries for a session.
+func (d *DB) GetRequestLog(sessionID string, limit int) ([]RequestLogEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(
+		`SELECT id, session_id, model, COALESCE(request,''), COALESCE(response,''),
+		        COALESCE(duration_ms,0), COALESCE(error,''), created_at
+		 FROM request_log WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []RequestLogEntry
+	for rows.Next() {
+		var e RequestLogEntry
+		var createdAt string
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Model, &e.Request, &e.Response, &e.DurationMs, &e.Error, &createdAt); err != nil {
+			return nil, err
+		}
+		e.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
