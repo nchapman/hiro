@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"charm.land/fantasy"
@@ -45,14 +46,20 @@ func runAgent() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Build sandboxed tools (file ops, bash, etc.).
-	bgMgr := tools.NewBackgroundJobManager(nil)
+	// Secret env vars are received from the control plane with each tool call.
+	// Store the latest set atomically so the BackgroundJobManager can read them.
+	var secretEnvMu sync.Mutex
+	var secretEnv []string
+
+	bgMgr := tools.NewBackgroundJobManager(func() []string {
+		secretEnvMu.Lock()
+		defer secretEnvMu.Unlock()
+		return secretEnv
+	})
 	toolSet := buildWorkerTools(cfg.WorkingDir, bgMgr, cfg.EffectiveTools)
 
-	// Create tool executor from the tool set.
 	executor := agent.ToolExecutorFromTools(toolSet)
 
-	// Create a minimal AgentWorker that delegates to the executor.
 	worker := &toolWorker{
 		executor: executor,
 		cancel:   cancel,
@@ -72,7 +79,13 @@ func runAgent() error {
 	defer os.Remove(socketPath)
 
 	srv := grpc.NewServer()
-	grpcipc.NewWorkerServer(worker).Register(srv)
+	ws := grpcipc.NewWorkerServer(worker)
+	ws.SetSecretEnvCallback(func(env []string) {
+		secretEnvMu.Lock()
+		secretEnv = env
+		secretEnvMu.Unlock()
+	})
+	ws.Register(srv)
 
 	go func() {
 		if err := srv.Serve(lis); err != nil {

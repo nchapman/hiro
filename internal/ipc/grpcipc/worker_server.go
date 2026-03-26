@@ -13,12 +13,19 @@ import (
 // WorkerServer adapts an ipc.AgentWorker to the gRPC AgentWorkerServer interface.
 type WorkerServer struct {
 	pb.UnimplementedAgentWorkerServer
-	worker ipc.AgentWorker
+	worker      ipc.AgentWorker
+	onSecretEnv func([]string) // called when secret env vars arrive with a tool call
 }
 
 // NewWorkerServer creates a gRPC server that delegates to the given AgentWorker.
 func NewWorkerServer(worker ipc.AgentWorker) *WorkerServer {
 	return &WorkerServer{worker: worker}
+}
+
+// SetSecretEnvCallback sets a callback invoked when secret env vars arrive
+// with a tool call. The worker uses this to inject secrets into bash commands.
+func (s *WorkerServer) SetSecretEnvCallback(fn func([]string)) {
+	s.onSecretEnv = fn
 }
 
 // Register registers this server with a gRPC service registrar.
@@ -29,6 +36,10 @@ func (s *WorkerServer) Register(registrar grpc.ServiceRegistrar) {
 func (s *WorkerServer) ExecuteTool(ctx context.Context, req *pb.ExecuteToolRequest) (*pb.ExecuteToolResponse, error) {
 	if s.worker == nil {
 		return nil, status.Errorf(codes.Unimplemented, "tool execution not available")
+	}
+	// Inject secret env vars into the worker's context for bash commands.
+	if len(req.SecretEnv) > 0 && s.onSecretEnv != nil {
+		s.onSecretEnv(req.SecretEnv)
 	}
 	result, err := s.worker.ExecuteTool(ctx, req.CallId, req.Name, req.Input)
 	if err != nil {

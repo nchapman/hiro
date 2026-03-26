@@ -19,6 +19,7 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
 	"github.com/nchapman/hivebot/internal/watcher"
@@ -748,6 +749,12 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	}
 
 	handle, err := m.workerFactory(spawnCtx, spawnCfg)
+	if err == nil {
+		// Inject secret env provider so bash commands in the worker can access secrets.
+		if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
+			wc.SetSecretEnvFn(m.SecretEnv)
+		}
+	}
 	if err != nil {
 		if m.uidPool != nil {
 			m.uidPool.Release(id)

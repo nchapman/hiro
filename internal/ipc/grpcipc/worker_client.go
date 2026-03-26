@@ -10,7 +10,8 @@ import (
 
 // WorkerClient implements ipc.AgentWorker by making gRPC calls to an AgentWorker server.
 type WorkerClient struct {
-	client pb.AgentWorkerClient
+	client      pb.AgentWorkerClient
+	secretEnvFn func() []string // returns secret env vars for bash injection
 }
 
 // NewWorkerClient creates an AgentWorker backed by a gRPC connection.
@@ -18,12 +19,23 @@ func NewWorkerClient(cc grpc.ClientConnInterface) *WorkerClient {
 	return &WorkerClient{client: pb.NewAgentWorkerClient(cc)}
 }
 
+// SetSecretEnvFn sets the function that provides secret env vars.
+// Called by the control plane after construction. Secrets are sent
+// with each ExecuteTool request so bash commands can access them.
+func (c *WorkerClient) SetSecretEnvFn(fn func() []string) {
+	c.secretEnvFn = fn
+}
+
 func (c *WorkerClient) ExecuteTool(ctx context.Context, callID, name, input string) (ipc.ToolResult, error) {
-	resp, err := c.client.ExecuteTool(ctx, &pb.ExecuteToolRequest{
+	req := &pb.ExecuteToolRequest{
 		CallId: callID,
 		Name:   name,
 		Input:  input,
-	})
+	}
+	if c.secretEnvFn != nil {
+		req.SecretEnv = c.secretEnvFn()
+	}
+	resp, err := c.client.ExecuteTool(ctx, req)
 	if err != nil {
 		return ipc.ToolResult{}, err
 	}
