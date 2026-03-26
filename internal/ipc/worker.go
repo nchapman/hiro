@@ -16,4 +16,8 @@ type AgentWorker interface {
 	// Called by the control plane when agent definitions or control plane
 	// config change. The agent applies the update on its next turn.
 	ConfigChanged(ctx context.Context, update ConfigUpdate) error
+
+	// ExecuteTool runs a named tool in the worker's sandbox and returns the result.
+	// Used when the control plane owns the inference loop.
+	ExecuteTool(ctx context.Context, callID, name, input string) (ToolResult, error)
 }

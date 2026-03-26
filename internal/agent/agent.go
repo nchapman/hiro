@@ -44,6 +44,9 @@ type Agent struct {
 	secretNamesFn  func() []string // returns secret names for system prompt (nil if no control plane)
 	logger         *slog.Logger
 
+	// All tools available to this agent (after filtering and redaction).
+	agentTools []fantasy.AgentTool
+
 	// Retained from Options for tool rebuilding on config updates.
 	extraTools  []fantasy.AgentTool
 	secretEnvFn func() []string
@@ -176,6 +179,8 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 	redactor := NewRedactor(opts.SecretEnvFn)
 	agentTools = wrapToolsWithRedactor(agentTools, redactor)
 
+	a.agentTools = agentTools
+
 	// Build the initial system prompt. This is also rebuilt dynamically
 	// on each StreamChat call via PrepareStep to pick up memory changes.
 	systemPrompt := a.currentSystemPrompt()
@@ -191,6 +196,13 @@ func New(ctx context.Context, cfg config.AgentConfig, opts Options, logger *slog
 // Name returns the agent's configured name.
 func (a *Agent) Name() string {
 	return a.config.Name
+}
+
+// Tools returns the agent's tools (after filtering and redaction).
+// Must be called before the first StreamChat — the returned slice is
+// a snapshot and is not updated when config changes rebuild tools.
+func (a *Agent) Tools() []fantasy.AgentTool {
+	return a.agentTools
 }
 
 // Config returns the agent's configuration.
@@ -278,6 +290,7 @@ func (a *Agent) applyConfigUpdate(ctx context.Context, update *ipc.ConfigUpdate,
 		redactor := NewRedactor(a.secretEnvFn)
 		agentTools = wrapToolsWithRedactor(agentTools, redactor)
 
+		a.agentTools = agentTools
 		result.Tools = agentTools
 	}
 }

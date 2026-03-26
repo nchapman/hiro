@@ -44,6 +44,11 @@ service AgentWorker {
   // ConfigChanged pushes resolved structural config when definitions or
   // control plane config change. The agent applies updates on its next turn.
   rpc ConfigChanged(ConfigChangedRequest) returns (ConfigChangedResponse);
+
+  // ExecuteTool runs a single tool and returns the result.
+  // Used when the control plane owns the inference loop and dispatches
+  // tool calls to the worker for sandboxed execution.
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
 }
 
 // ChatEvent is a streaming event sent during Chat, SpawnSession, or SendMessage.
@@ -142,3 +147,14 @@ message ConfigChangedRequest {
 }
 
 message ConfigChangedResponse {}
+
+message ExecuteToolRequest {
+  string name = 1;     // tool name (bash, read_file, etc.)
+  string input = 2;    // JSON-encoded tool arguments
+  string call_id = 3;  // tool call ID from the LLM
+}
+
+message ExecuteToolResponse {
+  string content = 1;
+  bool is_error = 2;
+}

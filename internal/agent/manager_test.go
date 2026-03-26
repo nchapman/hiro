@@ -57,6 +57,10 @@ func (w *testWorker) ConfigChanged(_ context.Context, update ipc.ConfigUpdate) e
 	return nil
 }
 
+func (w *testWorker) ExecuteTool(_ context.Context, _, name, _ string) (ipc.ToolResult, error) {
+	return ipc.ToolResult{Content: "mock result for " + name}, nil
+}
+
 func (w *testWorker) closeDone() {
 	if !w.closed {
 		w.closed = true

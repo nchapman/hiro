@@ -31,6 +31,21 @@ func (c *WorkerClient) Shutdown(ctx context.Context) error {
 	return err
 }
 
+func (c *WorkerClient) ExecuteTool(ctx context.Context, callID, name, input string) (ipc.ToolResult, error) {
+	resp, err := c.client.ExecuteTool(ctx, &pb.ExecuteToolRequest{
+		CallId: callID,
+		Name:   name,
+		Input:  input,
+	})
+	if err != nil {
+		return ipc.ToolResult{}, err
+	}
+	return ipc.ToolResult{
+		Content: resp.Content,
+		IsError: resp.IsError,
+	}, nil
+}
+
 func (c *WorkerClient) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate) error {
 	req := &pb.ConfigChangedRequest{
 		Model:       update.Model,

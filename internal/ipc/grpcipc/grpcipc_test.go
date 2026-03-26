@@ -125,6 +125,10 @@ func (f *fakeWorker) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate)
 	return nil
 }
 
+func (f *fakeWorker) ExecuteTool(ctx context.Context, callID, name, input string) (ipc.ToolResult, error) {
+	return ipc.ToolResult{Content: "result for " + name}, nil
+}
+
 // setupHostTest creates a bufconn-based gRPC server/client pair for AgentHost.
 func setupHostTest(t *testing.T, mgr ipc.HostManager, callerID string) *grpcipc.HostClient {
 	t.Helper()
@@ -519,6 +523,10 @@ func (f *fakeToolWorker) Shutdown(_ context.Context) error { return nil }
 
 func (f *fakeToolWorker) ConfigChanged(_ context.Context, _ ipc.ConfigUpdate) error { return nil }
 
+func (f *fakeToolWorker) ExecuteTool(_ context.Context, _, _, _ string) (ipc.ToolResult, error) {
+	return ipc.ToolResult{}, nil
+}
+
 func TestWorkerRoundtrip_ConfigChanged(t *testing.T) {
 	worker := &fakeWorker{}
 	client := setupWorkerTest(t, worker)
@@ -578,5 +586,90 @@ func TestWorkerRoundtrip_Shutdown(t *testing.T) {
 	}
 	if !worker.shutdown {
 		t.Error("expected shutdown to be called")
+	}
+}
+
+// fakeExecutor implements ipc.ToolExecutor for testing.
+type fakeExecutor struct {
+	result  ipc.ToolResult
+	lastReq struct{ callID, name, input string }
+}
+
+func (f *fakeExecutor) ExecuteTool(_ context.Context, callID, name, input string) (ipc.ToolResult, error) {
+	f.lastReq.callID = callID
+	f.lastReq.name = name
+	f.lastReq.input = input
+	return f.result, nil
+}
+
+// setupWorkerTestWithExecutor creates a worker test pair with a tool executor.
+func setupWorkerTestWithExecutor(t *testing.T, worker ipc.AgentWorker, exec ipc.ToolExecutor) *grpcipc.WorkerClient {
+	t.Helper()
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	ws := grpcipc.NewWorkerServer(worker)
+	ws.SetToolExecutor(exec)
+	ws.Register(srv)
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	return grpcipc.NewWorkerClient(conn)
+}
+
+func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "file contents here"}}
+	client := setupWorkerTestWithExecutor(t, &fakeWorker{}, exec)
+
+	result, err := client.ExecuteTool(t.Context(), "call-1", "read_file", `{"path":"test.txt"}`)
+	if err != nil {
+		t.Fatalf("ExecuteTool: %v", err)
+	}
+	if result.Content != "file contents here" {
+		t.Errorf("content = %q, want %q", result.Content, "file contents here")
+	}
+	if result.IsError {
+		t.Error("unexpected is_error=true")
+	}
+	if exec.lastReq.name != "read_file" {
+		t.Errorf("tool name = %q, want read_file", exec.lastReq.name)
+	}
+	if exec.lastReq.callID != "call-1" {
+		t.Errorf("call_id = %q, want call-1", exec.lastReq.callID)
+	}
+}
+
+func TestWorkerRoundtrip_ExecuteTool_Error(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "not found", IsError: true}}
+	client := setupWorkerTestWithExecutor(t, &fakeWorker{}, exec)
+
+	result, err := client.ExecuteTool(t.Context(), "call-2", "read_file", `{"path":"missing.txt"}`)
+	if err != nil {
+		t.Fatalf("ExecuteTool: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected is_error=true")
+	}
+	if result.Content != "not found" {
+		t.Errorf("content = %q, want %q", result.Content, "not found")
+	}
+}
+
+func TestWorkerRoundtrip_ExecuteTool_NoExecutor(t *testing.T) {
+	// No executor set — should return Unimplemented error.
+	client := setupWorkerTest(t, &fakeWorker{})
+
+	_, err := client.ExecuteTool(t.Context(), "call-3", "bash", `{"command":"ls"}`)
+	if err == nil {
+		t.Fatal("expected error when executor is not set")
 	}
 }

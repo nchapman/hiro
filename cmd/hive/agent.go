@@ -160,6 +160,9 @@ func runAgent() error {
 		logger: logger,
 	}
 
+	// Create tool executor for direct tool dispatch from the control plane.
+	executor := agent.ToolExecutorFromTools(a.Tools())
+
 	// Start gRPC server on Unix socket
 	socketPath := cfg.AgentSocket
 	if socketPath == "" {
@@ -173,7 +176,9 @@ func runAgent() error {
 	defer os.Remove(socketPath)
 
 	srv := grpc.NewServer()
-	grpcipc.NewWorkerServer(worker).Register(srv)
+	ws := grpcipc.NewWorkerServer(worker)
+	ws.SetToolExecutor(executor)
+	ws.Register(srv)
 
 	go func() {
 		if err := srv.Serve(lis); err != nil {
@@ -220,4 +225,10 @@ func (w *agentWorker) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate
 	w.logger.Info("config update received", "model", update.Model, "provider", update.Provider)
 	w.agent.ApplyConfigUpdate(update)
 	return nil
+}
+
+func (w *agentWorker) ExecuteTool(_ context.Context, _, _, _ string) (ipc.ToolResult, error) {
+	// Tool execution is handled via SetToolExecutor on the gRPC server,
+	// not through the AgentWorker interface. This stub satisfies the interface.
+	return ipc.ToolResult{Content: "ExecuteTool not supported via Chat path", IsError: true}, nil
 }

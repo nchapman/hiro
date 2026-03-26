@@ -419,6 +419,7 @@ const (
 	AgentWorker_Chat_FullMethodName          = "/hive.AgentWorker/Chat"
 	AgentWorker_Shutdown_FullMethodName      = "/hive.AgentWorker/Shutdown"
 	AgentWorker_ConfigChanged_FullMethodName = "/hive.AgentWorker/ConfigChanged"
+	AgentWorker_ExecuteTool_FullMethodName   = "/hive.AgentWorker/ExecuteTool"
 )
 
 // AgentWorkerClient is the client API for AgentWorker service.
@@ -435,6 +436,10 @@ type AgentWorkerClient interface {
 	// ConfigChanged pushes resolved structural config when definitions or
 	// control plane config change. The agent applies updates on its next turn.
 	ConfigChanged(ctx context.Context, in *ConfigChangedRequest, opts ...grpc.CallOption) (*ConfigChangedResponse, error)
+	// ExecuteTool runs a single tool and returns the result.
+	// Used when the control plane owns the inference loop and dispatches
+	// tool calls to the worker for sandboxed execution.
+	ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error)
 }
 
 type agentWorkerClient struct {
@@ -484,6 +489,16 @@ func (c *agentWorkerClient) ConfigChanged(ctx context.Context, in *ConfigChanged
 	return out, nil
 }
 
+func (c *agentWorkerClient) ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteToolResponse)
+	err := c.cc.Invoke(ctx, AgentWorker_ExecuteTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentWorkerServer is the server API for AgentWorker service.
 // All implementations must embed UnimplementedAgentWorkerServer
 // for forward compatibility.
@@ -498,6 +513,10 @@ type AgentWorkerServer interface {
 	// ConfigChanged pushes resolved structural config when definitions or
 	// control plane config change. The agent applies updates on its next turn.
 	ConfigChanged(context.Context, *ConfigChangedRequest) (*ConfigChangedResponse, error)
+	// ExecuteTool runs a single tool and returns the result.
+	// Used when the control plane owns the inference loop and dispatches
+	// tool calls to the worker for sandboxed execution.
+	ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error)
 	mustEmbedUnimplementedAgentWorkerServer()
 }
 
@@ -516,6 +535,9 @@ func (UnimplementedAgentWorkerServer) Shutdown(context.Context, *ShutdownRequest
 }
 func (UnimplementedAgentWorkerServer) ConfigChanged(context.Context, *ConfigChangedRequest) (*ConfigChangedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConfigChanged not implemented")
+}
+func (UnimplementedAgentWorkerServer) ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteTool not implemented")
 }
 func (UnimplementedAgentWorkerServer) mustEmbedUnimplementedAgentWorkerServer() {}
 func (UnimplementedAgentWorkerServer) testEmbeddedByValue()                     {}
@@ -585,6 +607,24 @@ func _AgentWorker_ConfigChanged_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentWorker_ExecuteTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentWorkerServer).ExecuteTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentWorker_ExecuteTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentWorkerServer).ExecuteTool(ctx, req.(*ExecuteToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentWorker_ServiceDesc is the grpc.ServiceDesc for AgentWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -599,6 +639,10 @@ var AgentWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfigChanged",
 			Handler:    _AgentWorker_ConfigChanged_Handler,
+		},
+		{
+			MethodName: "ExecuteTool",
+			Handler:    _AgentWorker_ExecuteTool_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

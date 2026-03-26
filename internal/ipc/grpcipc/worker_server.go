@@ -13,12 +13,18 @@ import (
 // WorkerServer adapts an ipc.AgentWorker to the gRPC AgentWorkerServer interface.
 type WorkerServer struct {
 	pb.UnimplementedAgentWorkerServer
-	worker ipc.AgentWorker
+	worker   ipc.AgentWorker
+	executor ipc.ToolExecutor // optional; set via SetToolExecutor
 }
 
 // NewWorkerServer creates a gRPC server that delegates to the given AgentWorker.
 func NewWorkerServer(worker ipc.AgentWorker) *WorkerServer {
 	return &WorkerServer{worker: worker}
+}
+
+// SetToolExecutor sets the tool executor for ExecuteTool RPCs.
+func (s *WorkerServer) SetToolExecutor(executor ipc.ToolExecutor) {
+	s.executor = executor
 }
 
 // Register registers this server with a gRPC service registrar.
@@ -64,4 +70,18 @@ func (s *WorkerServer) ConfigChanged(ctx context.Context, req *pb.ConfigChangedR
 		return nil, status.Errorf(codes.Internal, "config changed: %v", err)
 	}
 	return &pb.ConfigChangedResponse{}, nil
+}
+
+func (s *WorkerServer) ExecuteTool(ctx context.Context, req *pb.ExecuteToolRequest) (*pb.ExecuteToolResponse, error) {
+	if s.executor == nil {
+		return nil, status.Errorf(codes.Unimplemented, "tool execution not available")
+	}
+	result, err := s.executor.ExecuteTool(ctx, req.CallId, req.Name, req.Input)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "executing tool %s: %v", req.Name, err)
+	}
+	return &pb.ExecuteToolResponse{
+		Content: result.Content,
+		IsError: result.IsError,
+	}, nil
 }
