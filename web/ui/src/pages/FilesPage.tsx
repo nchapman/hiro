@@ -1,12 +1,7 @@
 import { useState, useCallback, useRef } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { RefreshCw, X, Circle } from "lucide-react"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { X, Circle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import FileTree from "@/components/FileTree"
 import type { FileTreeHandle } from "@/components/FileTree"
@@ -61,9 +56,9 @@ export default function FilesPage() {
     )
   }, [])
 
-  const handleSaved = useCallback(() => {
-    treeRef.current?.refresh()
-  }, [])
+  // No explicit tree refresh on save — the SSE watcher detects the
+  // file write and triggers a targeted refreshDir automatically.
+  const handleSaved = useCallback(() => {}, [])
 
   // Check if a path (or any child of it) has unsaved edits in open tabs.
   const hasDirtyChildren = useCallback((path: string) => {
@@ -161,19 +156,10 @@ export default function FilesPage() {
     <div className="flex h-full flex-1 overflow-hidden">
       {/* File tree sidebar */}
       <aside className="flex h-full w-60 min-w-60 flex-col border-r bg-card">
-        <div className="flex items-center justify-between px-4 py-4">
+        <div className="flex items-center px-4 py-4">
           <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Files
           </span>
-          <Tooltip>
-            <TooltipTrigger
-              onClick={() => treeRef.current?.refresh()}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:text-accent-foreground"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent side="right">Refresh</TooltipContent>
-          </Tooltip>
         </div>
         <Separator />
         <ScrollArea className="flex-1">
