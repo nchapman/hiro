@@ -99,15 +99,16 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager spawns worker p
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
 - **Sessions** are runtime state stored in `sessions/<uuid>/`. Persistent and coordinator agents survive restarts via `RestoreSessions()`.
-- **Ephemeral agents** are spawned via `spawn_agent` tool (available to all agents), run a single prompt, and are cleaned up.
-- **Persistent agents** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
-- **Coordinator agents** are a superset of persistent — they additionally get agent management tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
+- **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at session creation time (`CreateSession` takes a `mode` parameter). The `spawn_session` tool accepts a `mode` parameter (defaulting to ephemeral).
+- **Ephemeral sessions** run a single prompt and are cleaned up automatically.
+- **Persistent sessions** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
+- **Coordinator sessions** are a superset of persistent — they additionally get agent management tools (`resume_session`, `stop_session`, `send_message`, `list_sessions`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
 
 ### Agent Definition Structure
 
 ```
 agents/<name>/
-  agent.md          # Required. YAML frontmatter (name, model, mode, description, tools) + markdown body (system prompt)
+  agent.md          # Required. YAML frontmatter (name, model, description, tools) + markdown body (system prompt)
   soul.md           # Optional. Persona, tone, boundaries — prepended to system prompt
   tools.md          # Optional. Tool usage guidelines — appended as "## Tool Notes"
   skills/
@@ -182,8 +183,8 @@ Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `int
 |------|---------|------------|-------------|
 | `read_file` | Read file contents with line numbers | `path`, `offset`, `limit` | 64KB max output |
 | `write_file` | Write full content to file (creates dirs) | `path`, `content` | Full replacement only |
-| `edit` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
-| `multiedit` | Batch multiple edits to one file | `file_path`, `edits` (array of `{old_string, new_string, replace_all}`) | Edits applied sequentially; partial success supported |
+| `edit_file` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
+| `multiedit_file` | Batch multiple edits to one file | `file_path`, `edits` (array of `{old_string, new_string, replace_all}`) | Edits applied sequentially; partial success supported |
 | `list_files` | List directory contents | `path`, `pattern` (glob) | Max 500 entries; skips node_modules, vendor, dist, .git, hidden dirs |
 | `glob` | Find files by glob pattern | `pattern`, `path` | Max 100 results; uses ripgrep if available, falls back to Go; sorted by mod time (newest first) |
 | `grep` | Search file contents with regex | `pattern`, `path`, `include` (file glob), `literal_text` | Max 100 matches; 30s timeout; uses ripgrep if available |
@@ -194,22 +195,23 @@ Defined in `internal/agent/tools.go` via `buildTools()`. Implementations in `int
 
 ### Spawn Tool (all agents)
 
-All agents can spawn ephemeral subagents via `BuildSpawnTool()`. Scoped to descendants via `IsDescendant()`.
+All agents get `spawn_session` via `BuildSpawnTool()`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `spawn_agent` | Run ephemeral subagent to completion | `agent` (name), `prompt` | Blocks until done; forces ephemeral mode; cleans up after; 32KB max result |
+| `spawn_session` | Spawn a new session from an agent definition | `agent` (name), `prompt`, `mode` (ephemeral/persistent/coordinator) | Ephemeral (default): blocks until done, returns result, cleans up. Persistent/coordinator: creates long-lived session, returns ID. 32KB max result |
 
-### Coordinator Tools (mode: coordinator only)
+### Coordinator Tools (coordinator mode only)
 
-Defined in `internal/agent/tools_manager.go` via `BuildCoordinatorTools()`. Only injected for coordinator-mode agents. Scoped to descendants via `IsDescendant()`.
+Defined in `internal/agent/tools_manager.go` via `BuildCoordinatorTools()`. Only injected for coordinator-mode sessions. Scoped to descendants via `IsDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `start_agent` | Start a persistent child agent | `agent` (name) | Returns agent ID; respects agent config mode |
-| `send_message` | Send message to child and get response | `agent_id`, `message` | Blocks; scoped to descendants; serialized per-agent (mutex); 32KB max result |
-| `stop_agent` | Stop agent and its subtree | `agent_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent agents |
-| `list_agents` | List direct child agents | *(none)* | Shows name, ID, mode, description for direct children only |
+| `resume_session` | Restart a stopped session | `session_id` | Resumes with previous memory, history, todos |
+| `send_message` | Send message to child and get response | `session_id`, `message` | Blocks; scoped to descendants; serialized per-session (mutex); 32KB max result |
+| `stop_session` | Stop session and its subtree | `session_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent sessions |
+| `delete_session` | Permanently delete session and subtree | `session_id` | Removes all data; cannot be undone |
+| `list_sessions` | List direct child sessions | *(none)* | Shows name, ID, mode, description for direct children only |
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
@@ -231,22 +233,22 @@ Added in `runAgent()` via `BuildMemoryTools()`, `BuildTodoTools()`, `BuildHistor
 
 ### Tool Totals by Agent Type
 
-- **Ephemeral agents:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
-- **Persistent agents:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
-- **Coordinator agents:** 11 built-in + 1 spawn + 4 coordinator + 2 memory + 1 todos + 2 history = 21 tools (+ 1 if skills)
+- **Ephemeral sessions:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
+- **Persistent sessions:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
+- **Coordinator sessions:** 11 built-in + 1 spawn + 5 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
-The coordinator (`agents/coordinator/agent.md`) is the top-level agent. It uses `mode: coordinator` with model `claude-sonnet-4-20250514`.
+The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started in coordinator mode at bootstrap.
 
 **Bootstrap flow** (`cmd/hive/main.go`):
 1. Check `HIVE_API_KEY` is set
 2. Create `Manager` with provider/API key
 3. `RestoreSessions()` — resume any persistent agents from prior runs
-4. `AgentByName("coordinator")` — check if already running (from restore)
-5. If not running, `StartAgent(ctx, "coordinator", "")` — no parent, becomes root
+4. `SessionByAgentName("coordinator")` — check if already running (from restore)
+5. If not running, `CreateSession(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
 
-The coordinator uses `mode: coordinator`, which gives it persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents (including non-coordinators) get `spawn_agent` for firing off ephemeral subagents.
+Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`resume_session`, `stop_session`, `send_message`, `list_sessions`, `delete_session`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `spawn_session` which supports all modes (non-coordinators are restricted to ephemeral).
 
 ## Control Plane
 
@@ -284,8 +286,8 @@ agents:
 ## Creating Agents at Runtime
 
 Agents can create new agent definitions at runtime using their file tools:
-1. Use `write_file` / `edit` to create `agents/<name>/agent.md` (and optionally `soul.md`, `tools.md`, `skills/*.md`)
-2. Call `start_agent` with the new agent name — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
+1. Use `write_file` / `edit_file` to create `agents/<name>/agent.md` (and optionally `soul.md`, `tools.md`, `skills/*.md`)
+2. Use `spawn_session` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 
 Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next `StreamChat` call.
@@ -298,7 +300,7 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 ### Agent Tool Scoping
 
-Coordinator tools (`start_agent`, `stop_agent`, `send_message`, `list_agents`) and `spawn_agent` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+Coordinator tools (`resume_session`, `stop_session`, `send_message`, `list_sessions`, `delete_session`) and `spawn_session` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
 
 ## Testing Notes
 

@@ -6,4 +6,4 @@ Parent directories are created automatically. Use this to create new files or co
 
 - Read a file first before overwriting it to avoid data loss.
 - Include the complete file content — this tool replaces the entire file.
-- For targeted edits to existing files, use the edit or multiedit tool instead.
+- For targeted edits to existing files, use the edit_file or multiedit_file tool instead.

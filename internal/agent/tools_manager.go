@@ -22,18 +22,16 @@ func truncateResult(s string) string {
 }
 
 // BuildSpawnTool returns the spawn_session tool, available to all agents.
-// Spawning ephemeral sessions is universally safe — the session runs,
-// returns a result, and is cleaned up.
-func BuildSpawnTool(host ipc.AgentHost) fantasy.AgentTool {
-	return toolSpawnSession(host)
+// callerMode gates non-coordinator agents to ephemeral mode only.
+func BuildSpawnTool(host ipc.AgentHost, callerMode config.AgentMode) fantasy.AgentTool {
+	return toolSpawnSession(host, callerMode)
 }
 
 // BuildCoordinatorTools returns tools for managing session lifecycles.
 // Only coordinator-mode agents should receive these.
 func BuildCoordinatorTools(host ipc.AgentHost) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		toolCreateSession(host),
-		toolStartSession(host),
+		toolResumeSession(host),
 		toolListSessions(host),
 		toolSendMessage(host),
 		toolStopSession(host),
@@ -70,67 +68,66 @@ func BuildTodoTools(sessionDir string) []fantasy.AgentTool {
 
 type spawnSessionInput struct {
 	Agent  string `json:"agent"  description:"The name of the agent definition to run (matches a directory name under agents/)."`
-	Prompt string `json:"prompt" description:"A clear, self-contained description of the task. Do not assume the session has any prior context."`
+	Prompt string `json:"prompt" description:"The task prompt. Required for ephemeral mode. For persistent/coordinator sessions, use send_message after creation."`
+	Mode   string `json:"mode"   description:"Session mode: 'ephemeral' (default) runs the prompt and returns the result; 'persistent' or 'coordinator' creates a long-lived session and returns its ID." default:"ephemeral"`
 }
 
-func toolSpawnSession(host ipc.AgentHost) fantasy.AgentTool {
+func toolSpawnSession(host ipc.AgentHost, callerMode config.AgentMode) fantasy.AgentTool {
 	return fantasy.NewAgentTool("spawn_session",
-		"Run an ephemeral session that executes a prompt and returns the result. Blocks until done; the session is cleaned up automatically.",
+		"Spawn a new session from an agent definition. In ephemeral mode (default), runs a prompt and returns the result. In persistent or coordinator mode, creates a long-lived session and returns its ID.",
 		func(ctx context.Context, input spawnSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
-			if input.Prompt == "" {
-				return fantasy.NewTextErrorResponse("prompt is required"), nil
+
+			mode := input.Mode
+			if mode == "" {
+				mode = "ephemeral"
 			}
 
-			result, err := host.SpawnSession(ctx, input.Agent, input.Prompt, nil)
-			if err != nil {
+			switch config.AgentMode(mode) {
+			case config.ModeEphemeral:
+				if input.Prompt == "" {
+					return fantasy.NewTextErrorResponse("prompt is required for ephemeral mode"), nil
+				}
+				result, err := host.SpawnSession(ctx, input.Agent, input.Prompt, nil)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(
+						fmt.Sprintf("session failed: %v", err)), nil
+				}
+				return fantasy.NewTextResponse(truncateResult(result)), nil
+
+			case config.ModePersistent, config.ModeCoordinator:
+				if callerMode != config.ModeCoordinator {
+					return fantasy.NewTextErrorResponse(
+						fmt.Sprintf("only coordinator agents can spawn %s sessions", mode)), nil
+				}
+				id, err := host.CreateSession(ctx, input.Agent, mode)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(
+						fmt.Sprintf("failed to create session: %v", err)), nil
+				}
+				return fantasy.NewTextResponse(
+					fmt.Sprintf("Session created from %q with ID: %s (mode: %s)", input.Agent, id, mode)), nil
+
+			default:
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("session failed: %v", err)), nil
+					fmt.Sprintf("invalid mode %q: must be ephemeral, persistent, or coordinator", mode)), nil
 			}
-
-			return fantasy.NewTextResponse(truncateResult(result)), nil
 		},
 	)
 }
 
-// --- create_session tool ---
+// --- resume_session tool ---
 
-type createSessionInput struct {
-	Agent string `json:"agent" description:"The name of the agent definition to start (matches a directory name under agents/)."`
+type resumeSessionInput struct {
+	SessionID string `json:"session_id" description:"The ID of a stopped session to resume."`
 }
 
-func toolCreateSession(host ipc.AgentHost) fantasy.AgentTool {
-	return fantasy.NewAgentTool("create_session",
-		"Create a new persistent session from an agent definition. The session stays running until explicitly stopped. Returns the session ID; use send_message to interact with it.",
-		func(ctx context.Context, input createSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if input.Agent == "" {
-				return fantasy.NewTextErrorResponse("agent name is required"), nil
-			}
-
-			id, err := host.CreateSession(ctx, input.Agent)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("failed to create session: %v", err)), nil
-			}
-
-			return fantasy.NewTextResponse(
-				fmt.Sprintf("Session created from %q with ID: %s", input.Agent, id)), nil
-		},
-	)
-}
-
-// --- start_session tool ---
-
-type startSessionInput struct {
-	SessionID string `json:"session_id" description:"The ID of a stopped session to restart."`
-}
-
-func toolStartSession(host ipc.AgentHost) fantasy.AgentTool {
-	return fantasy.NewAgentTool("start_session",
-		"Restart a stopped session. Resumes with its previous memory, history, and todos.",
-		func(ctx context.Context, input startSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func toolResumeSession(host ipc.AgentHost) fantasy.AgentTool {
+	return fantasy.NewAgentTool("resume_session",
+		"Resume a stopped session. Picks up where it left off with its previous memory, history, and todos.",
+		func(ctx context.Context, input resumeSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
 			}
@@ -138,11 +135,11 @@ func toolStartSession(host ipc.AgentHost) fantasy.AgentTool {
 			err := host.StartSession(ctx, input.SessionID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("failed to start session: %v", err)), nil
+					fmt.Sprintf("failed to resume session: %v", err)), nil
 			}
 
 			return fantasy.NewTextResponse(
-				fmt.Sprintf("Session %s started.", input.SessionID)), nil
+				fmt.Sprintf("Session %s resumed.", input.SessionID)), nil
 		},
 	)
 }
@@ -212,7 +209,7 @@ type stopSessionInput struct {
 
 func toolStopSession(host ipc.AgentHost) fantasy.AgentTool {
 	return fantasy.NewAgentTool("stop_session",
-		"Stop a session and its descendants. Data is preserved — use start_session to resume, or delete_session to remove permanently.",
+		"Stop a session and its descendants. Data is preserved — use resume_session to restart, or delete_session to remove permanently.",
 		func(ctx context.Context, input stopSessionInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil

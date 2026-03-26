@@ -23,7 +23,7 @@ type EditParams struct {
 // NewEditTool creates a tool that performs surgical find-and-replace edits on files.
 func NewEditTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"edit",
+		"edit_file",
 		editDescription,
 		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {

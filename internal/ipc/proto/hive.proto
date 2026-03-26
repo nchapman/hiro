@@ -10,7 +10,7 @@ service AgentHost {
   // SpawnSession runs an ephemeral session to completion, streaming deltas.
   rpc SpawnSession(SpawnSessionRequest) returns (stream ChatEvent);
 
-  // CreateSession creates and starts a new persistent session from an agent definition.
+  // CreateSession creates and starts a new session from an agent definition.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
 
   // SendMessage sends a message to a running session, streaming deltas.
@@ -64,6 +64,7 @@ message SpawnSessionRequest {
 message CreateSessionRequest {
   string agent_name = 1;
   string parent_id = 2;
+  string mode = 3;
 }
 
 message CreateSessionResponse {

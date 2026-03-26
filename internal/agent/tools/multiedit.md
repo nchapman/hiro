@@ -1,4 +1,4 @@
-Apply multiple find-and-replace edits to a single file in one operation. Prefer this over repeated edit calls when making several changes to the same file.
+Apply multiple find-and-replace edits to a single file in one operation. Prefer this over repeated edit_file calls when making several changes to the same file.
 
 ## Parameters
 
@@ -15,7 +15,7 @@ Apply multiple find-and-replace edits to a single file in one operation. Prefer 
 
 ## Critical: exact matching
 
-All rules from the edit tool apply to each edit — old_string must match exactly, including whitespace and indentation. Include 3-5 lines of surrounding context.
+All rules from the edit_file tool apply to each edit — old_string must match exactly, including whitespace and indentation. Include 3-5 lines of surrounding context.
 
 ## Tips
 

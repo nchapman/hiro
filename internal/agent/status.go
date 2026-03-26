@@ -13,8 +13,8 @@ var toolStatusMessages = map[string]string{
 	// Built-in tools
 	"read_file":   "Reading {{path}}",
 	"write_file":  "Writing {{path}}",
-	"edit":        "Editing {{file_path}}",
-	"multiedit":   "Editing {{file_path}}",
+	"edit_file":      "Editing {{file_path}}",
+	"multiedit_file": "Editing {{file_path}}",
 	"list_files":  "Listing {{path}}",
 	"glob":        "Searching for {{pattern}}",
 	"grep":        "Searching for {{pattern}}",
@@ -27,8 +27,7 @@ var toolStatusMessages = map[string]string{
 	"spawn_session": "Spawning {{agent}}",
 
 	// Coordinator tools
-	"create_session": "Creating session for {{agent}}",
-	"start_session":  "Starting session",
+	"resume_session": "Resuming session",
 	"stop_session":   "Stopping session",
 	"delete_session": "Deleting session",
 	"list_sessions":  "Listing sessions",

@@ -40,10 +40,11 @@ func (c *HostClient) SpawnSession(ctx context.Context, agentName, prompt string,
 	return recvStream(stream, onEvent)
 }
 
-func (c *HostClient) CreateSession(ctx context.Context, agentName string) (string, error) {
+func (c *HostClient) CreateSession(ctx context.Context, agentName, mode string) (string, error) {
 	resp, err := c.client.CreateSession(ctx, &pb.CreateSessionRequest{
 		AgentName: agentName,
 		ParentId:  c.callerID,
+		Mode:      mode,
 	})
 	if err != nil {
 		return "", err

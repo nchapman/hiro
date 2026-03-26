@@ -27,7 +27,7 @@ type fakeManager struct {
 
 	lastSpawnReq  struct{ name, prompt, parentID string }
 	lastSendReq   struct{ id, message string }
-	lastCreateReq struct{ name, parentID string }
+	lastCreateReq struct{ name, parentID, mode string }
 	lastStopReq   string
 }
 
@@ -42,9 +42,10 @@ func (f *fakeManager) SpawnSession(ctx context.Context, agentName, prompt, paren
 	return f.spawnResult, nil
 }
 
-func (f *fakeManager) CreateSession(ctx context.Context, name, parentID string) (string, error) {
+func (f *fakeManager) CreateSession(ctx context.Context, name, parentID string, mode string) (string, error) {
 	f.lastCreateReq.name = name
 	f.lastCreateReq.parentID = parentID
+	f.lastCreateReq.mode = mode
 	return f.createID, nil
 }
 
@@ -202,7 +203,7 @@ func TestHostRoundtrip_CreateSession(t *testing.T) {
 	mgr := &fakeManager{createID: "session-123"}
 	client := setupHostTest(t, mgr, "parent-1")
 
-	id, err := client.CreateSession(t.Context(), "coordinator")
+	id, err := client.CreateSession(t.Context(), "coordinator", "coordinator")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -211,6 +212,9 @@ func TestHostRoundtrip_CreateSession(t *testing.T) {
 	}
 	if mgr.lastCreateReq.parentID != "parent-1" {
 		t.Errorf("parent_id = %q, want parent-1", mgr.lastCreateReq.parentID)
+	}
+	if mgr.lastCreateReq.mode != "coordinator" {
+		t.Errorf("mode = %q, want coordinator", mgr.lastCreateReq.mode)
 	}
 }
 

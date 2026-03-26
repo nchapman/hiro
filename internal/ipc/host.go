@@ -11,9 +11,10 @@ type AgentHost interface {
 	// events (text deltas, tool calls, tool results).
 	SpawnSession(ctx context.Context, agentName, prompt string, onEvent func(ChatEvent) error) (string, error)
 
-	// CreateSession creates and starts a new persistent child session from an
-	// agent definition. Returns the session ID. The host determines the parent.
-	CreateSession(ctx context.Context, agentName string) (string, error)
+	// CreateSession creates and starts a new child session from an agent
+	// definition in the given mode. Returns the session ID. The host
+	// determines the parent.
+	CreateSession(ctx context.Context, agentName, mode string) (string, error)
 
 	// SendMessage sends a message to a running session and returns the response.
 	// The host enforces that the target is a descendant. onEvent receives

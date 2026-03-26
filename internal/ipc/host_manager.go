@@ -12,8 +12,8 @@ type HostManager interface {
 	// SpawnSession runs an ephemeral session and returns its result.
 	SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ChatEvent) error) (string, error)
 
-	// CreateSession creates and starts a new persistent child session.
-	CreateSession(ctx context.Context, name, parentID string) (string, error)
+	// CreateSession creates and starts a new child session in the given mode.
+	CreateSession(ctx context.Context, name, parentID string, mode string) (string, error)
 
 	// SendMessage sends a message to a running session and returns the response.
 	SendMessage(ctx context.Context, sessionID, message string, onEvent func(ChatEvent) error) (string, error)

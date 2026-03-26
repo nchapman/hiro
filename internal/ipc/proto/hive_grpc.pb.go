@@ -38,7 +38,7 @@ const (
 type AgentHostClient interface {
 	// SpawnSession runs an ephemeral session to completion, streaming deltas.
 	SpawnSession(ctx context.Context, in *SpawnSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error)
-	// CreateSession creates and starts a new persistent session from an agent definition.
+	// CreateSession creates and starts a new session from an agent definition.
 	CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (*CreateSessionResponse, error)
 	// SendMessage sends a message to a running session, streaming deltas.
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error)
@@ -169,7 +169,7 @@ func (c *agentHostClient) GetSecrets(ctx context.Context, in *GetSecretsRequest,
 type AgentHostServer interface {
 	// SpawnSession runs an ephemeral session to completion, streaming deltas.
 	SpawnSession(*SpawnSessionRequest, grpc.ServerStreamingServer[ChatEvent]) error
-	// CreateSession creates and starts a new persistent session from an agent definition.
+	// CreateSession creates and starts a new session from an agent definition.
 	CreateSession(context.Context, *CreateSessionRequest) (*CreateSessionResponse, error)
 	// SendMessage sends a message to a running session, streaming deltas.
 	SendMessage(*SendMessageRequest, grpc.ServerStreamingServer[ChatEvent]) error

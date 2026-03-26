@@ -112,13 +112,23 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 	}
 }
 
-// StartAgent loads an agent definition by name and starts it as a persistent
-// agent supervised by the manager's lifetime context. The ctx parameter is used
-// only for config loading and worker spawning, not for the running agent's lifetime.
+// CreateSession loads an agent definition by name and starts a session in the
+// given mode. The ctx parameter is used only for config loading and worker
+// spawning — persistent/coordinator sessions use the manager's lifetime context.
 // parentID tracks lineage; pass "" for top-level agents.
-func (m *Manager) CreateSession(ctx context.Context, name, parentID string) (string, error) {
+// mode is a string to satisfy the ipc.HostManager interface boundary; it must
+// be one of "persistent", "ephemeral", or "coordinator".
+func (m *Manager) CreateSession(ctx context.Context, name, parentID string, mode string) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
+	}
+
+	agentMode := config.AgentMode(mode)
+	switch agentMode {
+	case config.ModePersistent, config.ModeEphemeral, config.ModeCoordinator:
+		// valid
+	default:
+		return "", fmt.Errorf("invalid mode %q: must be persistent, ephemeral, or coordinator", mode)
 	}
 
 	cfg, err := config.LoadAgentDir(m.agentDefDir(name))
@@ -127,12 +137,12 @@ func (m *Manager) CreateSession(ctx context.Context, name, parentID string) (str
 	}
 
 	id := uuid.Must(uuid.NewV7()).String()
-	return m.startSession(ctx, id, cfg, parentID)
+	return m.startSession(ctx, id, cfg, parentID, agentMode)
 }
 
-// SpawnSubagent starts an ephemeral agent that runs the given prompt and returns
+// SpawnSession starts an ephemeral agent that runs the given prompt and returns
 // the result. Blocks until the subagent completes. The agent always runs in
-// ephemeral mode regardless of its config file — the caller controls the lifecycle.
+// ephemeral mode — the caller controls the lifecycle.
 // parentID identifies the spawning agent (empty for top-level spawns).
 // onEvent receives streaming events during execution (may be nil).
 func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
@@ -144,11 +154,9 @@ func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID 
 	if err != nil {
 		return "", fmt.Errorf("loading agent %q: %w", agentName, err)
 	}
-	// Always ephemeral — the caller controls the lifecycle, not the config.
-	cfg.Mode = config.ModeEphemeral
 
 	id := uuid.Must(uuid.NewV7()).String()
-	agentID, err := m.startSession(ctx, id, cfg, parentID)
+	agentID, err := m.startSession(ctx, id, cfg, parentID, config.ModeEphemeral)
 	if err != nil {
 		return "", err
 	}
@@ -271,6 +279,7 @@ func (m *Manager) StartSession(ctx context.Context, agentID string) error {
 
 	name := ra.info.Name
 	parentID := ra.info.ParentID
+	mode := ra.info.Mode
 
 	// Remove the stopped entry so startSession can re-register it.
 	m.mu.Lock()
@@ -284,7 +293,7 @@ func (m *Manager) StartSession(ctx context.Context, agentID string) error {
 		return fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
-	if _, err = m.startSession(ctx, agentID, cfg, parentID); err != nil {
+	if _, err = m.startSession(ctx, agentID, cfg, parentID, mode); err != nil {
 		// Re-register as stopped so the session remains visible.
 		m.reregisterStopped(agentID, ra)
 		return err
@@ -570,7 +579,7 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 				info: SessionInfo{
 					ID:          manifest.ID,
 					Name:        cfg.Name,
-					Mode:        cfg.Mode,
+					Mode:        manifest.Mode,
 					Description: cfg.Description,
 					ParentID:    manifest.ParentID,
 					Status:      SessionStatusStopped,
@@ -587,7 +596,7 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 			continue
 		}
 
-		_, err = m.startSession(ctx, manifest.ID, cfg, manifest.ParentID)
+		_, err = m.startSession(ctx, manifest.ID, cfg, manifest.ParentID, manifest.Mode)
 		if err != nil {
 			m.logger.Warn("failed to restore agent",
 				"id", manifest.ID, "agent", manifest.Agent, "error", err)
@@ -637,7 +646,7 @@ func (m *Manager) Shutdown() {
 
 // startSession creates a session directory, spawns a worker process,
 // and registers the agent in the manager.
-func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string) (string, error) {
+func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string, mode config.AgentMode) (string, error) {
 	// Create session directory and standard subdirectories.
 	sessDir := m.sessionDir(id)
 	if err := os.MkdirAll(sessDir, 0700); err != nil {
@@ -656,7 +665,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		manifest := config.Manifest{
 			ID:        id,
 			Agent:     cfg.Name,
-			Mode:      cfg.Mode,
+			Mode:      mode,
 			ParentID:  parentID,
 			CreatedAt: time.Now(),
 		}
@@ -676,13 +685,13 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			hasSkills = true
 		}
 	}
-	allowedTools := buildAllowedToolsMap(effectiveTools, cfg.Mode, hasSkills)
+	allowedTools := buildAllowedToolsMap(effectiveTools, mode, hasSkills)
 
 	// Persistent agents use the manager's long-lived context so they
 	// survive beyond the tool call that started them. Ephemeral agents
 	// use the caller's context (typically the parent's tool call).
 	spawnCtx := ctx
-	if cfg.Mode.IsPersistent() {
+	if mode.IsPersistent() {
 		spawnCtx = m.ctx
 	}
 
@@ -697,7 +706,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		}
 		groups = []uint32{gid}
 		// Coordinator agents get write access to agents/ and skills/.
-		if cfg.Mode == config.ModeCoordinator {
+		if mode == config.ModeCoordinator {
 			if coordGID := m.uidPool.CoordinatorGID(); coordGID != 0 {
 				groups = append(groups, coordGID)
 			}
@@ -735,7 +744,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		SessionID:      id,
 		AgentName:      cfg.Name,
 		ParentID:       parentID,
-		Mode:           string(cfg.Mode),
+		Mode:           string(mode),
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
@@ -766,7 +775,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		info: SessionInfo{
 			ID:          id,
 			Name:        cfg.Name,
-			Mode:        cfg.Mode,
+			Mode:        mode,
 			Description: cfg.Description,
 			ParentID:    parentID,
 			Status:      SessionStatusRunning,
@@ -789,7 +798,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	m.logger.Info("session started",
 		"id", id,
 		"name", cfg.Name,
-		"mode", cfg.Mode,
+		"mode", mode,
 		"parent", parentID,
 	)
 
@@ -947,14 +956,14 @@ func (m *Manager) collectDescendants(agentID string) []string {
 	return result
 }
 
-// spawnTool is injected into all agents — spawning ephemeral subagents is
-// universally available since the subagent is fire-and-forget.
+// spawnTool is injected into all agents. Non-coordinators are restricted
+// to ephemeral mode at the tool layer.
 var spawnTool = "spawn_session"
 
 // coordinatorTools are injected only for coordinator-mode agents. These
 // manage persistent agent lifecycles and require hive-coordinators group.
 var coordinatorTools = []string{
-	"create_session", "start_session", "list_sessions", "send_message", "stop_session", "delete_session",
+	"resume_session", "list_sessions", "send_message", "stop_session", "delete_session",
 }
 
 // persistentTools are injected for persistent and coordinator agents.
@@ -1023,7 +1032,7 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 		allowed[t] = true
 	}
 
-	// All agents can spawn ephemeral subagents.
+	// All agents get spawn_session; coordinators can use all modes.
 	allowed[spawnTool] = true
 
 	// Coordinator agents get full agent management tools.
@@ -1136,6 +1145,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	type pushTarget struct {
 		id       string
 		parentID string
+		mode     config.AgentMode
 		worker   ipc.AgentWorker
 	}
 
@@ -1143,14 +1153,14 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	var targets []pushTarget
 	for id, s := range m.sessions {
 		if s.info.Name == agentName && s.info.Status == SessionStatusRunning && s.worker != nil {
-			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, worker: s.worker})
+			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, worker: s.worker})
 		}
 	}
 	m.mu.RUnlock()
 
 	for _, t := range targets {
 		effectiveTools := m.computeEffectiveTools(cfg, t.parentID)
-		allowedTools := buildAllowedToolsMap(effectiveTools, cfg.Mode, hasSkills)
+		allowedTools := buildAllowedToolsMap(effectiveTools, t.mode, hasSkills)
 
 		update := ipc.ConfigUpdate{
 			EffectiveTools: allowedTools,

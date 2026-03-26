@@ -48,7 +48,7 @@ func (s *HostServer) SpawnSession(req *pb.SpawnSessionRequest, stream grpc.Serve
 }
 
 func (s *HostServer) CreateSession(ctx context.Context, req *pb.CreateSessionRequest) (*pb.CreateSessionResponse, error) {
-	id, err := s.mgr.CreateSession(ctx, req.AgentName, req.ParentId)
+	id, err := s.mgr.CreateSession(ctx, req.AgentName, req.ParentId, req.Mode)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "create session: %v", err)
 	}

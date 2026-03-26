@@ -174,8 +174,7 @@ func (m AgentMode) IsPersistent() bool {
 type AgentConfig struct {
 	Name          string
 	Model         string
-	Provider      string    // optional: override default provider (e.g. "openrouter")
-	Mode          AgentMode // ModePersistent (default), ModeEphemeral, or ModeCoordinator
+	Provider      string // optional: override default provider (e.g. "openrouter")
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
 	Prompt        string   // the markdown body — the agent's operating instructions
@@ -220,22 +219,10 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		return AgentConfig{}, fmt.Errorf("loading agent config: %w", err)
 	}
 
-	mode := AgentMode(parsed.Frontmatter.String("mode"))
-	if mode == "" {
-		mode = ModePersistent
-	}
-	switch mode {
-	case ModePersistent, ModeEphemeral, ModeCoordinator:
-		// valid
-	default:
-		return AgentConfig{}, fmt.Errorf("unknown mode %q in %s (valid: persistent, ephemeral, coordinator)", mode, agentPath)
-	}
-
 	agent := AgentConfig{
 		Name:          parsed.Frontmatter.String("name"),
 		Model:         parsed.Frontmatter.String("model"),
 		Provider:      parsed.Frontmatter.String("provider"),
-		Mode:          mode,
 		Description:   parsed.Frontmatter.String("description"),
 		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
 		Prompt:        parsed.Body,
@@ -270,7 +257,7 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 
 // ReloadAgentTexts re-reads the text content of an agent definition from disk.
 // It returns the prompt body (from agent.md), soul (from soul.md), and tool
-// notes (from tools.md). Structural frontmatter (name, model, mode, tools) is
+// notes (from tools.md). Structural frontmatter (name, model, tools) is
 // parsed but discarded — only the body text matters for hot-reload.
 func ReloadAgentTexts(dir string) (prompt, soul, tools string, err error) {
 	parsed, err := ParseMarkdownFile(filepath.Join(dir, "agent.md"))

@@ -29,7 +29,7 @@ type MultiEditParams struct {
 // NewMultiEditTool creates a tool that applies multiple edits to a single file.
 func NewMultiEditTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"multiedit",
+		"multiedit_file",
 		multieditDescription,
 		func(ctx context.Context, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
