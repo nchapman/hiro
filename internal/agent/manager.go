@@ -19,6 +19,7 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/models"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
@@ -175,6 +176,80 @@ func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID 
 		return "", fmt.Errorf("subagent %q failed: %w", agentName, err)
 	}
 	return result, nil
+}
+
+// UpdateSessionConfig changes the model and/or reasoning effort for a running session.
+// Changes take effect on the next Chat() call.
+func (m *Manager) UpdateSessionConfig(ctx context.Context, sessionID, model string, reasoningEffort *string) error {
+	ra := m.getSession(sessionID)
+	if ra == nil {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+	if ra.info.Status == SessionStatusStopped {
+		return fmt.Errorf("session %q is stopped", sessionID)
+	}
+	if ra.loop == nil {
+		return fmt.Errorf("session %q has no inference loop", sessionID)
+	}
+
+	// Serialize with SendMessage to prevent concurrent access to session state.
+	ra.mu.Lock()
+	defer ra.mu.Unlock()
+
+	if model != "" && model != ra.info.Model {
+		// Validate model against the known catalogue.
+		provider, apiKey, err := m.resolveProvider(config.AgentConfig{})
+		if err != nil {
+			return fmt.Errorf("resolving provider: %w", err)
+		}
+		known := models.ModelsForProvider(provider)
+		valid := false
+		for _, km := range known {
+			if km.ID == model {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("unknown model %q for provider %q", model, provider)
+		}
+
+		lm, err := CreateLanguageModel(ctx, ProviderType(provider), apiKey, model)
+		if err != nil {
+			return fmt.Errorf("creating language model %q: %w", model, err)
+		}
+		ra.loop.UpdateModel(lm, model, provider)
+		ra.info.Model = model
+	}
+
+	if reasoningEffort != nil {
+		if !validReasoningEffort(*reasoningEffort) {
+			return fmt.Errorf("invalid reasoning effort %q", *reasoningEffort)
+		}
+		ra.loop.SetReasoningEffort(*reasoningEffort)
+	}
+
+	// Persist config to DB so it survives restarts.
+	if m.pdb != nil {
+		cfg := platformdb.SessionConfig{
+			ModelOverride:   ra.info.Model,
+			ReasoningEffort: ra.loop.ReasoningEffort(),
+		}
+		if err := m.pdb.UpdateSessionConfig(sessionID, cfg); err != nil {
+			m.logger.Warn("failed to persist session config", "session", sessionID, "error", err)
+		}
+	}
+
+	return nil
+}
+
+var validEfforts = map[string]bool{
+	"": true, "on": true, "low": true, "medium": true, "high": true, "max": true,
+	"minimal": true, "xhigh": true, // OpenAI/OpenRouter levels
+}
+
+func validReasoningEffort(effort string) bool {
+	return validEfforts[effort]
 }
 
 // SendMessage sends a message to a running agent and streams the response.
@@ -607,6 +682,15 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 		if err != nil {
 			m.logger.Warn("failed to restore agent",
 				"id", s.ID, "agent", s.AgentName, "error", err)
+			continue
+		}
+
+		// Restore per-session config (model override, reasoning effort).
+		if sessCfg, cfgErr := m.pdb.GetSessionConfig(s.ID); cfgErr == nil {
+			if sessCfg.ModelOverride != "" || sessCfg.ReasoningEffort != "" {
+				effort := sessCfg.ReasoningEffort
+				_ = m.UpdateSessionConfig(ctx, s.ID, sessCfg.ModelOverride, &effort)
+			}
 		}
 	}
 	return nil

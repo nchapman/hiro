@@ -1,12 +1,12 @@
 package ipc
 
 // ChatEvent is a streaming event emitted during agent chat.
-// It carries text deltas, tool call details, and tool results
-// through the same channel.
+// It carries text deltas, tool call details, tool results,
+// and reasoning/thinking content through the same channel.
 type ChatEvent struct {
-	Type string `json:"type"` // "delta", "tool_call", "tool_result"
+	Type string `json:"type"` // "delta", "tool_call", "tool_result", "reasoning_start", "reasoning_delta", "reasoning_end"
 
-	// Text delta (type == "delta")
+	// Text delta (type == "delta") or reasoning delta (type == "reasoning_delta")
 	Content string `json:"content,omitempty"`
 
 	// Tool call (type == "tool_call")

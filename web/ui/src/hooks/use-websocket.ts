@@ -18,7 +18,7 @@ export interface UsageInfo {
 }
 
 export interface ChatWireMessage {
-  type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result"
+  type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result" | "config" | "reasoning_start" | "reasoning_delta" | "reasoning_end"
   role?: "user" | "assistant"
   content?: string
   tool_call_id?: string
@@ -28,6 +28,8 @@ export interface ChatWireMessage {
   is_error?: boolean
   status?: string
   usage?: UsageInfo
+  model?: string
+  reasoning_effort?: string
 }
 
 export function useWebSocket(sessionId: string | null) {

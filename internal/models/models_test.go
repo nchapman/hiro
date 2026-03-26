@@ -53,6 +53,48 @@ func TestCost_UnknownModel(t *testing.T) {
 	}
 }
 
+func TestModelsForProvider_Anthropic(t *testing.T) {
+	models := ModelsForProvider("anthropic")
+	if len(models) == 0 {
+		t.Fatal("expected anthropic models")
+	}
+	// Should include a known model.
+	found := false
+	for _, m := range models {
+		if m.ID == "claude-sonnet-4-20250514" {
+			found = true
+			if m.ContextWindow <= 0 {
+				t.Error("expected positive context window")
+			}
+			if !m.CanReason {
+				t.Error("expected CanReason for sonnet-4")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find claude-sonnet-4-20250514 in anthropic models")
+	}
+}
+
+func TestModelsForProvider_Unknown(t *testing.T) {
+	models := ModelsForProvider("totally-fake-provider")
+	if len(models) != 0 {
+		t.Errorf("expected 0 models for fake provider, got %d", len(models))
+	}
+}
+
+func TestModelsForProvider_HasReasoningLevels(t *testing.T) {
+	models := ModelsForProvider("anthropic")
+	for _, m := range models {
+		if m.CanReason && len(m.ReasoningLevels) > 0 {
+			// At least one model should have reasoning levels.
+			return
+		}
+	}
+	t.Error("expected at least one model with reasoning levels")
+}
+
 func TestRegistryPopulated(t *testing.T) {
 	ensureInit()
 	if len(registry) < 10 {

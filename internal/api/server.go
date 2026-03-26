@@ -82,6 +82,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 
+	// Models API (authenticated)
+	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
+
 	// Usage API routes (authenticated)
 	s.mux.HandleFunc("GET /api/sessions/{id}/usage", s.requireAuth(s.handleSessionUsage))
 	s.mux.HandleFunc("GET /api/usage", s.requireAuth(s.handleTotalUsage))

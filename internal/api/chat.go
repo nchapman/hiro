@@ -20,17 +20,20 @@ import (
 // For tool calls: type="tool_call", tool_call_id, tool_name, input
 // For tool results: type="tool_result", tool_call_id, content (output), is_error
 // For control: type="done"|"error"|"system"|"message"
+// For config changes: type="config", model, reasoning_effort
 type ChatMessage struct {
-	Type       string     `json:"type"`
-	Role       string     `json:"role,omitempty"`
-	Content    string     `json:"content,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolName   string     `json:"tool_name,omitempty"`
-	Input      string     `json:"input,omitempty"`
-	Output     string     `json:"output,omitempty"`
-	IsError    bool       `json:"is_error,omitempty"`
-	Status     string     `json:"status,omitempty"`
-	Usage      *UsageInfo `json:"usage,omitempty"`
+	Type            string     `json:"type"`
+	Role            string     `json:"role,omitempty"`
+	Content         string     `json:"content,omitempty"`
+	ToolCallID      string     `json:"tool_call_id,omitempty"`
+	ToolName        string     `json:"tool_name,omitempty"`
+	Input           string     `json:"input,omitempty"`
+	Output          string     `json:"output,omitempty"`
+	IsError         bool       `json:"is_error,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	Usage           *UsageInfo `json:"usage,omitempty"`
+	Model           string     `json:"model,omitempty"`
+	ReasoningEffort *string    `json:"reasoning_effort,omitempty"`
 }
 
 // SetManager sets the agent manager and leader agent ID for handling chat.
@@ -111,6 +114,20 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 			s.logger.Debug("chat connection closed", "error", err)
 			return
+		}
+
+		// Handle config changes (model switch, reasoning toggle).
+		if msg.Type == "config" {
+			if err := s.manager.UpdateSessionConfig(ctx, sessionID, msg.Model, msg.ReasoningEffort); err != nil {
+				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
+			} else {
+				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
+			}
+			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(sessionID)}
+			if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
+				return
+			}
+			continue
 		}
 
 		if msg.Type != "message" || msg.Content == "" {

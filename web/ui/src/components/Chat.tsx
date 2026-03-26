@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
   ArrowUp,
@@ -36,6 +36,14 @@ import {
 
 // --- Types ---
 
+interface ModelInfo {
+  id: string
+  name: string
+  can_reason: boolean
+  reasoning_levels?: string[]
+  context_window: number
+}
+
 interface ToolCall {
   id: string
   name: string
@@ -50,6 +58,8 @@ interface Message {
   role: "user" | "assistant" | "system"
   content: string
   toolCalls?: ToolCall[]
+  thinking?: string
+  isThinking?: boolean // true while reasoning is streaming
 }
 
 interface HistoryMessage {
@@ -70,16 +80,20 @@ interface FantasyMessage {
   content: Array<{ type: string; data: Record<string, unknown> }>
 }
 
-function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: ToolCall[] } {
+function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: ToolCall[]; thinking: string } {
   try {
     const msg: FantasyMessage = JSON.parse(rawJSON)
     const textParts: string[] = []
+    const thinkingParts: string[] = []
     const toolCalls: ToolCall[] = []
 
     for (const part of msg.content) {
       switch (part.type) {
         case "text":
           if (typeof part.data.text === "string") textParts.push(part.data.text)
+          break
+        case "reasoning":
+          if (typeof part.data.text === "string") thinkingParts.push(part.data.text)
           break
         case "tool-call":
           toolCalls.push({
@@ -101,9 +115,9 @@ function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: Too
       }
     }
 
-    return { content: textParts.join(""), toolCalls }
+    return { content: textParts.join(""), toolCalls, thinking: thinkingParts.join("") }
   } catch {
-    return { content: "", toolCalls: [] }
+    return { content: "", toolCalls: [], thinking: "" }
   }
 }
 
@@ -174,12 +188,17 @@ function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
 
     if (m.role === "assistant" && m.raw_json) {
       const parsed = parseFantasyMessage(m.raw_json)
-      if (parsed.toolCalls.length > 0) {
-        // Accumulate tool calls into current turn (or start a new one)
+      if (parsed.toolCalls.length > 0 || parsed.thinking) {
+        // Accumulate tool calls/thinking into current turn (or start a new one)
         if (!current) {
           current = { id: crypto.randomUUID(), role: "assistant", content: "", toolCalls: [] }
         }
-        current.toolCalls = [...(current.toolCalls ?? []), ...parsed.toolCalls]
+        if (parsed.toolCalls.length > 0) {
+          current.toolCalls = [...(current.toolCalls ?? []), ...parsed.toolCalls]
+        }
+        if (parsed.thinking) {
+          current.thinking = (current.thinking || "") + parsed.thinking
+        }
         if (parsed.content) current.content += parsed.content
         continue
       }
@@ -282,12 +301,40 @@ const markdownClassName = cn(
   "prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none"
 )
 
+function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="rounded-lg border border-dashed border-muted-foreground/30">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground cursor-pointer hover:bg-accent/50 rounded-lg"
+      >
+        {isStreaming ? (
+          <Loader variant="typing" size="sm" />
+        ) : (
+          <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+        )}
+        <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
+      </button>
+      {(expanded || isStreaming) && (
+        <div className="border-t border-dashed border-muted-foreground/30 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap max-h-64 overflow-y-auto">
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AssistantMessage({ message }: { message: Message }) {
   const toolCalls = message.toolCalls ?? []
   const content = message.content
 
   return (
     <div className="space-y-2">
+      {message.thinking && (
+        <ThinkingBlock content={message.thinking} isStreaming={message.isThinking} />
+      )}
       {toolCalls.length > 0 && (
         <div className="space-y-1.5">
           {toolCalls.map((tc) => (
@@ -376,6 +423,155 @@ function TokenCounter({ usage }: { usage: UsageInfo }) {
   )
 }
 
+// --- Model selector ---
+
+function ModelSelector({
+  models,
+  currentModel,
+  onSelect,
+}: {
+  models: ModelInfo[]
+  currentModel: string
+  onSelect: (id: string) => void
+}) {
+  const currentName = models.find((m) => m.id === currentModel)?.name || currentModel
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const listRef = useRef<HTMLDivElement>(null)
+  const filtered = search
+    ? models.filter(
+        (m) =>
+          m.id.toLowerCase().includes(search.toLowerCase()) ||
+          m.name.toLowerCase().includes(search.toLowerCase())
+      )
+    : models
+
+  // Scroll the selected model into view when the dropdown opens.
+  useEffect(() => {
+    if (!open || search) return
+    requestAnimationFrame(() => {
+      const el = listRef.current?.querySelector("[data-selected]")
+      if (el) el.scrollIntoView({ block: "center" })
+    })
+  }, [open, search])
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
+      >
+        <span>{currentName}</span>
+        <ChevronDown className="h-3 w-3" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border bg-popover shadow-md">
+            {models.length > 10 && (
+              <div className="border-b p-2">
+                <input
+                  type="text"
+                  className="w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none placeholder:text-muted-foreground"
+                  placeholder="Search models..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
+              {filtered.map((m) => (
+                <button
+                  key={m.id}
+                  data-selected={m.id === currentModel ? "" : undefined}
+                  onClick={() => {
+                    onSelect(m.id)
+                    setOpen(false)
+                    setSearch("")
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent cursor-pointer",
+                    m.id === currentModel && "bg-accent"
+                  )}
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium">{m.name || m.id}</span>
+                    {m.name && m.name !== m.id && (
+                      <span className="text-[10px] text-muted-foreground">{m.id}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    {m.can_reason && <span className="rounded bg-muted px-1">reason</span>}
+                    <span>{formatTokenCount(m.context_window)}</span>
+                  </div>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                  No models found
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// --- Reasoning control ---
+
+function ReasoningControl({
+  model,
+  effort,
+  onChange,
+}: {
+  model: ModelInfo | undefined
+  effort: string
+  onChange: (effort: string) => void
+}) {
+  if (!model?.can_reason) return null
+
+  const levels = model.reasoning_levels
+
+  if (levels && levels.length > 0) {
+    return (
+      <select
+        value={effort || ""}
+        onChange={(e) => onChange(e.target.value)}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="rounded-full border bg-transparent px-2 py-0.5 text-xs text-muted-foreground outline-none cursor-pointer"
+      >
+        <option value="">Fast</option>
+        {levels.map((l) => (
+          <option key={l} value={l}>
+            Think: {l}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
+  // Binary toggle for older models without levels
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onChange(effort ? "" : "on") }}
+      onMouseDown={(e) => e.stopPropagation()}
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-xs cursor-pointer",
+        effort
+          ? "border-green-500/50 bg-green-500/10 text-green-600"
+          : "text-muted-foreground hover:bg-accent"
+      )}
+    >
+      {effort ? "Thinking" : "Fast"}
+    </button>
+  )
+}
+
 // --- Chat component ---
 
 // Status dot color helper
@@ -396,6 +592,8 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [usage, setUsage] = useState<UsageInfo | null>(null)
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [reasoningEffort, setReasoningEffort] = useState("")
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
   const isStopped = session?.status === "stopped"
@@ -403,6 +601,35 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   // Don't connect WebSocket for stopped sessions
   const wsSessionId = isStopped ? null : (session?.id ?? null)
   const { send, connected, setOnMessage } = useWebSocket(wsSessionId)
+
+  // Fetch available models once.
+  useEffect(() => {
+    fetch("/api/models")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: ModelInfo[]) => setModels(data ?? []))
+      .catch(() => {})
+  }, [])
+
+  const currentModel = usage?.model || session?.model || ""
+  const currentModelInfo = models.find((m) => m.id === currentModel)
+
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      send({ type: "config", model: modelId })
+      // Optimistically update usage model and reset reasoning.
+      setUsage((u) => u ? { ...u, model: modelId, context_window: models.find((m) => m.id === modelId)?.context_window ?? u.context_window } : u)
+      setReasoningEffort("")
+    },
+    [send, models]
+  )
+
+  const handleReasoningChange = useCallback(
+    (effort: string) => {
+      send({ type: "config", reasoning_effort: effort })
+      setReasoningEffort(effort)
+    },
+    [send]
+  )
 
   // Load message history when agent changes
   useEffect(() => {
@@ -521,6 +748,47 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           )
           break
         }
+        case "reasoning_start": {
+          // Ensure we have a streaming message to attach thinking to.
+          if (!streamingMsgId.current) {
+            const id = crypto.randomUUID()
+            streamingMsgId.current = id
+            setMessages((prev) => [
+              ...prev,
+              { id, role: "assistant", content: "", thinking: "", isThinking: true },
+            ])
+          } else {
+            const id = streamingMsgId.current
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id ? { ...m, isThinking: true } : m
+              )
+            )
+          }
+          break
+        }
+        case "reasoning_delta": {
+          if (!streamingMsgId.current) break
+          const id = streamingMsgId.current
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id
+                ? { ...m, thinking: (m.thinking || "") + (msg.content || "") }
+                : m
+            )
+          )
+          break
+        }
+        case "reasoning_end": {
+          if (!streamingMsgId.current) break
+          const id = streamingMsgId.current
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id ? { ...m, isThinking: false } : m
+            )
+          )
+          break
+        }
         case "done":
           if (msg.usage) setUsage(msg.usage)
           streamingMsgId.current = null
@@ -611,15 +879,22 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             className={cn("h-2 w-2 shrink-0 rounded-full", statusDotColor(session))}
           />
           <span className="font-medium">{session.name}</span>
-          <span className="text-xs text-muted-foreground">{session.mode}</span>
-          {usage && usage.event_count > 0 && <TokenCounter usage={usage} />}
+          {!isStopped && !streaming && models.length > 0 && currentModel && (
+            <ModelSelector
+              models={models}
+              currentModel={currentModel}
+              onSelect={handleModelChange}
+            />
+          )}
           {isStopped && (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
               stopped
             </span>
           )}
         </div>
-        {!isRoot && (
+        <div className="flex items-center gap-2">
+          {usage && usage.event_count > 0 && <TokenCounter usage={usage} />}
+          {!isRoot && (
           <DropdownMenu>
             <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground">
               <MoreHorizontal className="h-4 w-4" />
@@ -647,7 +922,8 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Messages */}
@@ -743,6 +1019,13 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
               autoFocus
             />
             <PromptInputActions>
+              {currentModelInfo?.can_reason && (
+                <ReasoningControl
+                  model={currentModelInfo}
+                  effort={reasoningEffort}
+                  onChange={handleReasoningChange}
+                />
+              )}
               <Button
                 size="icon"
                 className="h-8 w-8 rounded-full"

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hivebot/internal/models"
 )
 
 type settingsResponse struct {
@@ -156,4 +157,12 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+}
+
+func (s *Server) handleListModels(w http.ResponseWriter, _ *http.Request) {
+	provider := ""
+	if s.cp != nil {
+		provider = s.cp.DefaultProvider()
+	}
+	writeJSON(w, http.StatusOK, models.ModelsForProvider(provider))
 }

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -137,6 +138,50 @@ func (d *DB) DeleteSession(id string) error {
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("session %s not found", id)
+	}
+	return nil
+}
+
+// SessionConfig holds per-session configuration as a JSON blob.
+// Add new fields here as needed — no migration required.
+type SessionConfig struct {
+	ModelOverride   string `json:"model_override,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Future: Temperature, MaxTokens, TopP, etc.
+}
+
+// GetSessionConfig reads the per-session config JSON.
+func (d *DB) GetSessionConfig(sessionID string) (SessionConfig, error) {
+	var raw string
+	err := d.db.QueryRow("SELECT COALESCE(config, '{}') FROM sessions WHERE id = ?", sessionID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionConfig{}, fmt.Errorf("session %s: %w", sessionID, ErrNotFound)
+	}
+	if err != nil {
+		return SessionConfig{}, err
+	}
+	var cfg SessionConfig
+	if raw != "" && raw != "{}" {
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			return SessionConfig{}, fmt.Errorf("parsing session config: %w", err)
+		}
+	}
+	return cfg, nil
+}
+
+// UpdateSessionConfig writes the per-session config JSON.
+func (d *DB) UpdateSessionConfig(sessionID string, cfg SessionConfig) error {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling session config: %w", err)
+	}
+	result, err := d.db.Exec("UPDATE sessions SET config = ? WHERE id = ?", string(raw), sessionID)
+	if err != nil {
+		return fmt.Errorf("updating session config: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("session %s not found", sessionID)
 	}
 	return nil
 }

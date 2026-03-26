@@ -50,6 +50,43 @@ func ContextWindow(modelID string) int {
 	return int(m.ContextWindow)
 }
 
+// ModelInfo is a simplified model description for API consumers.
+type ModelInfo struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	CanReason       bool     `json:"can_reason"`
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
+	ContextWindow   int64    `json:"context_window"`
+}
+
+// ModelsForProvider returns models available for the given provider type.
+// The providerType matches catwalk's Provider.Type or Provider.ID (e.g. "anthropic", "openrouter").
+func ModelsForProvider(providerType string) []ModelInfo {
+	providers := embedded.GetAll()
+	result := make([]ModelInfo, 0)
+	for _, p := range providers {
+		if string(p.Type) != providerType && string(p.ID) != providerType {
+			continue
+		}
+		for _, m := range p.Models {
+			if m.ContextWindow <= 0 {
+				continue
+			}
+			info := ModelInfo{
+				ID:            m.ID,
+				Name:          m.Name,
+				CanReason:     m.CanReason,
+				ContextWindow: m.ContextWindow,
+			}
+			if len(m.ReasoningLevels) > 0 {
+				info.ReasoningLevels = m.ReasoningLevels
+			}
+			result = append(result, info)
+		}
+	}
+	return result
+}
+
 // Cost computes the cost of a single LLM call in dollars.
 func Cost(modelID string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) float64 {
 	m, ok := Lookup(modelID)

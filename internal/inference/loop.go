@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/openrouter"
 
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
@@ -57,6 +59,13 @@ type Loop struct {
 	secretNamesFn  func() []string
 	logger         *slog.Logger
 
+	// Tools are stored for agent recreation on model switch.
+	tools []fantasy.AgentTool
+
+	// Per-session reasoning config (protected by updateMu).
+	reasoningEffort string // "" = off, "low"/"medium"/"high"/"max"/"on" = enabled
+	provider        string // current provider type (e.g. "anthropic", "openrouter")
+
 	// Ephemeral message buffer (non-persistent sessions only).
 	ephemeralMsgs []fantasy.Message
 
@@ -94,6 +103,10 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	localTools := l.buildLocalTools(cfg)
 	agentTools = append(agentTools, localTools...)
 
+	// Store tools for agent recreation on model switch.
+	l.tools = agentTools
+	l.provider = cfg.AgentConfig.Provider
+
 	// Build the initial system prompt.
 	systemPrompt := l.currentSystemPrompt()
 
@@ -127,15 +140,31 @@ func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEve
 		return nil
 	}
 
-	result, err := l.agent.Stream(ctx, fantasy.AgentStreamCall{
-		Prompt:   prompt,
-		Messages: messages,
+	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
+	l.updateMu.Lock()
+	agent := l.agent
+	providerOpts := l.buildReasoningOptionsLocked()
+	l.updateMu.Unlock()
+
+	call := fantasy.AgentStreamCall{
+		Prompt:          prompt,
+		Messages:        messages,
+		ProviderOptions: providerOpts,
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
 			if opts.StepNumber == 0 {
 				sp := l.currentSystemPrompt()
 				return ctx, fantasy.PrepareStepResult{System: &sp}, nil
 			}
 			return ctx, fantasy.PrepareStepResult{}, nil
+		},
+		OnReasoningStart: func(id string, rc fantasy.ReasoningContent) error {
+			return emit(ipc.ChatEvent{Type: "reasoning_start"})
+		},
+		OnReasoningDelta: func(id, text string) error {
+			return emit(ipc.ChatEvent{Type: "reasoning_delta", Content: text})
+		},
+		OnReasoningEnd: func(id string, rc fantasy.ReasoningContent) error {
+			return emit(ipc.ChatEvent{Type: "reasoning_end"})
 		},
 		OnTextDelta: func(id, text string) error {
 			return emit(ipc.ChatEvent{Type: "delta", Content: text})
@@ -158,7 +187,9 @@ func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEve
 				IsError:    isErr,
 			})
 		},
-	})
+	}
+
+	result, err := agent.Stream(ctx, call)
 	if err != nil {
 		return "", fmt.Errorf("agent stream: %w", err)
 	}
@@ -230,6 +261,81 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult) {
 		CacheWriteTokens: u.CacheCreationTokens,
 		Cost:             models.Cost(l.agentConfig.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
 	})
+}
+
+// UpdateModel swaps the language model and recreates the fantasy agent.
+// The change takes effect on the next Chat() call.
+func (l *Loop) UpdateModel(lm fantasy.LanguageModel, model, provider string) {
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+	l.lm = lm
+	l.agentConfig.Model = model
+	l.agentConfig.Provider = provider
+	l.provider = provider
+	l.agent = fantasy.NewAgent(lm,
+		fantasy.WithSystemPrompt(l.currentSystemPrompt()),
+		fantasy.WithTools(l.tools...),
+	)
+}
+
+// SetReasoningEffort sets the reasoning effort level for subsequent calls.
+// An empty string disables reasoning.
+func (l *Loop) SetReasoningEffort(effort string) {
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+	l.reasoningEffort = effort
+}
+
+// ReasoningEffort returns the current reasoning effort level.
+func (l *Loop) ReasoningEffort() string {
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+	return l.reasoningEffort
+}
+
+// buildReasoningOptionsLocked creates provider-specific ProviderOptions for reasoning.
+// Must be called with updateMu held. Returns nil if reasoning is disabled.
+func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
+	effort := l.reasoningEffort
+	provider := l.provider
+	model := l.agentConfig.Model
+
+	if effort == "" {
+		return nil
+	}
+
+	switch provider {
+	case "anthropic":
+		m, _ := models.Lookup(model)
+		if len(m.ReasoningLevels) > 0 {
+			// New models with effort levels.
+			e := anthropic.Effort(effort)
+			return fantasy.ProviderOptions{
+				anthropic.Name: &anthropic.ProviderOptions{Effort: &e},
+			}
+		}
+		// Older models with binary thinking toggle.
+		return fantasy.ProviderOptions{
+			anthropic.Name: &anthropic.ProviderOptions{
+				Thinking: &anthropic.ThinkingProviderOption{BudgetTokens: 10_000},
+			},
+		}
+
+	case "openrouter":
+		e := openrouter.ReasoningEffort(effort)
+		enabled := true
+		return fantasy.ProviderOptions{
+			openrouter.Name: &openrouter.ProviderOptions{
+				Reasoning: &openrouter.ReasoningOptions{
+					Enabled: &enabled,
+					Effort:  &e,
+				},
+			},
+		}
+
+	default:
+		return nil
+	}
 }
 
 // ApplyConfigUpdate stores a pending config update. It will take effect
