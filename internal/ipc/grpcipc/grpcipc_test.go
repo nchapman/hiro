@@ -105,3 +105,89 @@ func TestWorkerRoundtrip_Shutdown(t *testing.T) {
 		t.Error("expected shutdown to be called")
 	}
 }
+
+func TestWorkerRoundtrip_SecretEnvInjection(t *testing.T) {
+	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "ok"}}
+
+	// Track secrets received by the server.
+	var receivedSecrets []string
+	ws := grpcipc.NewWorkerServer(worker)
+	ws.SetSecretEnvCallback(func(env []string) {
+		receivedSecrets = env
+	})
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	ws.Register(srv)
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := grpcipc.NewWorkerClient(conn)
+	client.SetSecretEnvFn(func() []string {
+		return []string{"API_KEY=sk-secret-123", "DB_PASS=hunter2"}
+	})
+
+	_, err = client.ExecuteTool(t.Context(), "call-1", "bash", `{"command":"echo $API_KEY"}`)
+	if err != nil {
+		t.Fatalf("ExecuteTool: %v", err)
+	}
+
+	if len(receivedSecrets) != 2 {
+		t.Fatalf("expected 2 secrets, got %d", len(receivedSecrets))
+	}
+	if receivedSecrets[0] != "API_KEY=sk-secret-123" {
+		t.Errorf("secret[0] = %q, want API_KEY=sk-secret-123", receivedSecrets[0])
+	}
+	if receivedSecrets[1] != "DB_PASS=hunter2" {
+		t.Errorf("secret[1] = %q, want DB_PASS=hunter2", receivedSecrets[1])
+	}
+}
+
+func TestWorkerRoundtrip_NoSecrets(t *testing.T) {
+	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "ok"}}
+
+	// Verify callback is not invoked when no secrets are set.
+	called := false
+	ws := grpcipc.NewWorkerServer(worker)
+	ws.SetSecretEnvCallback(func(env []string) {
+		called = true
+	})
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	ws.Register(srv)
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	// No SetSecretEnvFn — should not send secrets.
+	client := grpcipc.NewWorkerClient(conn)
+	_, err = client.ExecuteTool(t.Context(), "call-1", "bash", `{"command":"ls"}`)
+	if err != nil {
+		t.Fatalf("ExecuteTool: %v", err)
+	}
+	if called {
+		t.Error("secret callback should not be invoked when no secrets sent")
+	}
+}
