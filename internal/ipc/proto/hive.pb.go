@@ -21,1056 +21,19 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ChatEvent is a streaming event sent during Chat, SpawnSession, or SendMessage.
-type ChatEvent struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// type is "delta" for incremental text, "done" for final result, or "error".
-	Type          string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Content       string `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChatEvent) Reset() {
-	*x = ChatEvent{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChatEvent) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChatEvent) ProtoMessage() {}
-
-func (x *ChatEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChatEvent.ProtoReflect.Descriptor instead.
-func (*ChatEvent) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *ChatEvent) GetType() string {
-	if x != nil {
-		return x.Type
-	}
-	return ""
-}
-
-func (x *ChatEvent) GetContent() string {
-	if x != nil {
-		return x.Content
-	}
-	return ""
-}
-
-type SpawnSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	ParentId      string                 `protobuf:"bytes,3,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SpawnSessionRequest) Reset() {
-	*x = SpawnSessionRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SpawnSessionRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SpawnSessionRequest) ProtoMessage() {}
-
-func (x *SpawnSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SpawnSessionRequest.ProtoReflect.Descriptor instead.
-func (*SpawnSessionRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *SpawnSessionRequest) GetAgentName() string {
-	if x != nil {
-		return x.AgentName
-	}
-	return ""
-}
-
-func (x *SpawnSessionRequest) GetPrompt() string {
-	if x != nil {
-		return x.Prompt
-	}
-	return ""
-}
-
-func (x *SpawnSessionRequest) GetParentId() string {
-	if x != nil {
-		return x.ParentId
-	}
-	return ""
-}
-
-type CreateSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	ParentId      string                 `protobuf:"bytes,2,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	Mode          string                 `protobuf:"bytes,3,opt,name=mode,proto3" json:"mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateSessionRequest) Reset() {
-	*x = CreateSessionRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateSessionRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateSessionRequest) ProtoMessage() {}
-
-func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateSessionRequest.ProtoReflect.Descriptor instead.
-func (*CreateSessionRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *CreateSessionRequest) GetAgentName() string {
-	if x != nil {
-		return x.AgentName
-	}
-	return ""
-}
-
-func (x *CreateSessionRequest) GetParentId() string {
-	if x != nil {
-		return x.ParentId
-	}
-	return ""
-}
-
-func (x *CreateSessionRequest) GetMode() string {
-	if x != nil {
-		return x.Mode
-	}
-	return ""
-}
-
-type CreateSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateSessionResponse) Reset() {
-	*x = CreateSessionResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateSessionResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateSessionResponse) ProtoMessage() {}
-
-func (x *CreateSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateSessionResponse.ProtoReflect.Descriptor instead.
-func (*CreateSessionResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *CreateSessionResponse) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-type SendMessageRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	CallerId      string                 `protobuf:"bytes,3,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SendMessageRequest) Reset() {
-	*x = SendMessageRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SendMessageRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SendMessageRequest) ProtoMessage() {}
-
-func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SendMessageRequest.ProtoReflect.Descriptor instead.
-func (*SendMessageRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *SendMessageRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *SendMessageRequest) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *SendMessageRequest) GetCallerId() string {
-	if x != nil {
-		return x.CallerId
-	}
-	return ""
-}
-
-type StopSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StopSessionRequest) Reset() {
-	*x = StopSessionRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StopSessionRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StopSessionRequest) ProtoMessage() {}
-
-func (x *StopSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StopSessionRequest.ProtoReflect.Descriptor instead.
-func (*StopSessionRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *StopSessionRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *StopSessionRequest) GetCallerId() string {
-	if x != nil {
-		return x.CallerId
-	}
-	return ""
-}
-
-type StopSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StopSessionResponse) Reset() {
-	*x = StopSessionResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StopSessionResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StopSessionResponse) ProtoMessage() {}
-
-func (x *StopSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StopSessionResponse.ProtoReflect.Descriptor instead.
-func (*StopSessionResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{6}
-}
-
-type StartSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StartSessionRequest) Reset() {
-	*x = StartSessionRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StartSessionRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StartSessionRequest) ProtoMessage() {}
-
-func (x *StartSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StartSessionRequest.ProtoReflect.Descriptor instead.
-func (*StartSessionRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *StartSessionRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *StartSessionRequest) GetCallerId() string {
-	if x != nil {
-		return x.CallerId
-	}
-	return ""
-}
-
-type StartSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StartSessionResponse) Reset() {
-	*x = StartSessionResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StartSessionResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StartSessionResponse) ProtoMessage() {}
-
-func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StartSessionResponse.ProtoReflect.Descriptor instead.
-func (*StartSessionResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{8}
-}
-
-type DeleteSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	CallerId      string                 `protobuf:"bytes,2,opt,name=caller_id,json=callerId,proto3" json:"caller_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeleteSessionRequest) Reset() {
-	*x = DeleteSessionRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeleteSessionRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeleteSessionRequest) ProtoMessage() {}
-
-func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeleteSessionRequest.ProtoReflect.Descriptor instead.
-func (*DeleteSessionRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *DeleteSessionRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *DeleteSessionRequest) GetCallerId() string {
-	if x != nil {
-		return x.CallerId
-	}
-	return ""
-}
-
-type DeleteSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeleteSessionResponse) Reset() {
-	*x = DeleteSessionResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeleteSessionResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeleteSessionResponse) ProtoMessage() {}
-
-func (x *DeleteSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeleteSessionResponse.ProtoReflect.Descriptor instead.
-func (*DeleteSessionResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{10}
-}
-
-type ListSessionsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ParentId      string                 `protobuf:"bytes,1,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ListSessionsRequest) Reset() {
-	*x = ListSessionsRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ListSessionsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ListSessionsRequest) ProtoMessage() {}
-
-func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
-func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *ListSessionsRequest) GetParentId() string {
-	if x != nil {
-		return x.ParentId
-	}
-	return ""
-}
-
-type ListSessionsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sessions      []*SessionInfoProto    `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ListSessionsResponse) Reset() {
-	*x = ListSessionsResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ListSessionsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ListSessionsResponse) ProtoMessage() {}
-
-func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
-func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *ListSessionsResponse) GetSessions() []*SessionInfoProto {
-	if x != nil {
-		return x.Sessions
-	}
-	return nil
-}
-
-type SessionInfoProto struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Mode          string                 `protobuf:"bytes,3,opt,name=mode,proto3" json:"mode,omitempty"`
-	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	ParentId      string                 `protobuf:"bytes,5,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	Status        string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionInfoProto) Reset() {
-	*x = SessionInfoProto{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionInfoProto) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionInfoProto) ProtoMessage() {}
-
-func (x *SessionInfoProto) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionInfoProto.ProtoReflect.Descriptor instead.
-func (*SessionInfoProto) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *SessionInfoProto) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *SessionInfoProto) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *SessionInfoProto) GetMode() string {
-	if x != nil {
-		return x.Mode
-	}
-	return ""
-}
-
-func (x *SessionInfoProto) GetDescription() string {
-	if x != nil {
-		return x.Description
-	}
-	return ""
-}
-
-func (x *SessionInfoProto) GetParentId() string {
-	if x != nil {
-		return x.ParentId
-	}
-	return ""
-}
-
-func (x *SessionInfoProto) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-type GetSecretsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetSecretsRequest) Reset() {
-	*x = GetSecretsRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetSecretsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetSecretsRequest) ProtoMessage() {}
-
-func (x *GetSecretsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetSecretsRequest.ProtoReflect.Descriptor instead.
-func (*GetSecretsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{14}
-}
-
-type GetSecretsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Names         []string               `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
-	Env           []string               `protobuf:"bytes,2,rep,name=env,proto3" json:"env,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetSecretsResponse) Reset() {
-	*x = GetSecretsResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetSecretsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetSecretsResponse) ProtoMessage() {}
-
-func (x *GetSecretsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetSecretsResponse.ProtoReflect.Descriptor instead.
-func (*GetSecretsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *GetSecretsResponse) GetNames() []string {
-	if x != nil {
-		return x.Names
-	}
-	return nil
-}
-
-func (x *GetSecretsResponse) GetEnv() []string {
-	if x != nil {
-		return x.Env
-	}
-	return nil
-}
-
-type ChatRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChatRequest) Reset() {
-	*x = ChatRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChatRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChatRequest) ProtoMessage() {}
-
-func (x *ChatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChatRequest.ProtoReflect.Descriptor instead.
-func (*ChatRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *ChatRequest) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-type ShutdownRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ShutdownRequest) Reset() {
-	*x = ShutdownRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ShutdownRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ShutdownRequest) ProtoMessage() {}
-
-func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
-func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{17}
-}
-
-type ShutdownResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ShutdownResponse) Reset() {
-	*x = ShutdownResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ShutdownResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ShutdownResponse) ProtoMessage() {}
-
-func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
-func (*ShutdownResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{18}
-}
-
-type ConfigChangedRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	EffectiveTools     map[string]bool        `protobuf:"bytes,1,rep,name=effective_tools,json=effectiveTools,proto3" json:"effective_tools,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // nil map = unrestricted
-	HasToolRestriction bool                   `protobuf:"varint,2,opt,name=has_tool_restriction,json=hasToolRestriction,proto3" json:"has_tool_restriction,omitempty"`                                                             // distinguishes nil from empty
-	Model              string                 `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
-	Provider           string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
-	ApiKey             string                 `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
-	Description        string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
-}
-
-func (x *ConfigChangedRequest) Reset() {
-	*x = ConfigChangedRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ConfigChangedRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ConfigChangedRequest) ProtoMessage() {}
-
-func (x *ConfigChangedRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ConfigChangedRequest.ProtoReflect.Descriptor instead.
-func (*ConfigChangedRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *ConfigChangedRequest) GetEffectiveTools() map[string]bool {
-	if x != nil {
-		return x.EffectiveTools
-	}
-	return nil
-}
-
-func (x *ConfigChangedRequest) GetHasToolRestriction() bool {
-	if x != nil {
-		return x.HasToolRestriction
-	}
-	return false
-}
-
-func (x *ConfigChangedRequest) GetModel() string {
-	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
-func (x *ConfigChangedRequest) GetProvider() string {
-	if x != nil {
-		return x.Provider
-	}
-	return ""
-}
-
-func (x *ConfigChangedRequest) GetApiKey() string {
-	if x != nil {
-		return x.ApiKey
-	}
-	return ""
-}
-
-func (x *ConfigChangedRequest) GetDescription() string {
-	if x != nil {
-		return x.Description
-	}
-	return ""
-}
-
-type ConfigChangedResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ConfigChangedResponse) Reset() {
-	*x = ConfigChangedResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[20]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ConfigChangedResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ConfigChangedResponse) ProtoMessage() {}
-
-func (x *ConfigChangedResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[20]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ConfigChangedResponse.ProtoReflect.Descriptor instead.
-func (*ConfigChangedResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{20}
-}
-
 type ExecuteToolRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                   // tool name (bash, read_file, etc.)
-	Input         string                 `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`                 // JSON-encoded tool arguments
-	CallId        string                 `protobuf:"bytes,3,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"` // tool call ID from the LLM
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                            // tool name (bash, read_file, etc.)
+	Input         string                 `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`                          // JSON-encoded tool arguments
+	CallId        string                 `protobuf:"bytes,3,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`          // tool call ID from the LLM
+	SecretEnv     []string               `protobuf:"bytes,4,rep,name=secret_env,json=secretEnv,proto3" json:"secret_env,omitempty"` // secret env vars for bash (KEY=VALUE pairs)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecuteToolRequest) Reset() {
 	*x = ExecuteToolRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[21]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1082,7 +45,7 @@ func (x *ExecuteToolRequest) String() string {
 func (*ExecuteToolRequest) ProtoMessage() {}
 
 func (x *ExecuteToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[21]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1095,7 +58,7 @@ func (x *ExecuteToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteToolRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteToolRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{21}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ExecuteToolRequest) GetName() string {
@@ -1119,6 +82,13 @@ func (x *ExecuteToolRequest) GetCallId() string {
 	return ""
 }
 
+func (x *ExecuteToolRequest) GetSecretEnv() []string {
+	if x != nil {
+		return x.SecretEnv
+	}
+	return nil
+}
+
 type ExecuteToolResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
@@ -1129,7 +99,7 @@ type ExecuteToolResponse struct {
 
 func (x *ExecuteToolResponse) Reset() {
 	*x = ExecuteToolResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[22]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1141,7 +111,7 @@ func (x *ExecuteToolResponse) String() string {
 func (*ExecuteToolResponse) ProtoMessage() {}
 
 func (x *ExecuteToolResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[22]
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1154,7 +124,7 @@ func (x *ExecuteToolResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteToolResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteToolResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{22}
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ExecuteToolResponse) GetContent() string {
@@ -1171,99 +141,97 @@ func (x *ExecuteToolResponse) GetIsError() bool {
 	return false
 }
 
+type ShutdownRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownRequest) Reset() {
+	*x = ShutdownRequest{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownRequest) ProtoMessage() {}
+
+func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
+func (*ShutdownRequest) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{2}
+}
+
+type ShutdownResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownResponse) Reset() {
+	*x = ShutdownResponse{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownResponse) ProtoMessage() {}
+
+func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
+func (*ShutdownResponse) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{3}
+}
+
 var File_internal_ipc_proto_hive_proto protoreflect.FileDescriptor
 
 const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\n" +
-	"\x1dinternal/ipc/proto/hive.proto\x12\x04hive\"9\n" +
-	"\tChatEvent\x12\x12\n" +
-	"\x04type\x18\x01 \x01(\tR\x04type\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\tR\acontent\"i\n" +
-	"\x13SpawnSessionRequest\x12\x1d\n" +
-	"\n" +
-	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x16\n" +
-	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x1b\n" +
-	"\tparent_id\x18\x03 \x01(\tR\bparentId\"f\n" +
-	"\x14CreateSessionRequest\x12\x1d\n" +
-	"\n" +
-	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x1b\n" +
-	"\tparent_id\x18\x02 \x01(\tR\bparentId\x12\x12\n" +
-	"\x04mode\x18\x03 \x01(\tR\x04mode\"6\n" +
-	"\x15CreateSessionResponse\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"j\n" +
-	"\x12SendMessageRequest\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
-	"\tcaller_id\x18\x03 \x01(\tR\bcallerId\"P\n" +
-	"\x12StopSessionRequest\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
-	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x15\n" +
-	"\x13StopSessionResponse\"Q\n" +
-	"\x13StartSessionRequest\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
-	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x16\n" +
-	"\x14StartSessionResponse\"R\n" +
-	"\x14DeleteSessionRequest\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
-	"\tcaller_id\x18\x02 \x01(\tR\bcallerId\"\x17\n" +
-	"\x15DeleteSessionResponse\"2\n" +
-	"\x13ListSessionsRequest\x12\x1b\n" +
-	"\tparent_id\x18\x01 \x01(\tR\bparentId\"J\n" +
-	"\x14ListSessionsResponse\x122\n" +
-	"\bsessions\x18\x01 \x03(\v2\x16.hive.SessionInfoProtoR\bsessions\"\xa1\x01\n" +
-	"\x10SessionInfoProto\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04mode\x18\x03 \x01(\tR\x04mode\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1b\n" +
-	"\tparent_id\x18\x05 \x01(\tR\bparentId\x12\x16\n" +
-	"\x06status\x18\x06 \x01(\tR\x06status\"\x13\n" +
-	"\x11GetSecretsRequest\"<\n" +
-	"\x12GetSecretsResponse\x12\x14\n" +
-	"\x05names\x18\x01 \x03(\tR\x05names\x12\x10\n" +
-	"\x03env\x18\x02 \x03(\tR\x03env\"'\n" +
-	"\vChatRequest\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\x11\n" +
-	"\x0fShutdownRequest\"\x12\n" +
-	"\x10ShutdownResponse\"\xd1\x02\n" +
-	"\x14ConfigChangedRequest\x12W\n" +
-	"\x0feffective_tools\x18\x01 \x03(\v2..hive.ConfigChangedRequest.EffectiveToolsEntryR\x0eeffectiveTools\x120\n" +
-	"\x14has_tool_restriction\x18\x02 \x01(\bR\x12hasToolRestriction\x12\x14\n" +
-	"\x05model\x18\x03 \x01(\tR\x05model\x12\x1a\n" +
-	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x17\n" +
-	"\aapi_key\x18\x05 \x01(\tR\x06apiKey\x12 \n" +
-	"\vdescription\x18\x06 \x01(\tR\vdescription\x1aA\n" +
-	"\x13EffectiveToolsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x17\n" +
-	"\x15ConfigChangedResponse\"W\n" +
+	"\x1dinternal/ipc/proto/hive.proto\x12\x04hive\"v\n" +
 	"\x12ExecuteToolRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05input\x18\x02 \x01(\tR\x05input\x12\x17\n" +
-	"\acall_id\x18\x03 \x01(\tR\x06callId\"J\n" +
+	"\acall_id\x18\x03 \x01(\tR\x06callId\x12\x1d\n" +
+	"\n" +
+	"secret_env\x18\x04 \x03(\tR\tsecretEnv\"J\n" +
 	"\x13ExecuteToolResponse\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x19\n" +
-	"\bis_error\x18\x02 \x01(\bR\aisError2\xac\x04\n" +
-	"\tAgentHost\x12<\n" +
-	"\fSpawnSession\x12\x19.hive.SpawnSessionRequest\x1a\x0f.hive.ChatEvent0\x01\x12H\n" +
-	"\rCreateSession\x12\x1a.hive.CreateSessionRequest\x1a\x1b.hive.CreateSessionResponse\x12:\n" +
-	"\vSendMessage\x12\x18.hive.SendMessageRequest\x1a\x0f.hive.ChatEvent0\x01\x12B\n" +
-	"\vStopSession\x12\x18.hive.StopSessionRequest\x1a\x19.hive.StopSessionResponse\x12E\n" +
-	"\fStartSession\x12\x19.hive.StartSessionRequest\x1a\x1a.hive.StartSessionResponse\x12H\n" +
-	"\rDeleteSession\x12\x1a.hive.DeleteSessionRequest\x1a\x1b.hive.DeleteSessionResponse\x12E\n" +
-	"\fListSessions\x12\x19.hive.ListSessionsRequest\x1a\x1a.hive.ListSessionsResponse\x12?\n" +
-	"\n" +
-	"GetSecrets\x12\x17.hive.GetSecretsRequest\x1a\x18.hive.GetSecretsResponse2\x84\x02\n" +
-	"\vAgentWorker\x12,\n" +
-	"\x04Chat\x12\x11.hive.ChatRequest\x1a\x0f.hive.ChatEvent0\x01\x129\n" +
-	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponse\x12H\n" +
-	"\rConfigChanged\x12\x1a.hive.ConfigChangedRequest\x1a\x1b.hive.ConfigChangedResponse\x12B\n" +
-	"\vExecuteTool\x12\x18.hive.ExecuteToolRequest\x1a\x19.hive.ExecuteToolResponseB0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
+	"\bis_error\x18\x02 \x01(\bR\aisError\"\x11\n" +
+	"\x0fShutdownRequest\"\x12\n" +
+	"\x10ShutdownResponse2\x8c\x01\n" +
+	"\vAgentWorker\x12B\n" +
+	"\vExecuteTool\x12\x18.hive.ExecuteToolRequest\x1a\x19.hive.ExecuteToolResponse\x129\n" +
+	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponseB0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
 
 var (
 	file_internal_ipc_proto_hive_proto_rawDescOnce sync.Once
@@ -1277,65 +245,23 @@ func file_internal_ipc_proto_hive_proto_rawDescGZIP() []byte {
 	return file_internal_ipc_proto_hive_proto_rawDescData
 }
 
-var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_ipc_proto_hive_proto_goTypes = []any{
-	(*ChatEvent)(nil),             // 0: hive.ChatEvent
-	(*SpawnSessionRequest)(nil),   // 1: hive.SpawnSessionRequest
-	(*CreateSessionRequest)(nil),  // 2: hive.CreateSessionRequest
-	(*CreateSessionResponse)(nil), // 3: hive.CreateSessionResponse
-	(*SendMessageRequest)(nil),    // 4: hive.SendMessageRequest
-	(*StopSessionRequest)(nil),    // 5: hive.StopSessionRequest
-	(*StopSessionResponse)(nil),   // 6: hive.StopSessionResponse
-	(*StartSessionRequest)(nil),   // 7: hive.StartSessionRequest
-	(*StartSessionResponse)(nil),  // 8: hive.StartSessionResponse
-	(*DeleteSessionRequest)(nil),  // 9: hive.DeleteSessionRequest
-	(*DeleteSessionResponse)(nil), // 10: hive.DeleteSessionResponse
-	(*ListSessionsRequest)(nil),   // 11: hive.ListSessionsRequest
-	(*ListSessionsResponse)(nil),  // 12: hive.ListSessionsResponse
-	(*SessionInfoProto)(nil),      // 13: hive.SessionInfoProto
-	(*GetSecretsRequest)(nil),     // 14: hive.GetSecretsRequest
-	(*GetSecretsResponse)(nil),    // 15: hive.GetSecretsResponse
-	(*ChatRequest)(nil),           // 16: hive.ChatRequest
-	(*ShutdownRequest)(nil),       // 17: hive.ShutdownRequest
-	(*ShutdownResponse)(nil),      // 18: hive.ShutdownResponse
-	(*ConfigChangedRequest)(nil),  // 19: hive.ConfigChangedRequest
-	(*ConfigChangedResponse)(nil), // 20: hive.ConfigChangedResponse
-	(*ExecuteToolRequest)(nil),    // 21: hive.ExecuteToolRequest
-	(*ExecuteToolResponse)(nil),   // 22: hive.ExecuteToolResponse
-	nil,                           // 23: hive.ConfigChangedRequest.EffectiveToolsEntry
+	(*ExecuteToolRequest)(nil),  // 0: hive.ExecuteToolRequest
+	(*ExecuteToolResponse)(nil), // 1: hive.ExecuteToolResponse
+	(*ShutdownRequest)(nil),     // 2: hive.ShutdownRequest
+	(*ShutdownResponse)(nil),    // 3: hive.ShutdownResponse
 }
 var file_internal_ipc_proto_hive_proto_depIdxs = []int32{
-	13, // 0: hive.ListSessionsResponse.sessions:type_name -> hive.SessionInfoProto
-	23, // 1: hive.ConfigChangedRequest.effective_tools:type_name -> hive.ConfigChangedRequest.EffectiveToolsEntry
-	1,  // 2: hive.AgentHost.SpawnSession:input_type -> hive.SpawnSessionRequest
-	2,  // 3: hive.AgentHost.CreateSession:input_type -> hive.CreateSessionRequest
-	4,  // 4: hive.AgentHost.SendMessage:input_type -> hive.SendMessageRequest
-	5,  // 5: hive.AgentHost.StopSession:input_type -> hive.StopSessionRequest
-	7,  // 6: hive.AgentHost.StartSession:input_type -> hive.StartSessionRequest
-	9,  // 7: hive.AgentHost.DeleteSession:input_type -> hive.DeleteSessionRequest
-	11, // 8: hive.AgentHost.ListSessions:input_type -> hive.ListSessionsRequest
-	14, // 9: hive.AgentHost.GetSecrets:input_type -> hive.GetSecretsRequest
-	16, // 10: hive.AgentWorker.Chat:input_type -> hive.ChatRequest
-	17, // 11: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
-	19, // 12: hive.AgentWorker.ConfigChanged:input_type -> hive.ConfigChangedRequest
-	21, // 13: hive.AgentWorker.ExecuteTool:input_type -> hive.ExecuteToolRequest
-	0,  // 14: hive.AgentHost.SpawnSession:output_type -> hive.ChatEvent
-	3,  // 15: hive.AgentHost.CreateSession:output_type -> hive.CreateSessionResponse
-	0,  // 16: hive.AgentHost.SendMessage:output_type -> hive.ChatEvent
-	6,  // 17: hive.AgentHost.StopSession:output_type -> hive.StopSessionResponse
-	8,  // 18: hive.AgentHost.StartSession:output_type -> hive.StartSessionResponse
-	10, // 19: hive.AgentHost.DeleteSession:output_type -> hive.DeleteSessionResponse
-	12, // 20: hive.AgentHost.ListSessions:output_type -> hive.ListSessionsResponse
-	15, // 21: hive.AgentHost.GetSecrets:output_type -> hive.GetSecretsResponse
-	0,  // 22: hive.AgentWorker.Chat:output_type -> hive.ChatEvent
-	18, // 23: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
-	20, // 24: hive.AgentWorker.ConfigChanged:output_type -> hive.ConfigChangedResponse
-	22, // 25: hive.AgentWorker.ExecuteTool:output_type -> hive.ExecuteToolResponse
-	14, // [14:26] is the sub-list for method output_type
-	2,  // [2:14] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	0, // 0: hive.AgentWorker.ExecuteTool:input_type -> hive.ExecuteToolRequest
+	2, // 1: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
+	1, // 2: hive.AgentWorker.ExecuteTool:output_type -> hive.ExecuteToolResponse
+	3, // 3: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_internal_ipc_proto_hive_proto_init() }
@@ -1349,9 +275,9 @@ func file_internal_ipc_proto_hive_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hive_proto_rawDesc), len(file_internal_ipc_proto_hive_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   4,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   1,
 		},
 		GoTypes:           file_internal_ipc_proto_hive_proto_goTypes,
 		DependencyIndexes: file_internal_ipc_proto_hive_proto_depIdxs,

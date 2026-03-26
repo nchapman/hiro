@@ -32,33 +32,19 @@ func openTestPDB(t *testing.T, dir string) *platformdb.DB {
 
 // testWorker implements ipc.AgentWorker for testing.
 type testWorker struct {
-	response         string
-	shutdown         bool
-	done             chan struct{}
-	closed           bool
-	lastConfigUpdate *ipc.ConfigUpdate
+	shutdown bool
+	done     chan struct{}
+	closed   bool
 }
 
-func (w *testWorker) Chat(_ context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	if onEvent != nil {
-		onEvent(ipc.ChatEvent{Type: "delta", Content: w.response})
-	}
-	return w.response, nil
+func (w *testWorker) ExecuteTool(_ context.Context, _, name, _ string) (ipc.ToolResult, error) {
+	return ipc.ToolResult{Content: "mock result for " + name}, nil
 }
 
 func (w *testWorker) Shutdown(_ context.Context) error {
 	w.shutdown = true
 	w.closeDone()
 	return nil
-}
-
-func (w *testWorker) ConfigChanged(_ context.Context, update ipc.ConfigUpdate) error {
-	w.lastConfigUpdate = &update
-	return nil
-}
-
-func (w *testWorker) ExecuteTool(_ context.Context, _, name, _ string) (ipc.ToolResult, error) {
-	return ipc.ToolResult{Content: "mock result for " + name}, nil
 }
 
 func (w *testWorker) closeDone() {
@@ -70,10 +56,10 @@ func (w *testWorker) closeDone() {
 
 // testWorkerFactory returns a WorkerFactory that creates testWorkers.
 // The done channel is closed when Shutdown is called, simulating process exit.
-func testWorkerFactory(response string) WorkerFactory {
+func testWorkerFactory(_ string) WorkerFactory {
 	return func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
 		done := make(chan struct{})
-		w := &testWorker{response: response, done: done}
+		w := &testWorker{done: done}
 		return &WorkerHandle{
 			Worker: w,
 			Kill:   func() { w.closeDone() },
@@ -89,7 +75,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello from agent"), nil, nil)
+	}, nil, logger, testWorkerFactory("hello from agent"), nil, nil)
 	return mgr, dir
 }
 
@@ -163,7 +149,9 @@ func TestManager_CreateSession_InvalidMode(t *testing.T) {
 	}
 }
 
-func TestManager_SendMessage(t *testing.T) {
+func TestManager_SendMessage_NoLoop(t *testing.T) {
+	// Without a provider, no inference loop is created.
+	// SendMessage should return an error indicating no loop.
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
@@ -172,34 +160,12 @@ func TestManager_SendMessage(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	result, err := mgr.SendMessage(t.Context(), id, "hi", nil)
-	if err != nil {
-		t.Fatalf("send: %v", err)
+	_, err = mgr.SendMessage(t.Context(), id, "hi", nil)
+	if err == nil {
+		t.Fatal("expected error when no inference loop")
 	}
-	if result != "hello from agent" {
-		t.Errorf("result = %q, want %q", result, "hello from agent")
-	}
-}
-
-func TestManager_SendMessage_WithDelta(t *testing.T) {
-	mgr, dir := setupTestManager(t)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	var events []ipc.ChatEvent
-	_, err = mgr.SendMessage(t.Context(), id, "hi", func(evt ipc.ChatEvent) error {
-		events = append(events, evt)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	if len(events) == 0 {
-		t.Error("expected at least one event callback")
+	if !strings.Contains(err.Error(), "no inference loop") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -762,7 +728,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
 	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
 	if err != nil {
@@ -773,7 +739,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -798,7 +764,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
 	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
 	if err != nil {
@@ -810,7 +776,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	// Create a new manager and restore.
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -834,50 +800,33 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	}
 }
 
-func TestManager_SpawnSession(t *testing.T) {
+func TestManager_SpawnSession_NoLoop(t *testing.T) {
+	// SpawnSession calls SendMessage internally which requires a loop.
+	// Without a provider, this fails gracefully.
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	result, err := mgr.SpawnSession(t.Context(), "test-agent", "do something", "", nil)
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	if result != "hello from agent" {
-		t.Errorf("result = %q, want %q", result, "hello from agent")
+	_, err := mgr.SpawnSession(t.Context(), "test-agent", "do something", "", nil)
+	if err == nil {
+		t.Fatal("expected error when no inference loop")
 	}
 
-	// Ephemeral agent should be cleaned up
+	// Ephemeral agent should be cleaned up even on failure.
 	agents := mgr.ListSessions()
 	if len(agents) != 0 {
 		t.Errorf("expected 0 agents after spawn, got %d", len(agents))
 	}
 }
 
-func TestTruncateResult(t *testing.T) {
-	short := "hello"
-	if got := truncateResult(short); got != short {
-		t.Errorf("short string should not be truncated, got %q", got)
-	}
-
-	long := strings.Repeat("x", maxAgentResultSize+100)
-	got := truncateResult(long)
-	if len(got) > maxAgentResultSize+50 {
-		t.Errorf("truncated result too long: %d", len(got))
-	}
-	if !strings.HasSuffix(got, "(result truncated)") {
-		t.Error("expected truncation suffix")
-	}
-}
-
 // --- UID pool integration tests ---
 
 // capturingWorkerFactory creates workers and records the SpawnConfig for each.
-func capturingWorkerFactory(response string) (WorkerFactory, *[]ipc.SpawnConfig) {
+func capturingWorkerFactory(_ string) (WorkerFactory, *[]ipc.SpawnConfig) {
 	var configs []ipc.SpawnConfig
 	factory := func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
 		configs = append(configs, cfg)
 		done := make(chan struct{})
-		w := &testWorker{response: response, done: done}
+		w := &testWorker{done: done}
 		return &WorkerHandle{
 			Worker: w,
 			Kill:   func() { w.closeDone() },
@@ -902,7 +851,7 @@ func setupTestManagerWithPool(t *testing.T, pool *uidpool.Pool) (*Manager, strin
 	factory, configs := capturingWorkerFactory("hello")
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", factory, pool, nil)
+	}, nil, logger, factory, pool, nil)
 	return mgr, dir, configs
 }
 
@@ -1001,7 +950,7 @@ func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", failingWorkerFactory(), pool, nil)
+	}, nil, logger, failingWorkerFactory(), pool, nil)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	_, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
@@ -1073,7 +1022,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", factory1, pool, pdb)
+	}, nil, logger, factory1, pool, pdb)
 
 	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
 	if err != nil {
@@ -1089,7 +1038,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, "", factory2, pool2, pdb)
+	}, nil, logger, factory2, pool2, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1116,16 +1065,15 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 }
 
 func TestManager_UIDPool_SpawnSubagent(t *testing.T) {
+	// SpawnSession creates an ephemeral agent with a UID, then cleans up.
+	// Without a provider, SendMessage fails, but cleanup should still release the UID.
 	pool := uidpool.New(10000, 10000, 64)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.SpawnSession(t.Context(), "test-agent", "do something", "", nil)
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
+	_, _ = mgr.SpawnSession(t.Context(), "test-agent", "do something", "", nil)
+	// Error expected (no loop), but cleanup should happen.
 
-	// Ephemeral agent should have gotten a UID
 	if len(*configs) != 1 {
 		t.Fatalf("expected 1 spawn config, got %d", len(*configs))
 	}
@@ -1133,7 +1081,7 @@ func TestManager_UIDPool_SpawnSubagent(t *testing.T) {
 		t.Fatal("ephemeral agent should have non-zero UID")
 	}
 
-	// UID should be released after subagent completes
+	// UID should be released after subagent cleanup.
 	if pool.InUse() != 0 {
 		t.Fatalf("expected 0 UIDs after subagent cleanup, got %d", pool.InUse())
 	}
@@ -1233,7 +1181,7 @@ Coordinator.`)
 
 	// Start coordinator, shut down
 	pdb := openTestPDB(t, dir)
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 	id, err := mgr1.CreateSession(ctx, "coord", "", "coordinator")
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -1241,7 +1189,7 @@ Coordinator.`)
 	mgr1.Shutdown()
 
 	// Restore — coordinator mode should survive (it's persistent)
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, "", testWorkerFactory("hello"), nil, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreSessions(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1432,34 +1380,26 @@ func TestExtractAgentName(t *testing.T) {
 func TestManager_PushConfigUpdate(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 
-	// Write agent definition
 	agentDir := filepath.Join(dir, "agents", "worker")
 	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\nmodel: claude-sonnet-4-20250514\ntools: [bash, read_file]\n---\nWork."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\nmodel: claude-sonnet-4-20250514\ntools: [bash, read_file]\n---\nWork."), 0644)
 
-	// Start a session
 	id, err := mgr.CreateSession(t.Context(), "worker", "", "persistent")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Update agent.md with new model
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\nmodel: claude-opus-4-20250514\ntools: [bash, read_file, grep]\n---\nUpdated work."), 0644)
-
-	// Push config update
+	// Update agent.md
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\nmodel: claude-opus-4-20250514\ntools: [bash, read_file, grep]\n---\nUpdated work."), 0644)
 	mgr.pushConfigUpdate("worker")
 
-	// Verify the worker received the update
-	mgr.mu.RLock()
-	s := mgr.sessions[id]
-	w := s.worker.(*testWorker)
-	mgr.mu.RUnlock()
-
-	if w.lastConfigUpdate == nil {
-		t.Fatal("expected config update to be pushed to worker")
+	// Verify the description was updated in-memory.
+	info, ok := mgr.GetSession(id)
+	if !ok {
+		t.Fatal("session not found")
 	}
-	if w.lastConfigUpdate.Model != "claude-opus-4-20250514" {
-		t.Errorf("model = %q, want %q", w.lastConfigUpdate.Model, "claude-opus-4-20250514")
+	if info.Description != "New desc" {
+		t.Errorf("description = %q, want %q", info.Description, "New desc")
 	}
 }
 
@@ -1519,12 +1459,11 @@ func TestManager_PushConfigUpdate_UpdatesDescription(t *testing.T) {
 func TestManager_PushConfigUpdateAll(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 
-	// Create two different agents.
 	for _, name := range []string{"alpha", "beta"} {
 		agentDir := filepath.Join(dir, "agents", name)
 		os.MkdirAll(agentDir, 0755)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ntools: [bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: old\ntools: [bash]\n---\nDo stuff."), 0644)
 	}
 
 	idA, err := mgr.CreateSession(t.Context(), "alpha", "", "persistent")
@@ -1536,19 +1475,24 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Push to all.
+	// Update descriptions.
+	for _, name := range []string{"alpha", "beta"} {
+		agentDir := filepath.Join(dir, "agents", name)
+		os.WriteFile(filepath.Join(agentDir, "agent.md"),
+			[]byte("---\nname: "+name+"\ndescription: updated\ntools: [bash]\n---\nDo stuff."), 0644)
+	}
+
 	mgr.PushConfigUpdateAll()
 
-	// Both workers should have received an update.
-	mgr.mu.RLock()
-	wA := mgr.sessions[idA].worker.(*testWorker)
-	wB := mgr.sessions[idB].worker.(*testWorker)
-	mgr.mu.RUnlock()
-
-	if wA.lastConfigUpdate == nil {
-		t.Error("alpha worker did not receive config update")
-	}
-	if wB.lastConfigUpdate == nil {
-		t.Error("beta worker did not receive config update")
+	// Descriptions should be updated in-memory.
+	for _, id := range []string{idA, idB} {
+		info, ok := mgr.GetSession(id)
+		if !ok {
+			t.Errorf("session %s not found", id)
+			continue
+		}
+		if info.Description != "updated" {
+			t.Errorf("session %s description = %q, want %q", id, info.Description, "updated")
+		}
 	}
 }

@@ -2,12 +2,8 @@ package ipc
 
 import "context"
 
-// HostManager is the control-plane-side interface that the gRPC host server
-// delegates to. Unlike AgentHost (which is scoped to a single agent's
-// perspective), HostManager accepts caller/parent IDs explicitly so a single
-// server can multiplex requests from all agent processes.
-//
-// The agent.Manager satisfies this interface directly.
+// HostManager is the interface that the inference loop uses to manage
+// sessions. The agent.Manager implements this directly.
 type HostManager interface {
 	// SpawnSession runs an ephemeral session and returns its result.
 	SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ChatEvent) error) (string, error)

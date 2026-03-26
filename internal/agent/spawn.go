@@ -49,12 +49,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 			},
 		}
 		cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
-	} else {
-		// Pass API key via env var rather than JSON payload to avoid
-		// it being visible in /proc/<pid>/fd/0 or accidentally logged.
-		cmd.Env = append(os.Environ(), "HIVE_API_KEY="+cfg.APIKey)
 	}
-	cfg.APIKey = "" // strip from JSON payload
 
 	// Pipe SpawnConfig as JSON to stdin.
 	stdinPipe, err := cmd.StdinPipe()
@@ -176,7 +171,7 @@ func buildIsolatedEnv(cfg ipc.SpawnConfig, getenv func(string) string) []string 
 		"HOME=" + cfg.SessionDir,
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
-		"HIVE_API_KEY=" + cfg.APIKey,
+		// Workers don't need the API key — inference runs in the control plane.
 	}
 	for _, key := range forwardedEnvKeys {
 		if v := getenv(key); v != "" {

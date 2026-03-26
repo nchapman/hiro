@@ -19,427 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentHost_SpawnSession_FullMethodName  = "/hive.AgentHost/SpawnSession"
-	AgentHost_CreateSession_FullMethodName = "/hive.AgentHost/CreateSession"
-	AgentHost_SendMessage_FullMethodName   = "/hive.AgentHost/SendMessage"
-	AgentHost_StopSession_FullMethodName   = "/hive.AgentHost/StopSession"
-	AgentHost_StartSession_FullMethodName  = "/hive.AgentHost/StartSession"
-	AgentHost_DeleteSession_FullMethodName = "/hive.AgentHost/DeleteSession"
-	AgentHost_ListSessions_FullMethodName  = "/hive.AgentHost/ListSessions"
-	AgentHost_GetSecrets_FullMethodName    = "/hive.AgentHost/GetSecrets"
-)
-
-// AgentHostClient is the client API for AgentHost service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// AgentHost is served by the control plane. Agent processes call these RPCs
-// to perform session-level operations (creating sessions, sending messages, etc.).
-type AgentHostClient interface {
-	// SpawnSession runs an ephemeral session to completion, streaming deltas.
-	SpawnSession(ctx context.Context, in *SpawnSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error)
-	// CreateSession creates and starts a new session from an agent definition.
-	CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (*CreateSessionResponse, error)
-	// SendMessage sends a message to a running session, streaming deltas.
-	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error)
-	// StopSession stops a session and its subtree.
-	StopSession(ctx context.Context, in *StopSessionRequest, opts ...grpc.CallOption) (*StopSessionResponse, error)
-	// StartSession restarts a stopped session.
-	StartSession(ctx context.Context, in *StartSessionRequest, opts ...grpc.CallOption) (*StartSessionResponse, error)
-	// DeleteSession stops and permanently removes a session and its subtree.
-	DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*DeleteSessionResponse, error)
-	// ListSessions returns the direct child sessions of a parent.
-	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
-	// GetSecrets returns secret names and env vars for bash injection.
-	GetSecrets(ctx context.Context, in *GetSecretsRequest, opts ...grpc.CallOption) (*GetSecretsResponse, error)
-}
-
-type agentHostClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewAgentHostClient(cc grpc.ClientConnInterface) AgentHostClient {
-	return &agentHostClient{cc}
-}
-
-func (c *agentHostClient) SpawnSession(ctx context.Context, in *SpawnSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AgentHost_ServiceDesc.Streams[0], AgentHost_SpawnSession_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[SpawnSessionRequest, ChatEvent]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentHost_SpawnSessionClient = grpc.ServerStreamingClient[ChatEvent]
-
-func (c *agentHostClient) CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (*CreateSessionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateSessionResponse)
-	err := c.cc.Invoke(ctx, AgentHost_CreateSession_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentHostClient) SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AgentHost_ServiceDesc.Streams[1], AgentHost_SendMessage_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[SendMessageRequest, ChatEvent]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentHost_SendMessageClient = grpc.ServerStreamingClient[ChatEvent]
-
-func (c *agentHostClient) StopSession(ctx context.Context, in *StopSessionRequest, opts ...grpc.CallOption) (*StopSessionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StopSessionResponse)
-	err := c.cc.Invoke(ctx, AgentHost_StopSession_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentHostClient) StartSession(ctx context.Context, in *StartSessionRequest, opts ...grpc.CallOption) (*StartSessionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StartSessionResponse)
-	err := c.cc.Invoke(ctx, AgentHost_StartSession_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentHostClient) DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*DeleteSessionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteSessionResponse)
-	err := c.cc.Invoke(ctx, AgentHost_DeleteSession_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentHostClient) ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListSessionsResponse)
-	err := c.cc.Invoke(ctx, AgentHost_ListSessions_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentHostClient) GetSecrets(ctx context.Context, in *GetSecretsRequest, opts ...grpc.CallOption) (*GetSecretsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetSecretsResponse)
-	err := c.cc.Invoke(ctx, AgentHost_GetSecrets_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// AgentHostServer is the server API for AgentHost service.
-// All implementations must embed UnimplementedAgentHostServer
-// for forward compatibility.
-//
-// AgentHost is served by the control plane. Agent processes call these RPCs
-// to perform session-level operations (creating sessions, sending messages, etc.).
-type AgentHostServer interface {
-	// SpawnSession runs an ephemeral session to completion, streaming deltas.
-	SpawnSession(*SpawnSessionRequest, grpc.ServerStreamingServer[ChatEvent]) error
-	// CreateSession creates and starts a new session from an agent definition.
-	CreateSession(context.Context, *CreateSessionRequest) (*CreateSessionResponse, error)
-	// SendMessage sends a message to a running session, streaming deltas.
-	SendMessage(*SendMessageRequest, grpc.ServerStreamingServer[ChatEvent]) error
-	// StopSession stops a session and its subtree.
-	StopSession(context.Context, *StopSessionRequest) (*StopSessionResponse, error)
-	// StartSession restarts a stopped session.
-	StartSession(context.Context, *StartSessionRequest) (*StartSessionResponse, error)
-	// DeleteSession stops and permanently removes a session and its subtree.
-	DeleteSession(context.Context, *DeleteSessionRequest) (*DeleteSessionResponse, error)
-	// ListSessions returns the direct child sessions of a parent.
-	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
-	// GetSecrets returns secret names and env vars for bash injection.
-	GetSecrets(context.Context, *GetSecretsRequest) (*GetSecretsResponse, error)
-	mustEmbedUnimplementedAgentHostServer()
-}
-
-// UnimplementedAgentHostServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
-type UnimplementedAgentHostServer struct{}
-
-func (UnimplementedAgentHostServer) SpawnSession(*SpawnSessionRequest, grpc.ServerStreamingServer[ChatEvent]) error {
-	return status.Error(codes.Unimplemented, "method SpawnSession not implemented")
-}
-func (UnimplementedAgentHostServer) CreateSession(context.Context, *CreateSessionRequest) (*CreateSessionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateSession not implemented")
-}
-func (UnimplementedAgentHostServer) SendMessage(*SendMessageRequest, grpc.ServerStreamingServer[ChatEvent]) error {
-	return status.Error(codes.Unimplemented, "method SendMessage not implemented")
-}
-func (UnimplementedAgentHostServer) StopSession(context.Context, *StopSessionRequest) (*StopSessionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StopSession not implemented")
-}
-func (UnimplementedAgentHostServer) StartSession(context.Context, *StartSessionRequest) (*StartSessionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StartSession not implemented")
-}
-func (UnimplementedAgentHostServer) DeleteSession(context.Context, *DeleteSessionRequest) (*DeleteSessionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeleteSession not implemented")
-}
-func (UnimplementedAgentHostServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListSessions not implemented")
-}
-func (UnimplementedAgentHostServer) GetSecrets(context.Context, *GetSecretsRequest) (*GetSecretsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetSecrets not implemented")
-}
-func (UnimplementedAgentHostServer) mustEmbedUnimplementedAgentHostServer() {}
-func (UnimplementedAgentHostServer) testEmbeddedByValue()                   {}
-
-// UnsafeAgentHostServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to AgentHostServer will
-// result in compilation errors.
-type UnsafeAgentHostServer interface {
-	mustEmbedUnimplementedAgentHostServer()
-}
-
-func RegisterAgentHostServer(s grpc.ServiceRegistrar, srv AgentHostServer) {
-	// If the following call panics, it indicates UnimplementedAgentHostServer was
-	// embedded by pointer and is nil.  This will cause panics if an
-	// unimplemented method is ever invoked, so we test this at initialization
-	// time to prevent it from happening at runtime later due to I/O.
-	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
-		t.testEmbeddedByValue()
-	}
-	s.RegisterService(&AgentHost_ServiceDesc, srv)
-}
-
-func _AgentHost_SpawnSession_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SpawnSessionRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(AgentHostServer).SpawnSession(m, &grpc.GenericServerStream[SpawnSessionRequest, ChatEvent]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentHost_SpawnSessionServer = grpc.ServerStreamingServer[ChatEvent]
-
-func _AgentHost_CreateSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateSessionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentHostServer).CreateSession(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentHost_CreateSession_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentHostServer).CreateSession(ctx, req.(*CreateSessionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentHost_SendMessage_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SendMessageRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(AgentHostServer).SendMessage(m, &grpc.GenericServerStream[SendMessageRequest, ChatEvent]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentHost_SendMessageServer = grpc.ServerStreamingServer[ChatEvent]
-
-func _AgentHost_StopSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StopSessionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentHostServer).StopSession(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentHost_StopSession_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentHostServer).StopSession(ctx, req.(*StopSessionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentHost_StartSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartSessionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentHostServer).StartSession(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentHost_StartSession_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentHostServer).StartSession(ctx, req.(*StartSessionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentHost_DeleteSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteSessionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentHostServer).DeleteSession(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentHost_DeleteSession_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentHostServer).DeleteSession(ctx, req.(*DeleteSessionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentHost_ListSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListSessionsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentHostServer).ListSessions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentHost_ListSessions_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentHostServer).ListSessions(ctx, req.(*ListSessionsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentHost_GetSecrets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetSecretsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentHostServer).GetSecrets(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentHost_GetSecrets_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentHostServer).GetSecrets(ctx, req.(*GetSecretsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// AgentHost_ServiceDesc is the grpc.ServiceDesc for AgentHost service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var AgentHost_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "hive.AgentHost",
-	HandlerType: (*AgentHostServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "CreateSession",
-			Handler:    _AgentHost_CreateSession_Handler,
-		},
-		{
-			MethodName: "StopSession",
-			Handler:    _AgentHost_StopSession_Handler,
-		},
-		{
-			MethodName: "StartSession",
-			Handler:    _AgentHost_StartSession_Handler,
-		},
-		{
-			MethodName: "DeleteSession",
-			Handler:    _AgentHost_DeleteSession_Handler,
-		},
-		{
-			MethodName: "ListSessions",
-			Handler:    _AgentHost_ListSessions_Handler,
-		},
-		{
-			MethodName: "GetSecrets",
-			Handler:    _AgentHost_GetSecrets_Handler,
-		},
-	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "SpawnSession",
-			Handler:       _AgentHost_SpawnSession_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "SendMessage",
-			Handler:       _AgentHost_SendMessage_Handler,
-			ServerStreams: true,
-		},
-	},
-	Metadata: "internal/ipc/proto/hive.proto",
-}
-
-const (
-	AgentWorker_Chat_FullMethodName          = "/hive.AgentWorker/Chat"
-	AgentWorker_Shutdown_FullMethodName      = "/hive.AgentWorker/Shutdown"
-	AgentWorker_ConfigChanged_FullMethodName = "/hive.AgentWorker/ConfigChanged"
-	AgentWorker_ExecuteTool_FullMethodName   = "/hive.AgentWorker/ExecuteTool"
+	AgentWorker_ExecuteTool_FullMethodName = "/hive.AgentWorker/ExecuteTool"
+	AgentWorker_Shutdown_FullMethodName    = "/hive.AgentWorker/Shutdown"
 )
 
 // AgentWorkerClient is the client API for AgentWorker service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AgentWorker is served by each agent process. The control plane calls these
-// RPCs to send messages and manage the worker's lifecycle.
+// AgentWorker is served by each agent worker process. The control plane
+// calls these RPCs to execute tools and manage the worker's lifecycle.
 type AgentWorkerClient interface {
-	// Chat sends a message and streams back deltas and the final response.
-	Chat(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error)
+	// ExecuteTool runs a single tool in the worker's sandbox and returns the result.
+	ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error)
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
-	// ConfigChanged pushes resolved structural config when definitions or
-	// control plane config change. The agent applies updates on its next turn.
-	ConfigChanged(ctx context.Context, in *ConfigChangedRequest, opts ...grpc.CallOption) (*ConfigChangedResponse, error)
-	// ExecuteTool runs a single tool and returns the result.
-	// Used when the control plane owns the inference loop and dispatches
-	// tool calls to the worker for sandboxed execution.
-	ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error)
 }
 
 type agentWorkerClient struct {
@@ -448,45 +42,6 @@ type agentWorkerClient struct {
 
 func NewAgentWorkerClient(cc grpc.ClientConnInterface) AgentWorkerClient {
 	return &agentWorkerClient{cc}
-}
-
-func (c *agentWorkerClient) Chat(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatEvent], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AgentWorker_ServiceDesc.Streams[0], AgentWorker_Chat_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[ChatRequest, ChatEvent]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentWorker_ChatClient = grpc.ServerStreamingClient[ChatEvent]
-
-func (c *agentWorkerClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ShutdownResponse)
-	err := c.cc.Invoke(ctx, AgentWorker_Shutdown_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentWorkerClient) ConfigChanged(ctx context.Context, in *ConfigChangedRequest, opts ...grpc.CallOption) (*ConfigChangedResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ConfigChangedResponse)
-	err := c.cc.Invoke(ctx, AgentWorker_ConfigChanged_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *agentWorkerClient) ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error) {
@@ -499,24 +54,27 @@ func (c *agentWorkerClient) ExecuteTool(ctx context.Context, in *ExecuteToolRequ
 	return out, nil
 }
 
+func (c *agentWorkerClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownResponse)
+	err := c.cc.Invoke(ctx, AgentWorker_Shutdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentWorkerServer is the server API for AgentWorker service.
 // All implementations must embed UnimplementedAgentWorkerServer
 // for forward compatibility.
 //
-// AgentWorker is served by each agent process. The control plane calls these
-// RPCs to send messages and manage the worker's lifecycle.
+// AgentWorker is served by each agent worker process. The control plane
+// calls these RPCs to execute tools and manage the worker's lifecycle.
 type AgentWorkerServer interface {
-	// Chat sends a message and streams back deltas and the final response.
-	Chat(*ChatRequest, grpc.ServerStreamingServer[ChatEvent]) error
+	// ExecuteTool runs a single tool in the worker's sandbox and returns the result.
+	ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error)
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
-	// ConfigChanged pushes resolved structural config when definitions or
-	// control plane config change. The agent applies updates on its next turn.
-	ConfigChanged(context.Context, *ConfigChangedRequest) (*ConfigChangedResponse, error)
-	// ExecuteTool runs a single tool and returns the result.
-	// Used when the control plane owns the inference loop and dispatches
-	// tool calls to the worker for sandboxed execution.
-	ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error)
 	mustEmbedUnimplementedAgentWorkerServer()
 }
 
@@ -527,17 +85,11 @@ type AgentWorkerServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentWorkerServer struct{}
 
-func (UnimplementedAgentWorkerServer) Chat(*ChatRequest, grpc.ServerStreamingServer[ChatEvent]) error {
-	return status.Error(codes.Unimplemented, "method Chat not implemented")
+func (UnimplementedAgentWorkerServer) ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteTool not implemented")
 }
 func (UnimplementedAgentWorkerServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
-}
-func (UnimplementedAgentWorkerServer) ConfigChanged(context.Context, *ConfigChangedRequest) (*ConfigChangedResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ConfigChanged not implemented")
-}
-func (UnimplementedAgentWorkerServer) ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ExecuteTool not implemented")
 }
 func (UnimplementedAgentWorkerServer) mustEmbedUnimplementedAgentWorkerServer() {}
 func (UnimplementedAgentWorkerServer) testEmbeddedByValue()                     {}
@@ -560,16 +112,23 @@ func RegisterAgentWorkerServer(s grpc.ServiceRegistrar, srv AgentWorkerServer) {
 	s.RegisterService(&AgentWorker_ServiceDesc, srv)
 }
 
-func _AgentWorker_Chat_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(ChatRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
+func _AgentWorker_ExecuteTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
 	}
-	return srv.(AgentWorkerServer).Chat(m, &grpc.GenericServerStream[ChatRequest, ChatEvent]{ServerStream: stream})
+	if interceptor == nil {
+		return srv.(AgentWorkerServer).ExecuteTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentWorker_ExecuteTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentWorkerServer).ExecuteTool(ctx, req.(*ExecuteToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentWorker_ChatServer = grpc.ServerStreamingServer[ChatEvent]
 
 func _AgentWorker_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ShutdownRequest)
@@ -589,42 +148,6 @@ func _AgentWorker_Shutdown_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AgentWorker_ConfigChanged_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConfigChangedRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentWorkerServer).ConfigChanged(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentWorker_ConfigChanged_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentWorkerServer).ConfigChanged(ctx, req.(*ConfigChangedRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentWorker_ExecuteTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ExecuteToolRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentWorkerServer).ExecuteTool(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentWorker_ExecuteTool_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentWorkerServer).ExecuteTool(ctx, req.(*ExecuteToolRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // AgentWorker_ServiceDesc is the grpc.ServiceDesc for AgentWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -633,24 +156,14 @@ var AgentWorker_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*AgentWorkerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Shutdown",
-			Handler:    _AgentWorker_Shutdown_Handler,
-		},
-		{
-			MethodName: "ConfigChanged",
-			Handler:    _AgentWorker_ConfigChanged_Handler,
-		},
-		{
 			MethodName: "ExecuteTool",
 			Handler:    _AgentWorker_ExecuteTool_Handler,
 		},
-	},
-	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Chat",
-			Handler:       _AgentWorker_Chat_Handler,
-			ServerStreams: true,
+			MethodName: "Shutdown",
+			Handler:    _AgentWorker_Shutdown_Handler,
 		},
 	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "internal/ipc/proto/hive.proto",
 }

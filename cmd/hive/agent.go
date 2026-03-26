@@ -8,23 +8,21 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
+	"charm.land/fantasy"
+
 	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/history"
+	"github.com/nchapman/hivebot/internal/agent/tools"
 	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // runAgent is the entry point for an agent worker process.
-// It reads a SpawnConfig from stdin, sets up the agent runtime,
-// and starts a gRPC server for the control plane to communicate with.
+// Workers are thin tool-execution sandboxes: they receive ExecuteTool
+// RPCs from the control plane and execute tools under an isolated UID.
 func runAgent() error {
-	// Read spawn config from stdin
 	var cfg ipc.SpawnConfig
 	if err := json.NewDecoder(os.Stdin).Decode(&cfg); err != nil {
 		return fmt.Errorf("reading spawn config: %w", err)
@@ -33,7 +31,7 @@ func runAgent() error {
 	// When running under UID isolation, set a collaborative umask and
 	// verify we are running as the expected user.
 	if cfg.UID != 0 {
-		syscall.Umask(0002) // files: 0664, dirs: 0775 (group-writable)
+		syscall.Umask(0002)
 		if uint32(os.Getuid()) != cfg.UID {
 			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
 		}
@@ -44,131 +42,29 @@ func runAgent() error {
 	}))
 	logger = logger.With("agent", cfg.AgentName, "session", cfg.SessionID)
 
-	// Load agent definition
-	agentCfg, err := config.LoadAgentDir(cfg.AgentDefDir)
-	if err != nil {
-		return fmt.Errorf("loading agent definition: %w", err)
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Create language model
-	model := agentCfg.Model
-	if cfg.Model != "" {
-		model = cfg.Model
-	}
-	// API key is passed via env var (not in SpawnConfig JSON) for security.
-	apiKey := os.Getenv("HIVE_API_KEY")
-	lm, err := agent.CreateLanguageModel(ctx, agent.ProviderType(cfg.Provider), apiKey, model)
-	if err != nil {
-		return fmt.Errorf("creating language model: %w", err)
-	}
+	// Build sandboxed tools (file ops, bash, etc.).
+	bgMgr := tools.NewBackgroundJobManager(nil)
+	toolSet := buildWorkerTools(cfg.WorkingDir, bgMgr, cfg.EffectiveTools)
 
-	// Connect to control plane gRPC for manager tool calls
-	hostConn, err := grpc.NewClient("unix://"+cfg.HostSocket,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		return fmt.Errorf("connecting to control plane: %w", err)
-	}
-	defer hostConn.Close()
-	host := grpcipc.NewHostClient(hostConn, cfg.SessionID)
+	// Create tool executor from the tool set.
+	executor := agent.ToolExecutorFromTools(toolSet)
 
-	// Build agent options
-	opts := agent.Options{
-		WorkingDir:     cfg.WorkingDir,
-		SessionDir:     cfg.SessionDir,
-		AgentDefDir:    cfg.AgentDefDir,
-		SharedSkillDir: cfg.SharedSkillDir,
-		LM:             lm,
-		AllowedTools:   cfg.EffectiveTools,
-		HasSkills:      cfg.EffectiveTools["use_skill"],
+	// Create a minimal AgentWorker that delegates to the executor.
+	worker := &toolWorker{
+		executor: executor,
+		cancel:   cancel,
+		logger:   logger,
 	}
 
-	// All agents can spawn sessions. Spawn and coordinator tools are
-	// structural capabilities gated by mode, not subject to operator
-	// override via config.yaml tool allowlists. The mode itself is the gate.
-	callerMode := config.AgentMode(cfg.Mode)
-	opts.ExtraTools = append(opts.ExtraTools, agent.BuildSpawnTool(host, callerMode))
-
-	// Coordinator agents get persistent agent management tools.
-	if callerMode == config.ModeCoordinator {
-		opts.ExtraTools = append(opts.ExtraTools, agent.BuildCoordinatorTools(host)...)
-	}
-
-	// Inject secret functions only if the agent has bash — secrets are
-	// injected as env vars in bash commands, so they're useless without it.
-	// nil EffectiveTools means unrestricted (all tools allowed, including bash).
-	if cfg.EffectiveTools == nil || cfg.EffectiveTools["bash"] {
-		opts.SecretEnvFn = func() []string {
-			_, env, err := host.GetSecrets(context.Background())
-			if err != nil {
-				logger.Warn("failed to fetch secrets", "error", err)
-				return nil
-			}
-			return env
-		}
-		opts.SecretNamesFn = func() []string {
-			names, _, err := host.GetSecrets(context.Background())
-			if err != nil {
-				logger.Warn("failed to fetch secret names", "error", err)
-				return nil
-			}
-			return names
-		}
-	}
-
-	// Read identity if present
-	if id, err := config.ReadOptionalFile(filepath.Join(cfg.SessionDir, "identity.md")); err == nil {
-		opts.Identity = id
-	}
-
-	// Set up persistent agent tools and conversation
-	var conv *agent.Conversation
-	var historyEngine *history.Engine
-
-	if callerMode.IsPersistent() {
-		opts.ExtraTools = append(opts.ExtraTools, agent.BuildMemoryTools(cfg.SessionDir)...)
-		opts.ExtraTools = append(opts.ExtraTools, agent.BuildTodoTools(cfg.SessionDir)...)
-
-		historyPath := filepath.Join(cfg.SessionDir, "db", "history.db")
-		store, storeErr := history.OpenStore(historyPath)
-		if storeErr != nil {
-			logger.Warn("failed to open history DB, using ephemeral conversation", "error", storeErr)
-			conv = agent.NewConversation()
-		} else {
-			historyEngine = history.NewEngine(store, lm, history.DefaultConfig(), logger)
-			opts.ExtraTools = append(opts.ExtraTools, agent.BuildHistoryTools(historyEngine)...)
-			conv = agent.NewConversationWithHistory(historyEngine)
-		}
-	} else {
-		conv = agent.NewConversation()
-	}
-
-	// Create the agent
-	a, err := agent.New(ctx, agentCfg, opts, logger)
-	if err != nil {
-		return fmt.Errorf("creating agent: %w", err)
-	}
-
-	// Create the worker (implements ipc.AgentWorker)
-	worker := &agentWorker{
-		agent:  a,
-		conv:   conv,
-		cancel: cancel,
-		logger: logger,
-	}
-
-	// Create tool executor for direct tool dispatch from the control plane.
-	executor := agent.ToolExecutorFromTools(a.Tools())
-
-	// Start gRPC server on Unix socket
+	// Start gRPC server on Unix socket.
 	socketPath := cfg.AgentSocket
 	if socketPath == "" {
 		socketPath = fmt.Sprintf("/tmp/hive-agent-%s.sock", cfg.SessionID)
 	}
-	os.Remove(socketPath) // clean up stale socket
+	os.Remove(socketPath)
 	lis, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", socketPath, err)
@@ -176,9 +72,7 @@ func runAgent() error {
 	defer os.Remove(socketPath)
 
 	srv := grpc.NewServer()
-	ws := grpcipc.NewWorkerServer(worker)
-	ws.SetToolExecutor(executor)
-	ws.Register(srv)
+	grpcipc.NewWorkerServer(worker).Register(srv)
 
 	go func() {
 		if err := srv.Serve(lis); err != nil {
@@ -187,48 +81,59 @@ func runAgent() error {
 		}
 	}()
 
-	// Signal ready to the control plane
+	// Signal ready to the control plane.
 	fmt.Fprintln(os.Stdout, "ready")
-
 	logger.Info("agent worker ready")
 
-	// Block until shutdown
 	<-ctx.Done()
 	srv.GracefulStop()
-	a.Cleanup()
-	if historyEngine != nil {
-		historyEngine.Close()
-	}
+	bgMgr.KillAll()
 	logger.Info("agent worker stopped")
 	return nil
 }
 
-// agentWorker implements ipc.AgentWorker for a single agent process.
-type agentWorker struct {
-	agent  *agent.Agent
-	conv   *agent.Conversation
-	cancel context.CancelFunc
-	logger *slog.Logger
+// toolWorker implements ipc.AgentWorker as a thin tool executor.
+type toolWorker struct {
+	executor ipc.ToolExecutor
+	cancel   context.CancelFunc
+	logger   *slog.Logger
 }
 
-func (w *agentWorker) Chat(ctx context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	return w.agent.StreamChat(ctx, w.conv, message, onEvent)
+func (w *toolWorker) ExecuteTool(ctx context.Context, callID, name, input string) (ipc.ToolResult, error) {
+	return w.executor.ExecuteTool(ctx, callID, name, input)
 }
 
-func (w *agentWorker) Shutdown(ctx context.Context) error {
+func (w *toolWorker) Shutdown(ctx context.Context) error {
 	w.logger.Info("shutdown requested")
 	w.cancel()
 	return nil
 }
 
-func (w *agentWorker) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate) error {
-	w.logger.Info("config update received", "model", update.Model, "provider", update.Provider)
-	w.agent.ApplyConfigUpdate(update)
-	return nil
-}
+// buildWorkerTools creates the set of sandboxed tools available to the worker.
+func buildWorkerTools(workingDir string, bgMgr *tools.BackgroundJobManager, allowed map[string]bool) []fantasy.AgentTool {
+	all := []fantasy.AgentTool{
+		tools.NewBashTool(workingDir, bgMgr),
+		tools.NewReadFileTool(workingDir),
+		tools.NewEditTool(workingDir),
+		tools.NewMultiEditTool(workingDir),
+		tools.NewWriteFileTool(workingDir),
+		tools.NewListFilesTool(workingDir),
+		tools.NewGlobTool(workingDir),
+		tools.NewGrepTool(workingDir),
+		tools.NewFetchTool(),
+		tools.NewJobOutputTool(bgMgr),
+		tools.NewJobKillTool(bgMgr),
+	}
 
-func (w *agentWorker) ExecuteTool(_ context.Context, _, _, _ string) (ipc.ToolResult, error) {
-	// Tool execution is handled via SetToolExecutor on the gRPC server,
-	// not through the AgentWorker interface. This stub satisfies the interface.
-	return ipc.ToolResult{Content: "ExecuteTool not supported via Chat path", IsError: true}, nil
+	if allowed == nil {
+		return all
+	}
+
+	filtered := make([]fantasy.AgentTool, 0, len(all))
+	for _, t := range all {
+		if allowed[t.Info().Name] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }

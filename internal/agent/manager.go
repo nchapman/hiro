@@ -76,7 +76,6 @@ type Manager struct {
 	cp      ControlPlane // operator-level tool/secret config
 	logger  *slog.Logger
 
-	hostSocket    string        // path to host gRPC socket
 	workerFactory WorkerFactory // creates agent workers (default = OS processes)
 	uidPool       *uidpool.Pool // per-agent Unix user isolation; nil = disabled
 	pdb           *platformdb.DB // unified platform database
@@ -97,7 +96,7 @@ type ControlPlane interface {
 // containing agents/, sessions/, skills/, and workspace/ subdirectories. The context
 // controls the lifetime of persistent agents. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.
-func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, hostSocket string, wf WorkerFactory, pool *uidpool.Pool, pdb *platformdb.DB) *Manager {
+func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, wf WorkerFactory, pool *uidpool.Pool, pdb *platformdb.DB) *Manager {
 	if wf == nil {
 		wf = defaultWorkerFactory
 	}
@@ -109,7 +108,6 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 		opts:          opts,
 		cp:            cp,
 		logger:        logger,
-		hostSocket:    hostSocket,
 		workerFactory: wf,
 		uidPool:       pool,
 		pdb:           pdb,
@@ -202,14 +200,10 @@ func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEv
 	ctx = inference.ContextWithCallChain(ctx, agentID)
 	ctx = inference.ContextWithCallerID(ctx, agentID)
 
-	// Use inference loop if available; fall back to worker.Chat (test mode).
 	if ra.loop != nil {
 		return ra.loop.Chat(ctx, message, onEvent)
 	}
-	if ra.worker != nil {
-		return ra.worker.Chat(ctx, message, onEvent)
-	}
-	return "", fmt.Errorf("session %q is stopped", agentID)
+	return "", fmt.Errorf("session %q has no inference loop", agentID)
 }
 
 // StopAgent stops a running agent and all its descendants.
@@ -744,17 +738,10 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	spawnCfg := ipc.SpawnConfig{
 		SessionID:      id,
 		AgentName:      cfg.Name,
-		ParentID:       parentID,
-		Mode:           string(mode),
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
-		AgentDefDir:    m.agentDefDir(cfg.Name),
-		SharedSkillDir: m.sharedSkillsDir(),
-		HostSocket:     m.hostSocket,
-		Provider:       provider,
-		APIKey:         apiKey,
-		Model:          model,
+		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", id)),
 		UID:            uid,
 		GID:            gid,
 		Groups:         groups,
@@ -1196,14 +1183,13 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		parentID string
 		mode     config.AgentMode
 		loop     *inference.Loop
-		worker   ipc.AgentWorker // fallback for test mode
 	}
 
 	m.mu.RLock()
 	var targets []pushTarget
 	for id, s := range m.sessions {
-		if s.info.Name == agentName && s.info.Status == SessionStatusRunning && (s.loop != nil || s.worker != nil) {
-			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, loop: s.loop, worker: s.worker})
+		if s.info.Name == agentName && s.info.Status == SessionStatusRunning {
+			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, loop: s.loop})
 		}
 	}
 	m.mu.RUnlock()
@@ -1222,9 +1208,6 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 
 		if t.loop != nil {
 			t.loop.ApplyConfigUpdate(update)
-		} else if t.worker != nil {
-			// Fallback: push to worker directly (test mode without inference loop).
-			t.worker.ConfigChanged(context.Background(), update)
 		}
 		m.logger.Info("pushed config update to agent",
 			"agent", agentName, "session", t.id, "model", model)

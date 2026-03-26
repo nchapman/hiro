@@ -2,7 +2,6 @@ package grpcipc_test
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"testing"
 
@@ -15,141 +14,23 @@ import (
 
 const bufSize = 1024 * 1024
 
-// fakeManager implements ipc.HostManager for testing.
-type fakeManager struct {
-	spawnResult string
-	createID    string
-	sendResult  string
-	children    []ipc.SessionInfo
-	secretNames []string
-	secretEnv   []string
-	descendants map[string]string // targetID -> ancestorID (for IsDescendant)
-
-	lastSpawnReq  struct{ name, prompt, parentID string }
-	lastSendReq   struct{ id, message string }
-	lastCreateReq struct{ name, parentID, mode string }
-	lastStopReq   string
-}
-
-func (f *fakeManager) SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	f.lastSpawnReq.name = agentName
-	f.lastSpawnReq.prompt = prompt
-	f.lastSpawnReq.parentID = parentID
-	if onEvent != nil {
-		onEvent(ipc.ChatEvent{Type: "delta", Content: "thinking..."})
-		onEvent(ipc.ChatEvent{Type: "delta", Content: "done thinking"})
-	}
-	return f.spawnResult, nil
-}
-
-func (f *fakeManager) CreateSession(ctx context.Context, name, parentID string, mode string) (string, error) {
-	f.lastCreateReq.name = name
-	f.lastCreateReq.parentID = parentID
-	f.lastCreateReq.mode = mode
-	return f.createID, nil
-}
-
-func (f *fakeManager) SendMessage(ctx context.Context, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	f.lastSendReq.id = sessionID
-	f.lastSendReq.message = message
-	if onEvent != nil {
-		onEvent(ipc.ChatEvent{Type: "delta", Content: "streaming..."})
-	}
-	return f.sendResult, nil
-}
-
-func (f *fakeManager) StopSession(sessionID string) (ipc.SessionInfo, error) {
-	f.lastStopReq = sessionID
-	if sessionID == "not-found" {
-		return ipc.SessionInfo{}, fmt.Errorf("session %q not found", sessionID)
-	}
-	return ipc.SessionInfo{ID: sessionID}, nil
-}
-
-func (f *fakeManager) StartSession(ctx context.Context, sessionID string) error {
-	if sessionID == "not-found" {
-		return fmt.Errorf("session %q not found", sessionID)
-	}
-	return nil
-}
-
-func (f *fakeManager) DeleteSession(sessionID string) error {
-	if sessionID == "not-found" {
-		return fmt.Errorf("session %q not found", sessionID)
-	}
-	return nil
-}
-
-func (f *fakeManager) IsDescendant(targetID, ancestorID string) bool {
-	if f.descendants == nil {
-		return true // default: allow all
-	}
-	ancestor, ok := f.descendants[targetID]
-	return ok && ancestor == ancestorID
-}
-
-func (f *fakeManager) ListChildSessions(callerID string) []ipc.SessionInfo {
-	return f.children
-}
-
-func (f *fakeManager) SecretNames() []string {
-	return f.secretNames
-}
-
-func (f *fakeManager) SecretEnv() []string {
-	return f.secretEnv
-}
-
 // fakeWorker implements ipc.AgentWorker for testing.
 type fakeWorker struct {
-	chatResult       string
-	shutdown         bool
-	lastConfigUpdate *ipc.ConfigUpdate
+	shutdown bool
+	toolResult ipc.ToolResult
+	lastTool   struct{ callID, name, input string }
 }
 
-func (f *fakeWorker) Chat(ctx context.Context, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	if onEvent != nil {
-		onEvent(ipc.ChatEvent{Type: "delta", Content: "token1"})
-		onEvent(ipc.ChatEvent{Type: "delta", Content: "token2"})
-	}
-	return f.chatResult, nil
+func (f *fakeWorker) ExecuteTool(_ context.Context, callID, name, input string) (ipc.ToolResult, error) {
+	f.lastTool.callID = callID
+	f.lastTool.name = name
+	f.lastTool.input = input
+	return f.toolResult, nil
 }
 
-func (f *fakeWorker) Shutdown(ctx context.Context) error {
+func (f *fakeWorker) Shutdown(_ context.Context) error {
 	f.shutdown = true
 	return nil
-}
-
-func (f *fakeWorker) ConfigChanged(ctx context.Context, update ipc.ConfigUpdate) error {
-	f.lastConfigUpdate = &update
-	return nil
-}
-
-func (f *fakeWorker) ExecuteTool(ctx context.Context, callID, name, input string) (ipc.ToolResult, error) {
-	return ipc.ToolResult{Content: "result for " + name}, nil
-}
-
-// setupHostTest creates a bufconn-based gRPC server/client pair for AgentHost.
-func setupHostTest(t *testing.T, mgr ipc.HostManager, callerID string) *grpcipc.HostClient {
-	t.Helper()
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer()
-	grpcipc.NewHostServer(mgr).Register(srv)
-	go srv.Serve(lis)
-	t.Cleanup(srv.Stop)
-
-	conn, err := grpc.NewClient("passthrough:///bufconn",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-
-	return grpcipc.NewHostClient(conn, callerID)
 }
 
 // setupWorkerTest creates a bufconn-based gRPC server/client pair for AgentWorker.
@@ -175,460 +56,9 @@ func setupWorkerTest(t *testing.T, worker ipc.AgentWorker) *grpcipc.WorkerClient
 	return grpcipc.NewWorkerClient(conn)
 }
 
-func TestHostRoundtrip_SpawnSession(t *testing.T) {
-	mgr := &fakeManager{spawnResult: "task completed successfully"}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	var deltas []string
-	result, err := client.SpawnSession(t.Context(), "researcher", "find info", func(evt ipc.ChatEvent) error {
-		if evt.Type == "delta" {
-			deltas = append(deltas, evt.Content)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("SpawnSession: %v", err)
-	}
-	if result != "task completed successfully" {
-		t.Errorf("result = %q, want %q", result, "task completed successfully")
-	}
-	if len(deltas) != 2 {
-		t.Errorf("got %d deltas, want 2", len(deltas))
-	}
-	if mgr.lastSpawnReq.name != "researcher" {
-		t.Errorf("agent name = %q, want researcher", mgr.lastSpawnReq.name)
-	}
-	if mgr.lastSpawnReq.parentID != "parent-1" {
-		t.Errorf("parent_id = %q, want parent-1", mgr.lastSpawnReq.parentID)
-	}
-}
-
-func TestHostRoundtrip_CreateSession(t *testing.T) {
-	mgr := &fakeManager{createID: "session-123"}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	id, err := client.CreateSession(t.Context(), "coordinator", "coordinator")
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if id != "session-123" {
-		t.Errorf("id = %q, want session-123", id)
-	}
-	if mgr.lastCreateReq.parentID != "parent-1" {
-		t.Errorf("parent_id = %q, want parent-1", mgr.lastCreateReq.parentID)
-	}
-	if mgr.lastCreateReq.mode != "coordinator" {
-		t.Errorf("mode = %q, want coordinator", mgr.lastCreateReq.mode)
-	}
-}
-
-func TestHostRoundtrip_SendMessage(t *testing.T) {
-	mgr := &fakeManager{sendResult: "hello back"}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	var deltas []string
-	result, err := client.SendMessage(t.Context(), "session-1", "hello", func(evt ipc.ChatEvent) error {
-		if evt.Type == "delta" {
-			deltas = append(deltas, evt.Content)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-	if result != "hello back" {
-		t.Errorf("result = %q, want %q", result, "hello back")
-	}
-	if len(deltas) != 1 {
-		t.Errorf("got %d deltas, want 1", len(deltas))
-	}
-}
-
-func TestHostRoundtrip_StopSession(t *testing.T) {
-	mgr := &fakeManager{}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	if err := client.StopSession(t.Context(), "session-1"); err != nil {
-		t.Fatalf("StopSession: %v", err)
-	}
-	if mgr.lastStopReq != "session-1" {
-		t.Errorf("stopped = %q, want session-1", mgr.lastStopReq)
-	}
-}
-
-func TestHostRoundtrip_StopSession_NotFound(t *testing.T) {
-	mgr := &fakeManager{}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	err := client.StopSession(t.Context(), "not-found")
-	if err == nil {
-		t.Fatal("expected error for not-found session")
-	}
-}
-
-func TestHostRoundtrip_StartSession(t *testing.T) {
-	mgr := &fakeManager{}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	if err := client.StartSession(t.Context(), "session-1"); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-}
-
-func TestHostRoundtrip_StartSession_NotFound(t *testing.T) {
-	mgr := &fakeManager{}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	err := client.StartSession(t.Context(), "not-found")
-	if err == nil {
-		t.Fatal("expected error for not-found session")
-	}
-}
-
-func TestHostRoundtrip_DeleteSession(t *testing.T) {
-	mgr := &fakeManager{}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	if err := client.DeleteSession(t.Context(), "session-1"); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
-}
-
-func TestHostRoundtrip_DeleteSession_NotFound(t *testing.T) {
-	mgr := &fakeManager{}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	err := client.DeleteSession(t.Context(), "not-found")
-	if err == nil {
-		t.Fatal("expected error for not-found session")
-	}
-}
-
-func TestHostRoundtrip_ListSessions(t *testing.T) {
-	mgr := &fakeManager{
-		children: []ipc.SessionInfo{
-			{ID: "s1", Name: "researcher", Mode: "ephemeral", Description: "finds stuff", Status: "running"},
-			{ID: "s2", Name: "writer", Mode: "persistent", Status: "stopped"},
-		},
-	}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	sessions, err := client.ListSessions(t.Context())
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(sessions) != 2 {
-		t.Fatalf("got %d sessions, want 2", len(sessions))
-	}
-	if sessions[0].Name != "researcher" {
-		t.Errorf("sessions[0].Name = %q, want researcher", sessions[0].Name)
-	}
-	if sessions[0].Status != "running" {
-		t.Errorf("sessions[0].Status = %q, want running", sessions[0].Status)
-	}
-	if sessions[1].Status != "stopped" {
-		t.Errorf("sessions[1].Status = %q, want stopped", sessions[1].Status)
-	}
-}
-
-func TestHostRoundtrip_GetSecrets(t *testing.T) {
-	mgr := &fakeManager{
-		secretNames: []string{"TOKEN", "KEY"},
-		secretEnv:   []string{"TOKEN=abc", "KEY=xyz"},
-	}
-	client := setupHostTest(t, mgr, "parent-1")
-
-	names, env, err := client.GetSecrets(t.Context())
-	if err != nil {
-		t.Fatalf("GetSecrets: %v", err)
-	}
-	if len(names) != 2 || names[0] != "TOKEN" {
-		t.Errorf("names = %v, want [TOKEN KEY]", names)
-	}
-	if len(env) != 2 || env[0] != "TOKEN=abc" {
-		t.Errorf("env = %v, want [TOKEN=abc KEY=xyz]", env)
-	}
-}
-
-func TestHostRoundtrip_SendMessage_DescendantCheck(t *testing.T) {
-	mgr := &fakeManager{
-		sendResult: "ok",
-		descendants: map[string]string{
-			"child-1": "parent-1", // child-1 is a descendant of parent-1
-		},
-	}
-
-	// parent-1 can message child-1
-	client := setupHostTest(t, mgr, "parent-1")
-	_, err := client.SendMessage(t.Context(), "child-1", "hello", nil)
-	if err != nil {
-		t.Fatalf("expected SendMessage to succeed for descendant: %v", err)
-	}
-
-	// parent-2 cannot message child-1
-	client2 := setupHostTest(t, mgr, "parent-2")
-	_, err = client2.SendMessage(t.Context(), "child-1", "hello", nil)
-	if err == nil {
-		t.Fatal("expected SendMessage to fail for non-descendant")
-	}
-}
-
-func TestHostRoundtrip_StopSession_DescendantCheck(t *testing.T) {
-	mgr := &fakeManager{
-		descendants: map[string]string{
-			"child-1": "parent-1",
-		},
-	}
-
-	// parent-2 cannot stop child-1
-	client := setupHostTest(t, mgr, "parent-2")
-	err := client.StopSession(t.Context(), "child-1")
-	if err == nil {
-		t.Fatal("expected StopSession to fail for non-descendant")
-	}
-}
-
-func TestHostRoundtrip_DeleteSession_DescendantCheck(t *testing.T) {
-	mgr := &fakeManager{
-		descendants: map[string]string{
-			"child-1": "parent-1",
-		},
-	}
-
-	// parent-2 cannot delete child-1
-	client := setupHostTest(t, mgr, "parent-2")
-	err := client.DeleteSession(t.Context(), "child-1")
-	if err == nil {
-		t.Fatal("expected DeleteSession to fail for non-descendant")
-	}
-}
-
-func TestHostRoundtrip_StartSession_DescendantCheck(t *testing.T) {
-	mgr := &fakeManager{
-		descendants: map[string]string{
-			"child-1": "parent-1",
-		},
-	}
-
-	// parent-2 cannot start child-1
-	client := setupHostTest(t, mgr, "parent-2")
-	err := client.StartSession(t.Context(), "child-1")
-	if err == nil {
-		t.Fatal("expected StartSession to fail for non-descendant")
-	}
-}
-
-func TestWorkerRoundtrip_Chat(t *testing.T) {
-	worker := &fakeWorker{chatResult: "I'm an agent"}
-	client := setupWorkerTest(t, worker)
-
-	var deltas []string
-	result, err := client.Chat(t.Context(), "hello agent", func(evt ipc.ChatEvent) error {
-		if evt.Type == "delta" {
-			deltas = append(deltas, evt.Content)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Chat: %v", err)
-	}
-	if result != "I'm an agent" {
-		t.Errorf("result = %q, want %q", result, "I'm an agent")
-	}
-	if len(deltas) != 2 {
-		t.Errorf("got %d deltas, want 2", len(deltas))
-	}
-	if deltas[0] != "token1" || deltas[1] != "token2" {
-		t.Errorf("deltas = %v, want [token1 token2]", deltas)
-	}
-}
-
-func TestWorkerRoundtrip_ToolCallEvents(t *testing.T) {
-	// Use a custom worker that emits tool_call and tool_result events.
-	worker := &fakeToolWorker{}
-	client := setupWorkerTest(t, worker)
-
-	var events []ipc.ChatEvent
-	result, err := client.Chat(t.Context(), "run tools", func(evt ipc.ChatEvent) error {
-		events = append(events, evt)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Chat: %v", err)
-	}
-	if result != "done" {
-		t.Errorf("result = %q, want %q", result, "done")
-	}
-	if len(events) != 2 {
-		t.Fatalf("got %d events, want 2", len(events))
-	}
-
-	// Verify tool_call round-trips all fields including status.
-	tc := events[0]
-	if tc.Type != "tool_call" {
-		t.Errorf("events[0].Type = %q, want tool_call", tc.Type)
-	}
-	if tc.ToolCallID != "call-1" {
-		t.Errorf("ToolCallID = %q, want call-1", tc.ToolCallID)
-	}
-	if tc.ToolName != "read_file" {
-		t.Errorf("ToolName = %q, want read_file", tc.ToolName)
-	}
-	if tc.Input != `{"path":"main.go"}` {
-		t.Errorf("Input = %q, want %q", tc.Input, `{"path":"main.go"}`)
-	}
-	if tc.Status != "Reading main.go" {
-		t.Errorf("Status = %q, want %q", tc.Status, "Reading main.go")
-	}
-
-	// Verify tool_result round-trips all fields.
-	tr := events[1]
-	if tr.Type != "tool_result" {
-		t.Errorf("events[1].Type = %q, want tool_result", tr.Type)
-	}
-	if tr.ToolCallID != "call-1" {
-		t.Errorf("ToolCallID = %q, want call-1", tr.ToolCallID)
-	}
-	if tr.Output != "file contents here" {
-		t.Errorf("Output = %q, want %q", tr.Output, "file contents here")
-	}
-	if tr.IsError {
-		t.Error("IsError = true, want false")
-	}
-}
-
-// fakeToolWorker emits tool_call and tool_result events for testing gRPC round-trip.
-type fakeToolWorker struct{}
-
-func (f *fakeToolWorker) Chat(_ context.Context, _ string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	if onEvent != nil {
-		onEvent(ipc.ChatEvent{
-			Type:       "tool_call",
-			ToolCallID: "call-1",
-			ToolName:   "read_file",
-			Input:      `{"path":"main.go"}`,
-			Status:     "Reading main.go",
-		})
-		onEvent(ipc.ChatEvent{
-			Type:       "tool_result",
-			ToolCallID: "call-1",
-			Output:     "file contents here",
-			IsError:    false,
-		})
-	}
-	return "done", nil
-}
-
-func (f *fakeToolWorker) Shutdown(_ context.Context) error { return nil }
-
-func (f *fakeToolWorker) ConfigChanged(_ context.Context, _ ipc.ConfigUpdate) error { return nil }
-
-func (f *fakeToolWorker) ExecuteTool(_ context.Context, _, _, _ string) (ipc.ToolResult, error) {
-	return ipc.ToolResult{}, nil
-}
-
-func TestWorkerRoundtrip_ConfigChanged(t *testing.T) {
-	worker := &fakeWorker{}
-	client := setupWorkerTest(t, worker)
-
-	update := ipc.ConfigUpdate{
-		EffectiveTools: map[string]bool{"bash": true, "read_file": true},
-		Model:          "claude-sonnet-4-20250514",
-		Provider:       "anthropic",
-		APIKey:         "sk-test",
-		Description:    "updated desc",
-	}
-	if err := client.ConfigChanged(t.Context(), update); err != nil {
-		t.Fatalf("ConfigChanged: %v", err)
-	}
-
-	got := worker.lastConfigUpdate
-	if got == nil {
-		t.Fatal("expected config update to be received")
-	}
-	if got.Model != "claude-sonnet-4-20250514" {
-		t.Errorf("model = %q, want %q", got.Model, "claude-sonnet-4-20250514")
-	}
-	if got.Provider != "anthropic" {
-		t.Errorf("provider = %q, want %q", got.Provider, "anthropic")
-	}
-	if got.Description != "updated desc" {
-		t.Errorf("description = %q, want %q", got.Description, "updated desc")
-	}
-	if !got.EffectiveTools["bash"] || !got.EffectiveTools["read_file"] {
-		t.Errorf("effective tools = %v, want bash+read_file", got.EffectiveTools)
-	}
-}
-
-func TestWorkerRoundtrip_ConfigChanged_Unrestricted(t *testing.T) {
-	worker := &fakeWorker{}
-	client := setupWorkerTest(t, worker)
-
-	// nil EffectiveTools = unrestricted
-	update := ipc.ConfigUpdate{
-		Model:    "gpt-4",
-		Provider: "openrouter",
-	}
-	if err := client.ConfigChanged(t.Context(), update); err != nil {
-		t.Fatalf("ConfigChanged: %v", err)
-	}
-	if worker.lastConfigUpdate.EffectiveTools != nil {
-		t.Errorf("expected nil EffectiveTools for unrestricted, got %v", worker.lastConfigUpdate.EffectiveTools)
-	}
-}
-
-func TestWorkerRoundtrip_Shutdown(t *testing.T) {
-	worker := &fakeWorker{}
-	client := setupWorkerTest(t, worker)
-
-	if err := client.Shutdown(t.Context()); err != nil {
-		t.Fatalf("Shutdown: %v", err)
-	}
-	if !worker.shutdown {
-		t.Error("expected shutdown to be called")
-	}
-}
-
-// fakeExecutor implements ipc.ToolExecutor for testing.
-type fakeExecutor struct {
-	result  ipc.ToolResult
-	lastReq struct{ callID, name, input string }
-}
-
-func (f *fakeExecutor) ExecuteTool(_ context.Context, callID, name, input string) (ipc.ToolResult, error) {
-	f.lastReq.callID = callID
-	f.lastReq.name = name
-	f.lastReq.input = input
-	return f.result, nil
-}
-
-// setupWorkerTestWithExecutor creates a worker test pair with a tool executor.
-func setupWorkerTestWithExecutor(t *testing.T, worker ipc.AgentWorker, exec ipc.ToolExecutor) *grpcipc.WorkerClient {
-	t.Helper()
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer()
-	ws := grpcipc.NewWorkerServer(worker)
-	ws.SetToolExecutor(exec)
-	ws.Register(srv)
-	go srv.Serve(lis)
-	t.Cleanup(srv.Stop)
-
-	conn, err := grpc.NewClient("passthrough:///bufconn",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-	return grpcipc.NewWorkerClient(conn)
-}
-
 func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
-	exec := &fakeExecutor{result: ipc.ToolResult{Content: "file contents here"}}
-	client := setupWorkerTestWithExecutor(t, &fakeWorker{}, exec)
+	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "file contents here"}}
+	client := setupWorkerTest(t, worker)
 
 	result, err := client.ExecuteTool(t.Context(), "call-1", "read_file", `{"path":"test.txt"}`)
 	if err != nil {
@@ -640,17 +70,17 @@ func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
 	if result.IsError {
 		t.Error("unexpected is_error=true")
 	}
-	if exec.lastReq.name != "read_file" {
-		t.Errorf("tool name = %q, want read_file", exec.lastReq.name)
+	if worker.lastTool.name != "read_file" {
+		t.Errorf("tool name = %q, want read_file", worker.lastTool.name)
 	}
-	if exec.lastReq.callID != "call-1" {
-		t.Errorf("call_id = %q, want call-1", exec.lastReq.callID)
+	if worker.lastTool.callID != "call-1" {
+		t.Errorf("call_id = %q, want call-1", worker.lastTool.callID)
 	}
 }
 
 func TestWorkerRoundtrip_ExecuteTool_Error(t *testing.T) {
-	exec := &fakeExecutor{result: ipc.ToolResult{Content: "not found", IsError: true}}
-	client := setupWorkerTestWithExecutor(t, &fakeWorker{}, exec)
+	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "not found", IsError: true}}
+	client := setupWorkerTest(t, worker)
 
 	result, err := client.ExecuteTool(t.Context(), "call-2", "read_file", `{"path":"missing.txt"}`)
 	if err != nil {
@@ -664,12 +94,14 @@ func TestWorkerRoundtrip_ExecuteTool_Error(t *testing.T) {
 	}
 }
 
-func TestWorkerRoundtrip_ExecuteTool_NoExecutor(t *testing.T) {
-	// No executor set — should return Unimplemented error.
-	client := setupWorkerTest(t, &fakeWorker{})
+func TestWorkerRoundtrip_Shutdown(t *testing.T) {
+	worker := &fakeWorker{}
+	client := setupWorkerTest(t, worker)
 
-	_, err := client.ExecuteTool(t.Context(), "call-3", "bash", `{"command":"ls"}`)
-	if err == nil {
-		t.Fatal("expected error when executor is not set")
+	if err := client.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if !worker.shutdown {
+		t.Error("expected shutdown to be called")
 	}
 }

@@ -11,7 +11,6 @@ import (
 func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 	cfg := ipc.SpawnConfig{
 		SessionDir: "/hive/sessions/abc-123",
-		APIKey:     "sk-test-key",
 	}
 	getenv := func(key string) string {
 		if key == "PATH" {
@@ -23,11 +22,10 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 	env := buildIsolatedEnv(cfg, getenv)
 
 	expect := map[string]string{
-		"PATH":         "/opt/mise/shims:/usr/local/bin:/usr/bin",
-		"HOME":         "/hive/sessions/abc-123",
-		"LANG":         "en_US.UTF-8",
-		"LC_ALL":       "en_US.UTF-8",
-		"HIVE_API_KEY": "sk-test-key",
+		"PATH":   "/opt/mise/shims:/usr/local/bin:/usr/bin",
+		"HOME":   "/hive/sessions/abc-123",
+		"LANG":   "en_US.UTF-8",
+		"LC_ALL": "en_US.UTF-8",
 	}
 	envMap := parseEnv(env)
 
@@ -112,7 +110,7 @@ func TestBuildIsolatedEnv_NoExtraVars(t *testing.T) {
 	env := buildIsolatedEnv(cfg, getenv)
 
 	// Should contain exactly these vars — nothing else.
-	allowed := []string{"PATH", "HOME", "LANG", "LC_ALL", "HIVE_API_KEY",
+	allowed := []string{"PATH", "HOME", "LANG", "LC_ALL",
 		"MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_GLOBAL_CONFIG_FILE"}
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")

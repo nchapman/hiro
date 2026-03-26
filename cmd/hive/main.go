@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,12 +16,10 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"google.golang.org/grpc"
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/controlplane"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	"github.com/nchapman/hivebot/internal/platform"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
@@ -108,7 +105,6 @@ func run() error {
 	// Shared state for the manager lifecycle — the manager can be started
 	// at boot (if providers are configured) or later via the setup API.
 	var mgr *agent.Manager
-	var grpcSrv *grpc.Server
 
 	// Reload config.yaml when it changes on disk (external edits, coordinator writes).
 	// After reloading, push resolved config to all running agents since provider,
@@ -123,7 +119,7 @@ func run() error {
 		}
 	})
 
-	// startManager boots the agent manager, gRPC server, and coordinator.
+	// startManager boots the agent manager and coordinator.
 	// It is idempotent — calling it when a manager already exists is a no-op.
 	startManager := func() error {
 		if mgr != nil {
@@ -131,13 +127,6 @@ func run() error {
 		}
 		if !cp.IsConfigured() {
 			return fmt.Errorf("no LLM provider configured")
-		}
-
-		hostSocket := filepath.Join(os.TempDir(), fmt.Sprintf("hive-host-%d.sock", os.Getpid()))
-		os.Remove(hostSocket)
-		hostLis, err := net.Listen("unix", hostSocket)
-		if err != nil {
-			return fmt.Errorf("listening on host socket: %w", err)
 		}
 
 		// Detect Unix user isolation: enabled iff the hive-agents group exists.
@@ -149,9 +138,6 @@ func run() error {
 			}
 			pool = uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
 			logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
-			if err := os.Chmod(hostSocket, 0777); err != nil {
-				return fmt.Errorf("setting host socket permissions: %w", err)
-			}
 
 			// Detect hive-coordinators group for agents/ and skills/ write access.
 			if coordGrp, err := user.LookupGroup("hive-coordinators"); err == nil {
@@ -166,18 +152,10 @@ func run() error {
 
 		mgr = agent.NewManager(ctx, rootDir, agent.Options{
 			WorkingDir: absRootDir,
-		}, cp, logger, hostSocket, nil, pool, pdb)
+		}, cp, logger, nil, pool, pdb)
 
 		// Watch agent definitions for config changes and push to running agents.
 		mgr.WatchAgentDefinitions(fsWatcher)
-
-		grpcSrv = grpc.NewServer()
-		grpcipc.NewHostServer(mgr).Register(grpcSrv)
-		go func() {
-			if err := grpcSrv.Serve(hostLis); err != nil {
-				logger.Error("host gRPC server error", "error", err)
-			}
-		}()
 
 		// Restore any persistent agents from previous run
 		if err := mgr.RestoreSessions(ctx); err != nil {
@@ -245,9 +223,6 @@ func run() error {
 	defer shutdownCancel()
 
 	err = httpServer.Shutdown(shutdownCtx)
-	if grpcSrv != nil {
-		grpcSrv.GracefulStop()
-	}
 	if mgr != nil {
 		mgr.Shutdown()
 	}

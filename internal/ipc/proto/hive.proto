@@ -4,157 +4,28 @@ package hive;
 
 option go_package = "github.com/nchapman/hivebot/internal/ipc/proto";
 
-// AgentHost is served by the control plane. Agent processes call these RPCs
-// to perform session-level operations (creating sessions, sending messages, etc.).
-service AgentHost {
-  // SpawnSession runs an ephemeral session to completion, streaming deltas.
-  rpc SpawnSession(SpawnSessionRequest) returns (stream ChatEvent);
-
-  // CreateSession creates and starts a new session from an agent definition.
-  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
-
-  // SendMessage sends a message to a running session, streaming deltas.
-  rpc SendMessage(SendMessageRequest) returns (stream ChatEvent);
-
-  // StopSession stops a session and its subtree.
-  rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
-
-  // StartSession restarts a stopped session.
-  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
-
-  // DeleteSession stops and permanently removes a session and its subtree.
-  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
-
-  // ListSessions returns the direct child sessions of a parent.
-  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
-
-  // GetSecrets returns secret names and env vars for bash injection.
-  rpc GetSecrets(GetSecretsRequest) returns (GetSecretsResponse);
-}
-
-// AgentWorker is served by each agent process. The control plane calls these
-// RPCs to send messages and manage the worker's lifecycle.
+// AgentWorker is served by each agent worker process. The control plane
+// calls these RPCs to execute tools and manage the worker's lifecycle.
 service AgentWorker {
-  // Chat sends a message and streams back deltas and the final response.
-  rpc Chat(ChatRequest) returns (stream ChatEvent);
+  // ExecuteTool runs a single tool in the worker's sandbox and returns the result.
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
 
   // Shutdown gracefully stops the agent worker process.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
-
-  // ConfigChanged pushes resolved structural config when definitions or
-  // control plane config change. The agent applies updates on its next turn.
-  rpc ConfigChanged(ConfigChangedRequest) returns (ConfigChangedResponse);
-
-  // ExecuteTool runs a single tool and returns the result.
-  // Used when the control plane owns the inference loop and dispatches
-  // tool calls to the worker for sandboxed execution.
-  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
 }
-
-// ChatEvent is a streaming event sent during Chat, SpawnSession, or SendMessage.
-message ChatEvent {
-  // type is "delta" for incremental text, "done" for final result, or "error".
-  string type = 1;
-  string content = 2;
-}
-
-// --- AgentHost messages ---
-
-message SpawnSessionRequest {
-  string agent_name = 1;
-  string prompt = 2;
-  string parent_id = 3;
-}
-
-message CreateSessionRequest {
-  string agent_name = 1;
-  string parent_id = 2;
-  string mode = 3;
-}
-
-message CreateSessionResponse {
-  string session_id = 1;
-}
-
-message SendMessageRequest {
-  string session_id = 1;
-  string message = 2;
-  string caller_id = 3;
-}
-
-message StopSessionRequest {
-  string session_id = 1;
-  string caller_id = 2;
-}
-
-message StopSessionResponse {}
-
-message StartSessionRequest {
-  string session_id = 1;
-  string caller_id = 2;
-}
-
-message StartSessionResponse {}
-
-message DeleteSessionRequest {
-  string session_id = 1;
-  string caller_id = 2;
-}
-
-message DeleteSessionResponse {}
-
-message ListSessionsRequest {
-  string parent_id = 1;
-}
-
-message ListSessionsResponse {
-  repeated SessionInfoProto sessions = 1;
-}
-
-message SessionInfoProto {
-  string id = 1;
-  string name = 2;
-  string mode = 3;
-  string description = 4;
-  string parent_id = 5;
-  string status = 6;
-}
-
-message GetSecretsRequest {}
-
-message GetSecretsResponse {
-  repeated string names = 1;
-  repeated string env = 2;
-}
-
-// --- AgentWorker messages ---
-
-message ChatRequest {
-  string message = 1;
-}
-
-message ShutdownRequest {}
-
-message ShutdownResponse {}
-
-message ConfigChangedRequest {
-  map<string, bool> effective_tools = 1; // nil map = unrestricted
-  bool has_tool_restriction = 2;         // distinguishes nil from empty
-  string model = 3;
-  string provider = 4;
-  string api_key = 5;
-  string description = 6;
-}
-
-message ConfigChangedResponse {}
 
 message ExecuteToolRequest {
-  string name = 1;     // tool name (bash, read_file, etc.)
-  string input = 2;    // JSON-encoded tool arguments
-  string call_id = 3;  // tool call ID from the LLM
+  string name = 1;              // tool name (bash, read_file, etc.)
+  string input = 2;             // JSON-encoded tool arguments
+  string call_id = 3;           // tool call ID from the LLM
+  repeated string secret_env = 4; // secret env vars for bash (KEY=VALUE pairs)
 }
 
 message ExecuteToolResponse {
   string content = 1;
   bool is_error = 2;
 }
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}
