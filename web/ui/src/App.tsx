@@ -231,53 +231,63 @@ export default function App() {
         )}
 
         {appState.kind === "ready" && (
-          <div className="flex h-screen overflow-hidden bg-background text-foreground">
-            <ActivityBar
-              activity={activity}
-              onActivityChange={handleActivityChange}
-              onLogout={handleLogout}
+          <Routes>
+            <Route
+              path="/terminal"
+              element={
+                <Suspense fallback={suspenseFallback}>
+                  <TerminalPage />
+                </Suspense>
+              }
             />
-            <div className="flex flex-1 overflow-hidden">
-              <Routes>
-                <Route
-                  path="/chat/:sessionId?"
-                  element={
-                    <ChatRoute
-                      sessions={sessions}
-                      selectedSessionId={selectedSessionId}
-                      onSelect={handleSelect}
-                      onSessionsChanged={fetchSessions}
-                    />
-                  }
-                />
-                <Route
-                  path="/files"
-                  element={
-                    <Suspense fallback={suspenseFallback}>
-                      <FilesPage />
-                    </Suspense>
-                  }
-                />
-                <Route
-                  path="/settings"
-                  element={
-                    <main className="flex flex-1 flex-col overflow-hidden">
-                      <SettingsPage />
-                    </main>
-                  }
-                />
-                <Route
-                  path="/terminal"
-                  element={
-                    <Suspense fallback={suspenseFallback}>
-                      <TerminalPage />
-                    </Suspense>
-                  }
-                />
-                <Route path="*" element={<Navigate to="/chat" replace />} />
-              </Routes>
-            </div>
-          </div>
+            <Route
+              path="*"
+              element={
+                <div className="flex h-screen overflow-hidden bg-background text-foreground">
+                  <ActivityBar
+                    activity={activity}
+                    onActivityChange={handleActivityChange}
+                    onLogout={handleLogout}
+                  />
+                  <div className="flex flex-1 overflow-hidden">
+                    <Routes>
+                      <Route
+                        path="/chat/:sessionId?"
+                        element={
+                          <ChatRoute
+                            sessions={sessions}
+                            selectedSessionId={selectedSessionId}
+                            onSelect={handleSelect}
+                            onSessionsChanged={fetchSessions}
+                          />
+                        }
+                      />
+                      <Route
+                        path="/files"
+                        element={
+                          <Suspense fallback={suspenseFallback}>
+                            <FilesPage />
+                          </Suspense>
+                        }
+                      />
+                      <Route
+                        path="/settings"
+                        element={
+                          <main className="flex flex-1 flex-col overflow-hidden">
+                            <SettingsPage />
+                          </main>
+                        }
+                      />
+                      <Route
+                        path="*"
+                        element={<Navigate to="/chat" replace />}
+                      />
+                    </Routes>
+                  </div>
+                </div>
+              }
+            />
+          </Routes>
         )}
       </TooltipProvider>
     </ThemeCtx.Provider>
