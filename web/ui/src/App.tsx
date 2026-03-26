@@ -165,14 +165,14 @@ export default function App() {
   // Auto-select first persistent running session (once)
   useEffect(() => {
     if (hasAutoSelected.current || sessions.length === 0) return
-    const persistent = sessions.find(
-      (s) => s.mode === "persistent" && s.status === "running",
+    const first = sessions.find(
+      (s) => (s.mode === "persistent" || s.mode === "coordinator") && s.status === "running",
     )
-    if (!persistent) return
-    setSelectedSessionId(persistent.id)
+    if (!first) return
+    setSelectedSessionId(first.id)
     hasAutoSelected.current = true
     if (location.pathname === "/chat" || location.pathname === "/") {
-      navigate(`/chat/${persistent.id}`, { replace: true })
+      navigate(`/chat/${first.id}`, { replace: true })
     }
   }, [sessions, location.pathname, navigate])
 
