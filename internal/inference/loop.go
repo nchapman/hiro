@@ -14,6 +14,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/models"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 )
 
@@ -110,7 +111,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEve
 	var messages []fantasy.Message
 
 	if l.mode.IsPersistent() && l.pdb != nil {
-		assembled, err := Assemble(l.pdb, l.sessionID, DefaultCompactionConfig())
+		assembled, err := Assemble(l.pdb, l.sessionID, CompactionConfigForModel(l.agentConfig.Model))
 		if err != nil {
 			l.logger.Warn("failed to assemble context, falling back to empty", "error", err)
 		}
@@ -205,7 +206,7 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, result *fantasy.A
 	go func() {
 		l.compactMu.Lock()
 		defer l.compactMu.Unlock()
-		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: l.lm}, DefaultCompactionConfig(), l.logger)
+		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: l.lm}, CompactionConfigForModel(l.agentConfig.Model), l.logger)
 		if err := compactor.CompactIfNeeded(context.Background()); err != nil {
 			l.logger.Warn("compaction failed", "error", err)
 		}
@@ -217,15 +218,17 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult) {
 	if result.TotalUsage.InputTokens == 0 && result.TotalUsage.OutputTokens == 0 {
 		return
 	}
+	u := result.TotalUsage
 	l.pdb.RecordUsage(platformdb.UsageEvent{
 		SessionID:        l.sessionID,
 		Model:            l.agentConfig.Model,
 		Provider:         l.agentConfig.Provider,
-		InputTokens:      result.TotalUsage.InputTokens,
-		OutputTokens:     result.TotalUsage.OutputTokens,
-		ReasoningTokens:  result.TotalUsage.ReasoningTokens,
-		CacheReadTokens:  result.TotalUsage.CacheReadTokens,
-		CacheWriteTokens: result.TotalUsage.CacheCreationTokens,
+		InputTokens:      u.InputTokens,
+		OutputTokens:     u.OutputTokens,
+		ReasoningTokens:  u.ReasoningTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheCreationTokens,
+		Cost:             models.Cost(l.agentConfig.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
 	})
 }
 

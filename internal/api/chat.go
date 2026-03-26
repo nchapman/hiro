@@ -21,15 +21,16 @@ import (
 // For tool results: type="tool_result", tool_call_id, content (output), is_error
 // For control: type="done"|"error"|"system"|"message"
 type ChatMessage struct {
-	Type       string `json:"type"`
-	Role       string `json:"role,omitempty"`
-	Content    string `json:"content,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
-	Input      string `json:"input,omitempty"`
-	Output     string `json:"output,omitempty"`
-	IsError    bool   `json:"is_error,omitempty"`
-	Status     string `json:"status,omitempty"`
+	Type       string     `json:"type"`
+	Role       string     `json:"role,omitempty"`
+	Content    string     `json:"content,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolName   string     `json:"tool_name,omitempty"`
+	Input      string     `json:"input,omitempty"`
+	Output     string     `json:"output,omitempty"`
+	IsError    bool       `json:"is_error,omitempty"`
+	Status     string     `json:"status,omitempty"`
+	Usage      *UsageInfo `json:"usage,omitempty"`
 }
 
 // SetManager sets the agent manager and leader agent ID for handling chat.
@@ -164,10 +165,29 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Signal end of response
+		// Signal end of response with usage data.
 		done := ChatMessage{Type: "done", Role: "assistant"}
+		done.Usage = s.buildUsageInfo(sessionID)
 		if err := wsjson.Write(ctx, conn, done); err != nil {
 			return
 		}
 	}
+}
+
+// buildUsageInfo queries the platform DB for session usage and returns it
+// as a UsageInfo struct for inclusion in WebSocket messages.
+func (s *Server) buildUsageInfo(sessionID string) *UsageInfo {
+	if s.pdb == nil {
+		return nil
+	}
+
+	var model string
+	if s.manager != nil {
+		if info, ok := s.manager.GetSession(sessionID); ok {
+			model = info.Model
+		}
+	}
+
+	info := s.buildUsageInfoForSession(sessionID, model)
+	return &info
 }

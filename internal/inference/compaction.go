@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nchapman/hivebot/internal/models"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 )
 
@@ -48,7 +49,7 @@ type CompactionConfig struct {
 	CondenseMinFanout    int
 }
 
-// DefaultCompactionConfig returns reasonable defaults.
+// DefaultCompactionConfig returns reasonable defaults with a 180K token budget.
 func DefaultCompactionConfig() CompactionConfig {
 	return CompactionConfig{
 		TokenBudget:          180_000,
@@ -60,6 +61,19 @@ func DefaultCompactionConfig() CompactionConfig {
 		LeafMinFanout:        8,
 		CondenseMinFanout:    4,
 	}
+}
+
+// CompactionConfigForModel returns a config with a token budget derived from the
+// model's context window (75% of context window). Falls back to DefaultCompactionConfig
+// if the model is unknown.
+func CompactionConfigForModel(model string) CompactionConfig {
+	cfg := DefaultCompactionConfig()
+	cw := models.ContextWindow(model)
+	budget := int(float64(cw) * 0.75)
+	if budget > 0 {
+		cfg.TokenBudget = budget
+	}
+	return cfg
 }
 
 // Compactor runs incremental compaction on conversation history.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/watcher"
 )
 
@@ -26,6 +27,7 @@ type Server struct {
 	leaderID     string                  // ID of the leader session for chat
 	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
 	cp           *controlplane.ControlPlane // control plane (for auth + settings)
+	pdb          *platformdb.DB          // platform database (nil = no usage endpoints)
 	startManager func() error            // callback to start the session manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
@@ -44,6 +46,11 @@ func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
 	}
 	s.routes()
 	return s
+}
+
+// SetDB sets the platform database for usage tracking endpoints.
+func (s *Server) SetDB(pdb *platformdb.DB) {
+	s.pdb = pdb
 }
 
 func (s *Server) routes() {
@@ -74,6 +81,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions/{id}/stop", s.requireAuth(s.handleStopSession))
 	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
+
+	// Usage API routes (authenticated)
+	s.mux.HandleFunc("GET /api/sessions/{id}/usage", s.requireAuth(s.handleSessionUsage))
+	s.mux.HandleFunc("GET /api/usage", s.requireAuth(s.handleTotalUsage))
+	s.mux.HandleFunc("GET /api/usage/models", s.requireAuth(s.handleUsageByModel))
+	s.mux.HandleFunc("GET /api/usage/daily", s.requireAuth(s.handleUsageByDay))
 
 	// File browser (authenticated)
 	s.mux.HandleFunc("GET /api/files/tree", s.requireAuth(s.handleFilesTree))
@@ -146,6 +159,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		Status      string `json:"status"`
 		Description string `json:"description,omitempty"`
 		ParentID    string `json:"parent_id,omitempty"`
+		Model       string `json:"model,omitempty"`
 	}
 	result := make([]sessionResponse, 0, len(sessions))
 	for _, si := range sessions {
@@ -159,6 +173,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			Status:      string(si.Status),
 			Description: si.Description,
 			ParentID:    si.ParentID,
+			Model:       si.Model,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)

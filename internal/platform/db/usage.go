@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -57,6 +59,29 @@ func (d *DB) RecordUsage(e UsageEvent) error {
 		return fmt.Errorf("recording usage: %w", err)
 	}
 	return nil
+}
+
+// GetLastUsageEvent returns the most recent usage event for a session.
+// Returns a zero UsageEvent and false if no events exist.
+func (d *DB) GetLastUsageEvent(sessionID string) (UsageEvent, bool, error) {
+	var e UsageEvent
+	var createdAt string
+	err := d.db.QueryRow(
+		`SELECT id, session_id, model, provider,
+		        input_tokens, output_tokens, reasoning_tokens,
+		        cache_read_tokens, cache_write_tokens, cost, created_at
+		 FROM usage_events WHERE session_id = ? ORDER BY id DESC LIMIT 1`, sessionID,
+	).Scan(&e.ID, &e.SessionID, &e.Model, &e.Provider,
+		&e.InputTokens, &e.OutputTokens, &e.ReasoningTokens,
+		&e.CacheReadTokens, &e.CacheWriteTokens, &e.Cost, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return UsageEvent{}, false, nil
+		}
+		return UsageEvent{}, false, err
+	}
+	e.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	return e, true, nil
 }
 
 // GetSessionUsage returns aggregated usage for a session.

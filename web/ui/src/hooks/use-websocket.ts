@@ -1,5 +1,22 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 
+export interface UsageInfo {
+  // Per-turn (most recent LLM call)
+  prompt_tokens: number
+  completion_tokens: number
+  turn_total: number
+  turn_cost: number
+  // Cumulative session totals
+  session_input_tokens: number
+  session_output_tokens: number
+  session_total_tokens: number
+  session_cost: number
+  event_count: number
+  // Model info
+  context_window: number
+  model: string
+}
+
 export interface ChatWireMessage {
   type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result"
   role?: "user" | "assistant"
@@ -10,6 +27,7 @@ export interface ChatWireMessage {
   output?: string
   is_error?: boolean
   status?: string
+  usage?: UsageInfo
 }
 
 export function useWebSocket(sessionId: string | null) {

@@ -41,6 +41,7 @@ type SessionInfo struct {
 	Description string
 	ParentID    string // empty for top-level agents
 	Status      SessionStatus
+	Model       string // resolved model ID
 }
 
 // WorkerHandle represents a running agent worker (process or mock).
@@ -388,6 +389,7 @@ func (m *Manager) sessionInfoToIPC(info SessionInfo) ipc.SessionInfo {
 		Description: info.Description,
 		ParentID:    info.ParentID,
 		Status:      string(info.Status),
+		Model:       info.Model,
 	}
 }
 
@@ -430,6 +432,7 @@ func (m *Manager) ListChildSessions(callerID string) []ipc.SessionInfo {
 				Description: ra.info.Description,
 				ParentID:    ra.info.ParentID,
 				Status:      string(ra.info.Status),
+				Model:       ra.info.Model,
 			})
 		}
 	}
@@ -490,18 +493,22 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 	return result, nil
 }
 
-// AgentByName returns the ID of a running agent by name.
-// Stopped agents are not matched. If multiple running agents share
-// a name, the result is nondeterministic.
-func (m *Manager) SessionByAgentName(name string) (string, bool) {
+// SessionByAgentName returns the ID and status of an agent by name.
+// Prefers running sessions; falls back to stopped ones. If multiple
+// sessions share a name, running ones take priority.
+func (m *Manager) SessionByAgentName(name string) (id string, running bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for id, ra := range m.sessions {
-		if ra.info.Name == name && ra.info.Status == SessionStatusRunning {
-			return id, true
+	for sid, ra := range m.sessions {
+		if ra.info.Name == name {
+			if ra.info.Status == SessionStatusRunning {
+				return sid, true
+			}
+			// Remember the stopped one, but keep looking for a running one.
+			id = sid
 		}
 	}
-	return "", false
+	return id, false
 }
 
 // IsDescendant reports whether targetID is a descendant of (or equal to) ancestorID.
@@ -574,6 +581,7 @@ func (m *Manager) RestoreSessions(ctx context.Context) error {
 					Description: cfg.Description,
 					ParentID:    s.ParentID,
 					Status:      SessionStatusStopped,
+					Model:       m.resolveModel(cfg),
 				},
 			}
 			m.mu.Lock()
@@ -735,6 +743,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		return "", err
 	}
 	model := m.resolveModel(cfg)
+	cfg.Model = model // ensure the loop sees the resolved model
 
 	spawnCfg := ipc.SpawnConfig{
 		SessionID:      id,
@@ -820,6 +829,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			Description: cfg.Description,
 			ParentID:    parentID,
 			Status:      SessionStatusRunning,
+			Model:       model,
 		},
 		worker:         handle.Worker,
 		handle:         handle,

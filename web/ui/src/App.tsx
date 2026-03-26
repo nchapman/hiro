@@ -20,6 +20,7 @@ export interface SessionInfo {
   mode: string
   status: "running" | "stopped"
   description?: string
+  model?: string
 }
 
 type AppState =

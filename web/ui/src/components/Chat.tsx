@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useWebSocket } from "@/hooks/use-websocket"
-import type { ChatWireMessage } from "@/hooks/use-websocket"
+import type { ChatWireMessage, UsageInfo } from "@/hooks/use-websocket"
 import type { SessionInfo } from "@/App"
 import {
   ChatContainerRoot,
@@ -304,6 +304,78 @@ function AssistantMessage({ message }: { message: Message }) {
   )
 }
 
+// --- Token counter ---
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
+}
+
+function formatCost(cost: number): string {
+  if (cost < 0.01) return `$${cost.toFixed(4)}`
+  return `$${cost.toFixed(2)}`
+}
+
+function TokenCounter({ usage }: { usage: UsageInfo }) {
+  const pct = usage.context_window > 0
+    ? (usage.prompt_tokens / usage.context_window) * 100
+    : 0
+  const pctColor = pct > 80 ? "text-red-500" : pct > 60 ? "text-yellow-500" : "text-green-600"
+
+  return (
+    <div className="group relative">
+      <div className="flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs tabular-nums text-muted-foreground cursor-default">
+        <span>{formatTokenCount(usage.turn_total)}</span>
+        <span>/</span>
+        <span>{formatTokenCount(usage.context_window)}</span>
+      </div>
+
+      {/* Hover card */}
+      <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div className="w-56 rounded-lg border bg-popover p-3 text-sm shadow-md">
+          <table className="w-full">
+            <tbody>
+              <tr>
+                <td className="py-0.5 text-muted-foreground">Context usage</td>
+                <td className={cn("py-0.5 text-right tabular-nums font-medium", pctColor)}>
+                  {pct.toFixed(1)}%
+                </td>
+              </tr>
+              <tr>
+                <td className="py-0.5 text-muted-foreground">Prompt tokens</td>
+                <td className="py-0.5 text-right tabular-nums">
+                  {usage.prompt_tokens.toLocaleString()}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-0.5 text-muted-foreground">Completion</td>
+                <td className="py-0.5 text-right tabular-nums">
+                  {usage.completion_tokens.toLocaleString()}
+                </td>
+              </tr>
+              <tr>
+                <td className="border-t pt-1.5 text-muted-foreground">Total</td>
+                <td className="border-t pt-1.5 text-right tabular-nums">
+                  {usage.turn_total.toLocaleString()} / {usage.context_window.toLocaleString()}
+                </td>
+              </tr>
+              {usage.session_cost > 0 && (
+                <tr>
+                  <td className="py-0.5 text-muted-foreground">Session cost</td>
+                  <td className="py-0.5 text-right tabular-nums">
+                    {formatCost(usage.session_cost)}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Chat component ---
 
 // Status dot color helper
@@ -323,6 +395,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [usage, setUsage] = useState<UsageInfo | null>(null)
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
   const isStopped = session?.status === "stopped"
@@ -343,8 +416,19 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     const ac = new AbortController()
     setMessages([])
     setStreaming(false)
+    setUsage(null)
     streamingMsgId.current = null
     setLoadingHistory(true)
+
+    // Fetch usage data for this session.
+    fetch(`/api/sessions/${encodeURIComponent(session.id)}/usage`, {
+      signal: ac.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: UsageInfo | null) => {
+        if (sessionGeneration.current === gen && data) setUsage(data)
+      })
+      .catch(() => {})
 
     fetch(`/api/sessions/${encodeURIComponent(session.id)}/messages`, {
       signal: ac.signal,
@@ -438,6 +522,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           break
         }
         case "done":
+          if (msg.usage) setUsage(msg.usage)
           streamingMsgId.current = null
           setStreaming(false)
           break
@@ -527,6 +612,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           />
           <span className="font-medium">{session.name}</span>
           <span className="text-xs text-muted-foreground">{session.mode}</span>
+          {usage && usage.event_count > 0 && <TokenCounter usage={usage} />}
           {isStopped && (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
               stopped

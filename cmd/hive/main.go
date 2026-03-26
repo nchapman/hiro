@@ -100,6 +100,7 @@ func run() error {
 	srv := api.NewServer(logger, webFS)
 	srv.SetRootDir(absRootDir)
 	srv.SetControlPlane(cp)
+	srv.SetDB(pdb)
 	srv.SetWatcher(fsWatcher)
 
 	// Shared state for the manager lifecycle — the manager can be started
@@ -162,9 +163,23 @@ func run() error {
 			logger.Warn("failed to restore some agent sessions", "error", err)
 		}
 
-		// Start coordinator if not already restored from a previous run
+		// Start coordinator if not already restored from a previous run.
+		// If a stopped coordinator exists, restart it rather than creating a duplicate.
 		leaderID, alreadyRunning := mgr.SessionByAgentName("coordinator")
-		if !alreadyRunning {
+		if alreadyRunning {
+			// Already running from RestoreSessions — nothing to do.
+		} else if leaderID != "" {
+			// Stopped coordinator found — restart it.
+			if err := mgr.StartSession(ctx, leaderID); err != nil {
+				if os.IsNotExist(err) {
+					logger.Info("coordinator agent definition missing, skipping restart")
+					leaderID = ""
+				} else {
+					return fmt.Errorf("restarting coordinator: %w", err)
+				}
+			}
+		} else {
+			// No coordinator at all — create one.
 			var err error
 			leaderID, err = mgr.CreateSession(ctx, "coordinator", "", "coordinator")
 			if err != nil {

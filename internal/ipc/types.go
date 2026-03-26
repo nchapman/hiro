@@ -10,6 +10,7 @@ type SessionInfo struct {
 	Description string
 	ParentID    string
 	Status      string // "running" or "stopped"
+	Model       string // resolved model ID (e.g. "claude-sonnet-4-20250514")
 }
 
 // ConfigUpdate carries resolved structural config pushed from the control plane
