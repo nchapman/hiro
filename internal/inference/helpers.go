@@ -124,9 +124,9 @@ func resolveStatusMessage(toolName, inputJSON string) string {
 	return result
 }
 
-// injectStatusMessages parses a fantasy raw_json message, finds tool-call
+// InjectStatusMessages parses a fantasy raw_json message, finds tool-call
 // entries, resolves their status, and returns the patched JSON.
-func injectStatusMessages(rawJSON string) string {
+func InjectStatusMessages(rawJSON string) string {
 	var msg struct {
 		Role    string           `json:"role"`
 		Content []map[string]any `json:"content"`

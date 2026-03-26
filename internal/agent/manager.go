@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/history"
+	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
@@ -60,6 +60,7 @@ type session struct {
 	info           SessionInfo
 	worker         ipc.AgentWorker
 	handle         *WorkerHandle
+	loop           *inference.Loop // inference loop (runs in control plane)
 	effectiveTools map[string]bool // built-in tools this agent is allowed; nil = unrestricted
 }
 
@@ -180,6 +181,12 @@ func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID 
 // onEvent is called for each streaming event; it may be nil. Calls are serialized
 // per agent to prevent conversation corruption.
 func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	// Cycle detection: prevent re-entrant deadlocks when coordinator tools
+	// send messages in a loop (A → send_message(B) → B sends back to A).
+	if inference.IsInCallChain(ctx, agentID) {
+		return "", fmt.Errorf("circular message dependency: session %s is already awaiting a response in this call chain", agentID)
+	}
+
 	ra := m.getSession(agentID)
 	if ra == nil {
 		return "", fmt.Errorf("session %q not found", agentID)
@@ -191,12 +198,18 @@ func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEv
 	ra.mu.Lock()
 	defer ra.mu.Unlock()
 
-	// Re-check after acquiring the per-session lock — softStop may have
-	// niled out the worker between the status check above and here.
-	if ra.worker == nil {
-		return "", fmt.Errorf("session %q is stopped", agentID)
+	// Add this session to the call chain and set the caller ID for tool scoping.
+	ctx = inference.ContextWithCallChain(ctx, agentID)
+	ctx = inference.ContextWithCallerID(ctx, agentID)
+
+	// Use inference loop if available; fall back to worker.Chat (test mode).
+	if ra.loop != nil {
+		return ra.loop.Chat(ctx, message, onEvent)
 	}
-	return ra.worker.Chat(ctx, message, onEvent)
+	if ra.worker != nil {
+		return ra.worker.Chat(ctx, message, onEvent)
+	}
+	return "", fmt.Errorf("session %q is stopped", agentID)
 }
 
 // StopAgent stops a running agent and all its descendants.
@@ -344,6 +357,7 @@ func (m *Manager) softStop(id string) {
 	h := ra.handle
 	ra.worker = nil
 	ra.handle = nil
+	ra.loop = nil
 	ra.info.Status = SessionStatusStopped
 	m.mu.Unlock()
 
@@ -442,8 +456,6 @@ var ErrSessionNotFound = errors.New("session not found")
 var ErrSessionNotStopped = errors.New("session is not stopped")
 
 // GetHistory returns recent messages from a persistent agent's conversation history.
-// Opens the agent's history DB read-only, queries, and closes immediately to
-// avoid blocking WAL checkpointing in the agent process.
 func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()
 	ra, ok := m.sessions[agentID]
@@ -456,18 +468,11 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 		return nil, nil
 	}
 
-	historyPath := filepath.Join(m.sessionDir(agentID), "db", "history.db")
-	store, err := history.OpenStoreReadOnly(historyPath)
-	if err != nil {
-		// Agent may not have created history.db yet (still starting).
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading history: %w", err)
+	if m.pdb == nil {
+		return nil, nil
 	}
-	defer store.Close()
 
-	msgs, err := store.RecentMessages(limit)
+	msgs, err := m.pdb.RecentMessages(agentID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("reading history: %w", err)
 	}
@@ -477,7 +482,7 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "tool" {
 			rawJSON := msg.RawJSON
 			if msg.Role == "assistant" && rawJSON != "" {
-				rawJSON = injectStatusMessages(rawJSON)
+				rawJSON = inference.InjectStatusMessages(rawJSON)
 			}
 			result = append(result, HistoryMessage{
 				Role:      msg.Role,
@@ -767,6 +772,52 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
 	}
 
+	// Create the inference loop (skipped if no provider — test mode).
+	var loop *inference.Loop
+	if provider != "" {
+		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, model)
+		if err != nil {
+			handle.Kill()
+			if m.uidPool != nil {
+				m.uidPool.Release(id)
+			}
+			if dirIsNew {
+				os.RemoveAll(sessDir)
+			}
+			return "", fmt.Errorf("creating language model for %q: %w", cfg.Name, err)
+		}
+
+		loop, err = inference.NewLoop(inference.LoopConfig{
+			SessionID:      id,
+			AgentConfig:    cfg,
+			Mode:           mode,
+			WorkingDir:     m.opts.WorkingDir,
+			SessionDir:     sessDir,
+			AgentDefDir:    m.agentDefDir(cfg.Name),
+			SharedSkillDir: m.sharedSkillsDir(),
+			LM:             lm,
+			Executor:       handle.Worker,
+			PDB:            m.pdb,
+			AllowedTools:   allowedTools,
+			HasSkills:      hasSkills,
+			SecretNamesFn:  m.SecretNames,
+			SecretEnvFn:    m.SecretEnv,
+			Logger:         m.logger.With("session", id, "agent", cfg.Name),
+			HostManager:    m,
+			CallerMode:     mode,
+		})
+		if err != nil {
+			handle.Kill()
+			if m.uidPool != nil {
+				m.uidPool.Release(id)
+			}
+			if dirIsNew {
+				os.RemoveAll(sessDir)
+			}
+			return "", fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err)
+		}
+	}
+
 	ra := &session{
 		info: SessionInfo{
 			ID:          id,
@@ -778,6 +829,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		},
 		worker:         handle.Worker,
 		handle:         handle,
+		loop:           loop,
 		effectiveTools: effectiveTools,
 	}
 
@@ -1143,14 +1195,15 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		id       string
 		parentID string
 		mode     config.AgentMode
-		worker   ipc.AgentWorker
+		loop     *inference.Loop
+		worker   ipc.AgentWorker // fallback for test mode
 	}
 
 	m.mu.RLock()
 	var targets []pushTarget
 	for id, s := range m.sessions {
-		if s.info.Name == agentName && s.info.Status == SessionStatusRunning && s.worker != nil {
-			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, worker: s.worker})
+		if s.info.Name == agentName && s.info.Status == SessionStatusRunning && (s.loop != nil || s.worker != nil) {
+			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, loop: s.loop, worker: s.worker})
 		}
 	}
 	m.mu.RUnlock()
@@ -1167,13 +1220,14 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 			Description:    cfg.Description,
 		}
 
-		if err := t.worker.ConfigChanged(context.Background(), update); err != nil {
-			m.logger.Warn("failed to push config update to agent",
-				"agent", agentName, "session", t.id, "error", err)
-		} else {
-			m.logger.Info("pushed config update to agent",
-				"agent", agentName, "session", t.id, "model", model)
+		if t.loop != nil {
+			t.loop.ApplyConfigUpdate(update)
+		} else if t.worker != nil {
+			// Fallback: push to worker directly (test mode without inference loop).
+			t.worker.ConfigChanged(context.Background(), update)
 		}
+		m.logger.Info("pushed config update to agent",
+			"agent", agentName, "session", t.id, "model", model)
 
 		// Update cached description under write lock so API handlers
 		// reading SessionInfo don't race.

@@ -64,6 +64,10 @@ type Loop struct {
 
 	// Compaction runs async after each turn.
 	compactMu sync.Mutex
+
+	// Config update support (same pattern as current Agent).
+	updateMu      sync.Mutex
+	pendingUpdate *ipc.ConfigUpdate
 }
 
 // NewLoop creates an inference loop for a session.
@@ -223,6 +227,23 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult) {
 		CacheReadTokens:  result.TotalUsage.CacheReadTokens,
 		CacheWriteTokens: result.TotalUsage.CacheCreationTokens,
 	})
+}
+
+// ApplyConfigUpdate stores a pending config update. It will take effect
+// at the start of the next Chat call's PrepareStep.
+func (l *Loop) ApplyConfigUpdate(update ipc.ConfigUpdate) {
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+	l.pendingUpdate = &update
+}
+
+// consumePendingUpdate atomically retrieves and clears the pending config update.
+func (l *Loop) consumePendingUpdate() *ipc.ConfigUpdate {
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+	u := l.pendingUpdate
+	l.pendingUpdate = nil
+	return u
 }
 
 // currentSystemPrompt rebuilds the system prompt from config and disk.
