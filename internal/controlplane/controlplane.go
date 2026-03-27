@@ -350,6 +350,20 @@ func (cp *ControlPlane) ProviderByType(providerType string) (apiKey string, base
 	return p.APIKey, p.BaseURL, true
 }
 
+// ConfiguredProviderTypes returns a sorted list of all configured provider type keys.
+func (cp *ControlPlane) ConfiguredProviderTypes() []string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	types := make([]string, 0, len(cp.config.Providers))
+	for k, v := range cp.config.Providers {
+		if v.APIKey != "" {
+			types = append(types, k)
+		}
+	}
+	sort.Strings(types)
+	return types
+}
+
 // GetProvider returns a provider by type name.
 func (cp *ControlPlane) GetProvider(providerType string) (ProviderConfig, bool) {
 	cp.mu.RLock()

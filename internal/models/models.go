@@ -54,6 +54,7 @@ func ContextWindow(modelID string) int {
 type ModelInfo struct {
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
+	Provider        string   `json:"provider,omitempty"`
 	CanReason       bool     `json:"can_reason"`
 	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 	ContextWindow   int64    `json:"context_window"`
@@ -75,6 +76,7 @@ func ModelsForProvider(providerType string) []ModelInfo {
 			info := ModelInfo{
 				ID:            m.ID,
 				Name:          m.Name,
+				Provider:      string(p.ID),
 				CanReason:     m.CanReason,
 				ContextWindow: m.ContextWindow,
 			}
@@ -83,6 +85,15 @@ func ModelsForProvider(providerType string) []ModelInfo {
 			}
 			result = append(result, info)
 		}
+	}
+	return result
+}
+
+// ModelsForProviders returns models for multiple provider types.
+func ModelsForProviders(providerTypes []string) []ModelInfo {
+	var result []ModelInfo
+	for _, pt := range providerTypes {
+		result = append(result, ModelsForProvider(pt)...)
 	}
 	return result
 }

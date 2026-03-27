@@ -170,10 +170,19 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	provider := r.URL.Query().Get("provider")
-	if provider == "" && s.cp != nil {
-		provider = s.cp.DefaultProvider()
+	if provider != "" {
+		writeJSON(w, http.StatusOK, models.ModelsForProvider(provider))
+		return
 	}
-	writeJSON(w, http.StatusOK, models.ModelsForProvider(provider))
+	// No provider specified: return models from all configured providers.
+	if s.cp != nil {
+		configured := s.cp.ConfiguredProviderTypes()
+		if len(configured) > 0 {
+			writeJSON(w, http.StatusOK, models.ModelsForProviders(configured))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, []models.ModelInfo{})
 }
 
 func (s *Server) handleListProviderTypes(w http.ResponseWriter, _ *http.Request) {

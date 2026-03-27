@@ -279,12 +279,21 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const wsSessionId = isStopped ? null : (session?.id ?? null)
   const { send, connected, setOnMessage } = useWebSocket(wsSessionId)
 
-  // Fetch available models once.
+  // Fetch available models, and refresh when the tab regains focus.
   useEffect(() => {
-    fetch("/api/models")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: ModelInfo[]) => setModels(data ?? []))
-      .catch(() => {})
+    const fetchModels = () =>
+      fetch("/api/models")
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data: ModelInfo[]) => setModels(data ?? []))
+        .catch(() => {})
+
+    fetchModels()
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchModels()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
   }, [])
 
   const currentModel = usage?.model || session?.model || ""

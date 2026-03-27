@@ -1,6 +1,7 @@
 export interface ModelInfo {
   id: string
   name: string
+  provider?: string
   can_reason: boolean
   reasoning_levels?: string[]
   context_window: number

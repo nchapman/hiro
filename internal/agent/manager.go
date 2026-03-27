@@ -94,6 +94,7 @@ type ControlPlane interface {
 	SecretEnv() []string
 	ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool)
 	ProviderByType(providerType string) (apiKey string, baseURL string, ok bool)
+	ConfiguredProviderTypes() []string
 	DefaultModel() string
 }
 
@@ -199,21 +200,10 @@ func (m *Manager) UpdateSessionConfig(ctx context.Context, sessionID, model stri
 	defer ra.mu.Unlock()
 
 	if model != "" && model != ra.info.Model {
-		// Validate model against the known catalogue.
-		provider, apiKey, baseURL, err := m.resolveProvider(config.AgentConfig{})
+		// Find which configured provider owns this model.
+		provider, apiKey, baseURL, err := m.resolveProviderForModel(model)
 		if err != nil {
-			return fmt.Errorf("resolving provider: %w", err)
-		}
-		known := models.ModelsForProvider(provider)
-		valid := false
-		for _, km := range known {
-			if km.ID == model {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return fmt.Errorf("unknown model %q for provider %q", model, provider)
+			return err
 		}
 
 		lm, err := CreateLanguageModel(ctx, ProviderType(provider), apiKey, baseURL, model)
@@ -1203,6 +1193,27 @@ func (m *Manager) resolveProvider(cfg config.AgentConfig) (provider, apiKey, bas
 		return "", "", "", fmt.Errorf("no LLM provider configured")
 	}
 	return provider, apiKey, baseURL, nil
+}
+
+// resolveProviderForModel finds which configured provider offers the given model.
+// It searches all configured providers and returns the first match.
+// Falls back to the default provider if no match is found (allows unknown models).
+func (m *Manager) resolveProviderForModel(model string) (provider, apiKey, baseURL string, err error) {
+	if m.cp == nil {
+		return "", "", "", fmt.Errorf("no control plane configured")
+	}
+	// Search all configured providers for the model.
+	for _, pt := range m.cp.ConfiguredProviderTypes() {
+		for _, mi := range models.ModelsForProvider(pt) {
+			if mi.ID == model {
+				key, bu, ok := m.cp.ProviderByType(pt)
+				if ok {
+					return pt, key, bu, nil
+				}
+			}
+		}
+	}
+	return "", "", "", fmt.Errorf("model %q not found in any configured provider", model)
 }
 
 // resolveModel returns the resolved model for an agent config.
