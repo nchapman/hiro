@@ -1,0 +1,502 @@
+//go:build online
+
+package inference
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"charm.land/fantasy"
+)
+
+// --- LoCoMo dataset types ---
+
+type locomoConversation struct {
+	QA           []locomoQA             `json:"qa"`
+	Conversation map[string]interface{} `json:"conversation"`
+}
+
+type locomoQA struct {
+	Question          string      `json:"question"`
+	Answer            interface{} `json:"answer"` // string or number
+	Evidence          []string    `json:"evidence"`
+	Category          int         `json:"category"`
+	AdversarialAnswer string      `json:"adversarial_answer,omitempty"`
+}
+
+func (q locomoQA) AnswerString() string {
+	switch v := q.Answer.(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int(v)) {
+			return fmt.Sprintf("%d", int(v))
+		}
+		return fmt.Sprintf("%g", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+var categoryNames = map[int]string{
+	1: "factual",
+	2: "temporal",
+	3: "inference",
+	4: "world_knowledge",
+	5: "adversarial",
+}
+
+// --- Dataset loading ---
+
+const locomoURL = "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
+
+func loadLoCoMo(t *testing.T) []locomoConversation {
+	t.Helper()
+	path := filepath.Join("testdata", "locomo10.json")
+
+	// Auto-download if missing.
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Logf("Downloading LoCoMo dataset from %s", locomoURL)
+		os.MkdirAll("testdata", 0o755)
+		resp, err := http.Get(locomoURL)
+		if err != nil {
+			t.Fatalf("downloading locomo10.json: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("downloading locomo10.json: HTTP %d", resp.StatusCode)
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("reading locomo10.json download: %v", err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatalf("writing locomo10.json: %v", err)
+		}
+		t.Logf("Downloaded %d bytes", len(data))
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading locomo10.json: %v", err)
+	}
+	var convos []locomoConversation
+	if err := json.Unmarshal(data, &convos); err != nil {
+		t.Fatalf("parsing locomo10.json: %v", err)
+	}
+	return convos
+}
+
+// flattenConversation extracts all dialog turns in chronological order.
+type dialogTurn struct {
+	Speaker   string
+	Text      string
+	SessionID int
+	Timestamp time.Time
+}
+
+func flattenConversation(conv locomoConversation) []dialogTurn {
+	convo := conv.Conversation
+	speakerA, _ := convo["speaker_a"].(string)
+	speakerB, _ := convo["speaker_b"].(string)
+
+	var turns []dialogTurn
+
+	// Find all sessions by looking for session_N keys.
+	for i := 1; i <= 50; i++ {
+		sessionKey := fmt.Sprintf("session_%d", i)
+		dateKey := fmt.Sprintf("session_%d_date_time", i)
+
+		sessionData, ok := convo[sessionKey]
+		if !ok {
+			continue
+		}
+
+		// Parse session date.
+		var sessionTime time.Time
+		if dateStr, ok := convo[dateKey].(string); ok {
+			// Try common formats.
+			for _, layout := range []string{
+				"2 January, 2006",
+				"January 2, 2006",
+				"2006-01-02",
+				"2 Jan 2006",
+			} {
+				if t, err := time.Parse(layout, dateStr); err == nil {
+					sessionTime = t
+					break
+				}
+			}
+		}
+
+		// Parse turns in this session.
+		sessionArr, ok := sessionData.([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, turnRaw := range sessionArr {
+			turnMap, ok := turnRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			speaker, _ := turnMap["speaker"].(string)
+			text, _ := turnMap["text"].(string)
+			if text == "" {
+				continue
+			}
+
+			// Map speaker names to roles for clarity.
+			role := speaker
+			if speaker == speakerA {
+				role = speakerA
+			} else if speaker == speakerB {
+				role = speakerB
+			}
+
+			turns = append(turns, dialogTurn{
+				Speaker:   role,
+				Text:      text,
+				SessionID: i,
+				Timestamp: sessionTime,
+			})
+		}
+	}
+	return turns
+}
+
+// --- F1 scoring (partial match, as per LoCoMo paper) ---
+
+func tokenize(s string) []string {
+	s = strings.ToLower(s)
+	// Remove punctuation.
+	var cleaned strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' {
+			cleaned.WriteRune(r)
+		} else {
+			cleaned.WriteRune(' ')
+		}
+	}
+	fields := strings.Fields(cleaned.String())
+	// Remove stop words.
+	stop := map[string]bool{
+		"a": true, "an": true, "the": true, "is": true, "are": true,
+		"was": true, "were": true, "be": true, "been": true, "being": true,
+		"have": true, "has": true, "had": true, "do": true, "does": true,
+		"did": true, "will": true, "would": true, "could": true, "should": true,
+		"may": true, "might": true, "shall": true, "can": true,
+		"of": true, "in": true, "to": true, "for": true, "with": true,
+		"on": true, "at": true, "by": true, "from": true, "as": true,
+		"it": true, "its": true, "this": true, "that": true,
+		"and": true, "or": true, "but": true, "not": true,
+		"i": true, "me": true, "my": true, "we": true, "our": true,
+		"you": true, "your": true, "he": true, "she": true, "they": true,
+		"his": true, "her": true, "their": true,
+	}
+	var result []string
+	for _, w := range fields {
+		if !stop[w] && w != "" {
+			result = append(result, w)
+		}
+	}
+	return result
+}
+
+func f1Score(prediction, reference string) float64 {
+	predTokens := tokenize(prediction)
+	refTokens := tokenize(reference)
+
+	if len(predTokens) == 0 && len(refTokens) == 0 {
+		return 1.0
+	}
+	if len(predTokens) == 0 || len(refTokens) == 0 {
+		return 0.0
+	}
+
+	refSet := make(map[string]int)
+	for _, t := range refTokens {
+		refSet[t]++
+	}
+
+	common := 0
+	for _, t := range predTokens {
+		if refSet[t] > 0 {
+			common++
+			refSet[t]--
+		}
+	}
+
+	if common == 0 {
+		return 0.0
+	}
+
+	precision := float64(common) / float64(len(predTokens))
+	recall := float64(common) / float64(len(refTokens))
+	return 2 * precision * recall / (precision + recall)
+}
+
+// --- Eval runner ---
+
+type evalResult struct {
+	ConvIndex int
+	Category  int
+	Question  string
+	Expected  string
+	Got       string
+	F1        float64
+}
+
+type evalSummary struct {
+	ByCategory map[int][]float64
+	Overall    []float64
+}
+
+func (s evalSummary) Report() string {
+	var b strings.Builder
+
+	cats := make([]int, 0, len(s.ByCategory))
+	for c := range s.ByCategory {
+		cats = append(cats, c)
+	}
+	sort.Ints(cats)
+
+	for _, c := range cats {
+		scores := s.ByCategory[c]
+		avg := mean(scores)
+		name := categoryNames[c]
+		fmt.Fprintf(&b, "  Category %d (%s): %.1f%% F1 (%d questions)\n", c, name, avg*100, len(scores))
+	}
+	fmt.Fprintf(&b, "  Overall: %.1f%% F1 (%d questions)\n", mean(s.Overall)*100, len(s.Overall))
+	return b.String()
+}
+
+func mean(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, v := range vals {
+		sum += v
+	}
+	return sum / float64(len(vals))
+}
+
+// runEval runs the LoCoMo QA evaluation.
+//
+// For each conversation:
+//  1. Flatten dialog turns into messages and store in the platform DB
+//  2. If compact=true, run compaction to compress the conversation
+//  3. Assemble context from the (possibly compacted) DB
+//  4. For each QA pair, ask the LLM the question with the assembled context
+//  5. Score the answer against ground truth using F1 partial match
+//
+// maxConvos limits the number of conversations to evaluate (0 = all).
+// maxQAPerConvo limits QA pairs per conversation (0 = all).
+func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, maxQAPerConvo int) evalSummary {
+	t.Helper()
+	convos := loadLoCoMo(t)
+
+	if maxConvos > 0 && maxConvos < len(convos) {
+		convos = convos[:maxConvos]
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	summary := evalSummary{
+		ByCategory: make(map[int][]float64),
+	}
+
+	for ci, conv := range convos {
+		turns := flattenConversation(conv)
+		if len(turns) == 0 {
+			continue
+		}
+
+		pdb := openTestDB(t)
+		sessionID := fmt.Sprintf("eval-%d", ci)
+		createTestSession(t, pdb, sessionID)
+
+		// Ingest all dialog turns as alternating user/assistant messages.
+		for _, turn := range turns {
+			role := "user"
+			if turn.Speaker != "" {
+				// Use a consistent format: "[Speaker] text"
+				// Both speakers become "user" role since this is a conversation
+				// the agent is observing, not participating in.
+			}
+			content := fmt.Sprintf("[%s] %s", turn.Speaker, turn.Text)
+			tokens := EstimateTokens(content)
+			if _, err := pdb.AppendMessage(sessionID, role, content, "{}", tokens); err != nil {
+				t.Fatalf("AppendMessage: %v", err)
+			}
+		}
+
+		// Optionally compact.
+		if compact {
+			cfg := CompactionConfig{
+				ContextWindow:        200_000,
+				SoftThreshold:        0.01, // force compaction
+				HardThreshold:        0.85,
+				TokenBudget:          180_000,
+				FreshTailCount:       4,
+				LeafChunkTokens:      500,
+				LeafTargetTokens:     800,
+				CondenseTargetTokens: 1200,
+				LeafMinFanout:        4,
+				CondenseMinFanout:    3,
+			}
+
+			summarizer := &lmSummarizer{lm: lm}
+			compactor := NewCompactor(pdb, sessionID, summarizer, cfg, logger)
+
+			estimated, _ := pdb.ContextTokenCount(sessionID)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			_, err := compactor.CompactIfNeeded(ctx, int64(estimated))
+			cancel()
+			if err != nil {
+				t.Logf("Conv %d: compaction failed: %v", ci, err)
+			}
+
+			postTokens, _ := pdb.ContextTokenCount(sessionID)
+			items, _ := pdb.GetContextItems(sessionID)
+			msgCount, sumCount := 0, 0
+			for _, item := range items {
+				if item.ItemType == "message" {
+					msgCount++
+				} else {
+					sumCount++
+				}
+			}
+			t.Logf("Conv %d: %d turns → compacted to %d messages + %d summaries (%d → %d est tokens)",
+				ci, len(turns), msgCount, sumCount, estimated, postTokens)
+		}
+
+		// Assemble context.
+		assembleCfg := DefaultCompactionConfig()
+		assembled, err := Assemble(pdb, sessionID, assembleCfg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		// Build context string from assembled messages.
+		var contextBuf strings.Builder
+		for _, msg := range assembled.Messages {
+			for _, part := range msg.Content {
+				if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+					contextBuf.WriteString(tp.Text)
+					contextBuf.WriteString("\n")
+				}
+			}
+		}
+		contextStr := contextBuf.String()
+
+		// Score QA pairs.
+		qaPairs := conv.QA
+		if maxQAPerConvo > 0 && maxQAPerConvo < len(qaPairs) {
+			qaPairs = qaPairs[:maxQAPerConvo]
+		}
+
+		for _, qa := range qaPairs {
+			expected := qa.AnswerString()
+
+			prompt := fmt.Sprintf(
+				"Based on the following conversation history, answer the question. "+
+					"Give a short, direct answer using the exact wording from the conversation when possible. "+
+					"If the question cannot be answered from the conversation, say \"unanswerable\".\n\n"+
+					"Conversation:\n%s\n\nQuestion: %s\nAnswer:",
+				contextStr, qa.Question,
+			)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			resp, err := lm.Generate(ctx, fantasy.Call{
+				Prompt: fantasy.Prompt{fantasy.NewUserMessage(prompt)},
+			})
+			cancel()
+
+			answer := ""
+			if err != nil {
+				t.Logf("  LLM error for %q: %v", qa.Question, err)
+			} else {
+				answer = strings.TrimSpace(resp.Content.Text())
+			}
+
+			score := f1Score(answer, expected)
+			summary.ByCategory[qa.Category] = append(summary.ByCategory[qa.Category], score)
+			summary.Overall = append(summary.Overall, score)
+		}
+
+		t.Logf("Conv %d: scored %d QA pairs", ci, len(qaPairs))
+	}
+
+	return summary
+}
+
+// --- Test entrypoints ---
+
+// TestLoCoMo_Baseline runs the QA eval without compaction (full context).
+// This establishes the upper bound — how well the LLM performs when it
+// can see the entire conversation.
+func TestLoCoMo_Baseline(t *testing.T) {
+	lm := testLM(t)
+
+	// Run on first 2 conversations, 10 QA per convo for a quick smoke test.
+	// For a full run, use maxConvos=0 and maxQAPerConvo=0.
+	summary := runEval(t, lm, false, 2, 10)
+	t.Logf("\n=== BASELINE (no compaction) ===\n%s", summary.Report())
+}
+
+// TestLoCoMo_Compacted runs the QA eval after compaction.
+// This measures how much information survives the compaction pipeline.
+func TestLoCoMo_Compacted(t *testing.T) {
+	lm := testLM(t)
+
+	// Run on first 2 conversations, 10 QA per convo for a quick smoke test.
+	summary := runEval(t, lm, true, 2, 10)
+	t.Logf("\n=== COMPACTED ===\n%s", summary.Report())
+}
+
+// TestLoCoMo_Full runs the complete evaluation on all conversations.
+// This is slow (hundreds of LLM calls) — run explicitly with:
+//
+//	go test -tags=online -run TestLoCoMo_Full -v -count=1 -timeout=60m
+func TestLoCoMo_Full(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping full LoCoMo eval in short mode")
+	}
+	lm := testLM(t)
+
+	t.Log("=== Running baseline (no compaction) ===")
+	baseline := runEval(t, lm, false, 0, 0)
+	t.Logf("\n=== BASELINE RESULTS ===\n%s", baseline.Report())
+
+	t.Log("=== Running compacted ===")
+	compacted := runEval(t, lm, true, 0, 0)
+	t.Logf("\n=== COMPACTED RESULTS ===\n%s", compacted.Report())
+
+	// Report delta.
+	t.Log("\n=== DELTA (compacted - baseline) ===")
+	cats := make([]int, 0, len(baseline.ByCategory))
+	for c := range baseline.ByCategory {
+		cats = append(cats, c)
+	}
+	sort.Ints(cats)
+	for _, c := range cats {
+		bAvg := mean(baseline.ByCategory[c])
+		cAvg := mean(compacted.ByCategory[c])
+		delta := (cAvg - bAvg) * 100
+		t.Logf("  Category %d (%s): %+.1f%%", c, categoryNames[c], delta)
+	}
+	bOverall := mean(baseline.Overall)
+	cOverall := mean(compacted.Overall)
+	t.Logf("  Overall: %+.1f%%", (cOverall-bOverall)*100)
+}
