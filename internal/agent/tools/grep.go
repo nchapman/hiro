@@ -258,8 +258,7 @@ func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]gr
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "vendor", "dist", "__pycache__":
+			if excludedDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil

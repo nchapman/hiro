@@ -56,12 +56,9 @@ func NewListFilesTool(workingDir string) fantasy.AgentTool {
 					return filepath.SkipDir
 				}
 
-				// Skip node_modules, vendor, etc.
-				if d.IsDir() {
-					switch d.Name() {
-					case "node_modules", "vendor", "dist", "__pycache__", ".git":
-						return filepath.SkipDir
-					}
+				// Skip common noisy directories.
+				if d.IsDir() && excludedDirs[d.Name()] {
+					return filepath.SkipDir
 				}
 
 				rel, _ := filepath.Rel(dir, path)

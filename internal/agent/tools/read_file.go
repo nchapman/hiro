@@ -14,6 +14,7 @@ import (
 var readFileDescription string
 
 const maxFileReadLen = 64000
+const maxFileSize = 10 * 1024 * 1024 // 10MB — reject before reading into memory
 
 type ReadFileParams struct {
 	Path   string `json:"path"             description:"Absolute or relative path to the file to read."`
@@ -32,6 +33,15 @@ func NewReadFileTool(workingDir string) fantasy.AgentTool {
 			}
 
 			path := resolvePath(workingDir, params.Path)
+
+			fi, err := os.Stat(path)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %v", err)), nil
+			}
+			if fi.Size() > maxFileSize {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("file too large (%d bytes, max %d)", fi.Size(), maxFileSize)), nil
+			}
+
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %v", err)), nil

@@ -54,13 +54,18 @@ func Assemble(pdb *platformdb.DB, sessionID string, cfg CompactionConfig) (Assem
 
 	// Fill remaining budget from evictable, newest first.
 	remaining := cfg.TokenBudget - tailTokens
-	var kept []resolved
+	var keptReverse []resolved
 	for i := len(evictable) - 1; i >= 0; i-- {
 		if remaining <= 0 || evictable[i].tokens > remaining {
 			break
 		}
-		kept = append([]resolved{evictable[i]}, kept...)
+		keptReverse = append(keptReverse, evictable[i])
 		remaining -= evictable[i].tokens
+	}
+	// Reverse to restore chronological order.
+	kept := make([]resolved, len(keptReverse))
+	for i, r := range keptReverse {
+		kept[len(keptReverse)-1-i] = r
 	}
 
 	messages := make([]fantasy.Message, 0, len(kept)+len(freshTail))

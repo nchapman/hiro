@@ -60,7 +60,10 @@ func run() error {
 	listenAddr := envOr("HIVE_ADDR", ":8080")
 	rootDir := envOr("HIVE_ROOT", ".")
 
-	absRootDir, _ := filepath.Abs(rootDir)
+	absRootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return fmt.Errorf("resolving root dir: %w", err)
+	}
 	cpPath := filepath.Join(absRootDir, "config.yaml")
 
 	// Initialize platform directory structure and seed defaults

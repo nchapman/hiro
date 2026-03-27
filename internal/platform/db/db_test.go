@@ -94,15 +94,15 @@ func TestSessions_CRUD(t *testing.T) {
 		t.Errorf("expected stopped with timestamp, got %+v", s)
 	}
 
-	// IsDescendant.
-	ok, err := d.IsDescendant("sess-1", "sess-2")
+	// IsDescendant — parameter order: (targetID, ancestorID).
+	ok, err := d.IsDescendant("sess-2", "sess-1")
 	if err != nil {
 		t.Fatalf("IsDescendant: %v", err)
 	}
 	if !ok {
 		t.Error("expected sess-2 to be descendant of sess-1")
 	}
-	ok, _ = d.IsDescendant("sess-2", "sess-1")
+	ok, _ = d.IsDescendant("sess-1", "sess-2")
 	if ok {
 		t.Error("sess-1 should not be descendant of sess-2")
 	}
@@ -316,38 +316,34 @@ func TestSearch_FTS(t *testing.T) {
 		t.Errorf("expected 1 result in s1, got %d", len(results))
 	}
 
-	// Cross-session search.
-	all, err := d.SearchAllSessions("quick brown", 10)
-	if err != nil {
-		t.Fatalf("SearchAllSessions: %v", err)
-	}
-	if len(all) != 2 {
-		t.Errorf("expected 2 results across sessions, got %d", len(all))
-	}
 }
 
 func TestUsage_RecordAndAggregate(t *testing.T) {
 	d := openTestDB(t)
 	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
-	// Record usage events.
-	d.RecordUsage(UsageEvent{
-		SessionID:    "s1",
-		Model:        "claude-sonnet-4-6",
-		Provider:     "anthropic",
-		InputTokens:  1000,
-		OutputTokens: 500,
-		Cost:         0.01,
-	})
-	d.RecordUsage(UsageEvent{
-		SessionID:       "s1",
-		Model:           "claude-sonnet-4-6",
-		Provider:        "anthropic",
-		InputTokens:     2000,
-		OutputTokens:    1000,
-		CacheReadTokens: 500,
-		Cost:            0.02,
-	})
+	// Record usage events via RecordTurnUsage.
+	if err := d.RecordTurnUsage([]UsageEvent{
+		{
+			SessionID:    "s1",
+			Model:        "claude-sonnet-4-6",
+			Provider:     "anthropic",
+			InputTokens:  1000,
+			OutputTokens: 500,
+			Cost:         0.01,
+		},
+		{
+			SessionID:       "s1",
+			Model:           "claude-sonnet-4-6",
+			Provider:        "anthropic",
+			InputTokens:     2000,
+			OutputTokens:    1000,
+			CacheReadTokens: 500,
+			Cost:            0.02,
+		},
+	}); err != nil {
+		t.Fatalf("RecordTurnUsage: %v", err)
+	}
 
 	// Session usage.
 	usage, err := d.GetSessionUsage("s1")
@@ -457,8 +453,10 @@ func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
 	d := openTestDB(t)
 	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
-	// Simulate a legacy turn-0 row (pre-migration data).
-	d.RecordUsage(UsageEvent{SessionID: "s1", Model: "m", Provider: "p", Turn: 0, InputTokens: 9999, Cost: 0.99})
+	// Simulate a legacy turn-0 row (pre-migration data) via direct insert.
+	if _, err := d.db.Exec(`INSERT INTO usage_events (session_id, model, provider, turn, input_tokens, cost) VALUES (?, ?, ?, 0, 9999, 0.99)`, "s1", "m", "p"); err != nil {
+		t.Fatalf("inserting legacy turn-0 row: %v", err)
+	}
 
 	// GetLastTurnUsage should not return turn-0 data.
 	_, ok, err := d.GetLastTurnUsage("s1")
@@ -506,37 +504,15 @@ func TestUsage_RecordTurnUsage_Empty(t *testing.T) {
 	}
 }
 
-func TestRequestLog(t *testing.T) {
-	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
-
-	err := d.LogRequest(RequestLogEntry{
-		SessionID:  "s1",
-		Model:      "claude-sonnet-4-6",
-		Request:    `{"prompt":"hello"}`,
-		Response:   `{"text":"hi"}`,
-		DurationMs: 150,
-	})
-	if err != nil {
-		t.Fatalf("LogRequest: %v", err)
-	}
-
-	entries, err := d.GetRequestLog("s1", 10)
-	if err != nil {
-		t.Fatalf("GetRequestLog: %v", err)
-	}
-	if len(entries) != 1 || entries[0].DurationMs != 150 {
-		t.Errorf("unexpected log entry: %+v", entries)
-	}
-}
-
 func TestDeleteSession_Cascades(t *testing.T) {
 	d := openTestDB(t)
 	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	d.AppendMessage("s1", "user", "hello", "{}", 10)
-	d.RecordUsage(UsageEvent{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 100})
-	d.LogRequest(RequestLogEntry{SessionID: "s1", Model: "m"})
+	d.RecordTurnUsage([]UsageEvent{{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 100}})
+	if _, err := d.db.Exec(`INSERT INTO request_log (session_id, model) VALUES (?, ?)`, "s1", "m"); err != nil {
+		t.Fatalf("inserting test request_log row: %v", err)
+	}
 
 	if err := d.DeleteSession("s1"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
@@ -553,8 +529,9 @@ func TestDeleteSession_Cascades(t *testing.T) {
 		t.Errorf("expected 0 usage events after delete, got %d", usage.EventCount)
 	}
 
-	entries, _ := d.GetRequestLog("s1", 10)
-	if len(entries) != 0 {
-		t.Errorf("expected 0 log entries after delete, got %d", len(entries))
+	var logCount int
+	d.db.QueryRow(`SELECT COUNT(*) FROM request_log WHERE session_id = ?`, "s1").Scan(&logCount)
+	if logCount != 0 {
+		t.Errorf("expected 0 log entries after delete, got %d", logCount)
 	}
 }

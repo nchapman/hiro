@@ -4,16 +4,8 @@ import { Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { Markdown } from "@/components/prompt-kit/markdown"
+import { getFileExt, getPreviewType } from "@/lib/file-utils"
 
-const previewableExtensions: Record<string, "image" | "video" | "audio" | "pdf"> = {
-  png: "image", jpg: "image", jpeg: "image", gif: "image",
-  bmp: "image", ico: "image", webp: "image", svg: "image",
-  mp4: "video", webm: "video", ogg: "video",
-  mp3: "audio", wav: "audio", flac: "audio",
-  pdf: "pdf",
-}
-
-/** Map file extensions to markdown code fence language identifiers. */
 const langMap: Record<string, string> = {
   js: "javascript", mjs: "javascript", cjs: "javascript",
   ts: "typescript", mts: "typescript", cts: "typescript",
@@ -27,14 +19,6 @@ const langMap: Record<string, string> = {
   dockerfile: "dockerfile", makefile: "makefile",
   c: "c", cpp: "cpp", h: "c", hpp: "cpp",
   java: "java", kt: "kotlin", swift: "swift",
-}
-
-function getFileExt(name: string): string {
-  return name.split(".").pop()?.toLowerCase() ?? ""
-}
-
-function getPreviewType(name: string): "image" | "video" | "audio" | "pdf" | null {
-  return previewableExtensions[getFileExt(name)] ?? null
 }
 
 function formatSize(bytes: number): string {

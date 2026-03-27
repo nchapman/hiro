@@ -38,7 +38,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 
 			dir := workingDir
 			if params.WorkingDir != "" {
-				dir = params.WorkingDir
+				dir = resolvePath(workingDir, params.WorkingDir)
 			}
 
 			// Explicit background mode.

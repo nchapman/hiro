@@ -6,6 +6,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { statusDotColor } from "@/lib/session-utils"
 import type { SessionInfo } from "@/App"
 
 interface SidebarProps {
@@ -51,11 +52,7 @@ export default function Sidebar({
                   <span
                     className={cn(
                       "h-1.5 w-1.5 shrink-0 rounded-full",
-                      session.status === "stopped"
-                        ? "bg-gray-400"
-                        : session.mode === "ephemeral"
-                          ? "bg-violet-500"
-                          : "bg-green-500"
+                      statusDotColor(session)
                     )}
                   />
                   <span className="truncate">{session.name}</span>

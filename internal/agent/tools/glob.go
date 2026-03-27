@@ -186,12 +186,9 @@ func globWalk(pattern, searchPath string) ([]string, bool, error) {
 			return filepath.SkipDir
 		}
 
-		// Skip common noisy directories
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "vendor", "dist", "__pycache__":
-				return filepath.SkipDir
-			}
+		// Skip common noisy directories.
+		if d.IsDir() && excludedDirs[d.Name()] {
+			return filepath.SkipDir
 		}
 
 		if d.IsDir() {

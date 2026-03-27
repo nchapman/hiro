@@ -11,7 +11,7 @@ test:
 	docker run --rm --init hive-test
 
 test-local:
-	go test ./... -v -count=1
+	go test -race ./... -v -count=1
 
 test-isolation:
 	docker build --target test -t hive-test .
@@ -33,7 +33,7 @@ test-online:
 
 check:
 	docker build --target test -t hive-test .
-	docker run --rm --init hive-test sh -c "go test ./... -v -count=1 && go vet ./..."
+	docker run --rm --init hive-test sh -c "go test -race ./... -v -count=1 && go vet ./..."
 
 clean:
 	rm -f $(BINARY)

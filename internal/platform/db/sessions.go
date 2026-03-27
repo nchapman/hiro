@@ -5,9 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
+
+// parseTime parses a SQLite datetime string, logging a warning on failure.
+func parseTime(s string) time.Time {
+	return parseTimeLayout("2006-01-02 15:04:05", s)
+}
+
+// parseTimeLayout parses a time string with the given layout, logging a warning on failure.
+func parseTimeLayout(layout, s string) time.Time {
+	t, err := time.Parse(layout, s)
+	if err != nil {
+		slog.Warn("failed to parse timestamp from database", "value", s, "error", err)
+	}
+	return t
+}
 
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("not found")
@@ -69,9 +84,9 @@ func (d *DB) GetSession(id string) (Session, error) {
 	if parentID.Valid {
 		s.ParentID = parentID.String
 	}
-	s.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	s.CreatedAt = parseTime(createdAt)
 	if stoppedAt.Valid {
-		t, _ := time.Parse("2006-01-02 15:04:05", stoppedAt.String)
+		t := parseTime(stoppedAt.String)
 		s.StoppedAt = &t
 	}
 	return s, nil
@@ -186,10 +201,11 @@ func (d *DB) UpdateSessionConfig(sessionID string, cfg SessionConfig) error {
 	return nil
 }
 
-// IsDescendant returns true if candidateID is a descendant of ancestorID.
-func (d *DB) IsDescendant(ancestorID, candidateID string) (bool, error) {
-	// Walk up from candidate to root, checking for ancestor.
-	current := candidateID
+// IsDescendant returns true if targetID is a descendant of ancestorID.
+// Parameter order matches ipc.HostManager.IsDescendant(targetID, ancestorID).
+func (d *DB) IsDescendant(targetID, ancestorID string) (bool, error) {
+	// Walk up from target to root, checking for ancestor.
+	current := targetID
 	for {
 		if current == ancestorID {
 			return true, nil
@@ -219,9 +235,9 @@ func scanSessions(rows *sql.Rows) ([]Session, error) {
 		if parentID.Valid {
 			s.ParentID = parentID.String
 		}
-		s.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		s.CreatedAt = parseTime(createdAt)
 		if stoppedAt.Valid {
-			t, _ := time.Parse("2006-01-02 15:04:05", stoppedAt.String)
+			t := parseTime(stoppedAt.String)
 			s.StoppedAt = &t
 		}
 		sessions = append(sessions, s)

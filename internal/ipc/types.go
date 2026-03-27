@@ -13,16 +13,6 @@ type SessionInfo struct {
 	Model       string // resolved model ID (e.g. "claude-sonnet-4-20250514")
 }
 
-// ConfigUpdate carries resolved structural config pushed from the control plane
-// to a running inference loop when agent definitions or control plane config change.
-type ConfigUpdate struct {
-	EffectiveTools map[string]bool // nil = unrestricted, non-nil = allowed set
-	Model          string          // resolved model (frontmatter → CP default)
-	Provider       string          // resolved provider type
-	APIKey         string          // resolved provider API key
-	Description    string          // current description from agent.md frontmatter
-}
-
 // SpawnConfig is the configuration passed to an agent worker process at startup.
 // Workers are thin tool-execution sandboxes — they only need paths and UID info.
 type SpawnConfig struct {

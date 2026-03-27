@@ -3,6 +3,7 @@ package inference
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
@@ -75,6 +76,7 @@ func estimateOneFile(f fantasy.FilePart) int {
 func marshalMessage(msg fantasy.Message) string {
 	data, err := json.Marshal(msg)
 	if err != nil {
+		slog.Warn("failed to marshal message", "role", msg.Role, "error", err)
 		return "{}"
 	}
 	return string(data)

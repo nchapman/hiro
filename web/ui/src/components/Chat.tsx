@@ -35,49 +35,11 @@ import {
   PromptInput,
   PromptInputTextarea,
 } from "@/components/prompt-kit/prompt-input"
-
-// --- Types ---
-
-interface ModelInfo {
-  id: string
-  name: string
-  can_reason: boolean
-  reasoning_levels?: string[]
-  context_window: number
-}
-
-interface ToolCall {
-  id: string
-  name: string
-  input?: string
-  output?: string
-  isError?: boolean
-  status?: string
-}
-
-interface MessageAttachment {
-  filename: string
-  media_type: string
-  data?: string // base64; populated for image previews and when loaded from history
-}
-
-interface Message {
-  id: string
-  role: "user" | "assistant" | "system"
-  content: string
-  toolCalls?: ToolCall[]
-  thinking?: string
-  isThinking?: boolean // true while reasoning is streaming
-  attachments?: MessageAttachment[]
-}
-
-interface PendingAttachment {
-  id: string
-  file: File
-  preview?: string   // data URL for image thumbnails
-  dataBase64: string  // base64-encoded content
-  mediaType: string
-}
+import type { ModelInfo, ToolCall, Message, MessageAttachment, PendingAttachment, HistoryMessage } from "@/lib/chat-types"
+import { mergeHistoryMessages } from "@/lib/chat-parser"
+import { statusDotColor } from "@/lib/session-utils"
+import ModelSelector from "@/components/ModelSelector"
+import TokenCounter from "@/components/TokenCounter"
 
 const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
 const MAX_ATTACHMENTS = 10
@@ -91,7 +53,6 @@ function fileToBase64(file: File): Promise<string> {
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result as string
-      // Strip the data URL prefix to get raw base64
       const base64 = result.split(",")[1] || ""
       resolve(base64)
     }
@@ -117,183 +78,6 @@ async function processFiles(files: FileList | File[]): Promise<PendingAttachment
     result.push(att)
   }
   return result
-}
-
-interface HistoryMessage {
-  role: "user" | "assistant" | "tool"
-  content: string
-  raw_json?: string
-  timestamp?: string
-}
-
-// --- Fantasy Message JSON parsing (from raw_json in history DB) ---
-//
-// Fantasy serializes messages as: {"role": "...", "content": [{"type": "...", "data": {...}}]}
-// Types use hyphens: "text", "tool-call", "tool-result"
-// Tool results are in separate messages with role "tool"
-
-interface FantasyMessage {
-  role: string
-  content: Array<{ type: string; data: Record<string, unknown> }>
-}
-
-function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: ToolCall[]; thinking: string; attachments: MessageAttachment[] } {
-  try {
-    const msg: FantasyMessage = JSON.parse(rawJSON)
-    const textParts: string[] = []
-    const thinkingParts: string[] = []
-    const toolCalls: ToolCall[] = []
-    const attachments: MessageAttachment[] = []
-
-    for (const part of msg.content) {
-      switch (part.type) {
-        case "text":
-          if (typeof part.data.text === "string") textParts.push(part.data.text)
-          break
-        case "reasoning":
-          if (typeof part.data.text === "string") thinkingParts.push(part.data.text)
-          break
-        case "file":
-          attachments.push({
-            filename: (part.data.filename as string) || "file",
-            media_type: (part.data.media_type as string) || "",
-            data: part.data.data as string | undefined,
-          })
-          break
-        case "tool-call":
-          toolCalls.push({
-            id: (part.data.tool_call_id as string) || crypto.randomUUID(),
-            name: (part.data.tool_name as string) || "unknown",
-            input: part.data.input as string | undefined,
-            status: part.data.status as string | undefined,
-          })
-          break
-        case "tool-result": {
-          const callID = part.data.tool_call_id as string
-          const result = extractToolOutput(part.data.output)
-          if (callID && result) {
-            const tc = toolCalls.find((t) => t.id === callID)
-            if (tc) { tc.output = result.output; tc.isError = result.isError }
-          }
-          break
-        }
-      }
-    }
-
-    return { content: textParts.join(""), toolCalls, thinking: thinkingParts.join(""), attachments }
-  } catch {
-    return { content: "", toolCalls: [], thinking: "", attachments: [] }
-  }
-}
-
-// Extract tool results from a tool-role message's raw_json.
-// Returns a map of tool_call_id → { output, isError }.
-function parseToolResults(rawJSON: string): Map<string, { output: string; isError: boolean }> {
-  const results = new Map<string, { output: string; isError: boolean }>()
-  try {
-    const msg: FantasyMessage = JSON.parse(rawJSON)
-    for (const part of msg.content) {
-      if (part.type === "tool-result") {
-        const callID = part.data.tool_call_id as string
-        const result = extractToolOutput(part.data.output)
-        if (callID && result) {
-          results.set(callID, result)
-        }
-      }
-    }
-  } catch { /* ignore */ }
-  return results
-}
-
-// Safely extract output from a fantasy tool result's nested output structure.
-// Output format: {"type": "text", "data": {"text": "..."}} or {"type": "error", "data": {"error": "..."}}
-function extractToolOutput(raw: unknown): { output: string; isError: boolean } | null {
-  if (!raw || typeof raw !== "object") return null
-  const obj = raw as { type?: string; data?: Record<string, unknown> }
-  if (obj.type === "text" && typeof obj.data?.text === "string") {
-    return { output: obj.data.text, isError: false }
-  }
-  if (obj.type === "error" && typeof obj.data?.error === "string") {
-    return { output: obj.data.error, isError: true }
-  }
-  return null
-}
-
-// Merge history messages into a flat list for rendering.
-// An agentic turn may span multiple DB rows: assistant (tool calls) → tool (results) →
-// assistant (more tool calls) → tool (results) → assistant (final text). These are
-// consolidated into a single Message with all tool calls and the final text content.
-function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
-  const messages: Message[] = []
-  let current: Message | undefined // accumulator for the current assistant turn
-
-  function flushCurrent() {
-    if (current) {
-      messages.push(current)
-      current = undefined
-    }
-  }
-
-  for (const m of history) {
-    if (m.role === "tool" && m.raw_json) {
-      if (current) {
-        // Attach results to the current assistant message's tool calls
-        const results = parseToolResults(m.raw_json)
-        for (const [callID, result] of results) {
-          const target = current.toolCalls?.find((t) => t.id === callID)
-          if (target) {
-            target.output = result.output
-            target.isError = result.isError
-          }
-        }
-      }
-      // Tool rows are always consumed (never rendered directly)
-      continue
-    }
-
-    if (m.role === "assistant" && m.raw_json) {
-      const parsed = parseFantasyMessage(m.raw_json)
-      if (parsed.toolCalls.length > 0 || parsed.thinking) {
-        // Accumulate tool calls/thinking into current turn (or start a new one)
-        if (!current) {
-          current = { id: crypto.randomUUID(), role: "assistant", content: "", toolCalls: [] }
-        }
-        if (parsed.toolCalls.length > 0) {
-          current.toolCalls = [...(current.toolCalls ?? []), ...parsed.toolCalls]
-        }
-        if (parsed.thinking) {
-          current.thinking = (current.thinking || "") + parsed.thinking
-        }
-        if (parsed.content) current.content += parsed.content
-        continue
-      }
-      // Text-only assistant message — append content to current turn or start new
-      if (current) {
-        if (parsed.content) current.content += parsed.content
-        else current.content += m.content
-        flushCurrent()
-        continue
-      }
-    }
-
-    // Non-assistant message or no active turn — flush and emit
-    flushCurrent()
-    // Parse attachments from user messages (images stored as FileParts in raw_json).
-    let userAttachments: MessageAttachment[] | undefined
-    if (m.role === "user" && m.raw_json) {
-      const parsed = parseFantasyMessage(m.raw_json)
-      if (parsed.attachments.length > 0) userAttachments = parsed.attachments
-    }
-    messages.push({
-      id: crypto.randomUUID(),
-      role: m.role as Message["role"],
-      content: m.content,
-      attachments: userAttachments,
-    })
-  }
-
-  flushCurrent()
-  return messages
 }
 
 // --- Tool call UI ---
@@ -356,12 +140,10 @@ function formatJSON(input: string): string {
 }
 
 function formatAsCodeBlock(output: string): string {
-  // If it's valid JSON, pretty-print with syntax highlighting
   try {
     const parsed = JSON.parse(output)
     return "```json\n" + JSON.stringify(parsed, null, 2) + "\n```"
   } catch {
-    // Plain text — render as a generic code block
     return "```\n" + output + "\n```"
   }
 }
@@ -423,177 +205,6 @@ function AssistantMessage({ message }: { message: Message }) {
   )
 }
 
-// --- Token counter ---
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
-}
-
-function formatCost(cost: number): string {
-  if (cost < 0.01) return `$${cost.toFixed(4)}`
-  return `$${cost.toFixed(2)}`
-}
-
-function TokenCounter({ usage }: { usage: UsageInfo }) {
-  const contextUsed = usage.prompt_tokens + usage.completion_tokens
-  const pct = usage.context_window > 0
-    ? (contextUsed / usage.context_window) * 100
-    : 0
-  const pctColor = pct > 80 ? "text-red-500" : pct > 60 ? "text-yellow-500" : "text-green-600"
-
-  return (
-    <div className="group relative">
-      <div className="flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs tabular-nums text-muted-foreground cursor-default">
-        <span>{formatTokenCount(contextUsed)}</span>
-        <span>/</span>
-        <span>{formatTokenCount(usage.context_window)}</span>
-      </div>
-
-      {/* Hover card */}
-      <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
-        <div className="w-56 rounded-lg border bg-popover p-3 text-sm shadow-md">
-          <table className="w-full">
-            <tbody>
-              <tr>
-                <td className="py-0.5 text-muted-foreground">Context</td>
-                <td className={cn("py-0.5 text-right tabular-nums font-medium", pctColor)}>
-                  {pct.toFixed(1)}%
-                </td>
-              </tr>
-              <tr>
-                <td className="py-0.5 text-muted-foreground">Turn input</td>
-                <td className="py-0.5 text-right tabular-nums">
-                  {usage.turn_input_tokens.toLocaleString()}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-0.5 text-muted-foreground">Turn output</td>
-                <td className="py-0.5 text-right tabular-nums">
-                  {usage.turn_output_tokens.toLocaleString()}
-                </td>
-              </tr>
-              <tr>
-                <td className="border-t pt-1.5 text-muted-foreground">Turn cost</td>
-                <td className="border-t pt-1.5 text-right tabular-nums">
-                  {formatCost(usage.turn_cost)}
-                </td>
-              </tr>
-              {usage.session_cost > 0 && (
-                <tr>
-                  <td className="py-0.5 text-muted-foreground">Session cost</td>
-                  <td className="py-0.5 text-right tabular-nums">
-                    {formatCost(usage.session_cost)}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// --- Model selector ---
-
-function ModelSelector({
-  models,
-  currentModel,
-  onSelect,
-}: {
-  models: ModelInfo[]
-  currentModel: string
-  onSelect: (id: string) => void
-}) {
-  const currentName = models.find((m) => m.id === currentModel)?.name || currentModel
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const listRef = useRef<HTMLDivElement>(null)
-  const filtered = search
-    ? models.filter(
-        (m) =>
-          m.id.toLowerCase().includes(search.toLowerCase()) ||
-          m.name.toLowerCase().includes(search.toLowerCase())
-      )
-    : models
-
-  // Scroll the selected model into view when the dropdown opens.
-  useEffect(() => {
-    if (!open || search) return
-    requestAnimationFrame(() => {
-      const el = listRef.current?.querySelector("[data-selected]")
-      if (el) el.scrollIntoView({ block: "center" })
-    })
-  }, [open, search])
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
-      >
-        <span>{currentName}</span>
-        <ChevronDown className="h-3 w-3" />
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border bg-popover shadow-md">
-            {models.length > 10 && (
-              <div className="border-b p-2">
-                <input
-                  type="text"
-                  className="w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none placeholder:text-muted-foreground"
-                  placeholder="Search models..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            )}
-            <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
-              {filtered.map((m) => (
-                <button
-                  key={m.id}
-                  data-selected={m.id === currentModel ? "" : undefined}
-                  onClick={() => {
-                    onSelect(m.id)
-                    setOpen(false)
-                    setSearch("")
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent cursor-pointer",
-                    m.id === currentModel && "bg-accent"
-                  )}
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium">{m.name || m.id}</span>
-                    {m.name && m.name !== m.id && (
-                      <span className="text-[10px] text-muted-foreground">{m.id}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                    {m.can_reason && <span className="rounded bg-muted px-1">reason</span>}
-                    <span>{formatTokenCount(m.context_window)}</span>
-                  </div>
-                </button>
-              ))}
-              {filtered.length === 0 && (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  No models found
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
 // --- Reasoning control ---
 
 function ReasoningControl({
@@ -628,7 +239,6 @@ function ReasoningControl({
     )
   }
 
-  // Binary toggle for older models without levels
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onChange(effort ? "" : "on") }}
@@ -646,13 +256,6 @@ function ReasoningControl({
 }
 
 // --- Chat component ---
-
-// Status dot color helper
-function statusDotColor(session: SessionInfo): string {
-  if (session.status === "stopped") return "bg-gray-400"
-  if (session.mode === "ephemeral") return "bg-violet-500"
-  return "bg-green-500"
-}
 
 interface ChatProps {
   session: SessionInfo | null
@@ -673,7 +276,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const sessionGeneration = useRef(0)
   const isStopped = session?.status === "stopped"
   const isRoot = session ? !session.mode || session.mode === "coordinator" : false
-  // Don't connect WebSocket for stopped sessions
   const wsSessionId = isStopped ? null : (session?.id ?? null)
   const { send, connected, setOnMessage } = useWebSocket(wsSessionId)
 
@@ -691,7 +293,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const handleModelChange = useCallback(
     (modelId: string) => {
       send({ type: "config", model: modelId })
-      // Optimistically update usage model and reset reasoning.
       setUsage((u) => u ? { ...u, model: modelId, context_window: models.find((m) => m.id === modelId)?.context_window ?? u.context_window } : u)
       setReasoningEffort("")
     },
@@ -722,7 +323,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     streamingMsgId.current = null
     setLoadingHistory(true)
 
-    // Fetch usage data for this session.
     fetch(`/api/sessions/${encodeURIComponent(session.id)}/usage`, {
       signal: ac.signal,
     })
@@ -771,18 +371,15 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             ])
           } else {
             const id = streamingMsgId.current
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === id
-                  ? { ...m, content: m.content + (msg.content || "") }
-                  : m
-              )
-            )
+            setMessages((prev) => {
+              const last = prev[prev.length - 1]
+              if (last?.id !== id) return prev
+              return [...prev.slice(0, -1), { ...last, content: last.content + (msg.content || "") }]
+            })
           }
           break
         }
         case "tool_call": {
-          // Ensure we have a streaming message to attach to
           if (!streamingMsgId.current) {
             const id = crypto.randomUUID()
             streamingMsgId.current = id
@@ -798,33 +395,29 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             input: msg.input,
             status: msg.status,
           }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id
-                ? { ...m, toolCalls: [...(m.toolCalls ?? []), tc] }
-                : m
-            )
-          )
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.id !== id) return prev
+            return [...prev.slice(0, -1), { ...last, toolCalls: [...(last.toolCalls ?? []), tc] }]
+          })
           break
         }
         case "tool_result": {
           if (!streamingMsgId.current) break
           const id = streamingMsgId.current
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== id) return m
-              const updated = (m.toolCalls ?? []).map((tc) =>
-                tc.id === msg.tool_call_id
-                  ? { ...tc, output: msg.output, isError: msg.is_error }
-                  : tc
-              )
-              return { ...m, toolCalls: updated }
-            })
-          )
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.id !== id) return prev
+            const updated = (last.toolCalls ?? []).map((tc) =>
+              tc.id === msg.tool_call_id
+                ? { ...tc, output: msg.output, isError: msg.is_error }
+                : tc
+            )
+            return [...prev.slice(0, -1), { ...last, toolCalls: updated }]
+          })
           break
         }
         case "reasoning_start": {
-          // Ensure we have a streaming message to attach thinking to.
           if (!streamingMsgId.current) {
             const id = crypto.randomUUID()
             streamingMsgId.current = id
@@ -834,34 +427,32 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             ])
           } else {
             const id = streamingMsgId.current
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === id ? { ...m, isThinking: true } : m
-              )
-            )
+            setMessages((prev) => {
+              const last = prev[prev.length - 1]
+              if (last?.id !== id) return prev
+              return [...prev.slice(0, -1), { ...last, isThinking: true }]
+            })
           }
           break
         }
         case "reasoning_delta": {
           if (!streamingMsgId.current) break
           const id = streamingMsgId.current
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id
-                ? { ...m, thinking: (m.thinking || "") + (msg.content || "") }
-                : m
-            )
-          )
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.id !== id) return prev
+            return [...prev.slice(0, -1), { ...last, thinking: (last.thinking || "") + (msg.content || "") }]
+          })
           break
         }
         case "reasoning_end": {
           if (!streamingMsgId.current) break
           const id = streamingMsgId.current
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id ? { ...m, isThinking: false } : m
-            )
-          )
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.id !== id) return prev
+            return [...prev.slice(0, -1), { ...last, isThinking: false }]
+          })
           break
         }
         case "done":
@@ -912,7 +503,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const files = e.clipboardData?.files
     if (files && files.length > 0) {
-      // Only intercept image files — text pastes should go into the textarea.
       const hasFiles = Array.from(files).some((f) => f.type.startsWith("image/"))
       if (hasFiles) {
         e.preventDefault()
@@ -937,7 +527,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     const hasAttachments = attachments.length > 0
     if ((!text && !hasAttachments) || streaming || !connected || isStopped) return
 
-    // Build optimistic user message with attachment info.
     const msgAttachments: MessageAttachment[] = attachments.map((a) => ({
       filename: a.file.name,
       media_type: a.mediaType,
@@ -954,7 +543,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
       },
     ])
 
-    // Build wire message with attachments.
     const wireAttachments: ChatAttachment[] | undefined = hasAttachments
       ? attachments.map((a) => ({
           filename: a.file.name,

@@ -115,12 +115,15 @@ export default function SettingsPage() {
     settings.default_model !== savedSettings.default_model
 
   const handleSaveSettings = async () => {
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    })
-    setSavedSettings(settings)
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      })
+      if (!res.ok) return
+      setSavedSettings(settings)
+    } catch (e) { console.error("settings operation failed:", e) }
   }
 
   // Filter add dialog to provider types not already configured
@@ -130,24 +133,30 @@ export default function SettingsPage() {
 
   const handleAddProvider = async () => {
     if (!addType || !addKey) return
-    await fetch(`/api/settings/providers/${encodeURIComponent(addType)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: addKey }),
-    })
-    setAddType("")
-    setAddKey("")
-    setAddOpen(false)
-    fetchProviders()
-    fetchSettings() // default_provider may have been auto-set
+    try {
+      const res = await fetch(`/api/settings/providers/${encodeURIComponent(addType)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: addKey }),
+      })
+      if (!res.ok) return
+      setAddType("")
+      setAddKey("")
+      setAddOpen(false)
+      fetchProviders()
+      fetchSettings() // default_provider may have been auto-set
+    } catch (e) { console.error("settings operation failed:", e) }
   }
 
   const handleDeleteProvider = async (type: string) => {
-    await fetch(`/api/settings/providers/${encodeURIComponent(type)}`, {
-      method: "DELETE",
-    })
-    fetchProviders()
-    fetchSettings()
+    try {
+      const res = await fetch(`/api/settings/providers/${encodeURIComponent(type)}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) return
+      fetchProviders()
+      fetchSettings()
+    } catch (e) { console.error("settings operation failed:", e) }
   }
 
   const handleTestProvider = async (type: string) => {

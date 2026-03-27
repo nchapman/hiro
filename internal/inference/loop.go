@@ -75,9 +75,8 @@ type Loop struct {
 	// Compaction runs async after each turn.
 	compactMu sync.Mutex
 
-	// Config update support — applied at the start of the next Chat call.
-	updateMu      sync.Mutex
-	pendingUpdate *ipc.ConfigUpdate
+	// Protects mutable state: agent, agentConfig, lm, provider, reasoningEffort.
+	updateMu sync.Mutex
 }
 
 // NewLoop creates an inference loop for a session.
@@ -123,8 +122,17 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
 	var messages []fantasy.Message
 
+	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
+	l.updateMu.Lock()
+	agent := l.agent
+	agentModel := l.agentConfig.Model
+	agentProvider := l.provider
+	lm := l.lm
+	providerOpts := l.buildReasoningOptionsLocked()
+	l.updateMu.Unlock()
+
 	if l.mode.IsPersistent() && l.pdb != nil {
-		assembled, err := Assemble(l.pdb, l.sessionID, CompactionConfigForModel(l.agentConfig.Model))
+		assembled, err := Assemble(l.pdb, l.sessionID, CompactionConfigForModel(agentModel))
 		if err != nil {
 			l.logger.Warn("failed to assemble context, falling back to empty", "error", err)
 		}
@@ -139,12 +147,6 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 		}
 		return nil
 	}
-
-	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
-	l.updateMu.Lock()
-	agent := l.agent
-	providerOpts := l.buildReasoningOptionsLocked()
-	l.updateMu.Unlock()
 
 	call := fantasy.AgentStreamCall{
 		Prompt:          prompt,
@@ -197,7 +199,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	// Persist results.
 	if l.mode.IsPersistent() && l.pdb != nil {
-		l.persistTurn(ctx, prompt, files, result)
+		l.persistTurn(ctx, prompt, files, result, lm, agentModel)
 	} else {
 		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
 		for _, step := range result.Steps {
@@ -207,15 +209,16 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	// Record usage.
 	if l.pdb != nil {
-		l.recordUsage(result)
+		l.recordUsage(result, agentModel, agentProvider)
 	}
 
 	return result.Response.Content.Text(), nil
 }
 
 // persistTurn stores the user message and all step messages in the platform DB,
-// then kicks off async compaction.
-func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult) {
+// then kicks off async compaction. lm and model are snapshots captured at the
+// start of the turn to avoid racing with UpdateModel.
+func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
 	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
 	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens); err != nil {
@@ -235,10 +238,11 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.F
 	}
 
 	// Async compaction — runs in background so the session mutex is released.
+	// Uses the lm/model snapshots from the turn to avoid racing with UpdateModel.
 	go func() {
 		l.compactMu.Lock()
 		defer l.compactMu.Unlock()
-		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: l.lm}, CompactionConfigForModel(l.agentConfig.Model), l.logger)
+		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm}, CompactionConfigForModel(model), l.logger)
 		if err := compactor.CompactIfNeeded(context.Background()); err != nil {
 			l.logger.Warn("compaction failed", "error", err)
 		}
@@ -248,9 +252,9 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.F
 // recordUsage writes one usage event per inference step to the platform DB.
 // Each step corresponds to a single LLM API call, so per-step usage reflects
 // the real token counts from the provider. All steps in a turn share the same
-// turn number for grouping. The last step's InputTokens is the actual context
-// size, and session/turn totals sum correctly across all events.
-func (l *Loop) recordUsage(result *fantasy.AgentResult) {
+// turn number for grouping. The model and provider parameters are snapshots
+// from the turn start to avoid racing with UpdateModel.
+func (l *Loop) recordUsage(result *fantasy.AgentResult, model, provider string) {
 	if result == nil {
 		return
 	}
@@ -262,14 +266,14 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult) {
 		}
 		events = append(events, platformdb.UsageEvent{
 			SessionID:        l.sessionID,
-			Model:            l.agentConfig.Model,
-			Provider:         l.agentConfig.Provider,
+			Model:            model,
+			Provider:         provider,
 			InputTokens:      u.InputTokens,
 			OutputTokens:     u.OutputTokens,
 			ReasoningTokens:  u.ReasoningTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheCreationTokens,
-			Cost:             models.Cost(l.agentConfig.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
+			Cost:             models.Cost(model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
 		})
 	}
 	if err := l.pdb.RecordTurnUsage(events); err != nil {
@@ -287,7 +291,7 @@ func (l *Loop) UpdateModel(lm fantasy.LanguageModel, model, provider string) {
 	l.agentConfig.Provider = provider
 	l.provider = provider
 	l.agent = fantasy.NewAgent(lm,
-		fantasy.WithSystemPrompt(l.currentSystemPrompt()),
+		fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
 		fantasy.WithTools(l.tools...),
 	)
 }
@@ -352,25 +356,22 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 	}
 }
 
-// ApplyConfigUpdate stores a pending config update. It will take effect
-// at the start of the next Chat call's PrepareStep.
-func (l *Loop) ApplyConfigUpdate(update ipc.ConfigUpdate) {
-	l.updateMu.Lock()
-	defer l.updateMu.Unlock()
-	l.pendingUpdate = &update
-}
-
-// consumePendingUpdate atomically retrieves and clears the pending config update.
-func (l *Loop) consumePendingUpdate() *ipc.ConfigUpdate {
-	l.updateMu.Lock()
-	defer l.updateMu.Unlock()
-	u := l.pendingUpdate
-	l.pendingUpdate = nil
-	return u
-}
 
 // currentSystemPrompt rebuilds the system prompt from config and disk.
+// Acquires updateMu to snapshot agentConfig. Safe to call from Chat's
+// PrepareStep callback. Must NOT be called while updateMu is held —
+// use currentSystemPromptWithConfig instead.
 func (l *Loop) currentSystemPrompt() string {
+	l.updateMu.Lock()
+	cfg := l.agentConfig // shallow copy
+	l.updateMu.Unlock()
+	return l.currentSystemPromptWithConfig(cfg)
+}
+
+// currentSystemPromptWithConfig rebuilds the system prompt using the provided
+// config snapshot. Does not acquire updateMu — safe to call from UpdateModel
+// which already holds the lock.
+func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 	identity := ""
 	memory := ""
 	todos := ""
@@ -397,9 +398,9 @@ func (l *Loop) currentSystemPrompt() string {
 		if err != nil {
 			l.logger.Warn("could not reload agent texts", "error", err)
 		} else {
-			l.agentConfig.Prompt = prompt
-			l.agentConfig.Soul = soul
-			l.agentConfig.Tools = toolNotes
+			cfg.Prompt = prompt
+			cfg.Soul = soul
+			cfg.Tools = toolNotes
 		}
 	}
 
@@ -415,7 +416,7 @@ func (l *Loop) currentSystemPrompt() string {
 			} else {
 				l.lastShared = sharedSkills
 			}
-			l.agentConfig.Skills = config.MergeSkills(agentSkills, sharedSkills)
+			cfg.Skills = config.MergeSkills(agentSkills, sharedSkills)
 		}
 	}
 
@@ -424,7 +425,7 @@ func (l *Loop) currentSystemPrompt() string {
 		secretNames = l.secretNamesFn()
 	}
 
-	return buildSystemPrompt(l.agentConfig, identity, memory, todos, secretNames)
+	return buildSystemPrompt(cfg, identity, memory, todos, secretNames)
 }
 
 // buildLocalTools creates tools that run in the control plane process.

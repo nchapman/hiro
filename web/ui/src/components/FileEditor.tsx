@@ -17,14 +17,7 @@ import { useTheme } from "@/hooks/use-theme"
 import { readFile, writeFile, shareFile } from "@/hooks/use-files"
 import type { Extension } from "@codemirror/state"
 
-// Extensions the browser can render inline (image/video/audio/pdf).
-const previewableExtensions: Record<string, "image" | "video" | "audio" | "pdf"> = {
-  png: "image", jpg: "image", jpeg: "image", gif: "image",
-  bmp: "image", ico: "image", webp: "image", svg: "image",
-  mp4: "video", webm: "video", ogg: "video",
-  mp3: "audio", wav: "audio", flac: "audio",
-  pdf: "pdf",
-}
+import { getFileExt, getPreviewType } from "@/lib/file-utils"
 
 const binaryExtensions = new Set([
   // Images
@@ -44,16 +37,8 @@ const binaryExtensions = new Set([
   "ttf", "otf", "woff", "woff2", "eot",
 ])
 
-function getFileExt(path: string): string {
-  return path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? ""
-}
-
 function isBinaryPath(path: string): boolean {
   return binaryExtensions.has(getFileExt(path))
-}
-
-function getPreviewType(path: string): "image" | "video" | "audio" | "pdf" | null {
-  return previewableExtensions[getFileExt(path)] ?? null
 }
 
 function isBinaryContent(content: string): boolean {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"sync"
 )
 
@@ -16,10 +17,15 @@ var findRg = sync.OnceValue(func() string {
 	return path
 })
 
-// Directories to always exclude from ripgrep searches.
-var rgExcludeGlobs = []string{
-	"!node_modules", "!vendor", "!dist", "!__pycache__", "!.git",
-}
+// rgExcludeGlobs builds ripgrep --glob exclusions from the shared excludedDirs.
+var rgExcludeGlobs = func() []string {
+	globs := make([]string, 0, len(excludedDirs))
+	for dir := range excludedDirs {
+		globs = append(globs, "!"+dir)
+	}
+	sort.Strings(globs)
+	return globs
+}()
 
 // rgGlobCmd builds a ripgrep command for file glob matching (--files mode).
 // Does not follow symlinks. Excludes hidden files and common noisy dirs.

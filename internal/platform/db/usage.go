@@ -49,21 +49,6 @@ type DailyUsage struct {
 	UsageSummary
 }
 
-// RecordUsage inserts a single usage event. The Turn field is written as-is.
-func (d *DB) RecordUsage(e UsageEvent) error {
-	_, err := d.db.Exec(
-		`INSERT INTO usage_events (session_id, model, provider, turn, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.SessionID, e.Model, e.Provider, e.Turn,
-		e.InputTokens, e.OutputTokens, e.ReasoningTokens,
-		e.CacheReadTokens, e.CacheWriteTokens, e.Cost,
-	)
-	if err != nil {
-		return fmt.Errorf("recording usage: %w", err)
-	}
-	return nil
-}
-
 // RecordTurnUsage inserts multiple usage events (one per inference step)
 // as a single turn within a transaction. The turn number is auto-assigned.
 // Turn numbering starts at 1; turn 0 is reserved for legacy pre-migration rows.
@@ -125,7 +110,7 @@ func (d *DB) GetLastUsageEvent(sessionID string) (UsageEvent, bool, error) {
 		}
 		return UsageEvent{}, false, err
 	}
-	e.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	e.CreatedAt = parseTime(createdAt)
 	return e, true, nil
 }
 
@@ -247,62 +232,3 @@ func (d *DB) queryUsageSummary(query string, args ...any) (UsageSummary, error) 
 	return u, err
 }
 
-// --- Request Log ---
-
-// RequestLogEntry represents a full LLM request/response record.
-type RequestLogEntry struct {
-	ID         int64
-	SessionID  string
-	Model      string
-	Request    string
-	Response   string
-	DurationMs int64
-	Error      string
-	CreatedAt  time.Time
-}
-
-// LogRequest inserts a request/response record.
-func (d *DB) LogRequest(e RequestLogEntry) error {
-	var errPtr *string
-	if e.Error != "" {
-		errPtr = &e.Error
-	}
-	_, err := d.db.Exec(
-		`INSERT INTO request_log (session_id, model, request, response, duration_ms, error)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		e.SessionID, e.Model, e.Request, e.Response, e.DurationMs, errPtr,
-	)
-	if err != nil {
-		return fmt.Errorf("logging request: %w", err)
-	}
-	return nil
-}
-
-// GetRequestLog returns recent request log entries for a session.
-func (d *DB) GetRequestLog(sessionID string, limit int) ([]RequestLogEntry, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := d.db.Query(
-		`SELECT id, session_id, model, COALESCE(request,''), COALESCE(response,''),
-		        COALESCE(duration_ms,0), COALESCE(error,''), created_at
-		 FROM request_log WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
-		sessionID, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []RequestLogEntry
-	for rows.Next() {
-		var e RequestLogEntry
-		var createdAt string
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Model, &e.Request, &e.Response, &e.DurationMs, &e.Error, &createdAt); err != nil {
-			return nil, err
-		}
-		e.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-		entries = append(entries, e)
-	}
-	return entries, rows.Err()
-}

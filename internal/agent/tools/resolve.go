@@ -22,3 +22,13 @@ func mkdirFor(filePath string) error {
 	}
 	return os.MkdirAll(dir, 0777)
 }
+
+// excludedDirs lists directories that tools should skip when walking
+// file trees. Used by list_files, glob, grep, and ripgrep.
+var excludedDirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	"dist":         true,
+	"__pycache__":  true,
+	".git":         true,
+}

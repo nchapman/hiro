@@ -119,7 +119,7 @@ func (d *DB) GetMessage(id int64) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	m.CreatedAt = parseTime(createdAt)
 	return m, nil
 }
 
@@ -235,9 +235,9 @@ func (d *DB) GetSummary(id string) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	sum.EarliestAt, _ = time.Parse(time.RFC3339, earliest)
-	sum.LatestAt, _ = time.Parse(time.RFC3339, latest)
-	sum.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	sum.EarliestAt = parseTimeLayout(time.RFC3339, earliest)
+	sum.LatestAt = parseTimeLayout(time.RFC3339, latest)
+	sum.CreatedAt = parseTime(created)
 	if model.Valid {
 		sum.Model = model.String
 	}
@@ -400,7 +400,7 @@ func (d *DB) OldestMessageContextItems(sessionID string, tailSize, maxTokens int
 		); err != nil {
 			return nil, nil, err
 		}
-		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		m.CreatedAt = parseTime(createdAt)
 
 		if tokenSum > 0 && tokenSum+m.Tokens > maxTokens {
 			break
@@ -444,9 +444,9 @@ func (d *DB) ContiguousSummariesAtDepth(sessionID string, depth, minCount int) (
 		); err != nil {
 			return nil, nil, err
 		}
-		sum.EarliestAt, _ = time.Parse(time.RFC3339, earliest)
-		sum.LatestAt, _ = time.Parse(time.RFC3339, latest)
-		sum.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		sum.EarliestAt = parseTimeLayout(time.RFC3339, earliest)
+		sum.LatestAt = parseTimeLayout(time.RFC3339, latest)
+		sum.CreatedAt = parseTime(created)
 		if model.Valid {
 			sum.Model = model.String
 		}
@@ -575,30 +575,6 @@ func (d *DB) Search(sessionID, query string, limit int) ([]SearchResult, error) 
 	return all, nil
 }
 
-// SearchAllSessions performs a full-text search across all sessions.
-func (d *DB) SearchAllSessions(query string, limit int) ([]SearchResult, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	if len(query) > 512 {
-		return nil, fmt.Errorf("search query too long (max 512 bytes)")
-	}
-	query = sanitizeFTSQuery(query)
-	rows, err := d.db.Query(`
-		SELECT m.id, m.session_id, snippet(messages_fts, 0, '»', '«', '…', 32), rank
-		FROM messages_fts
-		JOIN messages m ON messages_fts.rowid = m.id
-		WHERE messages_fts MATCH ?
-		ORDER BY rank
-		LIMIT ?
-	`, query, limit)
-	if err != nil {
-		return nil, fmt.Errorf("searching all sessions: %w", err)
-	}
-	defer rows.Close()
-	return scanSearchResults(rows, "message")
-}
-
 func scanMessages(rows *sql.Rows) ([]Message, error) {
 	var msgs []Message
 	for rows.Next() {
@@ -607,7 +583,7 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 		if err := rows.Scan(&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &createdAt); err != nil {
 			return nil, err
 		}
-		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		m.CreatedAt = parseTime(createdAt)
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()

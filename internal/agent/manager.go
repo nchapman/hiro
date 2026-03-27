@@ -258,6 +258,12 @@ func validReasoningEffort(effort string) bool {
 // onEvent is called for each streaming event; it may be nil. Calls are serialized
 // per agent to prevent conversation corruption.
 func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessageWithFiles(ctx, agentID, message, nil, onEvent)
+}
+
+// SendMessageWithFiles is like SendMessage but includes file attachments
+// (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
+func (m *Manager) SendMessageWithFiles(ctx context.Context, agentID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
 	// Cycle detection: prevent re-entrant deadlocks when coordinator tools
 	// send messages in a loop (A → send_message(B) → B sends back to A).
 	if inference.IsInCallChain(ctx, agentID) {
@@ -276,33 +282,6 @@ func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEv
 	defer ra.mu.Unlock()
 
 	// Add this session to the call chain and set the caller ID for tool scoping.
-	ctx = inference.ContextWithCallChain(ctx, agentID)
-	ctx = inference.ContextWithCallerID(ctx, agentID)
-
-	if ra.loop != nil {
-		return ra.loop.Chat(ctx, message, nil, onEvent)
-	}
-	return "", fmt.Errorf("session %q has no inference loop", agentID)
-}
-
-// SendMessageWithFiles is like SendMessage but includes file attachments
-// (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
-func (m *Manager) SendMessageWithFiles(ctx context.Context, agentID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
-	if inference.IsInCallChain(ctx, agentID) {
-		return "", fmt.Errorf("circular message dependency: session %s is already awaiting a response in this call chain", agentID)
-	}
-
-	ra := m.getSession(agentID)
-	if ra == nil {
-		return "", fmt.Errorf("session %q not found", agentID)
-	}
-	if ra.info.Status == SessionStatusStopped {
-		return "", fmt.Errorf("session %q is stopped", agentID)
-	}
-
-	ra.mu.Lock()
-	defer ra.mu.Unlock()
-
 	ctx = inference.ContextWithCallChain(ctx, agentID)
 	ctx = inference.ContextWithCallerID(ctx, agentID)
 
@@ -423,19 +402,14 @@ func (m *Manager) StartSession(ctx context.Context, agentID string) error {
 	return nil
 }
 
-// softStop gracefully shuts down a persistent agent's worker process
-// but keeps it in the registry with status "stopped".
-func (m *Manager) softStop(id string) {
-	m.mu.RLock()
-	ra, ok := m.sessions[id]
-	m.mu.RUnlock()
-	if !ok {
+// shutdownWorker sends a graceful shutdown to the worker, waits for exit under
+// a deadline, and force-kills if necessary. Does not modify the session registry.
+const shutdownGrace = 5 * time.Second
+
+func (m *Manager) shutdownWorker(ra *session) {
+	if ra.worker == nil {
 		return
 	}
-
-	// Graceful shutdown: ask the worker to stop, then wait for exit
-	// under a single deadline.
-	const shutdownGrace = 5 * time.Second
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	ra.worker.Shutdown(shutCtx)
@@ -450,9 +424,32 @@ func (m *Manager) softStop(id string) {
 		}
 		<-ra.handle.Done
 	}
+}
+
+// cleanupWorker closes the worker handle and releases the UID.
+// The handle is captured under the lock to avoid races.
+func (m *Manager) cleanupWorker(id string, h *WorkerHandle) {
+	if h != nil {
+		h.Close()
+	}
+	if m.uidPool != nil {
+		m.uidPool.Release(id)
+	}
+}
+
+// softStop gracefully shuts down a persistent agent's worker process
+// but keeps it in the registry with status "stopped".
+func (m *Manager) softStop(id string) {
+	m.mu.RLock()
+	ra, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	m.shutdownWorker(ra)
 
 	// Mark stopped BEFORE cleanup so watchWorker sees it and bails out.
-	// Capture handle under the lock for cleanup outside.
 	m.mu.Lock()
 	h := ra.handle
 	ra.worker = nil
@@ -461,12 +458,7 @@ func (m *Manager) softStop(id string) {
 	ra.info.Status = SessionStatusStopped
 	m.mu.Unlock()
 
-	if h != nil {
-		h.Close()
-	}
-	if m.uidPool != nil {
-		m.uidPool.Release(id)
-	}
+	m.cleanupWorker(id, h)
 
 	// Persist stopped state so it survives server restarts.
 	m.setSessionStatus(id, "stopped")
@@ -1012,12 +1004,7 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 			deadRA.info.Status = SessionStatusStopped
 			m.mu.Unlock()
 
-			if h != nil {
-				h.Close()
-			}
-			if m.uidPool != nil {
-				m.uidPool.Release(id)
-			}
+			m.cleanupWorker(id, h)
 			m.setSessionStatus(id, "stopped")
 		} else {
 			// Ephemeral sessions are fully removed.
@@ -1025,12 +1012,8 @@ func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
 			h := deadRA.handle
 			m.unregisterLocked(id, deadRA)
 			m.mu.Unlock()
-			if h != nil {
-				h.Close()
-			}
-			if m.uidPool != nil {
-				m.uidPool.Release(id)
-			}
+
+			m.cleanupWorker(id, h)
 			os.RemoveAll(m.sessionDir(id))
 		}
 	}
@@ -1048,29 +1031,8 @@ func (m *Manager) removeSession(id string) {
 		return // not found or already soft-stopped
 	}
 
-	// Graceful shutdown: ask the worker to stop, then wait for exit
-	// under a single deadline.
-	const shutdownGrace = 5 * time.Second
-	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-	defer cancel()
-	ra.worker.Shutdown(shutCtx)
-
-	select {
-	case <-ra.handle.Done:
-		// Process exited cleanly.
-	case <-shutCtx.Done():
-		// Deadline expired — force-kill and wait.
-		if ra.handle.Kill != nil {
-			ra.handle.Kill()
-		}
-		<-ra.handle.Done
-	}
-
-	ra.handle.Close()
-
-	if m.uidPool != nil {
-		m.uidPool.Release(id)
-	}
+	m.shutdownWorker(ra)
+	m.cleanupWorker(id, ra.handle)
 
 	if !ra.info.Mode.IsPersistent() {
 		os.RemoveAll(m.sessionDir(id))
@@ -1309,44 +1271,42 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 
 	// Snapshot running sessions under RLock, then release before pushing.
 	type pushTarget struct {
-		id       string
-		parentID string
-		mode     config.AgentMode
-		loop     *inference.Loop
+		id           string
+		parentID     string
+		mode         config.AgentMode
+		loop         *inference.Loop
+		currentModel string
 	}
 
 	m.mu.RLock()
 	var targets []pushTarget
 	for id, s := range m.sessions {
 		if s.info.Name == agentName && s.info.Status == SessionStatusRunning {
-			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, loop: s.loop})
+			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, loop: s.loop, currentModel: s.info.Model})
 		}
 	}
 	m.mu.RUnlock()
 
 	for _, t := range targets {
-		effectiveTools := m.computeEffectiveTools(cfg, t.parentID)
-		allowedTools := buildAllowedToolsMap(effectiveTools, t.mode, hasSkills)
-
-		update := ipc.ConfigUpdate{
-			EffectiveTools: allowedTools,
-			Model:          model,
-			Provider:       provider,
-			APIKey:         apiKey,
-			Description:    cfg.Description,
-		}
-
-		if t.loop != nil {
-			t.loop.ApplyConfigUpdate(update)
+		if t.loop != nil && model != t.currentModel {
+			// Apply model changes when the resolved model differs from what's running.
+			lm, err := CreateLanguageModel(context.Background(), ProviderType(provider), apiKey, model)
+			if err != nil {
+				m.logger.Warn("failed to create language model for config push",
+					"agent", agentName, "model", model, "error", err)
+			} else {
+				t.loop.UpdateModel(lm, model, provider)
+			}
 		}
 		m.logger.Info("pushed config update to agent",
 			"agent", agentName, "session", t.id, "model", model)
 
-		// Update cached description under write lock so API handlers
+		// Update cached info under write lock so API handlers
 		// reading SessionInfo don't race.
 		m.mu.Lock()
 		if s, ok := m.sessions[t.id]; ok {
 			s.info.Description = cfg.Description
+			s.info.Model = model
 		}
 		m.mu.Unlock()
 	}
