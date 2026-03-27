@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -25,16 +25,17 @@ interface SetupProps {
 
 type Step = "password" | "provider" | "done"
 
-const defaultModels: Record<string, string> = {
-  anthropic: "claude-sonnet-4-20250514",
-  openrouter: "anthropic/claude-sonnet-4-20250514",
+interface ProviderTypeInfo {
+  id: string
+  name: string
 }
 
 export default function Setup({ onComplete }: SetupProps) {
   const [step, setStep] = useState<Step>("password")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [providerType, setProviderType] = useState("anthropic")
+  const [providerTypes, setProviderTypes] = useState<ProviderTypeInfo[]>([])
+  const [providerType, setProviderType] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("")
   const [testStatus, setTestStatus] = useState<
@@ -43,6 +44,25 @@ export default function Setup({ onComplete }: SetupProps) {
   const [testError, setTestError] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/setup/provider-types")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((types: ProviderTypeInfo[]) => {
+        setProviderTypes(types)
+        if (types.length > 0 && !providerType) {
+          // Default to anthropic if available, otherwise first
+          const anthro = types.find((t) => t.id === "anthropic")
+          setProviderType(anthro ? anthro.id : types[0].id)
+        }
+      })
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const providerItems = useMemo(
+    () => Object.fromEntries(providerTypes.map((p) => [p.id, p.name])),
+    [providerTypes]
+  )
 
   const passwordValid = password.length >= 8 && password === confirmPassword
 
@@ -85,7 +105,7 @@ export default function Setup({ onComplete }: SetupProps) {
           password,
           provider_type: providerType,
           api_key: apiKey,
-          default_model: model || defaultModels[providerType] || "",
+          default_model: model || "",
         }),
       })
 
@@ -186,13 +206,17 @@ export default function Setup({ onComplete }: SetupProps) {
                       if (v) setProviderType(v)
                       setTestStatus("idle")
                     }}
+                    items={providerItems}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="anthropic">Anthropic</SelectItem>
-                      <SelectItem value="openrouter">OpenRouter</SelectItem>
+                      {providerTypes.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -206,11 +230,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       setApiKey(e.target.value)
                       setTestStatus("idle")
                     }}
-                    placeholder={
-                      providerType === "anthropic"
-                        ? "sk-ant-..."
-                        : "sk-or-..."
-                    }
+                    placeholder="Enter your API key"
                   />
                 </div>
                 <div className="flex flex-col gap-2">
@@ -222,7 +242,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     id="setup-model"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    placeholder={defaultModels[providerType] || ""}
+                    placeholder="Leave blank for provider default"
                   />
                 </div>
 

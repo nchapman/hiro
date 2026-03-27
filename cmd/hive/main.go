@@ -194,7 +194,7 @@ func run() error {
 			}
 		}
 		if leaderID != "" {
-			providerType, _, _ := cp.ProviderInfo()
+			providerType, _, _, _ := cp.ProviderInfo()
 			logger.Info("leader agent ready",
 				"id", leaderID,
 				"provider", providerType,

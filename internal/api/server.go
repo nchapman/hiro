@@ -65,6 +65,7 @@ func (s *Server) routes() {
 	// Setup routes (unauthenticated, only work when needsSetup is true)
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 	s.mux.HandleFunc("POST /api/setup/test-provider", s.handleTestProvider)
+	s.mux.HandleFunc("GET /api/setup/provider-types", s.handleListProviderTypes)
 
 	// Settings routes (authenticated)
 	s.mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleGetSettings))
@@ -82,8 +83,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 
-	// Models API (authenticated)
+	// Models & provider types API (authenticated)
 	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
+	s.mux.HandleFunc("GET /api/provider-types", s.requireAuth(s.handleListProviderTypes))
 
 	// Usage API routes (authenticated)
 	s.mux.HandleFunc("GET /api/sessions/{id}/usage", s.requireAuth(s.handleSessionUsage))

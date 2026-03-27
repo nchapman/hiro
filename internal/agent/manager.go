@@ -92,8 +92,8 @@ type ControlPlane interface {
 	AgentTools(name string) (tools []string, ok bool)
 	SecretNames() []string
 	SecretEnv() []string
-	ProviderInfo() (providerType string, apiKey string, ok bool)
-	ProviderByType(providerType string) (apiKey string, ok bool)
+	ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool)
+	ProviderByType(providerType string) (apiKey string, baseURL string, ok bool)
 	DefaultModel() string
 }
 
@@ -200,7 +200,7 @@ func (m *Manager) UpdateSessionConfig(ctx context.Context, sessionID, model stri
 
 	if model != "" && model != ra.info.Model {
 		// Validate model against the known catalogue.
-		provider, apiKey, err := m.resolveProvider(config.AgentConfig{})
+		provider, apiKey, baseURL, err := m.resolveProvider(config.AgentConfig{})
 		if err != nil {
 			return fmt.Errorf("resolving provider: %w", err)
 		}
@@ -216,7 +216,7 @@ func (m *Manager) UpdateSessionConfig(ctx context.Context, sessionID, model stri
 			return fmt.Errorf("unknown model %q for provider %q", model, provider)
 		}
 
-		lm, err := CreateLanguageModel(ctx, ProviderType(provider), apiKey, model)
+		lm, err := CreateLanguageModel(ctx, ProviderType(provider), apiKey, baseURL, model)
 		if err != nil {
 			return fmt.Errorf("creating language model %q: %w", model, err)
 		}
@@ -843,7 +843,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	}
 
 	// Resolve provider and model from control plane config.
-	provider, apiKey, err := m.resolveProvider(cfg)
+	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
 	if err != nil {
 		return "", err
 	}
@@ -883,7 +883,7 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	// Create the inference loop (skipped if no provider — test mode).
 	var loop *inference.Loop
 	if provider != "" {
-		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, model)
+		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, baseURL, model)
 		if err != nil {
 			handle.Kill()
 			if m.uidPool != nil {
@@ -1185,24 +1185,24 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 
 // --- Config resolution and push ---
 
-// resolveProvider returns the provider type and API key for an agent config.
+// resolveProvider returns the provider type, API key, and base URL for an agent config.
 // Uses the agent's provider override if set, otherwise the default.
-func (m *Manager) resolveProvider(cfg config.AgentConfig) (provider, apiKey string, err error) {
+func (m *Manager) resolveProvider(cfg config.AgentConfig) (provider, apiKey, baseURL string, err error) {
 	if m.cp == nil {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if cfg.Provider != "" {
-		apiKey, ok := m.cp.ProviderByType(cfg.Provider)
+		apiKey, baseURL, ok := m.cp.ProviderByType(cfg.Provider)
 		if !ok {
-			return "", "", fmt.Errorf("agent %q requests provider %q which is not configured", cfg.Name, cfg.Provider)
+			return "", "", "", fmt.Errorf("agent %q requests provider %q which is not configured", cfg.Name, cfg.Provider)
 		}
-		return cfg.Provider, apiKey, nil
+		return cfg.Provider, apiKey, baseURL, nil
 	}
-	provider, apiKey, ok := m.cp.ProviderInfo()
+	provider, apiKey, baseURL, ok := m.cp.ProviderInfo()
 	if !ok {
-		return "", "", fmt.Errorf("no LLM provider configured")
+		return "", "", "", fmt.Errorf("no LLM provider configured")
 	}
-	return provider, apiKey, nil
+	return provider, apiKey, baseURL, nil
 }
 
 // resolveModel returns the resolved model for an agent config.
@@ -1252,7 +1252,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		return
 	}
 
-	provider, apiKey, err := m.resolveProvider(cfg)
+	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
 	if err != nil {
 		m.logger.Warn("failed to resolve provider for config push",
 			"agent", agentName, "error", err)
@@ -1290,7 +1290,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	for _, t := range targets {
 		if t.loop != nil && model != t.currentModel {
 			// Apply model changes when the resolved model differs from what's running.
-			lm, err := CreateLanguageModel(context.Background(), ProviderType(provider), apiKey, model)
+			lm, err := CreateLanguageModel(context.Background(), ProviderType(provider), apiKey, baseURL, model)
 			if err != nil {
 				m.logger.Warn("failed to create language model for config push",
 					"agent", agentName, "model", model, "error", err)

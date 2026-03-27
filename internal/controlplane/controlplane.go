@@ -30,7 +30,8 @@ type AuthConfig struct {
 // ProviderConfig defines an LLM provider. The map key is the provider
 // type (e.g. "anthropic", "openrouter"), so only one entry per type.
 type ProviderConfig struct {
-	APIKey string `yaml:"api_key" json:"api_key"` // provider API key
+	APIKey  string `yaml:"api_key" json:"api_key"`                      // provider API key
+	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty"` // optional API base URL override
 }
 
 // AgentPolicy defines operator-level overrides for a named agent.
@@ -141,6 +142,7 @@ func (cp *ControlPlane) hasContent() bool {
 	return cp.config.Auth.PasswordHash != "" ||
 		cp.config.Auth.SessionSecret != "" ||
 		len(cp.config.Providers) > 0 ||
+		cp.config.DefaultProvider != "" ||
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
 		len(cp.config.Agents) > 0
@@ -278,18 +280,18 @@ func (cp *ControlPlane) IsConfigured() bool {
 	return false
 }
 
-// ProviderInfo returns the default provider's type and API key.
+// ProviderInfo returns the default provider's type, API key, and base URL.
 // This is the interface the Manager uses to resolve provider config.
 // Uses DefaultProvider if set, otherwise falls back to the alphabetically
 // first configured provider.
-func (cp *ControlPlane) ProviderInfo() (providerType string, apiKey string, ok bool) {
+func (cp *ControlPlane) ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool) {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 
 	// Use explicit default if set and configured.
 	if dp := cp.config.DefaultProvider; dp != "" {
 		if p, exists := cp.config.Providers[dp]; exists && p.APIKey != "" {
-			return dp, p.APIKey, true
+			return dp, p.APIKey, p.BaseURL, true
 		}
 	}
 
@@ -302,10 +304,10 @@ func (cp *ControlPlane) ProviderInfo() (providerType string, apiKey string, ok b
 	for _, name := range names {
 		p := cp.config.Providers[name]
 		if p.APIKey != "" {
-			return name, p.APIKey, true
+			return name, p.APIKey, p.BaseURL, true
 		}
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 // DefaultProvider returns the default provider type.
@@ -336,16 +338,16 @@ func (cp *ControlPlane) SetDefaultModel(model string) {
 	cp.config.DefaultModel = model
 }
 
-// ProviderByType returns the API key for a specific provider type.
+// ProviderByType returns the API key and base URL for a specific provider type.
 // Used by the Manager when an agent overrides the default provider.
-func (cp *ControlPlane) ProviderByType(providerType string) (apiKey string, ok bool) {
+func (cp *ControlPlane) ProviderByType(providerType string) (apiKey string, baseURL string, ok bool) {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 	p, exists := cp.config.Providers[providerType]
 	if !exists || p.APIKey == "" {
-		return "", false
+		return "", "", false
 	}
-	return p.APIKey, true
+	return p.APIKey, p.BaseURL, true
 }
 
 // GetProvider returns a provider by type name.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -38,6 +38,12 @@ import {
 
 interface ProviderInfo {
   api_key: string
+  base_url?: string
+}
+
+interface ProviderTypeInfo {
+  id: string
+  name: string
 }
 
 interface Settings {
@@ -45,17 +51,9 @@ interface Settings {
   default_model: string
 }
 
-// All supported provider types. Extend this list as new providers are added.
-const providerTypes = [
-  { value: "anthropic", label: "Anthropic" },
-  { value: "openrouter", label: "OpenRouter" },
-]
-
-const providerLabel = (type: string) =>
-  providerTypes.find((p) => p.value === type)?.label ?? type
-
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme()
+  const [providerTypes, setProviderTypes] = useState<ProviderTypeInfo[]>([])
   const [providers, setProviders] = useState<Record<string, ProviderInfo>>({})
   const [settings, setSettings] = useState<Settings>({
     default_provider: "",
@@ -82,6 +80,27 @@ export default function SettingsPage() {
   const [testStatus, setTestStatus] = useState<
     Record<string, "idle" | "testing" | "success" | "error">
   >({})
+  const [testErrors, setTestErrors] = useState<Record<string, string>>({})
+
+  const fetchProviderTypes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/provider-types")
+      if (res.ok) setProviderTypes(await res.json())
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // Map of provider ID → display name for Select items prop.
+  const providerItems = useMemo(
+    () => Object.fromEntries(providerTypes.map((p) => [p.id, p.name])),
+    [providerTypes]
+  )
+
+  const providerLabel = useCallback(
+    (type: string) => providerItems[type] ?? type,
+    [providerItems]
+  )
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -106,9 +125,10 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
+    fetchProviderTypes()
     fetchProviders()
     fetchSettings()
-  }, [fetchProviders, fetchSettings])
+  }, [fetchProviderTypes, fetchProviders, fetchSettings])
 
   const settingsChanged =
     settings.default_provider !== savedSettings.default_provider ||
@@ -128,7 +148,7 @@ export default function SettingsPage() {
 
   // Filter add dialog to provider types not already configured
   const availableTypes = providerTypes.filter(
-    (p) => !providers[p.value]
+    (p) => !providers[p.id]
   )
 
   const handleAddProvider = async () => {
@@ -161,6 +181,7 @@ export default function SettingsPage() {
 
   const handleTestProvider = async (type: string) => {
     setTestStatus((s) => ({ ...s, [type]: "testing" }))
+    setTestErrors((s) => ({ ...s, [type]: "" }))
     try {
       const res = await fetch(
         `/api/settings/providers/${encodeURIComponent(type)}/test`,
@@ -171,8 +192,12 @@ export default function SettingsPage() {
         ...s,
         [type]: data.valid ? "success" : "error",
       }))
+      if (!data.valid && data.error) {
+        setTestErrors((s) => ({ ...s, [type]: data.error }))
+      }
     } catch {
       setTestStatus((s) => ({ ...s, [type]: "error" }))
+      setTestErrors((s) => ({ ...s, [type]: "Network error" }))
     }
   }
 
@@ -247,14 +272,15 @@ export default function SettingsPage() {
                           onValueChange={(v) => {
                             if (v) setAddType(v)
                           }}
+                          items={providerItems}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select provider..." />
                           </SelectTrigger>
                           <SelectContent>
                             {availableTypes.map((p) => (
-                              <SelectItem key={p.value} value={p.value}>
-                                {p.label}
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -335,6 +361,11 @@ export default function SettingsPage() {
                       readOnly
                       className="font-mono text-xs"
                     />
+                    {testErrors[type_] && (
+                      <p className="text-xs text-destructive">
+                        {testErrors[type_]}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -360,6 +391,7 @@ export default function SettingsPage() {
                     if (v)
                       setSettings((s) => ({ ...s, default_provider: v }))
                   }}
+                  items={providerItems}
                 >
                   <SelectTrigger className="w-40">
                     <SelectValue placeholder="Select..." />

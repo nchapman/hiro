@@ -130,7 +130,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 
 	model := req.Model
 	if model == "" {
-		model = testModelForProvider(req.Type)
+		model = agent.TestModelForProvider(req.Type)
 		if model == "" {
 			http.Error(w, "unsupported provider type", http.StatusBadRequest)
 			return
@@ -140,7 +140,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := agent.TestProviderConnection(ctx, agent.ProviderType(req.Type), req.APIKey, model); err != nil {
+	if err := agent.TestProviderConnection(ctx, agent.ProviderType(req.Type), req.APIKey, "", model); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": false,
 			"error": err.Error(),
@@ -151,14 +151,3 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
 }
 
-// testModelForProvider returns a small/cheap model to use for connection testing.
-func testModelForProvider(providerType string) string {
-	switch providerType {
-	case "anthropic":
-		return "claude-haiku-4-5-20251001"
-	case "openrouter":
-		return "anthropic/claude-haiku-4-5-20251001"
-	default:
-		return ""
-	}
-}

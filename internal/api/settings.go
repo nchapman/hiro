@@ -67,17 +67,21 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		APIKey string `json:"api_key"`
+		APIKey  string `json:"api_key"`
+		BaseURL string `json:"base_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// If updating and no new key provided, keep the old one.
-	if req.APIKey == "" {
-		if existing, ok := s.cp.GetProvider(providerType); ok {
+	// If updating and no new key/URL provided, keep the old values.
+	if existing, ok := s.cp.GetProvider(providerType); ok {
+		if req.APIKey == "" {
 			req.APIKey = existing.APIKey
+		}
+		if req.BaseURL == "" {
+			req.BaseURL = existing.BaseURL
 		}
 	}
 
@@ -87,7 +91,8 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cp.SetProvider(providerType, controlplane.ProviderConfig{
-		APIKey: req.APIKey,
+		APIKey:  req.APIKey,
+		BaseURL: req.BaseURL,
 	})
 
 	// If this is the only provider, make it the default.
@@ -139,19 +144,23 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	model := testModelForProvider(providerType)
+	model := agent.TestModelForProvider(providerType)
 	if model == "" {
 		http.Error(w, "unsupported provider type", http.StatusBadRequest)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if err := agent.TestProviderConnection(ctx, agent.ProviderType(providerType), provider.APIKey, model); err != nil {
+	if err := agent.TestProviderConnection(ctx, agent.ProviderType(providerType), provider.APIKey, provider.BaseURL, model); err != nil {
+		msg := err.Error()
+		if ctx.Err() != nil {
+			msg = "provider did not respond within 30s"
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": false,
-			"error": err.Error(),
+			"error": msg,
 		})
 		return
 	}
@@ -159,10 +168,14 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
 }
 
-func (s *Server) handleListModels(w http.ResponseWriter, _ *http.Request) {
-	provider := ""
-	if s.cp != nil {
+func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	if provider == "" && s.cp != nil {
 		provider = s.cp.DefaultProvider()
 	}
 	writeJSON(w, http.StatusOK, models.ModelsForProvider(provider))
+}
+
+func (s *Server) handleListProviderTypes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, agent.AvailableProviders())
 }
