@@ -438,7 +438,7 @@ export default function SettingsPage() {
                     defaultModels.map((m) => [m.id, m.name || m.id])
                   )}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select model..." />
                   </SelectTrigger>
                   <SelectContent>

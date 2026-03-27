@@ -264,7 +264,7 @@ export default function Setup({ onComplete }: SetupProps) {
                         providerModels.map((m) => [m.id, m.name || m.id])
                       )}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full">
                         <SelectValue placeholder="Provider default" />
                       </SelectTrigger>
                       <SelectContent>
