@@ -66,6 +66,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 	s.mux.HandleFunc("POST /api/setup/test-provider", s.handleTestProvider)
 	s.mux.HandleFunc("GET /api/setup/provider-types", s.handleListProviderTypes)
+	s.mux.HandleFunc("GET /api/setup/models", s.handleListModels)
 
 	// Settings routes (authenticated)
 	s.mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleGetSettings))

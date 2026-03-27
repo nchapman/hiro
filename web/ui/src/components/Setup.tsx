@@ -19,6 +19,8 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, Loader2, XCircle } from "lucide-react"
 
+import type { ModelInfo } from "@/lib/chat-types"
+
 interface SetupProps {
   onComplete: () => void
 }
@@ -36,6 +38,7 @@ export default function Setup({ onComplete }: SetupProps) {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [providerTypes, setProviderTypes] = useState<ProviderTypeInfo[]>([])
   const [providerType, setProviderType] = useState("")
+  const [providerModels, setProviderModels] = useState<ModelInfo[]>([])
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("")
   const [testStatus, setTestStatus] = useState<
@@ -58,6 +61,18 @@ export default function Setup({ onComplete }: SetupProps) {
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch models when the selected provider changes.
+  useEffect(() => {
+    if (!providerType) {
+      setProviderModels([])
+      return
+    }
+    fetch(`/api/setup/models?provider=${encodeURIComponent(providerType)}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: ModelInfo[]) => setProviderModels(data ?? []))
+      .catch(() => setProviderModels([]))
+  }, [providerType])
 
   const providerItems = useMemo(
     () => Object.fromEntries(providerTypes.map((p) => [p.id, p.name])),
@@ -203,7 +218,10 @@ export default function Setup({ onComplete }: SetupProps) {
                   <Select
                     value={providerType}
                     onValueChange={(v) => {
-                      if (v) setProviderType(v)
+                      if (v) {
+                        setProviderType(v)
+                        setModel("")
+                      }
                       setTestStatus("idle")
                     }}
                     items={providerItems}
@@ -233,18 +251,32 @@ export default function Setup({ onComplete }: SetupProps) {
                     placeholder="Enter your API key"
                   />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="setup-model">
-                    Default Model{" "}
-                    <span className="text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Input
-                    id="setup-model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="Leave blank for provider default"
-                  />
-                </div>
+                {providerModels.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <Label>
+                      Default Model{" "}
+                      <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Select
+                      value={model}
+                      onValueChange={(v) => setModel(v ?? "")}
+                      items={Object.fromEntries(
+                        providerModels.map((m) => [m.id, m.name || m.id])
+                      )}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Provider default" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providerModels.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name || m.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2">
                   <Button

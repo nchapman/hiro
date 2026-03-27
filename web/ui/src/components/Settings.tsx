@@ -36,6 +36,8 @@ import {
   Loader2,
 } from "lucide-react"
 
+import type { ModelInfo } from "@/lib/chat-types"
+
 interface ProviderInfo {
   api_key: string
   base_url?: string
@@ -75,6 +77,9 @@ export default function SettingsPage() {
   const [addType, setAddType] = useState("")
   const [addKey, setAddKey] = useState("")
   const [addOpen, setAddOpen] = useState(false)
+
+  // Models for the selected default provider
+  const [defaultModels, setDefaultModels] = useState<ModelInfo[]>([])
 
   // Test status per provider
   const [testStatus, setTestStatus] = useState<
@@ -129,6 +134,18 @@ export default function SettingsPage() {
     fetchProviders()
     fetchSettings()
   }, [fetchProviderTypes, fetchProviders, fetchSettings])
+
+  // Fetch models when the selected default provider changes.
+  useEffect(() => {
+    if (!settings.default_provider) {
+      setDefaultModels([])
+      return
+    }
+    fetch(`/api/models?provider=${encodeURIComponent(settings.default_provider)}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: ModelInfo[]) => setDefaultModels(data ?? []))
+      .catch(() => setDefaultModels([]))
+  }, [settings.default_provider])
 
   const settingsChanged =
     settings.default_provider !== savedSettings.default_provider ||
@@ -389,7 +406,11 @@ export default function SettingsPage() {
                   value={settings.default_provider}
                   onValueChange={(v) => {
                     if (v)
-                      setSettings((s) => ({ ...s, default_provider: v }))
+                      setSettings((s) => ({
+                        ...s,
+                        default_provider: v,
+                        default_model: "",
+                      }))
                   }}
                   items={providerItems}
                 >
@@ -407,16 +428,27 @@ export default function SettingsPage() {
               </div>
               <div className="flex flex-1 flex-col gap-2">
                 <Label>Model</Label>
-                <Input
+                <Select
                   value={settings.default_model}
-                  onChange={(e) =>
-                    setSettings((s) => ({
-                      ...s,
-                      default_model: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g. claude-sonnet-4-20250514"
-                />
+                  onValueChange={(v) => {
+                    if (v)
+                      setSettings((s) => ({ ...s, default_model: v }))
+                  }}
+                  items={Object.fromEntries(
+                    defaultModels.map((m) => [m.id, m.name || m.id])
+                  )}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {defaultModels.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name || m.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <Button
