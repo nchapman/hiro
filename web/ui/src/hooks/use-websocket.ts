@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 
 export interface UsageInfo {
-  // Per-turn (most recent LLM call)
+  // Per-turn totals (all steps in most recent turn)
+  turn_input_tokens: number
+  turn_output_tokens: number
+  turn_cost: number
+  // Last step context (actual context window usage)
   prompt_tokens: number
   completion_tokens: number
-  turn_total: number
-  turn_cost: number
   // Cumulative session totals
   session_input_tokens: number
   session_output_tokens: number

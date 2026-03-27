@@ -8,14 +8,16 @@ import (
 )
 
 // UsageInfo is the JSON shape for session usage data.
-// It includes both per-turn data (from the most recent LLM call) and
-// cumulative session totals.
+// It includes per-turn totals, last-step context data, and cumulative session totals.
 type UsageInfo struct {
-	// Per-turn data (most recent LLM call).
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	TurnTotal        int64   `json:"turn_total"`
+	// Per-turn totals (summed across all steps in the most recent turn).
+	TurnInputTokens  int64   `json:"turn_input_tokens"`
+	TurnOutputTokens int64   `json:"turn_output_tokens"`
 	TurnCost         float64 `json:"turn_cost"`
+
+	// Last step context (the final LLM call — reflects actual context window usage).
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
 
 	// Cumulative session totals.
 	SessionInputTokens  int64   `json:"session_input_tokens"`
@@ -25,7 +27,7 @@ type UsageInfo struct {
 	EventCount          int64   `json:"event_count"`
 
 	// Model info.
-	ContextWindow int `json:"context_window"`
+	ContextWindow int    `json:"context_window"`
 	Model         string `json:"model,omitempty"`
 }
 
@@ -61,7 +63,7 @@ func (s *Server) buildUsageInfoForSession(sessionID, model string) UsageInfo {
 		return info
 	}
 
-	// Cumulative totals.
+	// Cumulative session totals.
 	if usage, err := s.pdb.GetSessionUsage(sessionID); err == nil {
 		info.SessionInputTokens = usage.TotalInputTokens
 		info.SessionOutputTokens = usage.TotalOutputTokens
@@ -70,12 +72,17 @@ func (s *Server) buildUsageInfoForSession(sessionID, model string) UsageInfo {
 		info.EventCount = usage.EventCount
 	}
 
-	// Per-turn data from the most recent event.
+	// Per-turn totals (all steps in the most recent turn).
+	if turn, ok, err := s.pdb.GetLastTurnUsage(sessionID); err == nil && ok {
+		info.TurnInputTokens = turn.TotalInputTokens
+		info.TurnOutputTokens = turn.TotalOutputTokens
+		info.TurnCost = turn.TotalCost
+	}
+
+	// Last step (actual context window usage from the final LLM call).
 	if last, ok, err := s.pdb.GetLastUsageEvent(sessionID); err == nil && ok {
 		info.PromptTokens = last.InputTokens
 		info.CompletionTokens = last.OutputTokens
-		info.TurnTotal = last.InputTokens + last.OutputTokens
-		info.TurnCost = last.Cost
 	}
 
 	return info

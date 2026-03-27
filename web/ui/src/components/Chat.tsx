@@ -437,15 +437,16 @@ function formatCost(cost: number): string {
 }
 
 function TokenCounter({ usage }: { usage: UsageInfo }) {
+  const contextUsed = usage.prompt_tokens + usage.completion_tokens
   const pct = usage.context_window > 0
-    ? (usage.prompt_tokens / usage.context_window) * 100
+    ? (contextUsed / usage.context_window) * 100
     : 0
   const pctColor = pct > 80 ? "text-red-500" : pct > 60 ? "text-yellow-500" : "text-green-600"
 
   return (
     <div className="group relative">
       <div className="flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs tabular-nums text-muted-foreground cursor-default">
-        <span>{formatTokenCount(usage.turn_total)}</span>
+        <span>{formatTokenCount(contextUsed)}</span>
         <span>/</span>
         <span>{formatTokenCount(usage.context_window)}</span>
       </div>
@@ -456,27 +457,27 @@ function TokenCounter({ usage }: { usage: UsageInfo }) {
           <table className="w-full">
             <tbody>
               <tr>
-                <td className="py-0.5 text-muted-foreground">Context usage</td>
+                <td className="py-0.5 text-muted-foreground">Context</td>
                 <td className={cn("py-0.5 text-right tabular-nums font-medium", pctColor)}>
                   {pct.toFixed(1)}%
                 </td>
               </tr>
               <tr>
-                <td className="py-0.5 text-muted-foreground">Prompt tokens</td>
+                <td className="py-0.5 text-muted-foreground">Turn input</td>
                 <td className="py-0.5 text-right tabular-nums">
-                  {usage.prompt_tokens.toLocaleString()}
+                  {usage.turn_input_tokens.toLocaleString()}
                 </td>
               </tr>
               <tr>
-                <td className="py-0.5 text-muted-foreground">Completion</td>
+                <td className="py-0.5 text-muted-foreground">Turn output</td>
                 <td className="py-0.5 text-right tabular-nums">
-                  {usage.completion_tokens.toLocaleString()}
+                  {usage.turn_output_tokens.toLocaleString()}
                 </td>
               </tr>
               <tr>
-                <td className="border-t pt-1.5 text-muted-foreground">Total</td>
+                <td className="border-t pt-1.5 text-muted-foreground">Turn cost</td>
                 <td className="border-t pt-1.5 text-right tabular-nums">
-                  {usage.turn_total.toLocaleString()} / {usage.context_window.toLocaleString()}
+                  {formatCost(usage.turn_cost)}
                 </td>
               </tr>
               {usage.session_cost > 0 && (

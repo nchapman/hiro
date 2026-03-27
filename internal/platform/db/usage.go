@@ -8,11 +8,14 @@ import (
 )
 
 // UsageEvent represents a single LLM call's token consumption.
+// Multiple events may share a Turn number when a single chat turn
+// produces multiple inference steps (e.g., tool-use loops).
 type UsageEvent struct {
 	ID               int64
 	SessionID        string
 	Model            string
 	Provider         string
+	Turn             int64
 	InputTokens      int64
 	OutputTokens     int64
 	ReasoningTokens  int64
@@ -46,12 +49,12 @@ type DailyUsage struct {
 	UsageSummary
 }
 
-// RecordUsage inserts a usage event.
+// RecordUsage inserts a single usage event. The Turn field is written as-is.
 func (d *DB) RecordUsage(e UsageEvent) error {
 	_, err := d.db.Exec(
-		`INSERT INTO usage_events (session_id, model, provider, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.SessionID, e.Model, e.Provider,
+		`INSERT INTO usage_events (session_id, model, provider, turn, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.SessionID, e.Model, e.Provider, e.Turn,
 		e.InputTokens, e.OutputTokens, e.ReasoningTokens,
 		e.CacheReadTokens, e.CacheWriteTokens, e.Cost,
 	)
@@ -61,17 +64,59 @@ func (d *DB) RecordUsage(e UsageEvent) error {
 	return nil
 }
 
+// RecordTurnUsage inserts multiple usage events (one per inference step)
+// as a single turn within a transaction. The turn number is auto-assigned.
+// Turn numbering starts at 1; turn 0 is reserved for legacy pre-migration rows.
+func (d *DB) RecordTurnUsage(events []UsageEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning turn usage tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Determine next turn number atomically within the transaction.
+	var maxTurn sql.NullInt64
+	err = tx.QueryRow(
+		`SELECT MAX(turn) FROM usage_events WHERE session_id = ?`, events[0].SessionID,
+	).Scan(&maxTurn)
+	if err != nil {
+		return fmt.Errorf("querying max turn: %w", err)
+	}
+	turn := int64(1)
+	if maxTurn.Valid && maxTurn.Int64 >= 1 {
+		turn = maxTurn.Int64 + 1
+	}
+
+	for _, e := range events {
+		_, err = tx.Exec(
+			`INSERT INTO usage_events (session_id, model, provider, turn, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			e.SessionID, e.Model, e.Provider, turn,
+			e.InputTokens, e.OutputTokens, e.ReasoningTokens,
+			e.CacheReadTokens, e.CacheWriteTokens, e.Cost,
+		)
+		if err != nil {
+			return fmt.Errorf("inserting usage event: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 // GetLastUsageEvent returns the most recent usage event for a session.
-// Returns a zero UsageEvent and false if no events exist.
+// Returns a zero UsageEvent and false if no tracked events exist.
+// Turn 0 (legacy pre-migration rows) is excluded.
 func (d *DB) GetLastUsageEvent(sessionID string) (UsageEvent, bool, error) {
 	var e UsageEvent
 	var createdAt string
 	err := d.db.QueryRow(
-		`SELECT id, session_id, model, provider,
+		`SELECT id, session_id, model, provider, turn,
 		        input_tokens, output_tokens, reasoning_tokens,
 		        cache_read_tokens, cache_write_tokens, cost, created_at
-		 FROM usage_events WHERE session_id = ? ORDER BY id DESC LIMIT 1`, sessionID,
-	).Scan(&e.ID, &e.SessionID, &e.Model, &e.Provider,
+		 FROM usage_events WHERE session_id = ? AND turn > 0 ORDER BY id DESC LIMIT 1`, sessionID,
+	).Scan(&e.ID, &e.SessionID, &e.Model, &e.Provider, &e.Turn,
 		&e.InputTokens, &e.OutputTokens, &e.ReasoningTokens,
 		&e.CacheReadTokens, &e.CacheWriteTokens, &e.Cost, &createdAt)
 	if err != nil {
@@ -82,6 +127,31 @@ func (d *DB) GetLastUsageEvent(sessionID string) (UsageEvent, bool, error) {
 	}
 	e.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 	return e, true, nil
+}
+
+// GetLastTurnUsage returns aggregated usage for the most recent turn in a session.
+// A turn may contain multiple steps (LLM calls). Returns false if no tracked
+// turns exist. Turn 0 (legacy pre-migration rows) is excluded.
+func (d *DB) GetLastTurnUsage(sessionID string) (UsageSummary, bool, error) {
+	var u UsageSummary
+	err := d.db.QueryRow(
+		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
+		 FROM usage_events
+		 WHERE session_id = ? AND turn > 0
+		   AND turn = (SELECT MAX(turn) FROM usage_events WHERE session_id = ? AND turn > 0)`,
+		sessionID, sessionID,
+	).Scan(&u.TotalInputTokens, &u.TotalOutputTokens,
+		&u.TotalReasoningTokens, &u.TotalCacheReadTokens,
+		&u.TotalCacheWriteTokens, &u.TotalCost, &u.EventCount)
+	if err != nil {
+		return UsageSummary{}, false, err
+	}
+	if u.EventCount == 0 {
+		return UsageSummary{}, false, nil
+	}
+	return u, true, nil
 }
 
 // GetSessionUsage returns aggregated usage for a session.

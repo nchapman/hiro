@@ -389,6 +389,123 @@ func TestUsage_RecordAndAggregate(t *testing.T) {
 	}
 }
 
+func TestUsage_TurnGrouping(t *testing.T) {
+	d := openTestDB(t)
+	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+
+	// Turn 1: two steps (e.g., tool-use turn).
+	err := d.RecordTurnUsage([]UsageEvent{
+		{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 1000, OutputTokens: 200, Cost: 0.01},
+		{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 1500, OutputTokens: 300, Cost: 0.02},
+	})
+	if err != nil {
+		t.Fatalf("RecordTurnUsage turn 1: %v", err)
+	}
+
+	// Turn 2: single step.
+	err = d.RecordTurnUsage([]UsageEvent{
+		{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 2000, OutputTokens: 400, Cost: 0.03},
+	})
+	if err != nil {
+		t.Fatalf("RecordTurnUsage turn 2: %v", err)
+	}
+
+	// GetLastTurnUsage should return only turn 2.
+	turn, ok, err := d.GetLastTurnUsage("s1")
+	if err != nil {
+		t.Fatalf("GetLastTurnUsage: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected last turn usage, got none")
+	}
+	if turn.TotalInputTokens != 2000 || turn.TotalOutputTokens != 400 {
+		t.Errorf("last turn: input=%d output=%d, want 2000/400", turn.TotalInputTokens, turn.TotalOutputTokens)
+	}
+	if turn.TotalCost != 0.03 {
+		t.Errorf("last turn cost: %f, want 0.03", turn.TotalCost)
+	}
+	if turn.EventCount != 1 {
+		t.Errorf("last turn events: %d, want 1", turn.EventCount)
+	}
+
+	// GetLastUsageEvent should return the last step of turn 2.
+	last, ok, err := d.GetLastUsageEvent("s1")
+	if err != nil {
+		t.Fatalf("GetLastUsageEvent: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected last event, got none")
+	}
+	if last.InputTokens != 2000 || last.Turn != 2 {
+		t.Errorf("last event: input=%d turn=%d, want 2000/2", last.InputTokens, last.Turn)
+	}
+
+	// Session totals should include all events from both turns.
+	session, err := d.GetSessionUsage("s1")
+	if err != nil {
+		t.Fatalf("GetSessionUsage: %v", err)
+	}
+	if session.TotalInputTokens != 4500 { // 1000+1500+2000
+		t.Errorf("session input: %d, want 4500", session.TotalInputTokens)
+	}
+	if session.EventCount != 3 {
+		t.Errorf("session events: %d, want 3", session.EventCount)
+	}
+}
+
+func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
+	d := openTestDB(t)
+	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+
+	// Simulate a legacy turn-0 row (pre-migration data).
+	d.RecordUsage(UsageEvent{SessionID: "s1", Model: "m", Provider: "p", Turn: 0, InputTokens: 9999, Cost: 0.99})
+
+	// GetLastTurnUsage should not return turn-0 data.
+	_, ok, err := d.GetLastTurnUsage("s1")
+	if err != nil {
+		t.Fatalf("GetLastTurnUsage: %v", err)
+	}
+	if ok {
+		t.Error("expected no last turn for turn-0 only session")
+	}
+
+	// GetLastUsageEvent should also skip turn-0.
+	_, ok, err = d.GetLastUsageEvent("s1")
+	if err != nil {
+		t.Fatalf("GetLastUsageEvent: %v", err)
+	}
+	if ok {
+		t.Error("expected no last event for turn-0 only session")
+	}
+
+	// But session totals should still include turn-0 rows.
+	session, err := d.GetSessionUsage("s1")
+	if err != nil {
+		t.Fatalf("GetSessionUsage: %v", err)
+	}
+	if session.TotalInputTokens != 9999 {
+		t.Errorf("session input: %d, want 9999", session.TotalInputTokens)
+	}
+}
+
+func TestUsage_RecordTurnUsage_Empty(t *testing.T) {
+	d := openTestDB(t)
+	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+
+	// Empty slice should be a no-op.
+	if err := d.RecordTurnUsage(nil); err != nil {
+		t.Errorf("RecordTurnUsage(nil): %v", err)
+	}
+	if err := d.RecordTurnUsage([]UsageEvent{}); err != nil {
+		t.Errorf("RecordTurnUsage([]): %v", err)
+	}
+
+	session, _ := d.GetSessionUsage("s1")
+	if session.EventCount != 0 {
+		t.Errorf("expected 0 events, got %d", session.EventCount)
+	}
+}
+
 func TestRequestLog(t *testing.T) {
 	d := openTestDB(t)
 	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})

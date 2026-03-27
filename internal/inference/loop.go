@@ -245,23 +245,36 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.F
 	}()
 }
 
-// recordUsage writes a usage event to the platform DB.
+// recordUsage writes one usage event per inference step to the platform DB.
+// Each step corresponds to a single LLM API call, so per-step usage reflects
+// the real token counts from the provider. All steps in a turn share the same
+// turn number for grouping. The last step's InputTokens is the actual context
+// size, and session/turn totals sum correctly across all events.
 func (l *Loop) recordUsage(result *fantasy.AgentResult) {
-	if result.TotalUsage.InputTokens == 0 && result.TotalUsage.OutputTokens == 0 {
+	if result == nil {
 		return
 	}
-	u := result.TotalUsage
-	l.pdb.RecordUsage(platformdb.UsageEvent{
-		SessionID:        l.sessionID,
-		Model:            l.agentConfig.Model,
-		Provider:         l.agentConfig.Provider,
-		InputTokens:      u.InputTokens,
-		OutputTokens:     u.OutputTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheCreationTokens,
-		Cost:             models.Cost(l.agentConfig.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
-	})
+	var events []platformdb.UsageEvent
+	for _, step := range result.Steps {
+		u := step.Usage
+		if u.InputTokens == 0 && u.OutputTokens == 0 {
+			continue
+		}
+		events = append(events, platformdb.UsageEvent{
+			SessionID:        l.sessionID,
+			Model:            l.agentConfig.Model,
+			Provider:         l.agentConfig.Provider,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			ReasoningTokens:  u.ReasoningTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheCreationTokens,
+			Cost:             models.Cost(l.agentConfig.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
+		})
+	}
+	if err := l.pdb.RecordTurnUsage(events); err != nil {
+		l.logger.Warn("failed to record usage", "error", err)
+	}
 }
 
 // UpdateModel swaps the language model and recreates the fantasy agent.
