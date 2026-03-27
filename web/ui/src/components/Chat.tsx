@@ -9,6 +9,9 @@ import {
   Square,
   Play,
   Trash2,
+  Paperclip,
+  X,
+  FileText,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -19,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useWebSocket } from "@/hooks/use-websocket"
-import type { ChatWireMessage, UsageInfo } from "@/hooks/use-websocket"
+import type { ChatWireMessage, ChatAttachment, UsageInfo } from "@/hooks/use-websocket"
 import type { SessionInfo } from "@/App"
 import {
   ChatContainerRoot,
@@ -31,7 +34,6 @@ import { Loader } from "@/components/prompt-kit/loader"
 import {
   PromptInput,
   PromptInputTextarea,
-  PromptInputActions,
 } from "@/components/prompt-kit/prompt-input"
 
 // --- Types ---
@@ -53,6 +55,12 @@ interface ToolCall {
   status?: string
 }
 
+interface MessageAttachment {
+  filename: string
+  media_type: string
+  data?: string // base64; populated for image previews and when loaded from history
+}
+
 interface Message {
   id: string
   role: "user" | "assistant" | "system"
@@ -60,6 +68,55 @@ interface Message {
   toolCalls?: ToolCall[]
   thinking?: string
   isThinking?: boolean // true while reasoning is streaming
+  attachments?: MessageAttachment[]
+}
+
+interface PendingAttachment {
+  id: string
+  file: File
+  preview?: string   // data URL for image thumbnails
+  dataBase64: string  // base64-encoded content
+  mediaType: string
+}
+
+const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
+const MAX_ATTACHMENTS = 10
+
+function isImageType(type: string): boolean {
+  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(type)
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      // Strip the data URL prefix to get raw base64
+      const base64 = result.split(",")[1] || ""
+      resolve(base64)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+async function processFiles(files: FileList | File[]): Promise<PendingAttachment[]> {
+  const result: PendingAttachment[] = []
+  for (const file of Array.from(files)) {
+    if (file.size > MAX_ATTACHMENT_SIZE) continue
+    const dataBase64 = await fileToBase64(file)
+    const att: PendingAttachment = {
+      id: crypto.randomUUID(),
+      file,
+      dataBase64,
+      mediaType: file.type || "application/octet-stream",
+    }
+    if (isImageType(file.type)) {
+      att.preview = `data:${file.type};base64,${dataBase64}`
+    }
+    result.push(att)
+  }
+  return result
 }
 
 interface HistoryMessage {
@@ -80,12 +137,13 @@ interface FantasyMessage {
   content: Array<{ type: string; data: Record<string, unknown> }>
 }
 
-function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: ToolCall[]; thinking: string } {
+function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: ToolCall[]; thinking: string; attachments: MessageAttachment[] } {
   try {
     const msg: FantasyMessage = JSON.parse(rawJSON)
     const textParts: string[] = []
     const thinkingParts: string[] = []
     const toolCalls: ToolCall[] = []
+    const attachments: MessageAttachment[] = []
 
     for (const part of msg.content) {
       switch (part.type) {
@@ -94,6 +152,13 @@ function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: Too
           break
         case "reasoning":
           if (typeof part.data.text === "string") thinkingParts.push(part.data.text)
+          break
+        case "file":
+          attachments.push({
+            filename: (part.data.filename as string) || "file",
+            media_type: (part.data.media_type as string) || "",
+            data: part.data.data as string | undefined,
+          })
           break
         case "tool-call":
           toolCalls.push({
@@ -115,9 +180,9 @@ function parseFantasyMessage(rawJSON: string): { content: string; toolCalls: Too
       }
     }
 
-    return { content: textParts.join(""), toolCalls, thinking: thinkingParts.join("") }
+    return { content: textParts.join(""), toolCalls, thinking: thinkingParts.join(""), attachments }
   } catch {
-    return { content: "", toolCalls: [], thinking: "" }
+    return { content: "", toolCalls: [], thinking: "", attachments: [] }
   }
 }
 
@@ -213,10 +278,17 @@ function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
 
     // Non-assistant message or no active turn — flush and emit
     flushCurrent()
+    // Parse attachments from user messages (images stored as FileParts in raw_json).
+    let userAttachments: MessageAttachment[] | undefined
+    if (m.role === "user" && m.raw_json) {
+      const parsed = parseFantasyMessage(m.raw_json)
+      if (parsed.attachments.length > 0) userAttachments = parsed.attachments
+    }
     messages.push({
       id: crypto.randomUUID(),
       role: m.role as Message["role"],
       content: m.content,
+      attachments: userAttachments,
     })
   }
 
@@ -589,11 +661,13 @@ interface ChatProps {
 export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [reasoningEffort, setReasoningEffort] = useState("")
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
   const isStopped = session?.status === "stopped"
@@ -822,17 +896,76 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     return () => ac.abort()
   }, [session?.id, setOnMessage])
 
+  const addAttachments = useCallback(async (files: FileList | File[]) => {
+    const processed = await processFiles(files)
+    setAttachments((prev) => {
+      const combined = [...prev, ...processed]
+      return combined.slice(0, MAX_ATTACHMENTS)
+    })
+  }, [])
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const files = e.clipboardData?.files
+    if (files && files.length > 0) {
+      // Only intercept image files — text pastes should go into the textarea.
+      const hasFiles = Array.from(files).some((f) => f.type.startsWith("image/"))
+      if (hasFiles) {
+        e.preventDefault()
+        addAttachments(files)
+      }
+    }
+  }, [addAttachments])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    if (e.dataTransfer.files.length > 0) {
+      addAttachments(e.dataTransfer.files)
+    }
+  }, [addAttachments])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+  }, [])
+
   const handleSend = () => {
     const text = input.trim()
-    if (!text || streaming || !connected || isStopped) return
+    const hasAttachments = attachments.length > 0
+    if ((!text && !hasAttachments) || streaming || !connected || isStopped) return
+
+    // Build optimistic user message with attachment info.
+    const msgAttachments: MessageAttachment[] = attachments.map((a) => ({
+      filename: a.file.name,
+      media_type: a.mediaType,
+      data: a.preview ? a.dataBase64 : undefined,
+    }))
 
     setMessages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), role: "user", content: text },
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: text,
+        attachments: msgAttachments.length > 0 ? msgAttachments : undefined,
+      },
     ])
+
+    // Build wire message with attachments.
+    const wireAttachments: ChatAttachment[] | undefined = hasAttachments
+      ? attachments.map((a) => ({
+          filename: a.file.name,
+          data: a.dataBase64,
+          media_type: a.mediaType,
+        }))
+      : undefined
+
     setInput("")
+    setAttachments([])
     setStreaming(true)
-    send({ type: "message", content: text })
+    send({ type: "message", content: text, attachments: wireAttachments })
   }
 
   const handleStop = async () => {
@@ -955,8 +1088,31 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
               <div key={msg.id}>
                 {msg.role === "user" && (
                   <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-sm">
-                      {msg.content}
+                    <div className="max-w-[85%] space-y-2">
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {msg.attachments.map((att, i) =>
+                            isImageType(att.media_type) && att.data ? (
+                              <img
+                                key={i}
+                                src={`data:${att.media_type};base64,${att.data}`}
+                                alt={att.filename}
+                                className="max-h-48 max-w-full rounded-lg object-contain"
+                              />
+                            ) : (
+                              <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+                                <FileText className="h-3 w-3" />
+                                {att.filename}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
+                      {msg.content && (
+                        <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm">
+                          {msg.content}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1004,38 +1160,92 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         </div>
       ) : (
         <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2">
-          <PromptInput
-            value={input}
-            onValueChange={setInput}
-            onSubmit={handleSend}
-            isLoading={streaming}
-            disabled={!connected}
-            className="bg-muted/50"
+          <div
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
           >
-            <PromptInputTextarea
-              placeholder={
-                connected ? `Message ${session.name}...` : "Connecting..."
-              }
-              autoFocus
-            />
-            <PromptInputActions>
-              {currentModelInfo?.can_reason && (
-                <ReasoningControl
-                  model={currentModelInfo}
-                  effort={reasoningEffort}
-                  onChange={handleReasoningChange}
-                />
+            <PromptInput
+              value={input}
+              onValueChange={setInput}
+              onSubmit={handleSend}
+              isLoading={streaming}
+              disabled={!connected}
+              className="bg-muted/50"
+            >
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-3 pt-3">
+                  {attachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="group relative flex items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 text-xs"
+                    >
+                      {att.preview ? (
+                        <img src={att.preview} alt={att.file.name} className="h-8 w-8 rounded object-cover" />
+                      ) : (
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="max-w-[120px] truncate">{att.file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(att.id)}
+                        className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
-              <Button
-                size="icon"
-                className="h-8 w-8 rounded-full"
-                onClick={handleSend}
-                disabled={streaming || !connected || !input.trim()}
-              >
-                <ArrowUp className="h-4 w-4" />
-              </Button>
-            </PromptInputActions>
-          </PromptInput>
+              <PromptInputTextarea
+                placeholder={
+                  connected ? `Message ${session.name}...` : "Connecting..."
+                }
+                autoFocus
+                onPaste={handlePaste}
+              />
+              <div className="flex items-center justify-between px-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,text/*,application/json,application/xml,application/yaml,application/x-yaml,application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) addAttachments(e.target.files)
+                      e.target.value = ""
+                    }}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={streaming || !connected}
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  {currentModelInfo?.can_reason && (
+                    <ReasoningControl
+                      model={currentModelInfo}
+                      effort={reasoningEffort}
+                      onChange={handleReasoningChange}
+                    />
+                  )}
+                  <Button
+                    size="icon"
+                    className="h-8 w-8 rounded-full"
+                    onClick={handleSend}
+                    disabled={streaming || !connected || (!input.trim() && attachments.length === 0)}
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </PromptInput>
+          </div>
 
           {!connected && (
             <p className="mt-2 text-center text-xs text-muted-foreground">

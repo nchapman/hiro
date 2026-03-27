@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
@@ -15,6 +18,13 @@ import (
 	"github.com/nchapman/hivebot/internal/watcher"
 )
 
+// ChatAttachment is a file attached to a chat message, base64-encoded.
+type ChatAttachment struct {
+	Filename  string `json:"filename"`
+	Data      string `json:"data"`       // base64-encoded content
+	MediaType string `json:"media_type"` // MIME type (image/png, text/plain, etc.)
+}
+
 // ChatMessage is a message sent or received over the chat WebSocket.
 // For text deltas: type="delta", content="..."
 // For tool calls: type="tool_call", tool_call_id, tool_name, input
@@ -22,18 +32,19 @@ import (
 // For control: type="done"|"error"|"system"|"message"
 // For config changes: type="config", model, reasoning_effort
 type ChatMessage struct {
-	Type            string     `json:"type"`
-	Role            string     `json:"role,omitempty"`
-	Content         string     `json:"content,omitempty"`
-	ToolCallID      string     `json:"tool_call_id,omitempty"`
-	ToolName        string     `json:"tool_name,omitempty"`
-	Input           string     `json:"input,omitempty"`
-	Output          string     `json:"output,omitempty"`
-	IsError         bool       `json:"is_error,omitempty"`
-	Status          string     `json:"status,omitempty"`
-	Usage           *UsageInfo `json:"usage,omitempty"`
-	Model           string     `json:"model,omitempty"`
-	ReasoningEffort *string    `json:"reasoning_effort,omitempty"`
+	Type            string           `json:"type"`
+	Role            string           `json:"role,omitempty"`
+	Content         string           `json:"content,omitempty"`
+	ToolCallID      string           `json:"tool_call_id,omitempty"`
+	ToolName        string           `json:"tool_name,omitempty"`
+	Input           string           `json:"input,omitempty"`
+	Output          string           `json:"output,omitempty"`
+	IsError         bool             `json:"is_error,omitempty"`
+	Status          string           `json:"status,omitempty"`
+	Usage           *UsageInfo       `json:"usage,omitempty"`
+	Model           string           `json:"model,omitempty"`
+	ReasoningEffort *string          `json:"reasoning_effort,omitempty"`
+	Attachments     []ChatAttachment `json:"attachments,omitempty"`
 }
 
 // SetManager sets the agent manager and leader agent ID for handling chat.
@@ -103,6 +114,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
+	// Allow large messages for file attachments (default 32KB is too small).
+	conn.SetReadLimit(10 * 1024 * 1024) // 10 MB
+
 	ctx := r.Context()
 
 	for {
@@ -130,11 +144,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if msg.Type != "message" || msg.Content == "" {
+		if msg.Type != "message" || (msg.Content == "" && len(msg.Attachments) == 0) {
 			continue
 		}
 
-		// Intercept slash commands before they reach the agent.
+		// Intercept slash commands before processing attachments.
 		if s.cmdHandler != nil && strings.HasPrefix(msg.Content, "/") {
 			result, err := s.cmdHandler.HandleCommand(msg.Content)
 			if err == nil {
@@ -150,6 +164,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			// Unrecognized command — fall through to agent as normal message.
+		}
+
+		// Decode attachments into fantasy.FileParts.
+		files, attErr := processAttachments(msg.Attachments)
+		if attErr != nil {
+			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: attErr.Error()})
+			continue
 		}
 
 		onEvent := func(evt ipc.ChatEvent) error {
@@ -172,11 +193,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Stream response — agent process owns the conversation.
-		_, streamErr := s.manager.SendMessage(ctx, sessionID, msg.Content, onEvent)
+		_, streamErr := s.manager.SendMessageWithFiles(ctx, sessionID, msg.Content, files, onEvent)
 
 		if streamErr != nil {
 			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}
 			if writeErr := wsjson.Write(ctx, conn, errMsg); writeErr != nil {
+				return
+			}
+			// Still send done so the frontend exits streaming state.
+			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(sessionID)}
+			if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
 				return
 			}
 			continue
@@ -207,4 +233,64 @@ func (s *Server) buildUsageInfo(sessionID string) *UsageInfo {
 
 	info := s.buildUsageInfoForSession(sessionID, model)
 	return &info
+}
+
+const (
+	maxAttachmentSize = 5 * 1024 * 1024 // 5 MB per attachment
+	maxAttachments    = 10
+)
+
+// supportedMIME returns true for MIME types we accept as attachments.
+// Fantasy handles the provider-specific encoding: images become image blocks,
+// text/* becomes Anthropic document blocks, etc.
+func supportedMIME(mediaType string) bool {
+	switch {
+	case strings.HasPrefix(mediaType, "image/"):
+		return true
+	case strings.HasPrefix(mediaType, "text/"):
+		return true
+	case mediaType == "application/json",
+		mediaType == "application/xml",
+		mediaType == "application/yaml",
+		mediaType == "application/x-yaml",
+		mediaType == "application/pdf":
+		return true
+	}
+	return false
+}
+
+// processAttachments decodes base64 attachments into fantasy.FileParts.
+// All supported file types are passed through as FileParts — fantasy and the
+// LLM provider handle type-specific encoding (images, text documents, PDFs).
+func processAttachments(attachments []ChatAttachment) ([]fantasy.FilePart, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	if len(attachments) > maxAttachments {
+		return nil, fmt.Errorf("too many attachments (max %d)", maxAttachments)
+	}
+
+	var files []fantasy.FilePart
+	for _, att := range attachments {
+		if !supportedMIME(att.MediaType) {
+			return nil, fmt.Errorf("unsupported file type %q for %s", att.MediaType, att.Filename)
+		}
+		// Reject before decoding to avoid allocating oversized buffers.
+		if len(att.Data) > maxAttachmentSize*4/3+1024 {
+			return nil, fmt.Errorf("attachment %s exceeds %d MB limit", att.Filename, maxAttachmentSize/(1024*1024))
+		}
+		data, err := base64.StdEncoding.DecodeString(att.Data)
+		if err != nil {
+			return nil, fmt.Errorf("invalid base64 for %s: %w", att.Filename, err)
+		}
+		if len(data) > maxAttachmentSize {
+			return nil, fmt.Errorf("attachment %s exceeds %d MB limit", att.Filename, maxAttachmentSize/(1024*1024))
+		}
+		files = append(files, fantasy.FilePart{
+			Filename:  att.Filename,
+			Data:      data,
+			MediaType: att.MediaType,
+		})
+	}
+	return files, nil
 }

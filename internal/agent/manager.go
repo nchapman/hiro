@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hivebot/internal/config"
+	"charm.land/fantasy"
+
 	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/models"
@@ -278,7 +280,34 @@ func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEv
 	ctx = inference.ContextWithCallerID(ctx, agentID)
 
 	if ra.loop != nil {
-		return ra.loop.Chat(ctx, message, onEvent)
+		return ra.loop.Chat(ctx, message, nil, onEvent)
+	}
+	return "", fmt.Errorf("session %q has no inference loop", agentID)
+}
+
+// SendMessageWithFiles is like SendMessage but includes file attachments
+// (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
+func (m *Manager) SendMessageWithFiles(ctx context.Context, agentID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if inference.IsInCallChain(ctx, agentID) {
+		return "", fmt.Errorf("circular message dependency: session %s is already awaiting a response in this call chain", agentID)
+	}
+
+	ra := m.getSession(agentID)
+	if ra == nil {
+		return "", fmt.Errorf("session %q not found", agentID)
+	}
+	if ra.info.Status == SessionStatusStopped {
+		return "", fmt.Errorf("session %q is stopped", agentID)
+	}
+
+	ra.mu.Lock()
+	defer ra.mu.Unlock()
+
+	ctx = inference.ContextWithCallChain(ctx, agentID)
+	ctx = inference.ContextWithCallerID(ctx, agentID)
+
+	if ra.loop != nil {
+		return ra.loop.Chat(ctx, message, files, onEvent)
 	}
 	return "", fmt.Errorf("session %q has no inference loop", agentID)
 }

@@ -18,6 +18,12 @@ func EstimateTokens(s string) int {
 	return n
 }
 
+// EstimateFileTokens returns an approximate token count for file attachments.
+// Uses ~1600 tokens per file as a rough average across images, PDFs, and text docs.
+func EstimateFileTokens(count int) int {
+	return count * 1600
+}
+
 // marshalMessage serializes a fantasy.Message to JSON for storage.
 func marshalMessage(msg fantasy.Message) string {
 	data, err := json.Marshal(msg)

@@ -119,8 +119,8 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 }
 
 // Chat runs one turn of the inference loop: assembles context, calls the LLM,
-// dispatches tools, persists results.
-func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
+// dispatches tools, persists results. Files are optional image attachments for vision.
+func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
 	var messages []fantasy.Message
 
 	if l.mode.IsPersistent() && l.pdb != nil {
@@ -148,6 +148,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEve
 
 	call := fantasy.AgentStreamCall{
 		Prompt:          prompt,
+		Files:           files,
 		Messages:        messages,
 		ProviderOptions: providerOpts,
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
@@ -196,9 +197,9 @@ func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEve
 
 	// Persist results.
 	if l.mode.IsPersistent() && l.pdb != nil {
-		l.persistTurn(ctx, prompt, result)
+		l.persistTurn(ctx, prompt, files, result)
 	} else {
-		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt))
+		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
 		for _, step := range result.Steps {
 			l.ephemeralMsgs = append(l.ephemeralMsgs, step.Messages...)
 		}
@@ -214,9 +215,9 @@ func (l *Loop) Chat(ctx context.Context, prompt string, onEvent func(ipc.ChatEve
 
 // persistTurn stores the user message and all step messages in the platform DB,
 // then kicks off async compaction.
-func (l *Loop) persistTurn(ctx context.Context, prompt string, result *fantasy.AgentResult) {
-	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt))
-	tokens := EstimateTokens(prompt)
+func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult) {
+	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
+	tokens := EstimateTokens(prompt) + EstimateFileTokens(len(files))
 	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens); err != nil {
 		l.logger.Warn("failed to ingest user message", "error", err)
 	}

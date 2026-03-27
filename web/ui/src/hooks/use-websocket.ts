@@ -17,6 +17,12 @@ export interface UsageInfo {
   model: string
 }
 
+export interface ChatAttachment {
+  filename: string
+  data: string      // base64-encoded content
+  media_type: string // MIME type
+}
+
 export interface ChatWireMessage {
   type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result" | "config" | "reasoning_start" | "reasoning_delta" | "reasoning_end"
   role?: "user" | "assistant"
@@ -30,6 +36,7 @@ export interface ChatWireMessage {
   usage?: UsageInfo
   model?: string
   reasoning_effort?: string
+  attachments?: ChatAttachment[]
 }
 
 export function useWebSocket(sessionId: string | null) {
