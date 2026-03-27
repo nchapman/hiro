@@ -124,10 +124,8 @@ func TestProviderConnection(ctx context.Context, provider ProviderType, apiKey, 
 		return err
 	}
 
-	maxTokens := int64(1)
 	_, err = lm.Generate(ctx, fantasy.Call{
-		Prompt:          fantasy.Prompt{fantasy.NewUserMessage("Hi")},
-		MaxOutputTokens: &maxTokens,
+		Prompt: fantasy.Prompt{fantasy.NewUserMessage("Reply with the word OK")},
 	})
 	return err
 }
