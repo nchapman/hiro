@@ -1,7 +1,10 @@
 package inference
 
 import (
+	"strings"
 	"testing"
+
+	"charm.land/fantasy"
 )
 
 func TestEstimateTokens(t *testing.T) {
@@ -21,6 +24,96 @@ func TestEstimateTokens(t *testing.T) {
 			t.Errorf("EstimateTokens(%q) = %d, want %d", tt.input, got, tt.want)
 		}
 	}
+}
+
+func TestEstimateFileTokens(t *testing.T) {
+	makeFile := func(mediaType string, size int) fantasy.FilePart {
+		return fantasy.FilePart{
+			Filename:  "test",
+			Data:      make([]byte, size),
+			MediaType: mediaType,
+		}
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		if got := EstimateFileTokens(nil); got != 0 {
+			t.Errorf("nil files = %d, want 0", got)
+		}
+	})
+
+	t.Run("zero size file", func(t *testing.T) {
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("image/png", 0)})
+		if got != 0 {
+			t.Errorf("zero size = %d, want 0", got)
+		}
+	})
+
+	t.Run("small image hits floor", func(t *testing.T) {
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("image/jpeg", 100)})
+		if got != 85 {
+			t.Errorf("tiny image = %d, want 85", got)
+		}
+	})
+
+	t.Run("medium image scales", func(t *testing.T) {
+		// 50*1024 * 170 / 10240 = 850
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("image/png", 50*1024)})
+		if got != 850 {
+			t.Errorf("50KB image = %d, want 850", got)
+		}
+	})
+
+	t.Run("large image hits cap", func(t *testing.T) {
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("image/webp", 500*1024)})
+		if got != 1600 {
+			t.Errorf("500KB image = %d, want 1600", got)
+		}
+	})
+
+	t.Run("pdf single page", func(t *testing.T) {
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("application/pdf", 30*1024)})
+		if got != 1600 {
+			t.Errorf("small PDF = %d, want 1600 (1 page min)", got)
+		}
+	})
+
+	t.Run("pdf multi page", func(t *testing.T) {
+		// 200KB / 50KB = 4 pages → 6400 tokens
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("application/pdf", 200*1024)})
+		if got != 6400 {
+			t.Errorf("200KB PDF = %d, want 6400", got)
+		}
+	})
+
+	t.Run("pdf rounds up", func(t *testing.T) {
+		// 99KB → rounds up to 2 pages → 3200 tokens
+		got := EstimateFileTokens([]fantasy.FilePart{makeFile("application/pdf", 99*1024)})
+		if got != 3200 {
+			t.Errorf("99KB PDF = %d, want 3200", got)
+		}
+	})
+
+	t.Run("text file uses char heuristic", func(t *testing.T) {
+		data := []byte(strings.Repeat("abcd", 100)) // 400 bytes → 100 tokens
+		files := []fantasy.FilePart{{Filename: "test.txt", Data: data, MediaType: "text/plain"}}
+		got := EstimateFileTokens(files)
+		if got != 100 {
+			t.Errorf("400 byte text = %d, want 100", got)
+		}
+	})
+
+	t.Run("multiple files sum", func(t *testing.T) {
+		files := []fantasy.FilePart{
+			makeFile("image/jpeg", 100),     // 85 (floor)
+			makeFile("text/plain", 400),     // 100
+			makeFile("application/pdf", 1024), // 1600 (1 page min)
+		}
+		got := EstimateFileTokens(files)
+		want := 85 + 100 + 1600
+		if got != want {
+			t.Errorf("mixed files = %d, want %d", got, want)
+		}
+	})
 }
 
 func TestResolveStatusMessage(t *testing.T) {

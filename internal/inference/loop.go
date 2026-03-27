@@ -217,7 +217,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 // then kicks off async compaction.
 func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
-	tokens := EstimateTokens(prompt) + EstimateFileTokens(len(files))
+	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
 	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens); err != nil {
 		l.logger.Warn("failed to ingest user message", "error", err)
 	}

@@ -19,9 +19,56 @@ func EstimateTokens(s string) int {
 }
 
 // EstimateFileTokens returns an approximate token count for file attachments.
-// Uses ~1600 tokens per file as a rough average across images, PDFs, and text docs.
-func EstimateFileTokens(count int) int {
-	return count * 1600
+// Estimates vary by media type:
+//   - Images: scaled by file size (~170 tokens per 10KB, clamped 85–1600)
+//   - PDFs: ~1600 tokens per estimated page (~50KB/page)
+//   - Text/code: raw byte length ÷ 4 (same heuristic as plain text)
+//
+// These are rough, provider-agnostic estimates for context budgeting.
+func EstimateFileTokens(files []fantasy.FilePart) int {
+	total := 0
+	for _, f := range files {
+		total += estimateOneFile(f)
+	}
+	return total
+}
+
+func estimateOneFile(f fantasy.FilePart) int {
+	size := len(f.Data)
+	if size == 0 {
+		return 0
+	}
+
+	switch {
+	case strings.HasPrefix(f.MediaType, "image/"):
+		// Most providers resize images before tokenizing. Token cost
+		// correlates loosely with file size. ~170 tokens per 10KB is a
+		// reasonable middle ground across providers. Floor at 85 (tiny
+		// thumbnails still cost something), cap at 1600 (large images
+		// get resized down).
+		tokens := size * 170 / 10240
+		if tokens < 85 {
+			return 85
+		}
+		if tokens > 1600 {
+			return 1600
+		}
+		return tokens
+
+	case f.MediaType == "application/pdf":
+		// Rough estimate: ~50KB per page, ~1600 tokens per page.
+		// Round up so we don't underestimate multi-page PDFs.
+		pages := (size + 50*1024 - 1) / (50 * 1024)
+		return pages * 1600
+
+	default:
+		// Text, JSON, XML, code, etc. — treat as plain text.
+		tokens := size / 4
+		if tokens == 0 {
+			return 1
+		}
+		return tokens
+	}
 }
 
 // marshalMessage serializes a fantasy.Message to JSON for storage.
