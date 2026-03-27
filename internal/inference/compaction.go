@@ -38,40 +38,89 @@ func (s *lmSummarizer) Summarize(ctx context.Context, systemPrompt, input string
 }
 
 // CompactionConfig controls compaction behavior.
+//
+// Token thresholds use two types of counts:
+//   - Estimated tokens (len/4): stored per-message, used for relative sizing
+//     (chunk boundaries, compression ratios). Fine for internal bookkeeping.
+//   - Actual input_tokens from the API: used for trigger decisions (soft/hard
+//     thresholds) since these reflect the real context window consumption.
+//
+// The soft/hard threshold model follows the LCM paper (Ehrlich & Blackman, 2026):
+//   - Below SoftThreshold: no compaction overhead.
+//   - Between SoftThreshold and HardThreshold: async compaction between turns.
+//   - At or above HardThreshold: synchronous compaction before the next turn.
 type CompactionConfig struct {
-	TokenBudget          int
+	// ContextWindow is the model's full context window in tokens.
+	ContextWindow int
+
+	// SoftThreshold is the fraction of ContextWindow at which async compaction
+	// triggers. Compared against real input_tokens from the API.
+	SoftThreshold float64
+
+	// HardThreshold is the fraction of ContextWindow at which synchronous
+	// compaction is required before the next turn. Compared against real
+	// input_tokens from the API.
+	HardThreshold float64
+
+	// TokenBudget is the assembly budget in estimated tokens. Used as a loose
+	// safety net during context assembly — the real protection is the hard
+	// threshold. Set to ContextWindow * 0.90 by default (above HardThreshold
+	// so it only clips in edge cases where compaction couldn't free enough).
+	TokenBudget int
+
 	FreshTailCount       int
 	LeafChunkTokens      int
 	LeafTargetTokens     int
 	CondenseTargetTokens int
-	CompactThreshold     float64
 	LeafMinFanout        int
 	CondenseMinFanout    int
 }
 
-// DefaultCompactionConfig returns reasonable defaults with a 180K token budget.
+// SoftThresholdTokens returns the absolute token count for the soft threshold.
+func (c CompactionConfig) SoftThresholdTokens() int {
+	return int(float64(c.ContextWindow) * c.SoftThreshold)
+}
+
+// HardThresholdTokens returns the absolute token count for the hard threshold.
+func (c CompactionConfig) HardThresholdTokens() int {
+	return int(float64(c.ContextWindow) * c.HardThreshold)
+}
+
+// DefaultCompactionConfig returns reasonable defaults for a 200K context window.
 func DefaultCompactionConfig() CompactionConfig {
 	return CompactionConfig{
-		TokenBudget:          180_000,
+		ContextWindow:        200_000,
+		SoftThreshold:        0.60,
+		HardThreshold:        0.85,
+		TokenBudget:          180_000, // 90% of 200K — above hard threshold, loose safety net
 		FreshTailCount:       20,
 		LeafChunkTokens:      20_000,
 		LeafTargetTokens:     1_200,
 		CondenseTargetTokens: 2_000,
-		CompactThreshold:     0.75,
 		LeafMinFanout:        8,
 		CondenseMinFanout:    4,
 	}
 }
 
-// CompactionConfigForModel returns a config with a token budget derived from the
-// model's context window (75% of context window). Falls back to DefaultCompactionConfig
-// if the model is unknown.
+// CompactionConfigForModel returns a config derived from the model's context window.
+// Thresholds that depend on absolute context size are scaled proportionally.
 func CompactionConfigForModel(model string) CompactionConfig {
 	cfg := DefaultCompactionConfig()
 	cw := models.ContextWindow(model)
-	budget := int(float64(cw) * 0.75)
-	if budget > 0 {
-		cfg.TokenBudget = budget
+	if cw > 0 {
+		cfg.ContextWindow = cw
+		cfg.TokenBudget = int(float64(cw) * 0.90)
+		// Scale leaf chunk size proportionally — 10% of context window,
+		// clamped to [2_000, 20_000]. Without this, a 32K model would use
+		// the same 20K chunk as a 200K model (62% of its window).
+		leafChunk := cw / 10
+		if leafChunk < 2_000 {
+			leafChunk = 2_000
+		}
+		if leafChunk > 20_000 {
+			leafChunk = 20_000
+		}
+		cfg.LeafChunkTokens = leafChunk
 	}
 	return cfg
 }
@@ -96,31 +145,77 @@ func NewCompactor(pdb *platformdb.DB, sessionID string, summarizer Summarizer, c
 	}
 }
 
-// CompactIfNeeded runs incremental compaction if thresholds are met.
-func (c *Compactor) CompactIfNeeded(ctx context.Context) error {
-	tokensOutside, err := c.pdb.MessageTokensOutsideTail(c.sessionID, c.config.FreshTailCount)
-	if err != nil {
-		return fmt.Errorf("checking tokens outside tail: %w", err)
-	}
+// CompactResult reports what happened during compaction.
+type CompactResult struct {
+	// HardThresholdExceeded is true if the context still exceeds the hard
+	// threshold after compaction. The caller should run synchronous compaction
+	// before the next inference call.
+	HardThresholdExceeded bool
+}
 
-	if tokensOutside >= c.config.LeafChunkTokens {
-		if err := c.leafPass(ctx); err != nil {
-			return fmt.Errorf("leaf pass: %w", err)
+// CompactIfNeeded runs incremental compaction based on real API token usage.
+//
+// lastInputTokens is the input_tokens reported by the provider for the last
+// inference step — the ground truth for how full the context window is. When
+// zero (e.g., first turn or no usage data), falls back to estimated token
+// counts from the database.
+func (c *Compactor) CompactIfNeeded(ctx context.Context, lastInputTokens int64) (CompactResult, error) {
+	var result CompactResult
+
+	// Use real input_tokens for threshold comparison when available.
+	// Fall back to estimated ContextTokenCount when we have no API data
+	// (first turn, or usage not tracked).
+	contextTokens := lastInputTokens
+	if contextTokens == 0 {
+		estimated, err := c.pdb.ContextTokenCount(c.sessionID)
+		if err != nil {
+			return result, fmt.Errorf("checking context tokens: %w", err)
 		}
+		contextTokens = int64(estimated)
 	}
 
-	totalTokens, err := c.pdb.ContextTokenCount(c.sessionID)
+	softLimit := int64(c.config.SoftThresholdTokens())
+	hardLimit := int64(c.config.HardThresholdTokens())
+
+	// Below the soft threshold: no compaction overhead (LCM zero-cost regime).
+	if contextTokens < softLimit {
+		return result, nil
+	}
+
+	// At or above soft threshold: run full sweep (leaf passes + condensation).
+	c.logger.Info("compaction triggered",
+		"context_tokens", contextTokens,
+		"soft_limit", softLimit,
+		"hard_limit", hardLimit,
+		"source", tokenSource(lastInputTokens),
+	)
+	if err := c.fullSweep(ctx); err != nil {
+		return result, fmt.Errorf("full sweep: %w", err)
+	}
+
+	// Re-check with post-compaction estimated tokens to decide if the hard
+	// threshold is still exceeded. We use estimates here because the real
+	// input_tokens won't be known until the next API call.
+	postTokens, err := c.pdb.ContextTokenCount(c.sessionID)
 	if err != nil {
-		return fmt.Errorf("checking context tokens: %w", err)
+		return result, fmt.Errorf("post-compaction token check: %w", err)
+	}
+	if int64(postTokens) >= hardLimit {
+		result.HardThresholdExceeded = true
+		c.logger.Warn("context still exceeds hard threshold after compaction",
+			"post_tokens_estimated", postTokens,
+			"hard_limit", hardLimit,
+		)
 	}
 
-	threshold := int(float64(c.config.TokenBudget) * c.config.CompactThreshold)
-	if totalTokens > threshold {
-		if err := c.fullSweep(ctx); err != nil {
-			return fmt.Errorf("full sweep: %w", err)
-		}
+	return result, nil
+}
+
+func tokenSource(lastInputTokens int64) string {
+	if lastInputTokens > 0 {
+		return "api"
 	}
-	return nil
+	return "estimated"
 }
 
 func (c *Compactor) leafPass(ctx context.Context) error {
@@ -313,7 +408,8 @@ func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, inpu
 }
 
 func generateSummaryID() string {
-	return "sum_" + uuid.New().String()[:8]
+	id := strings.ReplaceAll(uuid.New().String(), "-", "")
+	return "sum_" + id[:16]
 }
 
 // --- Prompt/formatting helpers ---

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -75,6 +76,25 @@ type Loop struct {
 	// Compaction runs async after each turn.
 	compactMu sync.Mutex
 
+	// needsCompaction is set when the hard threshold is exceeded after async
+	// compaction. The next Chat() call will run compaction synchronously
+	// before assembly to prevent context overflow.
+	//
+	// Not persisted across restarts. On first turn after restart,
+	// CompactIfNeeded falls back to estimated ContextTokenCount (lastInputTokens
+	// is 0), which picks up any over-full state from the previous run.
+	needsCompaction atomic.Bool
+
+	// lastInputTokens stores the real input_tokens from the most recent API
+	// call. Used by sync compaction so it can make accurate threshold decisions
+	// rather than falling back to len/4 estimates. Also used to detect model
+	// switches: if the stored value exceeds the new model's soft threshold,
+	// sync compaction runs before assembly.
+	//
+	// Starts at 0 on fresh sessions and after restarts. Zero is handled as
+	// "no data available" — CompactIfNeeded falls back to estimated tokens.
+	lastInputTokens atomic.Int64
+
 	// Protects mutable state: agent, agentConfig, lm, provider, reasoningEffort.
 	updateMu sync.Mutex
 }
@@ -132,7 +152,32 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 	l.updateMu.Unlock()
 
 	if l.mode.IsPersistent() && l.pdb != nil {
-		assembled, err := Assemble(l.pdb, l.sessionID, CompactionConfigForModel(agentModel))
+		cfg := CompactionConfigForModel(agentModel)
+
+		// Check whether compaction is needed before assembly. This fires in
+		// two cases: (1) the hard threshold was exceeded on the previous turn
+		// (needsCompaction flag), or (2) the last known context size exceeds
+		// the current model's soft threshold — which catches model switches
+		// (e.g., 200K → 32K) where the old context is suddenly over-full.
+		lastTokens := l.lastInputTokens.Load()
+		needsSync := l.needsCompaction.CompareAndSwap(true, false) ||
+			(lastTokens > 0 && lastTokens >= int64(cfg.SoftThresholdTokens()))
+
+		if needsSync {
+			l.compactMu.Lock()
+			compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm}, cfg, l.logger)
+			if result, err := compactor.CompactIfNeeded(context.Background(), lastTokens); err != nil {
+				l.logger.Warn("synchronous compaction failed", "error", err)
+			} else if result.HardThresholdExceeded {
+				l.logger.Warn("context still exceeds hard threshold after synchronous compaction")
+			}
+			l.compactMu.Unlock()
+		}
+
+		// Assemble intentionally runs outside compactMu. If a prior turn's
+		// async compaction is still in progress, SQLite WAL snapshot isolation
+		// ensures Assemble sees a consistent pre- or post-compaction state.
+		assembled, err := Assemble(l.pdb, l.sessionID, cfg)
 		if err != nil {
 			l.logger.Warn("failed to assemble context, falling back to empty", "error", err)
 		}
@@ -237,14 +282,26 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.F
 		}
 	}
 
+	// Extract the last step's input_tokens — the ground truth for context size.
+	var lastInputTokens int64
+	if len(result.Steps) > 0 {
+		lastInputTokens = result.Steps[len(result.Steps)-1].Usage.InputTokens
+	}
+	l.lastInputTokens.Store(lastInputTokens)
+
 	// Async compaction — runs in background so the session mutex is released.
 	// Uses the lm/model snapshots from the turn to avoid racing with UpdateModel.
 	go func() {
 		l.compactMu.Lock()
 		defer l.compactMu.Unlock()
 		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm}, CompactionConfigForModel(model), l.logger)
-		if err := compactor.CompactIfNeeded(context.Background()); err != nil {
+		compactResult, err := compactor.CompactIfNeeded(context.Background(), lastInputTokens)
+		if err != nil {
 			l.logger.Warn("compaction failed", "error", err)
+			return
+		}
+		if compactResult.HardThresholdExceeded {
+			l.needsCompaction.Store(true)
 		}
 	}()
 }

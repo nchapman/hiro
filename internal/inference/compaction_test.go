@@ -38,11 +38,16 @@ func TestCompactIfNeeded_NoCompactionBelowThreshold(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	compactor := NewCompactor(pdb, "s1", summarizer, DefaultCompactionConfig(), logger)
 
-	if err := compactor.CompactIfNeeded(context.Background()); err != nil {
+	// Pass real input_tokens below soft threshold — no compaction.
+	result, err := compactor.CompactIfNeeded(context.Background(), 50_000)
+	if err != nil {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
 	if summarizer.calls > 0 {
 		t.Error("summarizer should not be called below threshold")
+	}
+	if result.HardThresholdExceeded {
+		t.Error("hard threshold should not be exceeded")
 	}
 }
 
@@ -51,12 +56,16 @@ func TestCompactIfNeeded_LeafPassTriggered(t *testing.T) {
 	createTestSession(t, pdb, "s1")
 
 	cfg := CompactionConfig{
-		TokenBudget:      180_000,
-		FreshTailCount:   5,
-		LeafChunkTokens:  500,  // low threshold to trigger easily
-		LeafTargetTokens: 200,
-		LeafMinFanout:    3,
-		CompactThreshold: 0.75,
+		ContextWindow:        10_000,
+		SoftThreshold:        0.60,  // soft = 6000
+		HardThreshold:        0.85,
+		TokenBudget:          9_000,
+		FreshTailCount:       5,
+		LeafChunkTokens:      500,   // low threshold to trigger leaf pass inside sweep
+		LeafTargetTokens:     200,
+		CondenseTargetTokens: 400,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    4,
 	}
 
 	// Add enough messages outside the fresh tail to trigger leaf pass.
@@ -68,7 +77,8 @@ func TestCompactIfNeeded_LeafPassTriggered(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	compactor := NewCompactor(pdb, "s1", summarizer, cfg, logger)
 
-	if err := compactor.CompactIfNeeded(context.Background()); err != nil {
+	// Report real input_tokens above soft threshold to trigger full sweep.
+	if _, err := compactor.CompactIfNeeded(context.Background(), 7_000); err != nil {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
 	if summarizer.calls == 0 {
@@ -99,6 +109,149 @@ func TestCompactIfNeeded_LeafPassTriggered(t *testing.T) {
 	}
 	if msgCount >= 20 {
 		t.Error("expected some messages to be replaced by summary, none were removed")
+	}
+}
+
+func TestCompactIfNeeded_SoftThresholdTriggersFullSweep(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	cfg := CompactionConfig{
+		ContextWindow:        200_000,
+		SoftThreshold:        0.60,
+		HardThreshold:        0.85,
+		TokenBudget:          150_000,
+		FreshTailCount:       5,
+		LeafChunkTokens:      500,
+		LeafTargetTokens:     200,
+		CondenseTargetTokens: 400,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    4,
+	}
+
+	// Add messages — their estimated tokens don't matter for the trigger,
+	// but they need to exist for the leaf pass to have material to compact.
+	for i := 0; i < 20; i++ {
+		appendMsg(t, pdb, "s1", "user", "message for compaction testing", 100)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Below soft threshold (120K): no compaction.
+	belowSummarizer := &fakeSummarizer{}
+	belowCompactor := NewCompactor(pdb, "s1", belowSummarizer, cfg, logger)
+	result, err := belowCompactor.CompactIfNeeded(context.Background(), 100_000)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded below soft: %v", err)
+	}
+	if belowSummarizer.calls > 0 {
+		t.Error("expected no compaction below soft threshold")
+	}
+	if result.HardThresholdExceeded {
+		t.Error("hard threshold should not be exceeded below soft")
+	}
+
+	// Above soft threshold (120K) but below hard (170K): full sweep runs.
+	aboveSummarizer := &fakeSummarizer{results: []string{"compacted summary"}}
+	aboveCompactor := NewCompactor(pdb, "s1", aboveSummarizer, cfg, logger)
+	result, err = aboveCompactor.CompactIfNeeded(context.Background(), 130_000)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded above soft: %v", err)
+	}
+	if aboveSummarizer.calls == 0 {
+		t.Error("expected full sweep to be triggered at soft threshold")
+	}
+	if result.HardThresholdExceeded {
+		t.Error("hard threshold should not be exceeded at 130K")
+	}
+}
+
+func TestCompactIfNeeded_HardThresholdSetsFlag(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	// Use a small context window so we can exceed the hard threshold with
+	// estimated tokens that remain high even after compaction. With a 10K
+	// window, hard threshold = 8500. We put most tokens in the fresh tail
+	// where compaction can't touch them.
+	cfg := CompactionConfig{
+		ContextWindow:        10_000,
+		SoftThreshold:        0.60,
+		HardThreshold:        0.85,
+		TokenBudget:          7_500,
+		FreshTailCount:       5,
+		LeafChunkTokens:      500,
+		LeafTargetTokens:     200,
+		CondenseTargetTokens: 400,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    4,
+	}
+
+	// Add 10 messages: 5 old (compactable) + 5 in fresh tail.
+	// Each message is 2000 estimated tokens. Fresh tail alone = 10K,
+	// which exceeds the hard threshold (8500) even after compacting the old ones.
+	for i := 0; i < 10; i++ {
+		appendMsg(t, pdb, "s1", "user", "message for compaction testing", 2000)
+	}
+
+	summarizer := &fakeSummarizer{results: []string{"short summary"}}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	compactor := NewCompactor(pdb, "s1", summarizer, cfg, logger)
+
+	// Report 9K real input_tokens — above hard threshold (8500).
+	result, err := compactor.CompactIfNeeded(context.Background(), 9_000)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded: %v", err)
+	}
+	if !result.HardThresholdExceeded {
+		t.Error("expected hard threshold to still be exceeded — fresh tail alone exceeds it")
+	}
+
+	// Verify the mechanical assumption: post-compaction estimated tokens
+	// must actually exceed the hard threshold for this test to be meaningful.
+	postTokens, err := pdb.ContextTokenCount("s1")
+	if err != nil {
+		t.Fatalf("ContextTokenCount: %v", err)
+	}
+	if postTokens < cfg.HardThresholdTokens() {
+		t.Errorf("post-compaction tokens (%d) below hard threshold (%d) — test premise is broken",
+			postTokens, cfg.HardThresholdTokens())
+	}
+}
+
+func TestCompactIfNeeded_FallsBackToEstimatesWhenNoAPIData(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	cfg := CompactionConfig{
+		ContextWindow:        200_000,
+		SoftThreshold:        0.60,
+		HardThreshold:        0.85,
+		TokenBudget:          180_000,
+		FreshTailCount:       5,
+		LeafChunkTokens:      50_000, // high so leaf pass doesn't trigger inside sweep
+		LeafTargetTokens:     200,
+		CondenseTargetTokens: 400,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    4,
+	}
+
+	// Add messages with estimated tokens that exceed soft threshold (120K).
+	for i := 0; i < 20; i++ {
+		appendMsg(t, pdb, "s1", "user", "message content", 7000)
+	}
+
+	summarizer := &fakeSummarizer{results: []string{"compacted summary"}}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	compactor := NewCompactor(pdb, "s1", summarizer, cfg, logger)
+
+	// Pass 0 for lastInputTokens — should fall back to estimated sum (140K).
+	_, err := compactor.CompactIfNeeded(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded: %v", err)
+	}
+	if summarizer.calls == 0 {
+		t.Error("expected full sweep from estimated tokens exceeding soft threshold")
 	}
 }
 
@@ -189,6 +342,10 @@ func TestGenerateSummaryID(t *testing.T) {
 		id := generateSummaryID()
 		if !strings.HasPrefix(id, "sum_") {
 			t.Fatalf("id %q missing sum_ prefix", id)
+		}
+		// "sum_" (4) + 16 hex chars = 20 total.
+		if len(id) != 20 {
+			t.Fatalf("id %q has length %d, want 20", id, len(id))
 		}
 		if seen[id] {
 			t.Fatalf("duplicate id %q after %d generations", id, i)
