@@ -84,7 +84,7 @@ export default function ModelSelector({
               {grouped.map(({ provider, models: groupModels }) => (
                 <div key={provider}>
                   {multiProvider && provider && (
-                    <div className="sticky top-0 bg-popover px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <div className="sticky -top-1 -mx-1 bg-popover px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {provider}
                     </div>
                   )}
