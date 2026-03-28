@@ -335,7 +335,9 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 			}
 		}
 
-		// Optionally compact.
+		// Optionally compact. We run multiple rounds to simulate aggressive
+		// compaction like a long-running session would experience, driving
+		// the context through leaf passes and condensation.
 		if compact {
 			cfg := CompactionConfig{
 				ContextWindow:        200_000,
@@ -343,22 +345,36 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 				HardThreshold:        0.85,
 				TokenBudget:          180_000,
 				FreshTailCount:       4,
-				LeafChunkTokens:      500,
-				LeafTargetTokens:     800,
-				CondenseTargetTokens: 1200,
-				LeafMinFanout:        4,
+				LeafChunkTokens:      300,
+				LeafTargetTokens:     600,
+				CondenseTargetTokens: 1000,
+				LeafMinFanout:        3,
 				CondenseMinFanout:    3,
 			}
 
 			summarizer := &lmSummarizer{lm: lm}
-			compactor := NewCompactor(pdb, sessionID, summarizer, cfg, logger)
+			preTokens, _ := pdb.ContextTokenCount(sessionID)
+			estimated := preTokens
 
-			estimated, _ := pdb.ContextTokenCount(sessionID)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			_, err := compactor.CompactIfNeeded(ctx, int64(estimated))
-			cancel()
-			if err != nil {
-				t.Logf("Conv %d: compaction failed: %v", ci, err)
+			// Run compaction repeatedly until stable (simulating multiple turns
+			// of an active session). Each round may create new leaf summaries
+			// or condense existing ones into higher-depth nodes.
+			const maxRounds = 5
+			for round := 0; round < maxRounds; round++ {
+				compactor := NewCompactor(pdb, sessionID, summarizer, cfg, logger)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				_, err := compactor.CompactIfNeeded(ctx, int64(estimated))
+				cancel()
+				if err != nil {
+					t.Logf("Conv %d round %d: compaction failed: %v", ci, round, err)
+					break
+				}
+
+				newEstimated, _ := pdb.ContextTokenCount(sessionID)
+				if newEstimated >= estimated {
+					break // no further compression possible
+				}
+				estimated = newEstimated
 			}
 
 			postTokens, _ := pdb.ContextTokenCount(sessionID)
@@ -371,8 +387,13 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 					sumCount++
 				}
 			}
-			t.Logf("Conv %d: %d turns → compacted to %d messages + %d summaries (%d → %d est tokens)",
-				ci, len(turns), msgCount, sumCount, estimated, postTokens)
+			maxDepth, _ := pdb.MaxSummaryDepth(sessionID)
+			reduction := 0.0
+			if preTokens > 0 {
+				reduction = (1 - float64(postTokens)/float64(preTokens)) * 100
+			}
+			t.Logf("Conv %d: %d turns → %d messages + %d summaries (depth %d), %d → %d est tokens (%.0f%% reduction)",
+				ci, len(turns), msgCount, sumCount, maxDepth, preTokens, postTokens, reduction)
 		}
 
 		// Assemble context.
