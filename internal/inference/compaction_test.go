@@ -302,6 +302,69 @@ func TestCompactIfNeeded_CondensationFiresAfterLeafPasses(t *testing.T) {
 	}
 }
 
+func TestPrecedingSummaryContent_FlowsThroughToPrompt(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	cfg := CompactionConfig{
+		ContextWindow:        10_000,
+		SoftThreshold:        0.01, // force compaction
+		HardThreshold:        0.99,
+		TokenBudget:          9_000,
+		FreshTailCount:       2,
+		LeafChunkTokens:      400,  // fits 4 messages at 100 tokens each
+		LeafTargetTokens:     200,
+		CondenseTargetTokens: 400,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    100, // prevent condensation
+	}
+
+	// Add 10 messages: 8 outside fresh tail, enough for two leaf passes
+	// (4 messages per pass at 100 tokens each, LeafChunkTokens=400).
+	for i := 0; i < 10; i++ {
+		appendMsg(t, pdb, "s1", "user", "message for dedup test", 100)
+	}
+
+	// Track all system prompts sent to the summarizer.
+	summarizer := &capturingSummarizer{
+		result: "- fact one about the topic\n- fact two about the details",
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	compactor := NewCompactor(pdb, "s1", summarizer, cfg, logger)
+
+	if _, err := compactor.CompactIfNeeded(context.Background(), 500); err != nil {
+		t.Fatalf("CompactIfNeeded: %v", err)
+	}
+
+	if len(summarizer.prompts) < 2 {
+		t.Fatalf("expected at least 2 summarizer calls, got %d", len(summarizer.prompts))
+	}
+
+	// First leaf pass should NOT have previous_context (nothing precedes it).
+	if strings.Contains(summarizer.prompts[0], "<previous_context>") {
+		t.Error("first leaf pass should not have previous_context")
+	}
+
+	// Second leaf pass SHOULD have previous_context from the first summary.
+	if !strings.Contains(summarizer.prompts[1], "<previous_context>") {
+		t.Error("second leaf pass should include previous_context from first summary")
+	}
+	if !strings.Contains(summarizer.prompts[1], "fact one about the topic") {
+		t.Error("previous_context should contain the first summary's content")
+	}
+}
+
+// capturingSummarizer records the system prompt of each call for assertion.
+type capturingSummarizer struct {
+	prompts []string
+	result  string
+}
+
+func (s *capturingSummarizer) Summarize(_ context.Context, systemPrompt, _ string) (string, error) {
+	s.prompts = append(s.prompts, systemPrompt)
+	return s.result, nil
+}
+
 func TestSummarizationPrompt_Variants(t *testing.T) {
 	tests := []struct {
 		depth      int
@@ -312,9 +375,13 @@ func TestSummarizationPrompt_Variants(t *testing.T) {
 		{0, true, "tight space budget"},
 		{1, false, "Merge these conversation summaries"},
 		{1, true, "tight space budget"},
+		{2, false, "trajectory, outcomes, and durable constraints"},
+		{2, true, "trajectory, outcomes, and durable constraints"},
+		{3, false, "high-level memory"},
+		{3, true, "durable context only"},
 	}
 	for _, tt := range tests {
-		got := summarizationPrompt(tt.depth, tt.aggressive, 500)
+		got := summarizationPrompt(tt.depth, tt.aggressive, 500, "")
 		if !strings.Contains(got, tt.contains) {
 			t.Errorf("depth=%d aggressive=%v: missing %q in:\n%s", tt.depth, tt.aggressive, tt.contains, got)
 		}
@@ -322,6 +389,30 @@ func TestSummarizationPrompt_Variants(t *testing.T) {
 		if !strings.Contains(got, "500 tokens") {
 			t.Errorf("depth=%d aggressive=%v: missing budget hint", tt.depth, tt.aggressive)
 		}
+		// All prompts should include the expand footer.
+		if !strings.Contains(got, "Expand for details about") {
+			t.Errorf("depth=%d aggressive=%v: missing expand footer", tt.depth, tt.aggressive)
+		}
+	}
+}
+
+func TestSummarizationPrompt_PreviousContext(t *testing.T) {
+	// Without previous context — no dedup section.
+	got := summarizationPrompt(0, false, 500, "")
+	if strings.Contains(got, "previous_context") {
+		t.Error("should not include previous_context when empty")
+	}
+
+	// With previous context — dedup section present.
+	got = summarizationPrompt(0, false, 500, "- Jon lost his job on 2023-01-19")
+	if !strings.Contains(got, "<previous_context>") {
+		t.Error("should include previous_context XML tag")
+	}
+	if !strings.Contains(got, "do not repeat or restate facts") {
+		t.Error("should include dedup instruction")
+	}
+	if !strings.Contains(got, "Jon lost his job") {
+		t.Error("should include the actual previous context content")
 	}
 }
 
@@ -378,7 +469,7 @@ func TestSummarizeWithEscalation_FallbackTruncation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	compactor := NewCompactor(pdb, "s1", summarizer, DefaultCompactionConfig(), logger)
-	got, err := compactor.summarizeWithEscalation(context.Background(), 0, "input text", 10000)
+	got, err := compactor.summarizeWithEscalation(context.Background(), 0, "input text", 10000, "")
 	if err != nil {
 		t.Fatalf("summarizeWithEscalation: %v", err)
 	}

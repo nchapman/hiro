@@ -231,6 +231,9 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 		return nil
 	}
 
+	// Look for a summary immediately preceding this chunk for dedup context.
+	prevContext := c.precedingSummaryContent(items[0].Ordinal, nil)
+
 	input := buildLeafInput(msgs)
 	sourceTokens := 0
 	var msgIDs []int64
@@ -239,7 +242,7 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 		msgIDs = append(msgIDs, m.ID)
 	}
 
-	summary, err := c.summarizeWithEscalation(ctx, 0, input, sourceTokens)
+	summary, err := c.summarizeWithEscalation(ctx, 0, input, sourceTokens, prevContext)
 	if err != nil {
 		return err
 	}
@@ -287,6 +290,12 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
+	// Fetch all context items once for dedup lookups across depth iterations.
+	allContextItems, err := c.pdb.GetContextItems(c.sessionID)
+	if err != nil {
+		return false, err
+	}
+
 	for depth := 0; depth <= maxDepth; depth++ {
 		items, sums, err := c.pdb.ContiguousSummariesAtDepth(c.sessionID, depth, c.config.CondenseMinFanout)
 		if err != nil {
@@ -296,6 +305,9 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 			continue
 		}
 
+		// Look for a summary immediately preceding this run for dedup context.
+		prevContext := c.precedingSummaryContent(items[0].Ordinal, allContextItems)
+
 		input := buildCondensationInput(sums)
 		sourceTokens := 0
 		var childIDs []string
@@ -304,7 +316,7 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 			childIDs = append(childIDs, s.ID)
 		}
 
-		summary, err := c.summarizeWithEscalation(ctx, depth+1, input, sourceTokens)
+		summary, err := c.summarizeWithEscalation(ctx, depth+1, input, sourceTokens, prevContext)
 		if err != nil {
 			return false, err
 		}
@@ -372,13 +384,13 @@ func (c *Compactor) fullSweep(ctx context.Context) error {
 	return nil
 }
 
-func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, input string, sourceTokens int) (string, error) {
+func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, input string, sourceTokens int, prevContext string) (string, error) {
 	targetTokens := c.config.LeafTargetTokens
 	if depth > 0 {
 		targetTokens = c.config.CondenseTargetTokens
 	}
 
-	prompt := summarizationPrompt(depth, false, targetTokens)
+	prompt := summarizationPrompt(depth, false, targetTokens, prevContext)
 	summary, err := c.summarizer.Summarize(ctx, prompt, input)
 	if err != nil {
 		return "", fmt.Errorf("normal summarization: %w", err)
@@ -393,7 +405,7 @@ func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, inpu
 		"summary_tokens", summaryTokens,
 		"target_tokens", targetTokens,
 	)
-	prompt = summarizationPrompt(depth, true, targetTokens)
+	prompt = summarizationPrompt(depth, true, targetTokens, prevContext)
 	summary, err = c.summarizer.Summarize(ctx, prompt, input)
 	if err != nil {
 		return "", fmt.Errorf("aggressive summarization: %w", err)
@@ -418,24 +430,88 @@ func generateSummaryID() string {
 	return "sum_" + id[:16]
 }
 
+// precedingSummaryContent finds the nearest summary context item before
+// startOrdinal and returns its content. Returns "" if none exists or on
+// any error. startOrdinal must be the ordinal of an item currently in the
+// context_items list (callers pass items[0].Ordinal from a just-fetched slice).
+//
+// When allItems is provided, it reuses that slice instead of re-fetching from
+// the DB. This avoids a redundant full scan in the condensation path where
+// ContiguousSummariesAtDepth already fetches all context items.
+func (c *Compactor) precedingSummaryContent(startOrdinal int, allItems []platformdb.ContextItem) string {
+	if allItems == nil {
+		var err error
+		allItems, err = c.pdb.GetContextItems(c.sessionID)
+		if err != nil {
+			return ""
+		}
+	}
+
+	// Find the context item at startOrdinal, then walk backwards for a summary.
+	var prevSummaryID *string
+	for i, ci := range allItems {
+		if ci.Ordinal >= startOrdinal {
+			for j := i - 1; j >= 0; j-- {
+				if allItems[j].ItemType == "summary" && allItems[j].SummaryID != nil {
+					prevSummaryID = allItems[j].SummaryID
+					break
+				}
+			}
+			break
+		}
+	}
+	if prevSummaryID == nil {
+		return ""
+	}
+
+	sum, err := c.pdb.GetSummary(*prevSummaryID)
+	if err != nil {
+		return ""
+	}
+	return sum.Content
+}
+
 // --- Prompt/formatting helpers ---
 
-func summarizationPrompt(depth int, aggressive bool, targetTokens int) string {
-	budgetHint := fmt.Sprintf("\n\nBudget: ~%d tokens (~%d characters). Prioritize the most important facts if you cannot fit everything.", targetTokens, targetTokens*4)
-
+func summarizationPrompt(depth int, aggressive bool, targetTokens int, prevContext string) string {
 	var base string
 	switch {
 	case depth == 0 && !aggressive:
 		base = leafPrompt
 	case depth == 0 && aggressive:
 		base = leafAggressivePrompt
+	case depth == 1 && !aggressive:
+		base = condenseD1Prompt
+	case depth == 1 && aggressive:
+		base = condenseD1AggressivePrompt
+	case depth == 2 && !aggressive:
+		base = condenseD2Prompt
+	case depth == 2 && aggressive:
+		base = condenseD2AggressivePrompt
 	case !aggressive:
-		base = condensePrompt
+		base = condenseD3PlusPrompt
 	default:
-		base = condenseAggressivePrompt
+		base = condenseD3PlusAggressivePrompt
 	}
-	return base + budgetHint
+
+	result := base
+
+	// Dedup constraint — "what to do" instruction, before budget guidance.
+	if prevContext != "" {
+		result += "\n\nThe following summary immediately precedes this chunk — do not repeat or restate facts already covered there, even if phrased differently:\n<previous_context>\n" + prevContext + "\n</previous_context>"
+	}
+
+	result += fmt.Sprintf("\n\nBudget: ~%d tokens (~%d characters). Prioritize the most important facts if you cannot fit everything.", targetTokens, targetTokens*4)
+
+	// Expand footer last — terminal instruction the model sees before generating.
+	result += expandFooter
+
+	return result
 }
+
+// expandFooter is appended to all summarization prompts. It tells the model
+// to list what was dropped so the agent can use history_recall to expand later.
+const expandFooter = ` End with: "Expand for details about: <comma-separated list of topics you compressed or dropped>".`
 
 // leafPrompt summarizes raw conversation messages into bullet points.
 const leafPrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. Someone will later use it to answer questions about this conversation.
@@ -450,29 +526,72 @@ Format: one bullet per fact, concise. Convert relative dates using the message t
 // the token target. Same objective, much tighter budget.
 const leafAggressivePrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. You are on a very tight space budget.
 
-Keep: facts, decisions (what AND why), opinions, feelings, dates, names, numbers, identifiers, personal details, reasons. Copy names, paths, commands, error messages, and numbers verbatim. Every event must have a date.
+Keep: facts, decisions (what AND why), opinions, feelings, dates, names, numbers, identifiers, personal details, reasons. Attribute each fact to its speaker. Copy names, paths, commands, error messages, and numbers verbatim. Every event must have a date.
 
 Discard: greetings, filler, restated information, context already established in earlier bullets.
 
 Format: one fact per bullet, ~15 words max. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. State a person's identity/role once; use name only after. No prose.`
 
-// condensePrompt merges multiple summaries into one.
-const condensePrompt = `Objective: Merge these conversation summaries into one record with maximum fidelity in minimum words. The inputs are from consecutive segments. Your output replaces all of them.
+// --- Depth-aware condensation prompts ---
+//
+// Each depth level progressively deprioritizes operational detail and
+// emphasizes durable decisions and outcomes.
 
-Keep: every distinct fact from any input. Merge related facts about the same topic or person into single bullets where possible. Preserve the date for every event — never merge away a date.
+// condenseD1Prompt merges leaf summaries into a session-level summary.
+const condenseD1Prompt = `Objective: Merge these conversation summaries into one record with maximum fidelity in minimum words. The inputs are from consecutive segments. Your output replaces all of them.
+
+Keep: every distinct fact from any input. Merge related facts about the same topic or person into single bullets where possible. Preserve the date for every event — never merge away a date. Copy identifiers, error messages, paths, commands, and numbers verbatim — paraphrasing them destroys searchability.
 
 Discard: strict duplicates, redundant phrasing, repeated context (e.g. a person's role restated across inputs — keep it once).
 
 Format: bullet points grouped by person or topic. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. No prose or framing sentences.`
 
-// condenseAggressivePrompt is the tight-budget version of condensation.
-const condenseAggressivePrompt = `Objective: Merge these conversation summaries with maximum fidelity in minimum words. Your output replaces all inputs — anything you drop becomes permanently unanswerable. Very tight space budget.
+// condenseD1AggressivePrompt is the tight-budget version of D1 condensation.
+const condenseD1AggressivePrompt = `Objective: Merge these conversation summaries with maximum fidelity in minimum words. Your output replaces all inputs — anything you drop becomes permanently unanswerable. Very tight space budget.
 
-Keep: every distinct fact. Merge related facts aggressively. Preserve the date for every event.
+Keep: every distinct fact. Merge related facts aggressively. Preserve the date for every event. Copy identifiers, error messages, paths, and commands verbatim.
 
 Discard: duplicates, redundant phrasing, repeated context.
 
 Format: terse bullet points. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. No prose.`
+
+// condenseD2Prompt consolidates session-level summaries into phase-level.
+// At this depth, operational detail matters less — focus on trajectory.
+const condenseD2Prompt = `Objective: Consolidate these session-level summaries into a higher-level record. A future reader should understand trajectory, outcomes, and durable constraints — not per-session process steps.
+
+Keep: decisions still in effect and their rationale. Decisions that evolved — what changed and why. Completed work with outcomes. Active constraints, limitations, and known issues. Current state of in-progress work. Dates for every event. Copy identifiers, error messages, paths, and commands verbatim — paraphrasing them destroys searchability.
+
+Discard: transient session-local mechanics (not active constraints), process scaffolding, intermediate states superseded by later outcomes, identifiers no longer relevant.
+
+Format: bullet points grouped by topic. Include a timeline of key milestones with dates. Match date precision to the source. Don't fabricate precision. No prose or framing sentences.`
+
+// condenseD2AggressivePrompt is the tight-budget version of D2 condensation.
+const condenseD2AggressivePrompt = `Objective: Consolidate session-level summaries — trajectory, outcomes, and durable constraints only. Very tight space budget. Anything you drop becomes permanently unanswerable.
+
+Keep: decisions in effect + rationale, evolved decisions, completed outcomes, active constraints, dates for every event. Copy identifiers and commands verbatim.
+
+Discard: transient session-local mechanics, process scaffolding, superseded intermediate states.
+
+Format: terse bullet points grouped by topic. Include a short timeline of key milestones with dates. No prose.`
+
+// condenseD3PlusPrompt creates long-term memory from phase-level summaries.
+// Only durable context survives — this may persist for the rest of the conversation.
+const condenseD3PlusPrompt = `Objective: Create a high-level memory from multiple phase-level summaries. This may persist for the rest of the conversation. Keep only durable context.
+
+Keep: key decisions and rationale. What was accomplished and current state. Active constraints and hard limitations. Important relationships between people, systems, or concepts. Lessons learned — recurring problems, failed approaches, and explicit conclusions about what to avoid. Dates for major milestones. Copy identifiers and commands verbatim unless no longer relevant.
+
+Discard: operational and process detail. Method details unless the method itself was the decision. Specific references unless essential for continuation.
+
+Format: concise bullet points. Include a brief timeline with dates for major milestones. No prose or framing sentences.`
+
+// condenseD3PlusAggressivePrompt is the tight-budget version of D3+ condensation.
+const condenseD3PlusAggressivePrompt = `Objective: High-level memory from phase summaries — durable context only. Very tight space budget.
+
+Keep: key decisions + rationale, accomplishments, active constraints, important relationships, milestone dates. Copy identifiers verbatim unless no longer relevant.
+
+Discard: operational detail, method specifics, non-essential references.
+
+Format: terse bullet points. Include a short timeline of major milestones with dates. No prose.`
 
 func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder
