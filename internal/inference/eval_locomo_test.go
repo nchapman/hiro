@@ -183,6 +183,15 @@ func flattenConversation(conv locomoConversation) []dialogTurn {
 
 // --- Eval runner ---
 
+type locomoQAResult struct {
+	qi       int
+	qa       locomoQA
+	expected string
+	answer   string
+	jr       judgeResult
+	ansErr   error
+}
+
 type evalSummary struct {
 	ByCategory   map[int][]float64
 	Overall      []float64
@@ -343,8 +352,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 			t.Logf("Conv %d: %d turns → %d messages + %d summaries (depth %d), %d → %d est tokens (%.0f%% reduction)",
 				ci, len(turns), msgCount, sumCount, maxDepth, preTokens, postTokens, reduction)
 
-			// Write summaries to files for qualitative inspection.
-			dumpSummaries(t, pdb, sessionID, "locomo", ci)
+			// Summaries + QA results are written after scoring below.
 		}
 
 		// Assemble context.
@@ -373,20 +381,12 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 		}
 
 		// Score QA pairs concurrently.
-		type qaResult struct {
-			qi       int
-			qa       locomoQA
-			expected string
-			answer   string
-			jr       judgeResult
-			ansErr   error
-		}
-		results := make([]qaResult, len(qaPairs))
+		results := make([]locomoQAResult, len(qaPairs))
 		sem := make(chan struct{}, evalConcurrency)
 		var wg sync.WaitGroup
 
 		for qi, qa := range qaPairs {
-			results[qi] = qaResult{qi: qi, qa: qa, expected: qa.AnswerString()}
+			results[qi] = locomoQAResult{qi: qi, qa: qa, expected: qa.AnswerString()}
 			wg.Add(1)
 			go func(qi int, qa locomoQA, expected string) {
 				defer wg.Done()
@@ -453,6 +453,11 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 			t.Logf("  [%d/%d] %s %s (%s) %q → got %q (expected %q) — %s",
 				r.qi+1, len(qaPairs), marker, r.jr.Grade, catName,
 				r.qa.Question, truncateStr(r.answer, 60), truncateStr(r.expected, 60), r.jr.Reason)
+		}
+
+		// Write summaries + QA results for qualitative inspection.
+		if compactCfg != nil {
+			dumpEvalResults(t, pdb, sessionID, "locomo", ci, results)
 		}
 
 		// Per-conversation running totals.
@@ -622,7 +627,7 @@ func reportDelta(t *testing.T, baseline, compacted evalSummary) {
 
 // dumpSummaries writes all summaries for a session to testdata/eval-output/<model>/
 // so they can be reviewed for qualitative quality.
-func dumpSummaries(t *testing.T, pdb *platformdb.DB, sessionID, evalName string, convIdx int) {
+func dumpEvalResults(t *testing.T, pdb *platformdb.DB, sessionID, evalName string, convIdx int, qaResults []locomoQAResult) {
 	t.Helper()
 
 	modelName := testModelName(t)
@@ -631,7 +636,7 @@ func dumpSummaries(t *testing.T, pdb *platformdb.DB, sessionID, evalName string,
 
 	items, err := pdb.GetContextItems(sessionID)
 	if err != nil {
-		t.Logf("warning: could not get context items for summary dump: %v", err)
+		t.Logf("warning: could not get context items for eval dump: %v", err)
 		return
 	}
 
@@ -641,7 +646,7 @@ func dumpSummaries(t *testing.T, pdb *platformdb.DB, sessionID, evalName string,
 	fmt.Fprintf(&buf, "# %s — Conversation %d\n\n", evalName, convIdx)
 	fmt.Fprintf(&buf, "Model: `%s`\n\n", modelName)
 
-	// Write context item order (shows how summaries and messages interleave).
+	// Write context item order.
 	fmt.Fprintf(&buf, "## Context Items (%d total)\n\n", len(items))
 	msgCount, sumCount := 0, 0
 	for _, item := range items {
@@ -674,11 +679,50 @@ func dumpSummaries(t *testing.T, pdb *platformdb.DB, sessionID, evalName string,
 		fmt.Fprintf(&buf, "```\n%s\n```\n\n", sum.Content)
 	}
 
+	// Write QA results.
+	if len(qaResults) > 0 {
+		correct, partial, incorrect, errors := 0, 0, 0, 0
+		for _, r := range qaResults {
+			if r.jr.Err {
+				errors++
+			} else {
+				switch r.jr.Grade {
+				case gradeCorrect:
+					correct++
+				case gradePartial:
+					partial++
+				case gradeIncorrect:
+					incorrect++
+				}
+			}
+		}
+		fmt.Fprintf(&buf, "## QA Results (%d correct, %d partial, %d incorrect, %d errors)\n\n",
+			correct, partial, incorrect, errors)
+
+		for _, r := range qaResults {
+			if r.jr.Err {
+				fmt.Fprintf(&buf, "- ⚠ ERROR (%s) **%s**\n  - %s\n\n",
+					categoryNames[r.qa.Category], r.qa.Question, r.jr.Reason)
+				continue
+			}
+			marker := "✓"
+			if r.jr.Grade == gradeIncorrect {
+				marker = "✗"
+			} else if r.jr.Grade == gradePartial {
+				marker = "½"
+			}
+			fmt.Fprintf(&buf, "- %s **%s** (%s) — %s\n", marker, r.jr.Grade, categoryNames[r.qa.Category], r.qa.Question)
+			fmt.Fprintf(&buf, "  - Expected: %s\n", r.expected)
+			fmt.Fprintf(&buf, "  - Got: %s\n", r.answer)
+			fmt.Fprintf(&buf, "  - Reason: %s\n\n", r.jr.Reason)
+		}
+	}
+
 	if err := os.WriteFile(outPath, []byte(buf.String()), 0o644); err != nil {
-		t.Logf("warning: could not write summary dump: %v", err)
+		t.Logf("warning: could not write eval dump: %v", err)
 		return
 	}
-	t.Logf("Summaries written to %s", outPath)
+	t.Logf("Eval results written to %s", outPath)
 }
 
 // parseLoCoMoDate parses LoCoMo's date format: "1:56 pm on 8 May, 2023".

@@ -314,7 +314,7 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 				ci, msgIdx, msgCount, sumCount, maxDepth, preTokens, postTokens, reduction)
 
 			// Write summaries to files for qualitative inspection.
-			dumpSummaries(t, pdb, sessionID, "code", ci)
+			dumpEvalResults(t, pdb, sessionID, "code", ci, nil)
 		}
 
 		// Assemble context.
