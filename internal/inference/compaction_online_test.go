@@ -4,6 +4,7 @@ package inference
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -92,6 +93,109 @@ func testModelName(t *testing.T) string {
 	}
 	// Sanitize for filesystem: replace / with _
 	return strings.ReplaceAll(model, "/", "_")
+}
+
+// --- LLM-as-judge scoring ---
+
+// judgeGrade represents the judge's assessment of an answer.
+type judgeGrade int
+
+const (
+	gradeIncorrect judgeGrade = iota // 0 — wrong, hallucinated, or missing
+	gradePartial                     // 1 — right direction, missing key details
+	gradeCorrect                     // 2 — captures the essential fact
+)
+
+func (g judgeGrade) Score() float64 {
+	switch g {
+	case gradeCorrect:
+		return 1.0
+	case gradePartial:
+		return 0.5
+	default:
+		return 0.0
+	}
+}
+
+func (g judgeGrade) String() string {
+	switch g {
+	case gradeCorrect:
+		return "CORRECT"
+	case gradePartial:
+		return "PARTIAL"
+	default:
+		return "INCORRECT"
+	}
+}
+
+// judgeResult holds the grade and the judge's explanation.
+type judgeResult struct {
+	Grade  judgeGrade
+	Reason string
+	Err    bool // true when the grade is due to a judge failure, not a real assessment
+}
+
+const judgePrompt = `Grade the answer against the reference. Reply with CORRECT, PARTIAL, or INCORRECT on the first line, then one sentence explaining why.
+
+CORRECT: captures the key fact accurately
+PARTIAL: right direction but missing important details or imprecise
+INCORRECT: wrong, fabricated, or not addressed
+
+Question: %s
+Reference: %s
+Answer: %s
+
+Grade:`
+
+// judgeAnswer uses the LLM to grade a model's answer against a reference.
+// For adversarial questions (where the correct response is "unanswerable"),
+// pass reference="unanswerable" — the judge handles refusal detection.
+func judgeAnswer(ctx context.Context, lm fantasy.LanguageModel, question, reference, answer string) judgeResult {
+	prompt := fmt.Sprintf(judgePrompt, question, reference, answer)
+
+	resp, err := lm.Generate(ctx, fantasy.Call{
+		Prompt: fantasy.Prompt{fantasy.NewUserMessage(prompt)},
+	})
+	if err != nil {
+		return judgeResult{Grade: gradeIncorrect, Reason: "judge error: " + err.Error(), Err: true}
+	}
+
+	text := strings.TrimSpace(resp.Content.Text())
+
+	// Parse grade from first line.
+	firstLine := text
+	reason := ""
+	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
+		firstLine = text[:idx]
+		reason = strings.TrimSpace(text[idx+1:])
+	}
+	firstLine = strings.TrimSpace(firstLine)
+
+	// Sometimes the model outputs "CORRECT:" or "CORRECT." — normalize.
+	fields := strings.Fields(firstLine)
+	if len(fields) == 0 {
+		return judgeResult{Grade: gradeIncorrect, Reason: "judge returned empty response"}
+	}
+	rawFirstWord := fields[0]
+	firstWord := strings.ToUpper(strings.TrimRight(rawFirstWord, ":.,-"))
+
+	var grade judgeGrade
+	switch firstWord {
+	case "CORRECT":
+		grade = gradeCorrect
+	case "PARTIAL":
+		grade = gradePartial
+	default:
+		grade = gradeIncorrect
+	}
+
+	// If reason wasn't on a separate line, use everything after the original first word.
+	if reason == "" && len(firstLine) > len(rawFirstWord) {
+		reason = strings.TrimSpace(firstLine[len(rawFirstWord):])
+		reason = strings.TrimLeft(reason, ":.,-— ")
+	}
+
+	return judgeResult{Grade: grade, Reason: reason}
 }
 
 // TestOnline_LeafCompaction verifies that the full compaction pipeline produces

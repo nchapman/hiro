@@ -105,12 +105,12 @@ func CompactionConfigForModel(model string) CompactionConfig {
 // The key ratios:
 //   - Leaf chunk: 10% of window — how much to grab per summarization pass
 //   - Leaf target: 2% of window — ~5:1 compression at leaf level
-//   - Condense target: 3% of window — ~3:1 compression when combining summaries
+//   - Condense target: 4% of window — ~2.5:1 compression when combining summaries
 //   - Token budget: 90% of window — loose assembly safety net
 //
-// At 200K: chunk=20K, leaf_target=4K, condense_target=6K
-// At  32K: chunk=3.2K, leaf_target=640, condense_target=960
-// At   1M: chunk=100K, leaf_target=20K, condense_target=30K
+// At 200K: chunk=20K, leaf_target=4K, condense_target=8K
+// At  32K: chunk=3.2K, leaf_target=640, condense_target=1.3K
+// At   1M: chunk=100K, leaf_target=20K, condense_target=40K
 func compactionConfigForWindow(contextWindow int) CompactionConfig {
 	if contextWindow <= 0 {
 		contextWindow = 200_000
@@ -123,7 +123,7 @@ func compactionConfigForWindow(contextWindow int) CompactionConfig {
 		FreshTailCount:       20,
 		LeafChunkTokens:      max(500, contextWindow/10),
 		LeafTargetTokens:     max(200, contextWindow/50),
-		CondenseTargetTokens: max(300, contextWindow*3/100),
+		CondenseTargetTokens: max(400, contextWindow*4/100),
 		LeafMinFanout:        4,
 		CondenseMinFanout:    3,
 	}
@@ -378,7 +378,7 @@ func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, inpu
 		targetTokens = c.config.CondenseTargetTokens
 	}
 
-	prompt := summarizationPrompt(depth, false)
+	prompt := summarizationPrompt(depth, false, targetTokens)
 	summary, err := c.summarizer.Summarize(ctx, prompt, input)
 	if err != nil {
 		return "", fmt.Errorf("normal summarization: %w", err)
@@ -393,14 +393,16 @@ func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, inpu
 		"summary_tokens", summaryTokens,
 		"target_tokens", targetTokens,
 	)
-	prompt = summarizationPrompt(depth, true)
+	prompt = summarizationPrompt(depth, true, targetTokens)
 	summary, err = c.summarizer.Summarize(ctx, prompt, input)
 	if err != nil {
 		return "", fmt.Errorf("aggressive summarization: %w", err)
 	}
 
 	summaryTokens = EstimateTokens(summary)
-	if summaryTokens <= targetTokens {
+	// Allow up to 1.5x target before truncating — the model tried its best,
+	// and modest overshoot preserves more facts than hard truncation.
+	if summaryTokens <= targetTokens*3/2 {
 		return summary, nil
 	}
 
@@ -408,7 +410,7 @@ func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, inpu
 		"summary_tokens", summaryTokens,
 		"target_tokens", targetTokens,
 	)
-	return fallbackTruncate(summary, targetTokens), nil
+	return truncateAtBullet(summary, targetTokens), nil
 }
 
 func generateSummaryID() string {
@@ -418,76 +420,59 @@ func generateSummaryID() string {
 
 // --- Prompt/formatting helpers ---
 
-func summarizationPrompt(depth int, aggressive bool) string {
+func summarizationPrompt(depth int, aggressive bool, targetTokens int) string {
+	budgetHint := fmt.Sprintf("\n\nBudget: ~%d tokens (~%d characters). Prioritize the most important facts if you cannot fit everything.", targetTokens, targetTokens*4)
+
+	var base string
 	switch {
 	case depth == 0 && !aggressive:
-		return leafPrompt
+		base = leafPrompt
 	case depth == 0 && aggressive:
-		return leafAggressivePrompt
+		base = leafAggressivePrompt
 	case !aggressive:
-		return condensePrompt
+		base = condensePrompt
 	default:
-		return condenseAggressivePrompt
+		base = condenseAggressivePrompt
 	}
+	return base + budgetHint
 }
 
-// leafPrompt extracts structured facts from raw conversation messages.
-// Optimized for maximum fact density per token — every bullet should be
-// independently useful for answering future questions.
-const leafPrompt = `You are a fact extractor for a conversation memory system. Your output will be the ONLY record of this conversation segment — any fact you omit is permanently lost.
+// leafPrompt summarizes raw conversation messages into bullet points.
+const leafPrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. Someone will later use it to answer questions about this conversation.
 
-Extract ALL retrievable facts as structured bullet points.
+Keep: facts, decisions (what AND why), opinions, feelings, dates, names, numbers, identifiers, personal details, reasons behind actions. Attribute who said/did/felt what. Copy names, paths, commands, error messages, and numbers verbatim. Every event must have a date — "when" questions are very common.
 
-## Rules
+Discard: greetings, filler, pleasantries, and anything already established in an earlier bullet.
 
-1. DATES: Convert every relative time reference ("yesterday", "last week", "2 days ago") to an absolute date using the message timestamps. If a message dated 2024-03-15 says "yesterday", write "2024-03-14". If a message dated 2024-06-10 says "last year", write "2023".
-
-2. PRESERVE EXACTLY: names, places, file paths, URLs, commands, error messages, version numbers, quantities, code snippets, and technical identifiers. Never paraphrase these — copy them verbatim.
-
-3. ATTRIBUTION: Note who said or did what. Speaker identity matters for future questions like "what did X do?" or "what does Y think about Z?"
-
-4. DECISIONS: For each decision, state WHAT was decided AND WHY (the reason or constraint that drove it).
-
-5. RELATIONSHIPS AND STATES: Capture personal details (occupation, location, relationships, preferences, plans, opinions, identity) — these are high-value for future recall.
-
-6. COMPLETENESS: If someone mentions a specific fact — a place they visited, a date something happened, a preference they have, a plan they're making — it MUST appear in your output. Err on the side of including too much rather than too little.
-
-## Output Format
-
-Write concise bullet points grouped by topic. Each bullet = one self-contained fact.
-
-DO NOT write narrative prose or connecting sentences.
-DO NOT start with "The conversation covered..." or similar framing.
-DO NOT editorialize or add interpretation beyond what was stated.`
+Format: one bullet per fact, concise. Convert relative dates using the message timestamps ("yesterday" on 2024-03-15 → 2024-03-14). Match the precision of the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. State a person's identity/role once, then use their name only in subsequent bullets. No prose or framing sentences.`
 
 // leafAggressivePrompt is the escalation when normal leaf output exceeds
-// the token target. Re-extracts from source with tighter constraints.
-const leafAggressivePrompt = `You are a conversation compressor. Extract only the essential facts as terse bullet points.
+// the token target. Same objective, much tighter budget.
+const leafAggressivePrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. You are on a very tight space budget.
 
-Rules:
-1. Convert all relative dates to absolute dates using the timestamps shown.
-2. KEEP: decisions (what + why), outcomes, names, dates, file paths, error messages, version numbers, quantities, personal details (identity, relationships, plans).
-3. DROP: discussion, reasoning, greetings, exploration that led nowhere, pleasantries.
-4. Each bullet: one fact, max ~15 words. No narrative, no framing sentences.`
+Keep: facts, decisions (what AND why), opinions, feelings, dates, names, numbers, identifiers, personal details, reasons. Copy names, paths, commands, error messages, and numbers verbatim. Every event must have a date.
 
-// condensePrompt merges multiple leaf summaries into a unified overview.
-const condensePrompt = `You are merging conversation summaries into a unified record. The input summaries were extracted from consecutive segments of the same conversation.
+Discard: greetings, filler, restated information, context already established in earlier bullets.
 
-## Rules
+Format: one fact per bullet, ~15 words max. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. State a person's identity/role once; use name only after. No prose.`
 
-1. MERGE related facts: combine information about the same topic, person, or decision from different summaries into single comprehensive bullets.
-2. PRESERVE ALL specific details: dates, names, file paths, versions, quantities, error messages, and personal facts. If a fact appears in any input summary, it must appear in your output.
-3. ELIMINATE only strict duplicates — the same fact stated identically in multiple summaries.
-4. MAINTAIN chronological anchoring: keep dates attached to their facts.
-5. GROUP by topic or entity for coherence.
+// condensePrompt merges multiple summaries into one.
+const condensePrompt = `Objective: Merge these conversation summaries into one record with maximum fidelity in minimum words. The inputs are from consecutive segments. Your output replaces all of them.
 
-Write concise bullet points. Do not add narrative framing. Density matters more than brevity — include every fact from the inputs.`
+Keep: every distinct fact from any input. Merge related facts about the same topic or person into single bullets where possible. Preserve the date for every event — never merge away a date.
 
-// condenseAggressivePrompt is the escalation for condensation.
-const condenseAggressivePrompt = `Compress these conversation summaries into a compact factual record.
+Discard: strict duplicates, redundant phrasing, repeated context (e.g. a person's role restated across inputs — keep it once).
 
-Keep all dates, names, file paths, identifiers, quantities, decisions with rationale, and personal details.
-Merge related facts aggressively. Terse bullet points only.`
+Format: bullet points grouped by person or topic. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. No prose or framing sentences.`
+
+// condenseAggressivePrompt is the tight-budget version of condensation.
+const condenseAggressivePrompt = `Objective: Merge these conversation summaries with maximum fidelity in minimum words. Your output replaces all inputs — anything you drop becomes permanently unanswerable. Very tight space budget.
+
+Keep: every distinct fact. Merge related facts aggressively. Preserve the date for every event.
+
+Discard: duplicates, redundant phrasing, repeated context.
+
+Format: terse bullet points. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. No prose.`
 
 func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder
@@ -514,11 +499,24 @@ func buildCondensationInput(sums []platformdb.Summary) string {
 	return strings.TrimSpace(b.String())
 }
 
-func fallbackTruncate(content string, maxTokens int) string {
+// truncateAtBullet truncates content at the last complete bullet point that
+// fits within the token budget. This preserves whole facts rather than
+// chopping mid-sentence.
+func truncateAtBullet(content string, maxTokens int) string {
 	maxChars := maxTokens * 4
 	if len(content) <= maxChars {
 		return content
 	}
-	return content[:maxChars] + "\n[Truncated for context management]"
+
+	// Find the last complete bullet point that fits within budget.
+	truncated := content[:maxChars]
+	if lastBullet := strings.LastIndex(truncated, "\n- "); lastBullet > 0 {
+		truncated = truncated[:lastBullet]
+	} else if lastSpace := strings.LastIndexByte(truncated, ' '); lastSpace > 0 {
+		// No bullet pattern — fall back to last word boundary.
+		truncated = truncated[:lastSpace]
+	}
+
+	return strings.TrimRight(truncated, "\n ")
 }
 

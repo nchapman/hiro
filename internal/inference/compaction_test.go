@@ -308,15 +308,19 @@ func TestSummarizationPrompt_Variants(t *testing.T) {
 		aggressive bool
 		contains   string
 	}{
-		{0, false, "fact extractor"},
-		{0, true, "conversation compressor"},
-		{1, false, "merging conversation summaries"},
-		{1, true, "Compress these conversation summaries"},
+		{0, false, "maximum fidelity"},
+		{0, true, "tight space budget"},
+		{1, false, "Merge these conversation summaries"},
+		{1, true, "tight space budget"},
 	}
 	for _, tt := range tests {
-		got := summarizationPrompt(tt.depth, tt.aggressive)
+		got := summarizationPrompt(tt.depth, tt.aggressive, 500)
 		if !strings.Contains(got, tt.contains) {
 			t.Errorf("depth=%d aggressive=%v: missing %q in:\n%s", tt.depth, tt.aggressive, tt.contains, got)
+		}
+		// All prompts should include the budget hint.
+		if !strings.Contains(got, "500 tokens") {
+			t.Errorf("depth=%d aggressive=%v: missing budget hint", tt.depth, tt.aggressive)
 		}
 	}
 }
@@ -343,19 +347,24 @@ func TestBuildLeafInput(t *testing.T) {
 	}
 }
 
-func TestFallbackTruncate(t *testing.T) {
+func TestTruncateAtBullet(t *testing.T) {
 	short := "hello"
-	if got := fallbackTruncate(short, 100); got != short {
+	if got := truncateAtBullet(short, 100); got != short {
 		t.Errorf("short string should not be truncated")
 	}
 
-	long := strings.Repeat("x", 1000)
-	got := fallbackTruncate(long, 10) // 10 tokens = 40 chars
+	// Build a bullet-formatted summary.
+	bullets := "- First fact about the topic\n- Second fact with details\n- Third fact is important\n- Fourth fact at the end"
+	got := truncateAtBullet(bullets, 20) // 20 tokens = 80 chars
 	if len(got) > 80 {
 		t.Errorf("truncated result too long: %d chars", len(got))
 	}
-	if !strings.Contains(got, "[Truncated") {
-		t.Error("expected truncation marker")
+	// Should end at a bullet boundary, not mid-sentence.
+	if strings.Contains(got, "Fourth") {
+		t.Error("should not include the last bullet that doesn't fit")
+	}
+	if !strings.HasPrefix(got, "- First") {
+		t.Error("should preserve first bullet")
 	}
 }
 
@@ -374,9 +383,12 @@ func TestSummarizeWithEscalation_FallbackTruncation(t *testing.T) {
 		t.Fatalf("summarizeWithEscalation: %v", err)
 	}
 
-	// Should have been truncated to fit LeafTargetTokens (1200 tokens = 4800 chars).
-	if EstimateTokens(got) > DefaultCompactionConfig().LeafTargetTokens+10 {
-		t.Errorf("result tokens %d exceeds target %d", EstimateTokens(got), DefaultCompactionConfig().LeafTargetTokens)
+	// With 1.5x tolerance, 6250 tokens still far exceeds 1.5x target, so
+	// truncation should kick in. Result should be at or under target since
+	// truncateAtBullet cuts to fit.
+	target := DefaultCompactionConfig().LeafTargetTokens
+	if EstimateTokens(got) > target+10 {
+		t.Errorf("result tokens %d exceeds target %d", EstimateTokens(got), target)
 	}
 	if summarizer.calls != 2 {
 		t.Errorf("expected 2 summarizer calls (normal + aggressive), got %d", summarizer.calls)

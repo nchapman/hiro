@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,6 +58,9 @@ func (q locomoQA) AnswerString() string {
 		return fmt.Sprintf("%v", v)
 	}
 }
+
+// evalConcurrency controls how many QA pairs are scored in parallel.
+const evalConcurrency = 24
 
 var categoryNames = map[int]string{
 	1: "factual",
@@ -177,91 +181,13 @@ func flattenConversation(conv locomoConversation) []dialogTurn {
 	return turns
 }
 
-// --- F1 scoring (partial match, as per LoCoMo paper) ---
-
-func tokenize(s string) []string {
-	s = strings.ToLower(s)
-	// Remove punctuation.
-	var cleaned strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' {
-			cleaned.WriteRune(r)
-		} else {
-			cleaned.WriteRune(' ')
-		}
-	}
-	fields := strings.Fields(cleaned.String())
-	// Remove stop words.
-	stop := map[string]bool{
-		"a": true, "an": true, "the": true, "is": true, "are": true,
-		"was": true, "were": true, "be": true, "been": true, "being": true,
-		"have": true, "has": true, "had": true, "do": true, "does": true,
-		"did": true, "will": true, "would": true, "could": true, "should": true,
-		"may": true, "might": true, "shall": true, "can": true,
-		"of": true, "in": true, "to": true, "for": true, "with": true,
-		"on": true, "at": true, "by": true, "from": true, "as": true,
-		"it": true, "its": true, "this": true, "that": true,
-		"and": true, "or": true, "but": true, "not": true,
-		"i": true, "me": true, "my": true, "we": true, "our": true,
-		"you": true, "your": true, "he": true, "she": true, "they": true,
-		"his": true, "her": true, "their": true,
-	}
-	var result []string
-	for _, w := range fields {
-		if !stop[w] && w != "" {
-			result = append(result, w)
-		}
-	}
-	return result
-}
-
-func f1Score(prediction, reference string) float64 {
-	predTokens := tokenize(prediction)
-	refTokens := tokenize(reference)
-
-	if len(predTokens) == 0 && len(refTokens) == 0 {
-		return 1.0
-	}
-	if len(predTokens) == 0 || len(refTokens) == 0 {
-		return 0.0
-	}
-
-	refSet := make(map[string]int)
-	for _, t := range refTokens {
-		refSet[t]++
-	}
-
-	common := 0
-	for _, t := range predTokens {
-		if refSet[t] > 0 {
-			common++
-			refSet[t]--
-		}
-	}
-
-	if common == 0 {
-		return 0.0
-	}
-
-	precision := float64(common) / float64(len(predTokens))
-	recall := float64(common) / float64(len(refTokens))
-	return 2 * precision * recall / (precision + recall)
-}
-
 // --- Eval runner ---
 
-type evalResult struct {
-	ConvIndex int
-	Category  int
-	Question  string
-	Expected  string
-	Got       string
-	F1        float64
-}
-
 type evalSummary struct {
-	ByCategory map[int][]float64
-	Overall    []float64
+	ByCategory   map[int][]float64
+	Overall      []float64
+	JudgeErrs    int
+	Compressions []float64 // per-conversation compression ratios (0-100%)
 }
 
 func (s evalSummary) Report() string {
@@ -277,9 +203,16 @@ func (s evalSummary) Report() string {
 		scores := s.ByCategory[c]
 		avg := mean(scores)
 		name := categoryNames[c]
-		fmt.Fprintf(&b, "  Category %d (%s): %.1f%% F1 (%d questions)\n", c, name, avg*100, len(scores))
+		fmt.Fprintf(&b, "  Category %d (%s): %.1f%% (%d questions)\n", c, name, avg*100, len(scores))
 	}
-	fmt.Fprintf(&b, "  Overall: %.1f%% F1 (%d questions)\n", mean(s.Overall)*100, len(s.Overall))
+	fmt.Fprintf(&b, "  Overall: %.1f%% (%d questions)", mean(s.Overall)*100, len(s.Overall))
+	if len(s.Compressions) > 0 {
+		fmt.Fprintf(&b, ", %.0f%% avg compression", mean(s.Compressions))
+	}
+	fmt.Fprintln(&b)
+	if s.JudgeErrs > 0 {
+		fmt.Fprintf(&b, "  ⚠ %d judge errors (excluded from scores)\n", s.JudgeErrs)
+	}
 	return b.String()
 }
 
@@ -406,6 +339,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 			if preTokens > 0 {
 				reduction = (1 - float64(postTokens)/float64(preTokens)) * 100
 			}
+			summary.Compressions = append(summary.Compressions, reduction)
 			t.Logf("Conv %d: %d turns → %d messages + %d summaries (depth %d), %d → %d est tokens (%.0f%% reduction)",
 				ci, len(turns), msgCount, sumCount, maxDepth, preTokens, postTokens, reduction)
 
@@ -438,61 +372,91 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 			qaPairs = qaPairs[:maxQAPerConvo]
 		}
 
+		// Score QA pairs concurrently.
+		type qaResult struct {
+			qi       int
+			qa       locomoQA
+			expected string
+			answer   string
+			jr       judgeResult
+			ansErr   error
+		}
+		results := make([]qaResult, len(qaPairs))
+		sem := make(chan struct{}, evalConcurrency)
+		var wg sync.WaitGroup
+
 		for qi, qa := range qaPairs {
-			expected := qa.AnswerString()
+			results[qi] = qaResult{qi: qi, qa: qa, expected: qa.AnswerString()}
+			wg.Add(1)
+			go func(qi int, qa locomoQA, expected string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
-			prompt := fmt.Sprintf(
-				"Based on the following conversation history, answer the question. "+
-					"Give a short, direct answer (a few words or a short phrase). "+
-					"The conversation may contain summaries of earlier portions — "+
-					"treat summarized content as authoritative. "+
-					"If the question cannot be answered from the conversation, say \"unanswerable\".\n\n"+
-					"Conversation:\n%s\n\nQuestion: %s\nAnswer:",
-				contextStr, qa.Question,
-			)
+				prompt := fmt.Sprintf(
+					"Answer the question from the conversation below. "+
+						"Give a short, direct answer (a few words or a short phrase).\n\n"+
+						"The conversation contains compressed bullet-point summaries with dense shorthand — "+
+						"slashes separate alternatives (e.g. 'counseling/mental health'), abbreviations are common "+
+						"(e.g. 'w/' = with, 'bday' = birthday, 'vol' = volunteer), and facts may be packed into "+
+						"a single line. Read carefully and extract the answer even from terse notation.\n\n"+
+						"Say \"unanswerable\" ONLY if the information is completely absent — not if it requires "+
+						"inference from the available facts.\n\n"+
+						"Conversation:\n%s\n\nQuestion: %s\nAnswer:",
+					contextStr, qa.Question,
+				)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			resp, err := lm.Generate(ctx, fantasy.Call{
-				Prompt: fantasy.Prompt{fantasy.NewUserMessage(prompt)},
-			})
-			cancel()
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				resp, err := lm.Generate(ctx, fantasy.Call{
+					Prompt: fantasy.Prompt{fantasy.NewUserMessage(prompt)},
+				})
+				cancel()
 
-			answer := ""
-			if err != nil {
-				t.Logf("  [%d/%d] ERROR %q: %v", qi+1, len(qaPairs), qa.Question, err)
-			} else {
-				answer = strings.TrimSpace(resp.Content.Text())
-			}
-
-			// Score the answer. Adversarial questions (expected=nil) are scored
-			// differently: any response containing "unanswerable" is correct,
-			// any concrete answer is wrong.
-			var score float64
-			if qa.IsUnanswerable() {
-				if containsCI(answer, "unanswerable") {
-					score = 1.0
-				} else {
-					score = 0.0
+				if err != nil {
+					results[qi].ansErr = err
+					results[qi].jr = judgeResult{Grade: gradeIncorrect, Reason: "answer error: " + err.Error(), Err: true}
+					return
 				}
-			} else {
-				score = f1Score(answer, expected)
+				answer := strings.TrimSpace(resp.Content.Text())
+				results[qi].answer = answer
+
+				judgeCtx, judgeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				results[qi].jr = judgeAnswer(judgeCtx, lm, qa.Question, expected, answer)
+				judgeCancel()
+			}(qi, qa, qa.AnswerString())
+		}
+		wg.Wait()
+
+		// Log results in order and accumulate scores.
+		for _, r := range results {
+			if r.ansErr != nil {
+				t.Logf("  [%d/%d] ERROR %q: %v", r.qi+1, len(qaPairs), r.qa.Question, r.ansErr)
 			}
-			summary.ByCategory[qa.Category] = append(summary.ByCategory[qa.Category], score)
+			if r.jr.Err {
+				summary.JudgeErrs++
+				t.Logf("  [%d/%d] ⚠ JUDGE ERROR (%s) %q — %s",
+					r.qi+1, len(qaPairs), categoryNames[r.qa.Category], r.qa.Question, r.jr.Reason)
+				continue
+			}
+
+			score := r.jr.Grade.Score()
+			summary.ByCategory[r.qa.Category] = append(summary.ByCategory[r.qa.Category], score)
 			summary.Overall = append(summary.Overall, score)
 
-			// Progress: show every question with score and running average.
-			catName := categoryNames[qa.Category]
+			catName := categoryNames[r.qa.Category]
 			marker := "✓"
-			if score < 0.5 {
+			if r.jr.Grade == gradeIncorrect {
 				marker = "✗"
+			} else if r.jr.Grade == gradePartial {
+				marker = "½"
 			}
-			t.Logf("  [%d/%d] %s F1=%.0f%% (%s) %q → got %q (expected %q)",
-				qi+1, len(qaPairs), marker, score*100, catName,
-				qa.Question, truncateStr(answer, 60), truncateStr(expected, 60))
+			t.Logf("  [%d/%d] %s %s (%s) %q → got %q (expected %q) — %s",
+				r.qi+1, len(qaPairs), marker, r.jr.Grade, catName,
+				r.qa.Question, truncateStr(r.answer, 60), truncateStr(r.expected, 60), r.jr.Reason)
 		}
 
 		// Per-conversation running totals.
-		t.Logf("Conv %d done: %d QA pairs, running overall F1=%.1f%%",
+		t.Logf("Conv %d done: %d QA pairs, running overall score=%.1f%%",
 			ci, len(qaPairs), mean(summary.Overall)*100)
 	}
 
