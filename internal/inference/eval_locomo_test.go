@@ -527,10 +527,29 @@ func TestLoCoMo_Compacted(t *testing.T) {
 	t.Logf("\n=== COMPACTED ===\n%s", summary.Report())
 }
 
+// TestLoCoMo_Medium runs 3 conversations with all QA pairs (~500 QA per pass).
+// Gives meaningful signal without the cost of a full 10-conversation run.
+//
+//	go test -tags=online -run TestLoCoMo_Medium -v -count=1 -timeout=60m
+func TestLoCoMo_Medium(t *testing.T) {
+	lm := testLM(t)
+
+	t.Log("=== Running baseline (no compaction) ===")
+	baseline := runEval(t, lm, nil, 3, 0)
+	t.Logf("\n=== BASELINE RESULTS ===\n%s", baseline.Report())
+
+	t.Log("=== Running compacted (production config) ===")
+	compacted := runEval(t, lm, productionEvalConfig, 3, 0)
+	t.Logf("\n=== COMPACTED RESULTS ===\n%s", compacted.Report())
+
+	t.Log("\n=== DELTA (compacted - baseline) ===")
+	reportDelta(t, baseline, compacted)
+}
+
 // TestLoCoMo_Full runs the complete evaluation on all conversations.
 // This is slow (hundreds of LLM calls) — run explicitly with:
 //
-//	go test -tags=online -run TestLoCoMo_Full -v -count=1 -timeout=60m
+//	go test -tags=online -run TestLoCoMo_Full -v -count=1 -timeout=120m
 func TestLoCoMo_Full(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping full LoCoMo eval in short mode")
