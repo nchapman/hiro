@@ -516,21 +516,21 @@ const expandFooter = ` End with: "Expand for details about: <comma-separated lis
 // leafPrompt summarizes raw conversation messages into bullet points.
 const leafPrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. Someone will later use it to answer questions about this conversation. Named entities — people, places, titles, event names — are especially high-value and must be preserved.
 
-Keep: facts, decisions (what AND why), opinions, feelings, motivations (the "why" behind actions), dates, names, numbers, identifiers, personal details. Attribute who said/did/felt what. Copy all named entities, paths, commands, error messages, and numbers verbatim. When a fact contains a list of items or names, preserve ALL elements. Every event must have a date — "when" questions are very common.
+Keep: facts, decisions (what AND why), opinions, feelings, motivations, dates, names, numbers, identifiers, personal details. Attribute who said/did/felt what. Copy all named entities, paths, commands, error messages, and numbers verbatim. When a fact contains a list of items or names, preserve ALL elements. Every event must have a date — "when" questions are very common.
 
 Discard: greetings, filler, pleasantries, and anything already established in an earlier bullet.
 
-Format: one bullet per fact, concise. Convert relative dates using the message timestamps ("yesterday" on 2024-03-15 → 2024-03-14). When a relative date resolves to a specific day, use the resolved date without approximation. Reserve ~ only for genuinely vague references ("recently", "a while ago"). Match the precision of the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. State a person's identity/role once, then use their name only in subsequent bullets. No prose or framing sentences.`
+Format: one bullet per fact, concise, in chronological order. Resolve relative dates from timestamps (e.g. "yesterday" on 2024-03-15 → 2024-03-14); use the resolved date without ~ when it maps to a specific day. Reserve ~ for genuinely vague references ("recently", "a while ago"). Match source precision: YYYY-MM-DD for exact days, Month YYYY for months, YYYY for years. State a person's identity/role once, then use name only. No prose or framing sentences.`
 
 // leafAggressivePrompt is the escalation when normal leaf output exceeds
 // the token target. Same objective, much tighter budget.
-const leafAggressivePrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. You are on a very tight space budget. Named entities — people, places, titles, event names ��� must be preserved even under tight budgets.
+const leafAggressivePrompt = `Objective: Preserve maximum fidelity in minimum words. The original messages will be deleted — your summary is the only record. You are on a very tight space budget. Named entities — people, places, titles, event names — must be preserved even under tight budgets.
 
 Keep: facts, decisions (what AND why), opinions, feelings, motivations, dates, names, numbers, identifiers, personal details. Attribute each fact to its speaker. Copy all named entities, paths, commands, error messages, and numbers verbatim. Preserve ALL elements when a fact is a list. Every event must have a date.
 
 Discard: greetings, filler, restated information, context already established in earlier bullets.
 
-Format: one fact per bullet, ~15 words max. When a relative date resolves to a specific day, use it without ~. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. State a person's identity/role once; use name only after. No prose.`
+Format: one fact per bullet, ~15 words max, in chronological order. Resolve relative dates; use the resolved date without ~ when specific. Match source precision: YYYY-MM-DD, Month YYYY, or YYYY. State a person's identity/role once; use name only after. No prose.`
 
 // --- Depth-aware condensation prompts ---
 //
@@ -544,16 +544,16 @@ Keep: every distinct fact from any input. Merge related facts about the same top
 
 Discard: strict duplicates, redundant phrasing, repeated context (e.g. a person's role restated across inputs — keep it once).
 
-Format: bullet points grouped by person or topic. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. No prose or framing sentences.`
+Format: bullet points grouped by person or topic, chronological within each group. Match source precision: YYYY-MM-DD, Month YYYY, or YYYY. No prose or framing sentences.`
 
 // condenseD1AggressivePrompt is the tight-budget version of D1 condensation.
-const condenseD1AggressivePrompt = `Objective: Merge these conversation summaries with maximum fidelity in minimum words. Your output replaces all inputs — anything you drop becomes permanently unanswerable. Very tight space budget. Named entities must survive.
+const condenseD1AggressivePrompt = `Objective: Merge these conversation summaries into a record with maximum fidelity in minimum words. Your output replaces all inputs — anything you drop becomes permanently unanswerable. Very tight space budget. Named entities must survive.
 
 Keep: every distinct fact. Merge related facts aggressively. Preserve the date for every event. Preserve ALL list elements (names, items, events). Copy identifiers, error messages, paths, and commands verbatim.
 
 Discard: duplicates, redundant phrasing, repeated context.
 
-Format: terse bullet points. Match date precision to the source: YYYY-MM-DD for exact days, Month YYYY for month-level, YYYY for year-level. Don't fabricate precision. No prose.`
+Format: terse bullet points in chronological order. Match source precision: YYYY-MM-DD, Month YYYY, or YYYY. No prose.`
 
 // condenseD2Prompt consolidates session-level summaries into phase-level.
 // At this depth, operational detail matters less — focus on trajectory.
@@ -563,7 +563,7 @@ Keep: decisions still in effect and their rationale. Decisions that evolved — 
 
 Discard: transient session-local mechanics (not active constraints), process scaffolding, intermediate states superseded by later outcomes, identifiers no longer relevant.
 
-Format: bullet points grouped by topic. Include a timeline of key milestones with dates. Match date precision to the source. Don't fabricate precision. No prose or framing sentences.`
+Format: bullet points grouped by topic. Include a timeline of key milestones with dates. Match source precision. No prose or framing sentences.`
 
 // condenseD2AggressivePrompt is the tight-budget version of D2 condensation.
 const condenseD2AggressivePrompt = `Objective: Consolidate session-level summaries — trajectory, outcomes, and durable constraints only. Very tight space budget. Anything you drop becomes permanently unanswerable. Preserve named entities.
