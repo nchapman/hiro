@@ -424,10 +424,10 @@ func summarizationPrompt(depth int, aggressive bool) string {
 		return leafPrompt
 	case depth == 0 && aggressive:
 		return leafAggressivePrompt
-	case depth == 1:
+	case !aggressive:
 		return condensePrompt
 	default:
-		return distillPrompt
+		return condenseAggressivePrompt
 	}
 }
 
@@ -458,22 +458,15 @@ Write concise bullet points grouped by topic. Each bullet = one self-contained f
 
 DO NOT write narrative prose or connecting sentences.
 DO NOT start with "The conversation covered..." or similar framing.
-DO NOT editorialize or add interpretation beyond what was stated.
-
-Example:
-• [2024-03-14] Alice migrated auth from session cookies to JWT tokens
-• Decision: Use Redis for session store — need multi-instance support
-• Bob visited Rome in 2023, prefers PostgreSQL + pgx driver
-• Error: "connection refused on port 5432" — resolved by starting Docker
-• Alice plans to add rate limiting next sprint`
+DO NOT editorialize or add interpretation beyond what was stated.`
 
 // leafAggressivePrompt is the escalation when normal leaf output exceeds
-// the token target. Aims for maximum compression while retaining key facts.
+// the token target. Re-extracts from source with tighter constraints.
 const leafAggressivePrompt = `You are a conversation compressor. Extract only the essential facts as terse bullet points.
 
 Rules:
 1. Convert all relative dates to absolute dates using the timestamps shown.
-2. KEEP: decisions (what + why), outcomes, names, dates, file paths, error messages, quantities, personal details (identity, relationships, plans).
+2. KEEP: decisions (what + why), outcomes, names, dates, file paths, error messages, version numbers, quantities, personal details (identity, relationships, plans).
 3. DROP: discussion, reasoning, greetings, exploration that led nowhere, pleasantries.
 4. Each bullet: one fact, max ~15 words. No narrative, no framing sentences.`
 
@@ -490,14 +483,11 @@ const condensePrompt = `You are merging conversation summaries into a unified re
 
 Write concise bullet points. Do not add narrative framing. Density matters more than brevity — include every fact from the inputs.`
 
-// distillPrompt produces the highest-level overview from depth-2+ summaries.
-const distillPrompt = `Distill these summaries into a compact factual record. Preserve:
-- All dates, names, identifiers, quantities, and file paths
-- Key decisions with their rationale
-- Personal details (identity, relationships, preferences, plans)
-- Current state and unresolved items
+// condenseAggressivePrompt is the escalation for condensation.
+const condenseAggressivePrompt = `Compress these conversation summaries into a compact factual record.
 
-Use terse bullet points. Drop narrative structure but keep every specific fact and technical detail.`
+Keep all dates, names, file paths, identifiers, quantities, decisions with rationale, and personal details.
+Merge related facts aggressively. Terse bullet points only.`
 
 func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder

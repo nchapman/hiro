@@ -311,7 +311,7 @@ func TestSummarizationPrompt_Variants(t *testing.T) {
 		{0, false, "fact extractor"},
 		{0, true, "conversation compressor"},
 		{1, false, "merging conversation summaries"},
-		{2, false, "Distill these summaries"},
+		{1, true, "Compress these conversation summaries"},
 	}
 	for _, tt := range tests {
 		got := summarizationPrompt(tt.depth, tt.aggressive)
