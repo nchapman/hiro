@@ -36,6 +36,12 @@ type locomoQA struct {
 	AdversarialAnswer string      `json:"adversarial_answer,omitempty"`
 }
 
+// IsUnanswerable returns true for adversarial questions where the expected
+// answer is nil (JSON null) — meaning the question has no valid answer.
+func (q locomoQA) IsUnanswerable() bool {
+	return q.Answer == nil
+}
+
 func (q locomoQA) AnswerString() string {
 	switch v := q.Answer.(type) {
 	case string:
@@ -45,6 +51,8 @@ func (q locomoQA) AnswerString() string {
 			return fmt.Sprintf("%d", int(v))
 		}
 		return fmt.Sprintf("%g", v)
+	case nil:
+		return "unanswerable"
 	default:
 		return fmt.Sprintf("%v", v)
 	}
@@ -456,7 +464,19 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 				answer = strings.TrimSpace(resp.Content.Text())
 			}
 
-			score := f1Score(answer, expected)
+			// Score the answer. Adversarial questions (expected=nil) are scored
+			// differently: any response containing "unanswerable" is correct,
+			// any concrete answer is wrong.
+			var score float64
+			if qa.IsUnanswerable() {
+				if containsCI(answer, "unanswerable") {
+					score = 1.0
+				} else {
+					score = 0.0
+				}
+			} else {
+				score = f1Score(answer, expected)
+			}
 			summary.ByCategory[qa.Category] = append(summary.ByCategory[qa.Category], score)
 			summary.Overall = append(summary.Overall, score)
 
