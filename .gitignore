@@ -37,3 +37,4 @@ Thumbs.db
 coverage.out
 *.test
 internal/inference/testdata/locomo10.json
+internal/inference/testdata/eval-output/

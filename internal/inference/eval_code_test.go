@@ -301,6 +301,9 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 			}
 			t.Logf("Conv %d: %d msgs → %d messages + %d summaries (depth %d), %d → %d est tokens (%.0f%% reduction)",
 				ci, msgIdx, msgCount, sumCount, maxDepth, preTokens, postTokens, reduction)
+
+			// Write summaries to files for qualitative inspection.
+			dumpSummaries(t, pdb, sessionID, "code", ci)
 		}
 
 		// Assemble context.

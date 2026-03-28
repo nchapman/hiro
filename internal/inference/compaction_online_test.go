@@ -21,6 +21,12 @@ import (
 
 // testLM creates a real language model from .env for online tests.
 // Returns nil and skips the test if credentials are not available.
+//
+// The model can be overridden with EVAL_MODEL env var, allowing parallel
+// runs with different models:
+//
+//	EVAL_MODEL=x-ai/grok-4.1-fast go test -tags=online -run TestLoCoMo_Full ...
+//	EVAL_MODEL=anthropic/claude-sonnet-4 go test -tags=online -run TestLoCoMo_Full ...
 func testLM(t *testing.T) fantasy.LanguageModel {
 	t.Helper()
 
@@ -35,6 +41,11 @@ func testLM(t *testing.T) fantasy.LanguageModel {
 	apiKey := os.Getenv("HIVE_API_KEY")
 	model := os.Getenv("HIVE_MODEL")
 
+	// EVAL_MODEL overrides HIVE_MODEL, allowing parallel eval runs.
+	if em := os.Getenv("EVAL_MODEL"); em != "" {
+		model = em
+	}
+
 	if apiKey == "" {
 		t.Skip("HIVE_API_KEY not set — skipping online test")
 	}
@@ -44,6 +55,8 @@ func testLM(t *testing.T) fantasy.LanguageModel {
 	if model == "" {
 		t.Skip("HIVE_MODEL not set — skipping online test")
 	}
+
+	t.Logf("Using model: %s (provider: %s)", model, provider)
 
 	// For now, only openrouter is supported in the online test.
 	// This avoids importing the agent package (which imports inference → cycle).
@@ -60,6 +73,25 @@ func testLM(t *testing.T) fantasy.LanguageModel {
 		t.Fatalf("creating language model: %v", err)
 	}
 	return lm
+}
+
+// testModelName returns the model name for use in output file paths.
+func testModelName(t *testing.T) string {
+	t.Helper()
+	for _, rel := range []string{"../../.env", "../../../.env"} {
+		if abs, err := filepath.Abs(rel); err == nil {
+			godotenv.Load(abs)
+		}
+	}
+	model := os.Getenv("EVAL_MODEL")
+	if model == "" {
+		model = os.Getenv("HIVE_MODEL")
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	// Sanitize for filesystem: replace / with _
+	return strings.ReplaceAll(model, "/", "_")
 }
 
 // TestOnline_LeafCompaction verifies that the full compaction pipeline produces

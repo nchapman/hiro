@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+
+	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 )
 
 // --- LoCoMo dataset types ---
@@ -303,6 +305,9 @@ type evalConfigFunc func(preTokens, numTurns int) *CompactionConfig
 // configFn, when non-nil, is called per conversation with the estimated token
 // count and turn count. It returns a CompactionConfig for that conversation.
 // When configFn is nil, no compaction is performed (baseline).
+//
+// When compaction is enabled, all generated summaries are written to
+// testdata/eval-output/<model>/ for qualitative inspection.
 func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, maxConvos, maxQAPerConvo int) evalSummary {
 	t.Helper()
 	convos := loadLoCoMo(t)
@@ -395,6 +400,9 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 			}
 			t.Logf("Conv %d: %d turns → %d messages + %d summaries (depth %d), %d → %d est tokens (%.0f%% reduction)",
 				ci, len(turns), msgCount, sumCount, maxDepth, preTokens, postTokens, reduction)
+
+			// Write summaries to files for qualitative inspection.
+			dumpSummaries(t, pdb, sessionID, "locomo", ci)
 		}
 
 		// Assemble context.
@@ -607,6 +615,67 @@ func reportDelta(t *testing.T, baseline, compacted evalSummary) {
 	bOverall := mean(baseline.Overall)
 	cOverall := mean(compacted.Overall)
 	t.Logf("  Overall: %+.1f%%", (cOverall-bOverall)*100)
+}
+
+// dumpSummaries writes all summaries for a session to testdata/eval-output/<model>/
+// so they can be reviewed for qualitative quality.
+func dumpSummaries(t *testing.T, pdb *platformdb.DB, sessionID, evalName string, convIdx int) {
+	t.Helper()
+
+	modelName := testModelName(t)
+	dir := filepath.Join("testdata", "eval-output", modelName)
+	os.MkdirAll(dir, 0o755)
+
+	items, err := pdb.GetContextItems(sessionID)
+	if err != nil {
+		t.Logf("warning: could not get context items for summary dump: %v", err)
+		return
+	}
+
+	outPath := filepath.Join(dir, fmt.Sprintf("%s-conv%d.md", evalName, convIdx))
+	var buf strings.Builder
+
+	fmt.Fprintf(&buf, "# %s — Conversation %d\n\n", evalName, convIdx)
+	fmt.Fprintf(&buf, "Model: `%s`\n\n", modelName)
+
+	// Write context item order (shows how summaries and messages interleave).
+	fmt.Fprintf(&buf, "## Context Items (%d total)\n\n", len(items))
+	msgCount, sumCount := 0, 0
+	for _, item := range items {
+		if item.ItemType == "message" {
+			msgCount++
+		} else {
+			sumCount++
+		}
+	}
+	fmt.Fprintf(&buf, "%d messages + %d summaries\n\n", msgCount, sumCount)
+
+	// Write each summary with full content.
+	fmt.Fprintf(&buf, "## Summaries\n\n")
+	sumIdx := 0
+	for _, item := range items {
+		if item.ItemType != "summary" || item.SummaryID == nil {
+			continue
+		}
+		sum, err := pdb.GetSummary(*item.SummaryID)
+		if err != nil {
+			fmt.Fprintf(&buf, "### Summary %d (ERROR: %v)\n\n", sumIdx, err)
+			continue
+		}
+		sumIdx++
+		fmt.Fprintf(&buf, "### Summary %d — %s (depth %d)\n\n", sumIdx, sum.ID, sum.Depth)
+		fmt.Fprintf(&buf, "- Kind: %s\n", sum.Kind)
+		fmt.Fprintf(&buf, "- Tokens: %d (source: %d, %.1fx compression)\n", sum.Tokens, sum.SourceTokens,
+			float64(sum.SourceTokens)/max(float64(sum.Tokens), 1))
+		fmt.Fprintf(&buf, "- Time range: %s to %s\n\n", sum.EarliestAt.Format("2006-01-02 15:04"), sum.LatestAt.Format("2006-01-02 15:04"))
+		fmt.Fprintf(&buf, "```\n%s\n```\n\n", sum.Content)
+	}
+
+	if err := os.WriteFile(outPath, []byte(buf.String()), 0o644); err != nil {
+		t.Logf("warning: could not write summary dump: %v", err)
+		return
+	}
+	t.Logf("Summaries written to %s", outPath)
 }
 
 // parseLoCoMoDate parses LoCoMo's date format: "1:56 pm on 8 May, 2023".
