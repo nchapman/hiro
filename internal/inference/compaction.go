@@ -140,11 +140,11 @@ func compactionConfigForWindow(contextWindow int) CompactionConfig {
 		ContextWindow:        contextWindow,
 		SoftThreshold:        0.60,
 		HardThreshold:        0.85,
-		TokenBudget:          min(max(1_000, contextWindow*9/10), 350_000),
+		TokenBudget:          min(max(1_000, contextWindow*9/10), 350_000), // above hard cap (300K)
 		FreshTailCount:       max(20, contextWindow/10_000),
 		LeafChunkTokens:      clamp(500, contextWindow/10, 20_000),
 		LeafTargetTokens:     clamp(200, contextWindow/50, 4_000),
-		CondenseTargetTokens: clamp(400, contextWindow*4/100, 8_000),
+		CondenseTargetTokens: clamp(400, contextWindow/25, 8_000),
 		LeafMinFanout:        4,
 		CondenseMinFanout:    clamp(3, contextWindow/100_000, 6),
 	}
