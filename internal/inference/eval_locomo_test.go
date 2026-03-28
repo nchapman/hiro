@@ -284,20 +284,26 @@ func mean(vals []float64) float64 {
 	return sum / float64(len(vals))
 }
 
+// evalConfigFunc generates a compaction config for a specific conversation.
+// Receives the pre-compaction estimated token count and number of dialog turns.
+// Return nil to skip compaction for that conversation (baseline mode).
+type evalConfigFunc func(preTokens, numTurns int) *CompactionConfig
+
 // runEval runs the LoCoMo QA evaluation.
 //
 // For each conversation:
 //  1. Flatten dialog turns into messages and store in the platform DB
-//  2. If compact=true, run compaction to compress the conversation
+//  2. If configFn returns a config, run compaction to compress the conversation
 //  3. Assemble context from the (possibly compacted) DB
 //  4. For each QA pair, ask the LLM the question with the assembled context
 //  5. Score the answer against ground truth using F1 partial match
 //
 // maxConvos limits the number of conversations to evaluate (0 = all).
 // maxQAPerConvo limits QA pairs per conversation (0 = all).
-// compactCfg, when non-nil, specifies the compaction configuration to use.
-// When nil, no compaction is performed (baseline).
-func runEval(t *testing.T, lm fantasy.LanguageModel, compactCfg *CompactionConfig, maxConvos, maxQAPerConvo int) evalSummary {
+// configFn, when non-nil, is called per conversation with the estimated token
+// count and turn count. It returns a CompactionConfig for that conversation.
+// When configFn is nil, no compaction is performed (baseline).
+func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, maxConvos, maxQAPerConvo int) evalSummary {
 	t.Helper()
 	convos := loadLoCoMo(t)
 
@@ -337,14 +343,18 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compactCfg *CompactionConfi
 			}
 		}
 
-		// Optionally compact. We run multiple rounds to simulate aggressive
-		// compaction like a long-running session would experience, driving
-		// the context through leaf passes and condensation.
+		// Optionally compact. We run multiple rounds to simulate compaction
+		// as a long-running session would experience, driving the context
+		// through leaf passes and condensation.
+		preTokens, _ := pdb.ContextTokenCount(sessionID)
+		var compactCfg *CompactionConfig
+		if configFn != nil {
+			compactCfg = configFn(preTokens, len(turns))
+		}
 		if compactCfg != nil {
 			cfg := *compactCfg
 
 			summarizer := &lmSummarizer{lm: lm}
-			preTokens, _ := pdb.ContextTokenCount(sessionID)
 			estimated := preTokens
 
 			// Run compaction repeatedly until stable (simulating multiple turns
@@ -474,30 +484,38 @@ func TestLoCoMo_Baseline(t *testing.T) {
 	t.Logf("\n=== BASELINE (no compaction) ===\n%s", summary.Report())
 }
 
-// evalCompactionConfig returns a compaction config for eval with the context
-// window set to match the actual content size. This ensures the proportional
-// scaling in compactionConfigForWindow produces appropriate chunk/target sizes
-// for the conversation being tested — the same ratios that would apply in
-// production when the context window is actually full.
-func evalCompactionConfig(estimatedTokens int) *CompactionConfig {
-	// Treat the conversation as filling most of the "window" so compaction
-	// behaves as it would in production when context pressure is real.
-	window := max(estimatedTokens*2, 1_000) // give some headroom
+// productionEvalConfig returns a per-conversation config that simulates
+// realistic production compaction. The context window is sized so the
+// conversation fills ~65% of it — just above the soft threshold (60%).
+// This means compaction fires once, reduces content by 30-50%, then the
+// next round sees tokens below the soft threshold and stops.
+//
+// This contrasts with stress-test configs (used in CompressionLevels) that
+// force compaction with SoftThreshold=0.01 and run until tokens are crushed.
+func productionEvalConfig(preTokens, numTurns int) *CompactionConfig {
+	// Size window so content fills ~65% — just above soft threshold (60%).
+	window := max(preTokens*100/65, 1_000)
 	cfg := compactionConfigForWindow(window)
-	cfg.SoftThreshold = 0.01 // force compaction for eval
-	cfg.FreshTailCount = 4   // smaller tail for eval (conversations are shorter)
+	// Use production thresholds — after one compaction round, tokens drop
+	// below soft threshold and further rounds don't trigger.
+	//
+	// LoCoMo messages are very short (~37 tokens each). In production, 20
+	// messages of real assistant output would be 10-30K tokens (~15-25% of
+	// content). To simulate the same proportion, protect ~20% of messages.
+	cfg.FreshTailCount = max(20, numTurns/5)
 	return &cfg
 }
 
 // TestLoCoMo_Compacted runs the QA eval after compaction.
-// This measures how much information survives the compaction pipeline.
+// This measures how much information survives the compaction pipeline
+// under realistic production conditions (single compaction cycle).
 func TestLoCoMo_Compacted(t *testing.T) {
 	lm := testLM(t)
 
 	// Run on first 2 conversations, 20 QA per convo for a quick smoke test.
-	// Pass nil config — runEval will compute per-conversation configs based on content size.
-	cfg := evalCompactionConfig(15_000) // ~15K tokens is typical for LoCoMo conversations
-	summary := runEval(t, lm, cfg, 2, 20)
+	// Per-conversation config sizes the window to match each conversation's
+	// actual content, simulating production compaction behavior.
+	summary := runEval(t, lm, productionEvalConfig, 2, 20)
 	t.Logf("\n=== COMPACTED ===\n%s", summary.Report())
 }
 
@@ -515,8 +533,8 @@ func TestLoCoMo_Full(t *testing.T) {
 	baseline := runEval(t, lm, nil, 0, 0)
 	t.Logf("\n=== BASELINE RESULTS ===\n%s", baseline.Report())
 
-	t.Log("=== Running compacted ===")
-	compacted := runEval(t, lm, evalCompactionConfig(15_000), 0, 0)
+	t.Log("=== Running compacted (production config) ===")
+	compacted := runEval(t, lm, productionEvalConfig, 0, 0)
 	t.Logf("\n=== COMPACTED RESULTS ===\n%s", compacted.Report())
 
 	// Report delta.
@@ -534,17 +552,19 @@ func TestLoCoMo_CompressionLevels(t *testing.T) {
 	}
 	lm := testLM(t)
 
-	// Each level uses a different context window relative to the content
-	// size (~15K tokens). Smaller window = more compression needed.
-	// All other parameters scale proportionally via compactionConfigForWindow.
+	// Each level scales the window relative to actual content size per
+	// conversation. Smaller multiplier = more compression needed. All
+	// parameters scale proportionally via compactionConfigForWindow.
+	// These use forced compaction (SoftThreshold=0.01) to stress-test
+	// quality at each compression level.
 	levels := []struct {
-		name   string
-		window int // context window size
+		name       string
+		multiplier float64 // window = content * multiplier
 	}{
-		{"light (2x headroom)", 30_000},  // 15K content in 30K window
-		{"medium (1.5x)", 22_000},        // moderate pressure
-		{"heavy (1.2x)", 18_000},         // tight fit
-		{"extreme (0.8x)", 12_000},       // must compress below content size
+		{"light (2x headroom)", 2.0},
+		{"medium (1.5x)", 1.5},
+		{"heavy (1.2x)", 1.2},
+		{"extreme (0.8x)", 0.8}, // must compress below content size
 	}
 
 	// Use 3 conversations, all QA pairs for meaningful signal.
@@ -555,12 +575,17 @@ func TestLoCoMo_CompressionLevels(t *testing.T) {
 	t.Logf("\n=== BASELINE ===\n%s", baseline.Report())
 
 	for _, level := range levels {
-		cfg := compactionConfigForWindow(level.window)
-		cfg.SoftThreshold = 0.01
-		cfg.FreshTailCount = 4
+		mult := level.multiplier
+		configFn := func(preTokens, numTurns int) *CompactionConfig {
+			window := max(int(float64(preTokens)*mult), 1_000)
+			cfg := compactionConfigForWindow(window)
+			cfg.SoftThreshold = 0.01 // force compaction every round
+			cfg.FreshTailCount = max(10, numTurns/10)
+			return &cfg
+		}
 
-		t.Logf("\n=== Running %s compression (window=%dK) ===", level.name, level.window/1000)
-		result := runEval(t, lm, &cfg, maxConvos, 0)
+		t.Logf("\n=== Running %s compression ===", level.name)
+		result := runEval(t, lm, configFn, maxConvos, 0)
 		t.Logf("\n=== %s RESULTS ===\n%s", strings.ToUpper(level.name), result.Report())
 		reportDelta(t, baseline, result)
 	}
