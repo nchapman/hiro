@@ -486,6 +486,53 @@ func TestSummarizeWithEscalation_FallbackTruncation(t *testing.T) {
 	}
 }
 
+func TestCompactionConfigScaling(t *testing.T) {
+	tests := []struct {
+		window         int
+		wantChunk      int
+		wantLeafTarget int
+		wantCondTarget int
+		wantTail       int
+		wantCondFanout int
+		wantSoft       int
+		wantHard       int
+		wantBudget     int
+	}{
+		{32_000, 3_200, 640, 1_280, 20, 3, 19_200, 27_200, 28_800},          // small: linear scaling
+		{200_000, 20_000, 4_000, 8_000, 20, 3, 120_000, 170_000, 180_000},   // reference: caps equal linear
+		{500_000, 20_000, 4_000, 8_000, 50, 5, 200_000, 300_000, 350_000},   // large: all caps active
+		{1_000_000, 20_000, 4_000, 8_000, 100, 6, 200_000, 300_000, 350_000}, // 1M: capped
+		{2_000_000, 20_000, 4_000, 8_000, 200, 6, 200_000, 300_000, 350_000}, // 2M: capped
+	}
+	for _, tt := range tests {
+		cfg := compactionConfigForWindow(tt.window)
+		if cfg.LeafChunkTokens != tt.wantChunk {
+			t.Errorf("window=%d: LeafChunkTokens=%d, want %d", tt.window, cfg.LeafChunkTokens, tt.wantChunk)
+		}
+		if cfg.LeafTargetTokens != tt.wantLeafTarget {
+			t.Errorf("window=%d: LeafTargetTokens=%d, want %d", tt.window, cfg.LeafTargetTokens, tt.wantLeafTarget)
+		}
+		if cfg.CondenseTargetTokens != tt.wantCondTarget {
+			t.Errorf("window=%d: CondenseTargetTokens=%d, want %d", tt.window, cfg.CondenseTargetTokens, tt.wantCondTarget)
+		}
+		if cfg.FreshTailCount != tt.wantTail {
+			t.Errorf("window=%d: FreshTailCount=%d, want %d", tt.window, cfg.FreshTailCount, tt.wantTail)
+		}
+		if cfg.CondenseMinFanout != tt.wantCondFanout {
+			t.Errorf("window=%d: CondenseMinFanout=%d, want %d", tt.window, cfg.CondenseMinFanout, tt.wantCondFanout)
+		}
+		if soft := cfg.SoftThresholdTokens(); soft != tt.wantSoft {
+			t.Errorf("window=%d: SoftThresholdTokens=%d, want %d", tt.window, soft, tt.wantSoft)
+		}
+		if hard := cfg.HardThresholdTokens(); hard != tt.wantHard {
+			t.Errorf("window=%d: HardThresholdTokens=%d, want %d", tt.window, hard, tt.wantHard)
+		}
+		if cfg.TokenBudget != tt.wantBudget {
+			t.Errorf("window=%d: TokenBudget=%d, want %d", tt.window, cfg.TokenBudget, tt.wantBudget)
+		}
+	}
+}
+
 func TestGenerateSummaryID(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 100; i++ {

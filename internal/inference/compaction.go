@@ -77,13 +77,17 @@ type CompactionConfig struct {
 }
 
 // SoftThresholdTokens returns the absolute token count for the soft threshold.
+// Capped at 200K — beyond this, models show diminishing returns on synthesis
+// tasks and compacted context outperforms raw messages.
 func (c CompactionConfig) SoftThresholdTokens() int {
-	return int(float64(c.ContextWindow) * c.SoftThreshold)
+	return min(int(float64(c.ContextWindow)*c.SoftThreshold), 200_000)
 }
 
 // HardThresholdTokens returns the absolute token count for the hard threshold.
+// Capped at 300K to maintain a 100K gap above the soft cap for async
+// compaction to complete during normal conversation flow.
 func (c CompactionConfig) HardThresholdTokens() int {
-	return int(float64(c.ContextWindow) * c.HardThreshold)
+	return min(int(float64(c.ContextWindow)*c.HardThreshold), 300_000)
 }
 
 // DefaultCompactionConfig returns reasonable defaults for a 200K context window.
@@ -99,18 +103,35 @@ func CompactionConfigForModel(model string) CompactionConfig {
 }
 
 // compactionConfigForWindow builds a config where all parameters are derived
-// from the context window size. This ensures consistent compression ratios
-// and behavior across models of any size.
+// from the context window size.
 //
-// The key ratios:
-//   - Leaf chunk: 10% of window — how much to grab per summarization pass
-//   - Leaf target: 2% of window — ~5:1 compression at leaf level
-//   - Condense target: 4% of window — ~2.5:1 compression when combining summaries
-//   - Token budget: 90% of window — loose assembly safety net
+// Summarization-quality parameters (chunk size, target tokens) scale linearly
+// up to 200K then hard-cap. Beyond 200K, larger windows produce more leaves
+// and deeper trees rather than bigger individual summaries — summarization
+// quality degrades with input length regardless of model capacity.
 //
-// At 200K: chunk=20K, leaf_target=4K, condense_target=8K
-// At  32K: chunk=3.2K, leaf_target=640, condense_target=1.3K
-// At   1M: chunk=100K, leaf_target=20K, condense_target=40K
+// Structural parameters (tail size, condense fanout) continue scaling so
+// larger windows get proportionally more perfect-recall and shallower trees.
+//
+// Quality-bounded (cap at 200K):
+//   - Leaf chunk:      min(20K, window/10)  — input per summarization call
+//   - Leaf target:     min(4K,  window/50)  — ~5:1 compression at leaf level
+//   - Condense target: min(8K,  window*4%)  — ~2.5:1 when combining summaries
+//
+// Structural (scale with window):
+//   - Fresh tail:       max(20, window/10K) — perfect-recall message count
+//   - Condense fanout:  clamp(3, window/100K, 6) — wider trees at large windows
+//   - Token budget:     min(90% of window, 350K) — assembly safety net above hard cap
+//
+// Threshold caps (applied in SoftThresholdTokens/HardThresholdTokens):
+//   - Soft:  min(60% of window, 200K) — synthesis quality knee
+//   - Hard:  min(85% of window, 300K) — 100K gap for async compaction
+//   - Budget: min(90% of window, 350K) — just above hard cap
+//
+// At  32K: chunk=3.2K, leaf=640,  condense=1.3K, tail=20,  fanout=3, soft=19K,  hard=27K
+// At 200K: chunk=20K,  leaf=4K,   condense=8K,   tail=20,  fanout=3, soft=120K, hard=170K
+// At   1M: chunk=20K,  leaf=4K,   condense=8K,   tail=100, fanout=6, soft=200K, hard=300K
+// At   2M: chunk=20K,  leaf=4K,   condense=8K,   tail=200, fanout=6, soft=200K, hard=300K
 func compactionConfigForWindow(contextWindow int) CompactionConfig {
 	if contextWindow <= 0 {
 		contextWindow = 200_000
@@ -119,13 +140,13 @@ func compactionConfigForWindow(contextWindow int) CompactionConfig {
 		ContextWindow:        contextWindow,
 		SoftThreshold:        0.60,
 		HardThreshold:        0.85,
-		TokenBudget:          max(1_000, contextWindow*9/10),
-		FreshTailCount:       20,
-		LeafChunkTokens:      max(500, contextWindow/10),
-		LeafTargetTokens:     max(200, contextWindow/50),
-		CondenseTargetTokens: max(400, contextWindow*4/100),
+		TokenBudget:          min(max(1_000, contextWindow*9/10), 350_000),
+		FreshTailCount:       max(20, contextWindow/10_000),
+		LeafChunkTokens:      clamp(500, contextWindow/10, 20_000),
+		LeafTargetTokens:     clamp(200, contextWindow/50, 4_000),
+		CondenseTargetTokens: clamp(400, contextWindow*4/100, 8_000),
 		LeafMinFanout:        4,
-		CondenseMinFanout:    3,
+		CondenseMinFanout:    clamp(3, contextWindow/100_000, 6),
 	}
 }
 
@@ -616,6 +637,17 @@ func buildCondensationInput(sums []platformdb.Summary) string {
 		)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// clamp returns v clamped to [lo, hi].
+func clamp(lo, v, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // truncateAtBullet truncates content at the last complete bullet point that
