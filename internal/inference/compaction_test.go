@@ -255,6 +255,53 @@ func TestCompactIfNeeded_FallsBackToEstimatesWhenNoAPIData(t *testing.T) {
 	}
 }
 
+func TestCompactIfNeeded_CondensationFiresAfterLeafPasses(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	cfg := CompactionConfig{
+		ContextWindow:        10_000,
+		SoftThreshold:        0.01, // force compaction
+		HardThreshold:        0.85,
+		TokenBudget:          9_000,
+		FreshTailCount:       2,
+		LeafChunkTokens:      500, // must be >= LeafMinFanout * per-message tokens
+		LeafTargetTokens:     50,
+		CondenseTargetTokens: 100,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    3,
+	}
+
+	// Add 30 messages — enough for multiple leaf passes that produce 3+
+	// adjacent summaries, which should trigger condensation.
+	for i := 0; i < 30; i++ {
+		appendMsg(t, pdb, "s1", "user", "message for condensation test", 100)
+	}
+
+	// Provide enough canned summaries for leaf passes + condensation.
+	summarizer := &fakeSummarizer{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	compactor := NewCompactor(pdb, "s1", summarizer, cfg, logger)
+
+	_, err := compactor.CompactIfNeeded(context.Background(), 500)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded: %v", err)
+	}
+
+	maxDepth, err := pdb.MaxSummaryDepth("s1")
+	if err != nil {
+		t.Fatalf("MaxSummaryDepth: %v", err)
+	}
+	if maxDepth < 1 {
+		// Log context items for debugging.
+		items, _ := pdb.GetContextItems("s1")
+		for _, item := range items {
+			t.Logf("  ordinal=%d type=%s msg=%v sum=%v", item.Ordinal, item.ItemType, item.MessageID, item.SummaryID)
+		}
+		t.Errorf("expected condensation (depth >= 1), got max depth %d", maxDepth)
+	}
+}
+
 func TestSummarizationPrompt_Variants(t *testing.T) {
 	tests := []struct {
 		depth      int

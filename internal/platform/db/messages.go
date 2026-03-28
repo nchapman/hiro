@@ -420,60 +420,55 @@ func (d *DB) OldestMessageContextItems(sessionID string, tailSize, maxTokens int
 	return items, msgs, rows.Err()
 }
 
-// ContiguousSummariesAtDepth returns the oldest contiguous run of summaries
-// at the given depth for a session.
+// ContiguousSummariesAtDepth returns the longest run of summaries at the given
+// depth that are adjacent in the context ordering — no other context items
+// (messages or summaries at other depths) exist between them.
+//
+// Note: adjacency is determined by context position, not by ordinal arithmetic.
+// After ReplaceContextItems, ordinals have gaps (e.g., summaries at ordinals
+// 5 and 21 with nothing between them are adjacent even though 5+1 != 21).
 func (d *DB) ContiguousSummariesAtDepth(sessionID string, depth, minCount int) ([]ContextItem, []Summary, error) {
-	rows, err := d.db.Query(`
-		SELECT ci.session_id, ci.ordinal, ci.item_type, ci.message_id, ci.summary_id,
-		       s.id, s.session_id, s.kind, s.depth, s.content, s.tokens,
-		       s.earliest_at, s.latest_at, s.source_tokens, s.model, s.created_at
-		FROM context_items ci
-		JOIN summaries s ON ci.summary_id = s.id
-		WHERE ci.session_id = ? AND ci.item_type = 'summary' AND s.depth = ?
-		ORDER BY ci.ordinal ASC
-	`, sessionID, depth)
+	// Fetch all context items to determine adjacency, then filter to
+	// summaries at the target depth. Two summaries are adjacent if no
+	// other context items appear between their positions in the full list.
+	allCI, err := d.GetContextItems(sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
 
-	var allItems []ContextItem
-	var allSums []Summary
-
-	for rows.Next() {
-		var ci ContextItem
-		var sum Summary
-		var earliest, latest, created string
-		var model sql.NullString
-		if err := rows.Scan(
-			&ci.SessionID, &ci.Ordinal, &ci.ItemType, &ci.MessageID, &ci.SummaryID,
-			&sum.ID, &sum.SessionID, &sum.Kind, &sum.Depth, &sum.Content, &sum.Tokens,
-			&earliest, &latest, &sum.SourceTokens, &model, &created,
-		); err != nil {
-			return nil, nil, err
-		}
-		sum.EarliestAt = parseTimeLayout(time.RFC3339, earliest)
-		sum.LatestAt = parseTimeLayout(time.RFC3339, latest)
-		sum.CreatedAt = parseTime(created)
-		if model.Valid {
-			sum.Model = model.String
-		}
-		allItems = append(allItems, ci)
-		allSums = append(allSums, sum)
+	// Build a list of indices into allCI that are summaries at the target depth.
+	// We need to fetch the summary data for depth checking.
+	type candidate struct {
+		posInContext int // index in allCI
+		ci           ContextItem
+		sum          Summary
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
+	var candidates []candidate
+
+	for idx, ci := range allCI {
+		if ci.ItemType != "summary" || ci.SummaryID == nil {
+			continue
+		}
+		sum, err := d.GetSummary(*ci.SummaryID)
+		if err != nil {
+			continue
+		}
+		if sum.Depth != depth {
+			continue
+		}
+		candidates = append(candidates, candidate{posInContext: idx, ci: ci, sum: sum})
 	}
 
-	if len(allItems) < minCount {
+	if len(candidates) < minCount {
 		return nil, nil, nil
 	}
 
-	// Find longest contiguous run by ordinal.
+	// Find longest run where candidates are adjacent in context position
+	// (no other context items between them).
 	bestStart, bestLen := 0, 1
 	curStart, curLen := 0, 1
-	for i := 1; i < len(allItems); i++ {
-		if allItems[i].Ordinal == allItems[i-1].Ordinal+1 {
+	for i := 1; i < len(candidates); i++ {
+		if candidates[i].posInContext == candidates[i-1].posInContext+1 {
 			curLen++
 		} else {
 			curStart = i
@@ -489,7 +484,14 @@ func (d *DB) ContiguousSummariesAtDepth(sessionID string, depth, minCount int) (
 		return nil, nil, nil
 	}
 
-	return allItems[bestStart : bestStart+bestLen], allSums[bestStart : bestStart+bestLen], nil
+	run := candidates[bestStart : bestStart+bestLen]
+	items := make([]ContextItem, len(run))
+	sums := make([]Summary, len(run))
+	for i, c := range run {
+		items[i] = c.ci
+		sums[i] = c.sum
+	}
+	return items, sums, nil
 }
 
 // MaxSummaryDepth returns the maximum depth of any summary in context_items
