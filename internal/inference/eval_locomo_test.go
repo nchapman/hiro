@@ -122,21 +122,10 @@ func flattenConversation(conv locomoConversation) []dialogTurn {
 			continue
 		}
 
-		// Parse session date.
+		// Parse session date. LoCoMo uses "1:56 pm on 8 May, 2023" format.
 		var sessionTime time.Time
 		if dateStr, ok := convo[dateKey].(string); ok {
-			// Try common formats.
-			for _, layout := range []string{
-				"2 January, 2006",
-				"January 2, 2006",
-				"2006-01-02",
-				"2 Jan 2006",
-			} {
-				if t, err := time.Parse(layout, dateStr); err == nil {
-					sessionTime = t
-					break
-				}
-			}
+			sessionTime = parseLoCoMoDate(dateStr)
 		}
 
 		// Parse turns in this session.
@@ -145,7 +134,7 @@ func flattenConversation(conv locomoConversation) []dialogTurn {
 			continue
 		}
 
-		for _, turnRaw := range sessionArr {
+		for turnIdx, turnRaw := range sessionArr {
 			turnMap, ok := turnRaw.(map[string]interface{})
 			if !ok {
 				continue
@@ -155,6 +144,9 @@ func flattenConversation(conv locomoConversation) []dialogTurn {
 			if text == "" {
 				continue
 			}
+
+			// Offset each turn within the session by 1 minute for ordering.
+			turnTime := sessionTime.Add(time.Duration(turnIdx) * time.Minute)
 
 			// Map speaker names to roles for clarity.
 			role := speaker
@@ -168,7 +160,7 @@ func flattenConversation(conv locomoConversation) []dialogTurn {
 				Speaker:   role,
 				Text:      text,
 				SessionID: i,
-				Timestamp: sessionTime,
+				Timestamp: turnTime,
 			})
 		}
 	}
@@ -326,18 +318,20 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 		sessionID := fmt.Sprintf("eval-%d", ci)
 		createTestSession(t, pdb, sessionID)
 
-		// Ingest all dialog turns as alternating user/assistant messages.
+		// Ingest all dialog turns as messages with correct timestamps.
+		// The LoCoMo dataset has session-level dates; we space turns within
+		// a session by 1 minute for ordering.
 		for _, turn := range turns {
-			role := "user"
-			if turn.Speaker != "" {
-				// Use a consistent format: "[Speaker] text"
-				// Both speakers become "user" role since this is a conversation
-				// the agent is observing, not participating in.
-			}
 			content := fmt.Sprintf("[%s] %s", turn.Speaker, turn.Text)
 			tokens := EstimateTokens(content)
-			if _, err := pdb.AppendMessage(sessionID, role, content, "{}", tokens); err != nil {
+			msgID, err := pdb.AppendMessage(sessionID, "user", content, "{}", tokens)
+			if err != nil {
 				t.Fatalf("AppendMessage: %v", err)
+			}
+			// Set the correct timestamp from the LoCoMo session date so that
+			// the compaction summarizer can resolve relative time references.
+			if !turn.Timestamp.IsZero() {
+				pdb.UpdateMessageTimestamp(msgID, turn.Timestamp)
 			}
 		}
 
@@ -511,6 +505,30 @@ func TestLoCoMo_Full(t *testing.T) {
 	bOverall := mean(baseline.Overall)
 	cOverall := mean(compacted.Overall)
 	t.Logf("  Overall: %+.1f%%", (cOverall-bOverall)*100)
+}
+
+// parseLoCoMoDate parses LoCoMo's date format: "1:56 pm on 8 May, 2023".
+func parseLoCoMoDate(s string) time.Time {
+	// Try the primary format with "on" separator.
+	layouts := []string{
+		"3:04 pm on 2 January, 2006",
+		"3:04 am on 2 January, 2006",
+		"12:04 pm on 2 January, 2006",
+		"12:04 am on 2 January, 2006",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	// Fallback: try just the date portion after "on ".
+	if idx := strings.Index(s, "on "); idx >= 0 {
+		dateStr := s[idx+3:]
+		if t, err := time.Parse("2 January, 2006", dateStr); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func truncateStr(s string, maxLen int) string {

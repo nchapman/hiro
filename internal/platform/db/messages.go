@@ -106,6 +106,14 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int)
 	return msgID, tx.Commit()
 }
 
+// UpdateMessageTimestamp sets the created_at timestamp for a message.
+// Used by tests that ingest historical data with known timestamps.
+func (d *DB) UpdateMessageTimestamp(id int64, t time.Time) error {
+	_, err := d.db.Exec("UPDATE messages SET created_at = ? WHERE id = ?",
+		t.Format("2006-01-02 15:04:05"), id)
+	return err
+}
+
 // GetMessage retrieves a message by ID.
 func (d *DB) GetMessage(id int64) (Message, error) {
 	var m Message

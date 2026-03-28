@@ -430,14 +430,19 @@ func summarizationPrompt(depth int, aggressive bool) string {
 	case depth == 0:
 		p.WriteString("Summarize the following conversation segment. ")
 		p.WriteString("Preserve specific details: file names, commands run, decisions made, error messages, ")
-		p.WriteString("configuration changes, and timestamps. ")
+		p.WriteString("configuration changes, and key quantities (numbers, sizes, counts). ")
+		p.WriteString("IMPORTANT: Convert all relative time references (\"yesterday\", \"last week\", \"two days ago\") ")
+		p.WriteString("to absolute dates using the timestamps shown in the conversation. ")
+		p.WriteString("For example, if a message on 2024-03-15 says \"I did it yesterday\", write \"on 2024-03-14\". ")
 		p.WriteString("Write as a narrative that another AI agent could read to understand what happened.")
 	case depth == 1:
 		p.WriteString("Condense the following summaries into a higher-level overview. ")
 		p.WriteString("Focus on decisions made, problems solved, and outcomes. ")
+		p.WriteString("Preserve all dates, version numbers, and key technical specifics. ")
 		p.WriteString("Omit repetitive details but keep file names and key technical specifics.")
 	default:
 		p.WriteString("Distill the following summaries to key decisions, outcomes, and unresolved items. ")
+		p.WriteString("Preserve all dates and version numbers. ")
 		p.WriteString("Be concise. Only preserve information that would be critical for understanding ")
 		p.WriteString("the overall trajectory of this conversation.")
 	}
@@ -448,7 +453,7 @@ func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
 		fmt.Fprintf(&b, "[%s] %s: %s\n\n",
-			m.CreatedAt.Format("15:04:05"),
+			m.CreatedAt.Format("2006-01-02 15:04:05"),
 			m.Role,
 			m.Content,
 		)
