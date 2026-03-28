@@ -308,15 +308,15 @@ func TestSummarizationPrompt_Variants(t *testing.T) {
 		aggressive bool
 		contains   string
 	}{
-		{0, false, "Summarize the following conversation segment"},
-		{0, true, "extremely concise"},
-		{1, false, "Condense the following summaries"},
-		{2, false, "Distill the following summaries"},
+		{0, false, "fact extractor"},
+		{0, true, "conversation compressor"},
+		{1, false, "merging conversation summaries"},
+		{2, false, "Distill these summaries"},
 	}
 	for _, tt := range tests {
 		got := summarizationPrompt(tt.depth, tt.aggressive)
 		if !strings.Contains(got, tt.contains) {
-			t.Errorf("depth=%d aggressive=%v: missing %q", tt.depth, tt.aggressive, tt.contains)
+			t.Errorf("depth=%d aggressive=%v: missing %q in:\n%s", tt.depth, tt.aggressive, tt.contains, got)
 		}
 	}
 }

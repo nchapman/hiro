@@ -419,39 +419,85 @@ func generateSummaryID() string {
 // --- Prompt/formatting helpers ---
 
 func summarizationPrompt(depth int, aggressive bool) string {
-	var p strings.Builder
-	if aggressive {
-		p.WriteString("You are a conversation compressor. Be extremely concise. ")
-		p.WriteString("Only include durable facts: decisions made, files changed, errors encountered, and outcomes. ")
-		p.WriteString("Omit all narrative, pleasantries, and exploratory discussion. ")
-		p.WriteString("Use bullet points.\n\n")
-	} else {
-		p.WriteString("You are a conversation summarizer. ")
-		p.WriteString("Your job is to create a clear, information-dense summary that preserves the important details.\n\n")
-	}
-
 	switch {
-	case depth == 0:
-		p.WriteString("Summarize the following conversation segment. ")
-		p.WriteString("Preserve specific details: file names, commands run, decisions made, error messages, ")
-		p.WriteString("configuration changes, and key quantities (numbers, sizes, counts). ")
-		p.WriteString("IMPORTANT: Convert all relative time references (\"yesterday\", \"last week\", \"two days ago\") ")
-		p.WriteString("to absolute dates using the timestamps shown in the conversation. ")
-		p.WriteString("For example, if a message on 2024-03-15 says \"I did it yesterday\", write \"on 2024-03-14\". ")
-		p.WriteString("Write as a narrative that another AI agent could read to understand what happened.")
+	case depth == 0 && !aggressive:
+		return leafPrompt
+	case depth == 0 && aggressive:
+		return leafAggressivePrompt
 	case depth == 1:
-		p.WriteString("Condense the following summaries into a higher-level overview. ")
-		p.WriteString("Focus on decisions made, problems solved, and outcomes. ")
-		p.WriteString("Preserve all dates, version numbers, and key technical specifics. ")
-		p.WriteString("Omit repetitive details but keep file names and key technical specifics.")
+		return condensePrompt
 	default:
-		p.WriteString("Distill the following summaries to key decisions, outcomes, and unresolved items. ")
-		p.WriteString("Preserve all dates and version numbers. ")
-		p.WriteString("Be concise. Only preserve information that would be critical for understanding ")
-		p.WriteString("the overall trajectory of this conversation.")
+		return distillPrompt
 	}
-	return p.String()
 }
+
+// leafPrompt extracts structured facts from raw conversation messages.
+// Optimized for maximum fact density per token — every bullet should be
+// independently useful for answering future questions.
+const leafPrompt = `You are a fact extractor for a conversation memory system. Your output will be the ONLY record of this conversation segment — any fact you omit is permanently lost.
+
+Extract ALL retrievable facts as structured bullet points.
+
+## Rules
+
+1. DATES: Convert every relative time reference ("yesterday", "last week", "2 days ago") to an absolute date using the message timestamps. If a message dated 2024-03-15 says "yesterday", write "2024-03-14". If a message dated 2024-06-10 says "last year", write "2023".
+
+2. PRESERVE EXACTLY: names, places, file paths, URLs, commands, error messages, version numbers, quantities, code snippets, and technical identifiers. Never paraphrase these — copy them verbatim.
+
+3. ATTRIBUTION: Note who said or did what. Speaker identity matters for future questions like "what did X do?" or "what does Y think about Z?"
+
+4. DECISIONS: For each decision, state WHAT was decided AND WHY (the reason or constraint that drove it).
+
+5. RELATIONSHIPS AND STATES: Capture personal details (occupation, location, relationships, preferences, plans, opinions, identity) — these are high-value for future recall.
+
+6. COMPLETENESS: If someone mentions a specific fact — a place they visited, a date something happened, a preference they have, a plan they're making — it MUST appear in your output. Err on the side of including too much rather than too little.
+
+## Output Format
+
+Write concise bullet points grouped by topic. Each bullet = one self-contained fact.
+
+DO NOT write narrative prose or connecting sentences.
+DO NOT start with "The conversation covered..." or similar framing.
+DO NOT editorialize or add interpretation beyond what was stated.
+
+Example:
+• [2024-03-14] Alice migrated auth from session cookies to JWT tokens
+• Decision: Use Redis for session store — need multi-instance support
+• Bob visited Rome in 2023, prefers PostgreSQL + pgx driver
+• Error: "connection refused on port 5432" — resolved by starting Docker
+• Alice plans to add rate limiting next sprint`
+
+// leafAggressivePrompt is the escalation when normal leaf output exceeds
+// the token target. Aims for maximum compression while retaining key facts.
+const leafAggressivePrompt = `You are a conversation compressor. Extract only the essential facts as terse bullet points.
+
+Rules:
+1. Convert all relative dates to absolute dates using the timestamps shown.
+2. KEEP: decisions (what + why), outcomes, names, dates, file paths, error messages, quantities, personal details (identity, relationships, plans).
+3. DROP: discussion, reasoning, greetings, exploration that led nowhere, pleasantries.
+4. Each bullet: one fact, max ~15 words. No narrative, no framing sentences.`
+
+// condensePrompt merges multiple leaf summaries into a unified overview.
+const condensePrompt = `You are merging conversation summaries into a unified record. The input summaries were extracted from consecutive segments of the same conversation.
+
+## Rules
+
+1. MERGE related facts: combine information about the same topic, person, or decision from different summaries into single comprehensive bullets.
+2. PRESERVE ALL specific details: dates, names, file paths, versions, quantities, error messages, and personal facts. If a fact appears in any input summary, it must appear in your output.
+3. ELIMINATE only strict duplicates — the same fact stated identically in multiple summaries.
+4. MAINTAIN chronological anchoring: keep dates attached to their facts.
+5. GROUP by topic or entity for coherence.
+
+Write concise bullet points. Do not add narrative framing. Density matters more than brevity — include every fact from the inputs.`
+
+// distillPrompt produces the highest-level overview from depth-2+ summaries.
+const distillPrompt = `Distill these summaries into a compact factual record. Preserve:
+- All dates, names, identifiers, quantities, and file paths
+- Key decisions with their rationale
+- Personal details (identity, relationships, preferences, plans)
+- Current state and unresolved items
+
+Use terse bullet points. Drop narrative structure but keep every specific fact and technical detail.`
 
 func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder
