@@ -88,41 +88,45 @@ func (c CompactionConfig) HardThresholdTokens() int {
 
 // DefaultCompactionConfig returns reasonable defaults for a 200K context window.
 func DefaultCompactionConfig() CompactionConfig {
-	return CompactionConfig{
-		ContextWindow:        200_000,
-		SoftThreshold:        0.60,
-		HardThreshold:        0.85,
-		TokenBudget:          180_000, // 90% of 200K — above hard threshold, loose safety net
-		FreshTailCount:       20,
-		LeafChunkTokens:      20_000,
-		LeafTargetTokens:     1_200,
-		CondenseTargetTokens: 2_000,
-		LeafMinFanout:        8,
-		CondenseMinFanout:    4,
-	}
+	return compactionConfigForWindow(200_000)
 }
 
 // CompactionConfigForModel returns a config derived from the model's context window.
-// Thresholds that depend on absolute context size are scaled proportionally.
+// All size-dependent parameters scale proportionally so compaction behaves
+// consistently whether the model has 32K or 1M tokens.
 func CompactionConfigForModel(model string) CompactionConfig {
-	cfg := DefaultCompactionConfig()
-	cw := models.ContextWindow(model)
-	if cw > 0 {
-		cfg.ContextWindow = cw
-		cfg.TokenBudget = int(float64(cw) * 0.90)
-		// Scale leaf chunk size proportionally — 10% of context window,
-		// clamped to [2_000, 20_000]. Without this, a 32K model would use
-		// the same 20K chunk as a 200K model (62% of its window).
-		leafChunk := cw / 10
-		if leafChunk < 2_000 {
-			leafChunk = 2_000
-		}
-		if leafChunk > 20_000 {
-			leafChunk = 20_000
-		}
-		cfg.LeafChunkTokens = leafChunk
+	return compactionConfigForWindow(models.ContextWindow(model))
+}
+
+// compactionConfigForWindow builds a config where all parameters are derived
+// from the context window size. This ensures consistent compression ratios
+// and behavior across models of any size.
+//
+// The key ratios:
+//   - Leaf chunk: 10% of window — how much to grab per summarization pass
+//   - Leaf target: 2% of window — ~5:1 compression at leaf level
+//   - Condense target: 3% of window — ~3:1 compression when combining summaries
+//   - Token budget: 90% of window — loose assembly safety net
+//
+// At 200K: chunk=20K, leaf_target=4K, condense_target=6K
+// At  32K: chunk=3.2K, leaf_target=640, condense_target=960
+// At   1M: chunk=100K, leaf_target=20K, condense_target=30K
+func compactionConfigForWindow(contextWindow int) CompactionConfig {
+	if contextWindow <= 0 {
+		contextWindow = 200_000
 	}
-	return cfg
+	return CompactionConfig{
+		ContextWindow:        contextWindow,
+		SoftThreshold:        0.60,
+		HardThreshold:        0.85,
+		TokenBudget:          max(1_000, contextWindow*9/10),
+		FreshTailCount:       20,
+		LeafChunkTokens:      max(500, contextWindow/10),
+		LeafTargetTokens:     max(200, contextWindow/50),
+		CondenseTargetTokens: max(300, contextWindow*3/100),
+		LeafMinFanout:        4,
+		CondenseMinFanout:    3,
+	}
 }
 
 // Compactor runs incremental compaction on conversation history.
