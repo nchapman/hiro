@@ -293,9 +293,19 @@ func mean(vals []float64) float64 {
 //  4. For each QA pair, ask the LLM the question with the assembled context
 //  5. Score the answer against ground truth using F1 partial match
 //
+// compactionLevel defines a named compression configuration for multi-level eval.
+type compactionLevel struct {
+	Name             string
+	LeafChunkTokens  int
+	LeafTargetTokens int
+	CondenseTarget   int
+}
+
 // maxConvos limits the number of conversations to evaluate (0 = all).
 // maxQAPerConvo limits QA pairs per conversation (0 = all).
-func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, maxQAPerConvo int) evalSummary {
+// compactCfg, when non-nil, specifies the compaction configuration to use.
+// When nil, no compaction is performed (baseline).
+func runEval(t *testing.T, lm fantasy.LanguageModel, compactCfg *CompactionConfig, maxConvos, maxQAPerConvo int) evalSummary {
 	t.Helper()
 	convos := loadLoCoMo(t)
 
@@ -338,19 +348,8 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 		// Optionally compact. We run multiple rounds to simulate aggressive
 		// compaction like a long-running session would experience, driving
 		// the context through leaf passes and condensation.
-		if compact {
-			cfg := CompactionConfig{
-				ContextWindow:        200_000,
-				SoftThreshold:        0.01, // force compaction
-				HardThreshold:        0.85,
-				TokenBudget:          180_000,
-				FreshTailCount:       4,
-				LeafChunkTokens:      300,
-				LeafTargetTokens:     600,
-				CondenseTargetTokens: 1000,
-				LeafMinFanout:        3,
-				CondenseMinFanout:    3,
-			}
+		if compactCfg != nil {
+			cfg := *compactCfg
 
 			summarizer := &lmSummarizer{lm: lm}
 			preTokens, _ := pdb.ContextTokenCount(sessionID)
@@ -362,7 +361,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 			const maxRounds = 5
 			for round := 0; round < maxRounds; round++ {
 				compactor := NewCompactor(pdb, sessionID, summarizer, cfg, logger)
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				_, err := compactor.CompactIfNeeded(ctx, int64(estimated))
 				cancel()
 				if err != nil {
@@ -426,13 +425,15 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 
 			prompt := fmt.Sprintf(
 				"Based on the following conversation history, answer the question. "+
-					"Give a short, direct answer using the exact wording from the conversation when possible. "+
+					"Give a short, direct answer (a few words or a short phrase). "+
+					"The conversation may contain summaries of earlier portions — "+
+					"treat summarized content as authoritative. "+
 					"If the question cannot be answered from the conversation, say \"unanswerable\".\n\n"+
 					"Conversation:\n%s\n\nQuestion: %s\nAnswer:",
 				contextStr, qa.Question,
 			)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			resp, err := lm.Generate(ctx, fantasy.Call{
 				Prompt: fantasy.Prompt{fantasy.NewUserMessage(prompt)},
 			})
@@ -476,10 +477,25 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 func TestLoCoMo_Baseline(t *testing.T) {
 	lm := testLM(t)
 
-	// Run on first 2 conversations, 10 QA per convo for a quick smoke test.
-	// For a full run, use maxConvos=0 and maxQAPerConvo=0.
-	summary := runEval(t, lm, false, 2, 10)
+	// Run on first 2 conversations, 20 QA per convo for a quick smoke test.
+	summary := runEval(t, lm, nil, 2, 20)
 	t.Logf("\n=== BASELINE (no compaction) ===\n%s", summary.Report())
+}
+
+// defaultEvalCompactionConfig returns the standard compaction config for evals.
+func defaultEvalCompactionConfig() *CompactionConfig {
+	return &CompactionConfig{
+		ContextWindow:        200_000,
+		SoftThreshold:        0.01, // force compaction
+		HardThreshold:        0.85,
+		TokenBudget:          180_000,
+		FreshTailCount:       4,
+		LeafChunkTokens:      4_000, // grab meaningful chunks for real compression
+		LeafTargetTokens:     800,   // ~5:1 compression target at leaf level
+		CondenseTargetTokens: 1_500,
+		LeafMinFanout:        3,
+		CondenseMinFanout:    3,
+	}
 }
 
 // TestLoCoMo_Compacted runs the QA eval after compaction.
@@ -487,8 +503,8 @@ func TestLoCoMo_Baseline(t *testing.T) {
 func TestLoCoMo_Compacted(t *testing.T) {
 	lm := testLM(t)
 
-	// Run on first 2 conversations, 10 QA per convo for a quick smoke test.
-	summary := runEval(t, lm, true, 2, 10)
+	// Run on first 2 conversations, 20 QA per convo for a quick smoke test.
+	summary := runEval(t, lm, defaultEvalCompactionConfig(), 2, 20)
 	t.Logf("\n=== COMPACTED ===\n%s", summary.Report())
 }
 
@@ -503,15 +519,65 @@ func TestLoCoMo_Full(t *testing.T) {
 	lm := testLM(t)
 
 	t.Log("=== Running baseline (no compaction) ===")
-	baseline := runEval(t, lm, false, 0, 0)
+	baseline := runEval(t, lm, nil, 0, 0)
 	t.Logf("\n=== BASELINE RESULTS ===\n%s", baseline.Report())
 
 	t.Log("=== Running compacted ===")
-	compacted := runEval(t, lm, true, 0, 0)
+	compacted := runEval(t, lm, defaultEvalCompactionConfig(), 0, 0)
 	t.Logf("\n=== COMPACTED RESULTS ===\n%s", compacted.Report())
 
 	// Report delta.
 	t.Log("\n=== DELTA (compacted - baseline) ===")
+	reportDelta(t, baseline, compacted)
+}
+
+// TestLoCoMo_CompressionLevels runs the eval at multiple compression levels
+// to find where the accuracy/compression tradeoff breaks down.
+//
+//	go test -tags=online -run TestLoCoMo_CompressionLevels -v -timeout=120m
+func TestLoCoMo_CompressionLevels(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compression levels eval in short mode")
+	}
+	lm := testLM(t)
+
+	levels := []compactionLevel{
+		{"light", 2_000, 1_000, 1_500},
+		{"medium", 4_000, 800, 1_200},
+		{"heavy", 8_000, 800, 1_000},
+		{"extreme", 16_000, 600, 800},
+	}
+
+	// Use 3 conversations, all QA pairs for meaningful signal.
+	maxConvos := 3
+
+	t.Log("=== Running baseline ===")
+	baseline := runEval(t, lm, nil, maxConvos, 0)
+	t.Logf("\n=== BASELINE ===\n%s", baseline.Report())
+
+	for _, level := range levels {
+		cfg := &CompactionConfig{
+			ContextWindow:        200_000,
+			SoftThreshold:        0.01,
+			HardThreshold:        0.85,
+			TokenBudget:          180_000,
+			FreshTailCount:       4,
+			LeafChunkTokens:      level.LeafChunkTokens,
+			LeafTargetTokens:     level.LeafTargetTokens,
+			CondenseTargetTokens: level.CondenseTarget,
+			LeafMinFanout:        3,
+			CondenseMinFanout:    3,
+		}
+
+		t.Logf("\n=== Running %s compression ===", level.Name)
+		result := runEval(t, lm, cfg, maxConvos, 0)
+		t.Logf("\n=== %s RESULTS ===\n%s", strings.ToUpper(level.Name), result.Report())
+		reportDelta(t, baseline, result)
+	}
+}
+
+func reportDelta(t *testing.T, baseline, compacted evalSummary) {
+	t.Helper()
 	cats := make([]int, 0, len(baseline.ByCategory))
 	for c := range baseline.ByCategory {
 		cats = append(cats, c)
