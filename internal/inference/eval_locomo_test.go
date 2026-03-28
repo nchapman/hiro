@@ -406,7 +406,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 			qaPairs = qaPairs[:maxQAPerConvo]
 		}
 
-		for _, qa := range qaPairs {
+		for qi, qa := range qaPairs {
 			expected := qa.AnswerString()
 
 			prompt := fmt.Sprintf(
@@ -425,7 +425,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 
 			answer := ""
 			if err != nil {
-				t.Logf("  LLM error for %q: %v", qa.Question, err)
+				t.Logf("  [%d/%d] ERROR %q: %v", qi+1, len(qaPairs), qa.Question, err)
 			} else {
 				answer = strings.TrimSpace(resp.Content.Text())
 			}
@@ -433,9 +433,21 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, compact bool, maxConvos, ma
 			score := f1Score(answer, expected)
 			summary.ByCategory[qa.Category] = append(summary.ByCategory[qa.Category], score)
 			summary.Overall = append(summary.Overall, score)
+
+			// Progress: show every question with score and running average.
+			catName := categoryNames[qa.Category]
+			marker := "✓"
+			if score < 0.5 {
+				marker = "✗"
+			}
+			t.Logf("  [%d/%d] %s F1=%.0f%% (%s) %q → got %q (expected %q)",
+				qi+1, len(qaPairs), marker, score*100, catName,
+				qa.Question, truncateStr(answer, 60), truncateStr(expected, 60))
 		}
 
-		t.Logf("Conv %d: scored %d QA pairs", ci, len(qaPairs))
+		// Per-conversation running totals.
+		t.Logf("Conv %d done: %d QA pairs, running overall F1=%.1f%%",
+			ci, len(qaPairs), mean(summary.Overall)*100)
 	}
 
 	return summary
@@ -499,4 +511,14 @@ func TestLoCoMo_Full(t *testing.T) {
 	bOverall := mean(baseline.Overall)
 	cOverall := mean(compacted.Overall)
 	t.Logf("  Overall: %+.1f%%", (cOverall-bOverall)*100)
+}
+
+func truncateStr(s string, maxLen int) string {
+	// Collapse to single line for log readability.
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
 }
