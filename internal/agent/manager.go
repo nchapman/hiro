@@ -942,8 +942,12 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		var sessionID string
 		if sess, ok := m.pdb.LatestSessionByInstance(dbInst.ID); ok {
 			sessionID = sess.ID
+			m.logger.Info("resuming existing session",
+				"instance", dbInst.ID, "session", sessionID, "agent", dbInst.AgentName)
 		} else {
 			sessionID = uuid.Must(uuid.NewV7()).String()
+			m.logger.Info("creating new session (no previous session found)",
+				"instance", dbInst.ID, "session", sessionID, "agent", dbInst.AgentName)
 		}
 		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode)
 		if err != nil {

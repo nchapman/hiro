@@ -123,6 +123,37 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 }
 
+func TestLatestSessionByInstance(t *testing.T) {
+	d := openTestDB(t)
+
+	// Create an instance.
+	d.CreateInstance(Instance{ID: "inst-A", AgentName: "test", Mode: "persistent"})
+
+	// No sessions yet.
+	_, ok := d.LatestSessionByInstance("inst-A")
+	if ok {
+		t.Fatal("expected no session for fresh instance")
+	}
+
+	// Create two sessions with different timestamps.
+	d.db.Exec(`INSERT INTO sessions (id, instance_id, agent_name, mode, status, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"sess-old", "inst-A", "test", "persistent", "running", "2026-01-01 00:00:00")
+	d.db.Exec(`INSERT INTO sessions (id, instance_id, agent_name, mode, status, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"sess-new", "inst-A", "test", "persistent", "running", "2026-01-02 00:00:00")
+
+	// Should return the newest one.
+	sess, ok := d.LatestSessionByInstance("inst-A")
+	if !ok {
+		t.Fatal("expected to find a session")
+	}
+	if sess.ID != "sess-new" {
+		t.Errorf("expected sess-new, got %s", sess.ID)
+	}
+	if sess.InstanceID != "inst-A" {
+		t.Errorf("expected instance_id inst-A, got %s", sess.InstanceID)
+	}
+}
+
 func TestMessages_AppendAndRetrieve(t *testing.T) {
 	d := openTestDB(t)
 	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
