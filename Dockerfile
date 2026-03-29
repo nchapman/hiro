@@ -42,8 +42,8 @@ ENV PATH="/opt/mise/shims:${PATH}"
 RUN curl -fsSL https://mise.run | sh \
     && mise use -g node@24 python@3.12 \
     && chgrp -R hive-agents /opt/mise \
-    && chmod -R g+rwX /opt/mise \
-    && find /opt/mise -type d -exec chmod g+s {} +
+    && chmod -R g+rX /opt/mise \
+    && chmod -R g-w /opt/mise
 
 # Pre-build the binary so tests that spawn agent processes have it available.
 RUN go build -o /usr/local/bin/hive ./cmd/hive
@@ -124,12 +124,12 @@ RUN mise use -g eza@latest bat@latest fd@latest fzf@latest zoxide@latest delta@l
     && eza --version && bat --version && fd --version && fzf --version \
     && zoxide --version && delta --version && starship --version
 
-# Make tool installations group-writable so agent users (hive-agents) can
-# install additional tools at runtime via mise. Setgid ensures new files
-# inherit the hive-agents group.
+# Make mise installations readable (but not writable) by agent users.
+# Root owns everything — agents cannot inject malicious shims or replace binaries.
+# Agents that need to install tools at runtime should use per-instance directories.
 RUN chgrp -R hive-agents /opt/mise \
-    && chmod -R g+rwX /opt/mise \
-    && find /opt/mise -type d -exec chmod g+s {} +
+    && chmod -R g+rX /opt/mise \
+    && chmod -R g-w /opt/mise
 
 # Shell configuration — polished terminal experience for all users.
 COPY docker/shell/bashrc /etc/hive.bashrc

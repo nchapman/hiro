@@ -7,6 +7,69 @@ import (
 	"testing"
 )
 
+func TestFetch_SSRFBlocked(t *testing.T) {
+	origEnabled := ssrfEnabled
+	defer func() { ssrfEnabled = origEnabled }()
+	SetSSRFProtection(true)
+
+	// Start a local server — it'll be on 127.0.0.1 which is loopback.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("should not reach here"))
+	}))
+	defer ts.Close()
+
+	// Loopback should be blocked even when the server is actually running.
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if !isErr {
+		t.Fatalf("expected error for loopback URL, got: %s", content)
+	}
+	if !strings.Contains(content, "blocked") && !strings.Contains(content, "non-public") {
+		t.Errorf("expected SSRF block message, got: %s", content)
+	}
+}
+
+func TestFetch_SSRFBlocksNonRoutable(t *testing.T) {
+	origEnabled := ssrfEnabled
+	defer func() { ssrfEnabled = origEnabled }()
+	SetSSRFProtection(true)
+
+	// Test that the transport itself rejects private IPs by checking
+	// the ssrfTransport directly with a known-connectable loopback addr.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	// With SSRF enabled, even localhost test servers are blocked.
+	client := &http.Client{Transport: ssrfTransport}
+	_, err := client.Get(ts.URL)
+	if err == nil {
+		t.Fatal("expected SSRF transport to block localhost")
+	}
+	if !strings.Contains(err.Error(), "non-public") {
+		t.Errorf("expected non-public error, got: %v", err)
+	}
+}
+
+func TestFetch_SSRFAllowedWhenDisabled(t *testing.T) {
+	origEnabled := ssrfEnabled
+	defer func() { ssrfEnabled = origEnabled }()
+	SetSSRFProtection(false)
+
+	// With SSRF disabled, localhost test servers work fine.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	tool := NewFetchTool()
+	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
+	if isErr {
+		t.Fatalf("unexpected error with SSRF disabled: %s", content)
+	}
+}
+
 func TestFetch_BasicGet(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

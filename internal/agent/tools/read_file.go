@@ -32,7 +32,10 @@ func NewReadFileTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("path is required"), nil
 			}
 
-			path := resolvePath(workingDir, params.Path)
+			path, err := resolveAndConfine(workingDir, params.Path)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 
 			fi, err := os.Stat(path)
 			if err != nil {

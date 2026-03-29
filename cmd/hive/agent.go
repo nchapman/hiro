@@ -51,6 +51,17 @@ func runAgent() error {
 	var secretEnvMu sync.Mutex
 	var secretEnv []string
 
+	// When running under UID isolation, enable additional security:
+	// 1. Confine file tools to the platform root (/hive) — prevents reading/writing
+	//    outside the workspace (e.g. /opt/mise, /etc, other instance dirs).
+	// 2. Block SSRF in fetch — prevents hitting cloud metadata (169.254.169.254)
+	//    or internal services.
+	// Note: the bash tool is not confinable here — it relies on UID/group DAC.
+	if cfg.UID != 0 {
+		tools.SetAllowedRoots([]string{cfg.WorkingDir})
+		tools.SetSSRFProtection(true)
+	}
+
 	bgMgr := tools.NewBackgroundJobManager(func() []string {
 		secretEnvMu.Lock()
 		defer secretEnvMu.Unlock()

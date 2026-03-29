@@ -28,8 +28,9 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	// Deterministic socket path — the agent listens here.
-	socketPath := fmt.Sprintf("/tmp/hive-agent-%s.sock", cfg.SessionID)
+	// Place socket inside instance dir so it's protected by the instance dir's
+	// 0700 permissions — other agent UIDs cannot connect to it.
+	socketPath := fmt.Sprintf("%s/agent.sock", cfg.SessionDir)
 	cfg.AgentSocket = socketPath
 
 	cmd := exec.CommandContext(ctx, self, "agent")

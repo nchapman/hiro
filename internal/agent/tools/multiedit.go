@@ -39,7 +39,10 @@ func NewMultiEditTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("at least one edit operation is required"), nil
 			}
 
-			filePath := resolvePath(workingDir, params.FilePath)
+			filePath, err := resolveAndConfine(workingDir, params.FilePath)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 
 			// Validate: only the first edit may have empty old_string (file creation).
 			for i, e := range params.Edits {

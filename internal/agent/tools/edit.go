@@ -30,7 +30,10 @@ func NewEditTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			filePath := resolvePath(workingDir, params.FilePath)
+			filePath, err := resolveAndConfine(workingDir, params.FilePath)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 
 			// Create new file: old_string empty, new_string has content
 			if params.OldString == "" {

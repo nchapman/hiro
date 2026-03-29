@@ -2,6 +2,7 @@ package tools
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,5 +66,84 @@ func TestResolvePath(t *testing.T) {
 				t.Errorf("resolvePath(%q, %q) = %q, want %q", tt.workingDir, tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveAndConfine(t *testing.T) {
+	// Save and restore global state.
+	origRoots := allowedRoots
+	defer func() { allowedRoots = origRoots }()
+
+	SetAllowedRoots([]string{"/hive"})
+	wd := "/hive/workspace"
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"relative inside root", "agents/foo.md", false},
+		{"absolute inside root", "/hive/workspace/file.txt", false},
+		{"root itself", "/hive", false},
+		{"absolute outside root", "/etc/hosts", true},
+		{"absolute outside root /opt", "/opt/mise/shims/node", true},
+		{"traversal escape", "../../etc/passwd", true},
+		{"tmp directory", "/tmp/something", true},
+		{"sibling instance dir", "/hive/../etc/passwd", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := resolveAndConfine(wd, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for path %q, got resolved=%q", tt.path, resolved)
+				} else if !strings.Contains(err.Error(), "access denied") {
+					t.Errorf("expected 'access denied' error, got: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for path %q: %v", tt.path, err)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveAndConfine_NoRoots(t *testing.T) {
+	origRoots := allowedRoots
+	defer func() { allowedRoots = origRoots }()
+
+	// No roots configured = no confinement (non-isolated mode).
+	SetAllowedRoots(nil)
+
+	resolved, err := resolveAndConfine("/hive", "/etc/hosts")
+	if err != nil {
+		t.Fatalf("unexpected error with no roots: %v", err)
+	}
+	if resolved != "/etc/hosts" {
+		t.Errorf("expected /etc/hosts, got %s", resolved)
+	}
+}
+
+func TestResolveAndConfine_MultipleRoots(t *testing.T) {
+	origRoots := allowedRoots
+	defer func() { allowedRoots = origRoots }()
+
+	SetAllowedRoots([]string{"/hive", "/workspace"})
+
+	// Allowed in first root.
+	if _, err := resolveAndConfine("/hive", "/hive/agents/foo.md"); err != nil {
+		t.Errorf("expected access to /hive: %v", err)
+	}
+
+	// Allowed in second root.
+	if _, err := resolveAndConfine("/hive", "/workspace/project/file.txt"); err != nil {
+		t.Errorf("expected access to /workspace: %v", err)
+	}
+
+	// Denied outside both.
+	if _, err := resolveAndConfine("/hive", "/etc/hosts"); err == nil {
+		t.Error("expected error for /etc/hosts")
 	}
 }
