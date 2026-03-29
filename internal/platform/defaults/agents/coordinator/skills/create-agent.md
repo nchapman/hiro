@@ -37,12 +37,12 @@ Write this as direct instructions to the agent about what it is and how it shoul
 | `name` | yes | — | Must match the directory name |
 | `model` | no | inherited from env | Any supported model ID |
 | `mode` | no | `persistent` | `persistent` or `ephemeral` |
-| `description` | no | — | Short description shown in `list_sessions` |
+| `description` | no | — | Short description shown in `list_instances` |
 
 ### Mode guidance
 
 - **persistent**: The agent keeps memory, todos, and conversation history across interactions. Use for agents that build up context over time or need to be long-running.
-- **ephemeral**: The agent runs a single task and is cleaned up. Use for stateless, one-shot tasks. `spawn_session` always forces ephemeral mode regardless of the config.
+- **ephemeral**: The agent runs a single task and is cleaned up. Use for stateless, one-shot tasks. `spawn_instance` always forces ephemeral mode regardless of the config.
 
 ## skill file format
 
@@ -64,7 +64,7 @@ Required: `name` (lowercase kebab-case, max 64 chars) and `description` (max 102
 
 ## After creating an agent
 
-- Use `create_session` with the agent name to launch it as a persistent agent, or `spawn_session` to run it ephemerally with a one-shot prompt.
+- Use `spawn_instance` with `mode: "persistent"` to launch it as a persistent instance, or with the default ephemeral mode to run it with a one-shot prompt.
 - The agent definition is loaded fresh from disk each time, so edits to the markdown files take effect on the next start/spawn.
 - You can verify the files look correct with `read_file` before starting the agent.
 

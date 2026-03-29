@@ -23,11 +23,13 @@ import (
 
 // LoopConfig holds all configuration needed to create a Loop.
 type LoopConfig struct {
+	InstanceID     string
 	SessionID      string
 	AgentConfig    config.AgentConfig
 	Mode           config.AgentMode
 	WorkingDir     string
-	SessionDir     string
+	InstanceDir    string // instance-level state: memory.md, identity.md
+	SessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	AgentDefDir    string
 	SharedSkillDir string
 	LM             fantasy.LanguageModel
@@ -49,9 +51,11 @@ type LoopConfig struct {
 // Loop runs the fantasy agent loop for a single session.
 type Loop struct {
 	agent          fantasy.Agent
+	instanceID     string
 	sessionID      string
 	mode           config.AgentMode
-	sessionDir     string
+	instanceDir    string // instance-level state: memory.md, identity.md
+	sessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	agentDefDir    string
 	sharedSkillDir string
 	agentConfig    config.AgentConfig
@@ -102,8 +106,10 @@ type Loop struct {
 // NewLoop creates an inference loop for a session.
 func NewLoop(cfg LoopConfig) (*Loop, error) {
 	l := &Loop{
+		instanceID:     cfg.InstanceID,
 		sessionID:      cfg.SessionID,
 		mode:           cfg.Mode,
+		instanceDir:    cfg.InstanceDir,
 		sessionDir:     cfg.SessionDir,
 		agentDefDir:    cfg.AgentDefDir,
 		sharedSkillDir: cfg.SharedSkillDir,
@@ -432,17 +438,21 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 	identity := ""
 	memory := ""
 	todos := ""
-	if l.sessionDir != "" {
-		if id, err := config.ReadOptionalFile(filepath.Join(l.sessionDir, "identity.md")); err != nil {
+	// Identity and memory are instance-level state.
+	if l.instanceDir != "" {
+		if id, err := config.ReadOptionalFile(filepath.Join(l.instanceDir, "identity.md")); err != nil {
 			l.logger.Warn("could not read identity.md", "error", err)
 		} else {
 			identity = id
 		}
-		if mem, err := config.ReadMemoryFile(l.sessionDir); err != nil {
+		if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
 			l.logger.Warn("could not read memory.md", "error", err)
 		} else {
 			memory = mem
 		}
+	}
+	// Todos are session-level state.
+	if l.sessionDir != "" {
 		if t, err := config.ReadTodos(l.sessionDir); err != nil {
 			l.logger.Warn("could not read todos.yaml", "error", err)
 		} else {
@@ -489,8 +499,10 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	var localTools []fantasy.AgentTool
 
+	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
+		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
+	}
 	if cfg.Mode.IsPersistent() && cfg.SessionDir != "" {
-		localTools = append(localTools, buildMemoryTools(cfg.SessionDir)...)
 		localTools = append(localTools, buildTodoTools(cfg.SessionDir)...)
 	}
 

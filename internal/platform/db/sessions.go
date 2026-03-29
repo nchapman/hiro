@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,13 +36,14 @@ func isUniqueViolation(err error) bool {
 
 // Session represents a row in the sessions table.
 type Session struct {
-	ID        string
-	AgentName string
-	Mode      string // "ephemeral", "persistent", "coordinator"
-	ParentID  string // empty if root
-	Status    string // "running", "stopped"
-	CreatedAt time.Time
-	StoppedAt *time.Time
+	ID         string
+	InstanceID string // parent instance
+	AgentName  string
+	Mode       string // "ephemeral", "persistent", "coordinator"
+	ParentID   string // empty if root
+	Status     string // "running", "stopped"
+	CreatedAt  time.Time
+	StoppedAt  *time.Time
 }
 
 // CreateSession inserts a new session.
@@ -52,9 +52,13 @@ func (d *DB) CreateSession(s Session) error {
 	if s.ParentID != "" {
 		parentID = &s.ParentID
 	}
+	var instanceID *string
+	if s.InstanceID != "" {
+		instanceID = &s.InstanceID
+	}
 	_, err := d.db.Exec(
-		`INSERT INTO sessions (id, agent_name, mode, parent_id, status) VALUES (?, ?, ?, ?, ?)`,
-		s.ID, s.AgentName, s.Mode, parentID, "running",
+		`INSERT INTO sessions (id, agent_name, mode, parent_id, status, instance_id) VALUES (?, ?, ?, ?, ?, ?)`,
+		s.ID, s.AgentName, s.Mode, parentID, "running", instanceID,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -122,6 +126,19 @@ func (d *DB) ListChildSessions(parentID string) ([]Session, error) {
 	return d.ListSessions(parentID, "")
 }
 
+// ListSessionsByInstance returns all sessions belonging to an instance.
+func (d *DB) ListSessionsByInstance(instanceID string) ([]Session, error) {
+	rows, err := d.db.Query(
+		`SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at
+		 FROM sessions WHERE instance_id = ? ORDER BY created_at`, instanceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessions(rows)
+}
+
 // UpdateSessionStatus sets the session status. If status is "stopped",
 // stopped_at is set to now.
 func (d *DB) UpdateSessionStatus(id, status string) error {
@@ -155,71 +172,6 @@ func (d *DB) DeleteSession(id string) error {
 		return fmt.Errorf("session %s not found", id)
 	}
 	return nil
-}
-
-// SessionConfig holds per-session configuration as a JSON blob.
-// Add new fields here as needed — no migration required.
-type SessionConfig struct {
-	ModelOverride   string `json:"model_override,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// Future: Temperature, MaxTokens, TopP, etc.
-}
-
-// GetSessionConfig reads the per-session config JSON.
-func (d *DB) GetSessionConfig(sessionID string) (SessionConfig, error) {
-	var raw string
-	err := d.db.QueryRow("SELECT COALESCE(config, '{}') FROM sessions WHERE id = ?", sessionID).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return SessionConfig{}, fmt.Errorf("session %s: %w", sessionID, ErrNotFound)
-	}
-	if err != nil {
-		return SessionConfig{}, err
-	}
-	var cfg SessionConfig
-	if raw != "" && raw != "{}" {
-		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-			return SessionConfig{}, fmt.Errorf("parsing session config: %w", err)
-		}
-	}
-	return cfg, nil
-}
-
-// UpdateSessionConfig writes the per-session config JSON.
-func (d *DB) UpdateSessionConfig(sessionID string, cfg SessionConfig) error {
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshaling session config: %w", err)
-	}
-	result, err := d.db.Exec("UPDATE sessions SET config = ? WHERE id = ?", string(raw), sessionID)
-	if err != nil {
-		return fmt.Errorf("updating session config: %w", err)
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("session %s not found", sessionID)
-	}
-	return nil
-}
-
-// IsDescendant returns true if targetID is a descendant of ancestorID.
-// Parameter order matches ipc.HostManager.IsDescendant(targetID, ancestorID).
-func (d *DB) IsDescendant(targetID, ancestorID string) (bool, error) {
-	// Walk up from target to root, checking for ancestor.
-	current := targetID
-	for {
-		if current == ancestorID {
-			return true, nil
-		}
-		var parentID sql.NullString
-		err := d.db.QueryRow("SELECT parent_id FROM sessions WHERE id = ?", current).Scan(&parentID)
-		if err != nil {
-			return false, err
-		}
-		if !parentID.Valid {
-			return false, nil
-		}
-		current = parentID.String
-	}
 }
 
 func scanSessions(rows *sql.Rows) ([]Session, error) {

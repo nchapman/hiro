@@ -100,7 +100,7 @@ You are a test agent.`
 
 func TestManager_NewManager(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	agents := mgr.ListSessions()
+	agents := mgr.ListInstances()
 	if len(agents) != 0 {
 		t.Errorf("new manager should have 0 agents, got %d", len(agents))
 	}
@@ -110,7 +110,7 @@ func TestManager_CreateSession(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestManager_CreateSession(t *testing.T) {
 		t.Fatal("expected non-empty agent ID")
 	}
 
-	info, ok := mgr.GetSession(id)
+	info, ok := mgr.GetInstance(id)
 	if !ok {
 		t.Fatal("agent not found after start")
 	}
@@ -132,7 +132,7 @@ func TestManager_CreateSession(t *testing.T) {
 
 func TestManager_CreateSession_MissingConfig(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	_, err := mgr.CreateSession(t.Context(), "nonexistent", "", "persistent")
+	_, err := mgr.CreateInstance(t.Context(), "nonexistent", "", "persistent")
 	if err == nil {
 		t.Fatal("expected error for missing agent config")
 	}
@@ -142,7 +142,7 @@ func TestManager_CreateSession_InvalidMode(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 	for _, mode := range []string{"", "supercoordinator", "persistant"} {
-		_, err := mgr.CreateSession(t.Context(), "test-agent", "", mode)
+		_, err := mgr.CreateInstance(t.Context(), "test-agent", "", mode)
 		if err == nil {
 			t.Errorf("mode %q: expected error, got nil", mode)
 		}
@@ -155,7 +155,7 @@ func TestManager_SendMessage_NoLoop(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -173,12 +173,12 @@ func TestManager_StopSession(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	info, err := mgr.StopSession(id)
+	info, err := mgr.StopInstance(id)
 	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -187,12 +187,12 @@ func TestManager_StopSession(t *testing.T) {
 	}
 
 	// Persistent agents stay in registry with "stopped" status.
-	ai, ok := mgr.GetSession(id)
+	ai, ok := mgr.GetInstance(id)
 	if !ok {
 		t.Fatal("persistent agent should still be in registry after stop")
 	}
-	if ai.Status != SessionStatusStopped {
-		t.Errorf("status = %q, want %q", ai.Status, SessionStatusStopped)
+	if ai.Status != InstanceStatusStopped {
+		t.Errorf("status = %q, want %q", ai.Status, InstanceStatusStopped)
 	}
 }
 
@@ -204,15 +204,15 @@ model: fake-model
 ---
 Ephemeral agent.`)
 
-	id, err := mgr.CreateSession(t.Context(), "eph-agent", "", "ephemeral")
+	id, err := mgr.CreateInstance(t.Context(), "eph-agent", "", "ephemeral")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	mgr.StopSession(id)
+	mgr.StopInstance(id)
 
 	// Ephemeral agents are fully removed after stop.
-	if _, ok := mgr.GetSession(id); ok {
+	if _, ok := mgr.GetInstance(id); ok {
 		t.Error("ephemeral agent should not exist after stop")
 	}
 }
@@ -230,25 +230,25 @@ model: fake-model
 ---
 Child agent.`)
 
-	parentID, _ := mgr.CreateSession(t.Context(), "parent", "", "persistent")
-	childID, _ := mgr.CreateSession(t.Context(), "child", parentID, "persistent")
+	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent")
+	childID, _ := mgr.CreateInstance(t.Context(), "child", parentID, "persistent")
 
 	// Stopping parent should also stop child (both persistent → soft-stopped).
-	mgr.StopSession(parentID)
+	mgr.StopInstance(parentID)
 
-	parentInfo, ok := mgr.GetSession(parentID)
+	parentInfo, ok := mgr.GetInstance(parentID)
 	if !ok {
 		t.Fatal("parent should still be in registry")
 	}
-	if parentInfo.Status != SessionStatusStopped {
+	if parentInfo.Status != InstanceStatusStopped {
 		t.Errorf("parent status = %q, want stopped", parentInfo.Status)
 	}
 
-	childInfo, ok := mgr.GetSession(childID)
+	childInfo, ok := mgr.GetInstance(childID)
 	if !ok {
 		t.Fatal("child should still be in registry")
 	}
-	if childInfo.Status != SessionStatusStopped {
+	if childInfo.Status != InstanceStatusStopped {
 		t.Errorf("child status = %q, want stopped", childInfo.Status)
 	}
 }
@@ -257,16 +257,16 @@ func TestManager_DeleteSession(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	if err := mgr.DeleteSession(id); err != nil {
+	if err := mgr.DeleteInstance(id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	if _, ok := mgr.GetSession(id); ok {
+	if _, ok := mgr.GetInstance(id); ok {
 		t.Error("agent should not exist after delete")
 	}
 }
@@ -275,26 +275,26 @@ func TestManager_StartSession(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	mgr.StopSession(id)
-	ai, _ := mgr.GetSession(id)
-	if ai.Status != SessionStatusStopped {
+	mgr.StopInstance(id)
+	ai, _ := mgr.GetInstance(id)
+	if ai.Status != InstanceStatusStopped {
 		t.Fatalf("status after stop = %q, want stopped", ai.Status)
 	}
 
-	if err := mgr.StartSession(t.Context(), id); err != nil {
+	if err := mgr.StartInstance(t.Context(), id); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 
-	ai, ok := mgr.GetSession(id)
+	ai, ok := mgr.GetInstance(id)
 	if !ok {
 		t.Fatal("agent should exist after restart")
 	}
-	if ai.Status != SessionStatusRunning {
+	if ai.Status != InstanceStatusRunning {
 		t.Errorf("status after restart = %q, want running", ai.Status)
 	}
 }
@@ -303,22 +303,22 @@ func TestManager_StopSession_AlreadyStopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	mgr.StopSession(id)
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
+	mgr.StopInstance(id)
 
 	// Stopping an already-stopped agent should be a no-op.
-	info, err := mgr.StopSession(id)
+	info, err := mgr.StopInstance(id)
 	if err != nil {
 		t.Fatalf("stop already-stopped: %v", err)
 	}
-	if info.Status != string(SessionStatusStopped) {
+	if info.Status != string(InstanceStatusStopped) {
 		t.Errorf("status = %q, want stopped", info.Status)
 	}
 }
 
 func TestManager_StopSession_NotFound(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	_, err := mgr.StopSession("nonexistent-id")
+	_, err := mgr.StopInstance("nonexistent-id")
 	if err == nil {
 		t.Fatal("expected error for stopping nonexistent agent")
 	}
@@ -328,13 +328,13 @@ func TestManager_DeleteSession_Stopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	mgr.StopSession(id)
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
+	mgr.StopInstance(id)
 
-	if err := mgr.DeleteSession(id); err != nil {
+	if err := mgr.DeleteInstance(id); err != nil {
 		t.Fatalf("delete stopped agent: %v", err)
 	}
-	if _, ok := mgr.GetSession(id); ok {
+	if _, ok := mgr.GetInstance(id); ok {
 		t.Error("agent should not exist after delete")
 	}
 }
@@ -352,23 +352,23 @@ model: fake-model
 ---
 Child.`)
 
-	parentID, _ := mgr.CreateSession(t.Context(), "parent", "", "persistent")
-	childID, _ := mgr.CreateSession(t.Context(), "child", parentID, "persistent")
+	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent")
+	childID, _ := mgr.CreateInstance(t.Context(), "child", parentID, "persistent")
 
-	if err := mgr.DeleteSession(parentID); err != nil {
+	if err := mgr.DeleteInstance(parentID); err != nil {
 		t.Fatalf("delete parent: %v", err)
 	}
-	if _, ok := mgr.GetSession(parentID); ok {
+	if _, ok := mgr.GetInstance(parentID); ok {
 		t.Error("parent should be deleted")
 	}
-	if _, ok := mgr.GetSession(childID); ok {
+	if _, ok := mgr.GetInstance(childID); ok {
 		t.Error("child should be deleted with parent")
 	}
 }
 
 func TestManager_DeleteSession_NotFound(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	err := mgr.DeleteSession("nonexistent-id")
+	err := mgr.DeleteInstance("nonexistent-id")
 	if err == nil {
 		t.Fatal("expected error for deleting nonexistent agent")
 	}
@@ -376,9 +376,9 @@ func TestManager_DeleteSession_NotFound(t *testing.T) {
 
 func TestManager_StartSession_NotFound(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	err := mgr.StartSession(t.Context(), "nonexistent-id")
-	if !errors.Is(err, ErrSessionNotFound) {
-		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	err := mgr.StartInstance(t.Context(), "nonexistent-id")
+	if !errors.Is(err, ErrInstanceNotFound) {
+		t.Fatalf("expected ErrInstanceNotFound, got %v", err)
 	}
 }
 
@@ -386,11 +386,11 @@ func TestManager_StartSession_AlreadyRunning(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 
-	err := mgr.StartSession(t.Context(), id)
-	if !errors.Is(err, ErrSessionNotStopped) {
-		t.Fatalf("expected ErrSessionNotStopped, got %v", err)
+	err := mgr.StartInstance(t.Context(), id)
+	if !errors.Is(err, ErrInstanceNotStopped) {
+		t.Fatalf("expected ErrInstanceNotStopped, got %v", err)
 	}
 }
 
@@ -398,23 +398,23 @@ func TestManager_StartSession_ErrorRecovery(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	mgr.StopSession(id)
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
+	mgr.StopInstance(id)
 
 	// Delete the agent definition so startSession will fail on config load.
 	os.RemoveAll(mgr.agentDefDir("test-agent"))
 
-	err := mgr.StartSession(t.Context(), id)
+	err := mgr.StartInstance(t.Context(), id)
 	if err == nil {
 		t.Fatal("expected error when agent definition is missing")
 	}
 
 	// Session should still be visible as stopped (not lost from registry).
-	info, ok := mgr.GetSession(id)
+	info, ok := mgr.GetInstance(id)
 	if !ok {
 		t.Fatal("session should still be in registry after failed restart")
 	}
-	if info.Status != SessionStatusStopped {
+	if info.Status != InstanceStatusStopped {
 		t.Errorf("status = %q, want stopped", info.Status)
 	}
 }
@@ -423,8 +423,8 @@ func TestManager_SendMessage_Stopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	mgr.StopSession(id)
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
+	mgr.StopInstance(id)
 
 	_, err := mgr.SendMessage(t.Context(), id, "hello", nil)
 	if err == nil {
@@ -439,9 +439,9 @@ func TestManager_SessionByAgentName(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 
-	found, ok := mgr.SessionByAgentName("test-agent")
+	found, ok := mgr.InstanceByAgentName("test-agent")
 	if !ok {
 		t.Fatal("expected to find agent by name")
 	}
@@ -452,7 +452,7 @@ func TestManager_SessionByAgentName(t *testing.T) {
 
 func TestManager_SessionByAgentName_NotFound(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	_, found := mgr.SessionByAgentName("nope")
+	_, found := mgr.InstanceByAgentName("nope")
 	if found {
 		t.Error("expected not found")
 	}
@@ -460,7 +460,7 @@ func TestManager_SessionByAgentName_NotFound(t *testing.T) {
 
 func TestManager_GetSession_NotFound(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	_, found := mgr.GetSession("nonexistent-id")
+	_, found := mgr.GetInstance("nonexistent-id")
 	if found {
 		t.Error("expected not found")
 	}
@@ -487,10 +487,10 @@ model: fake-model
 ---
 Agent two.`)
 
-	mgr.CreateSession(t.Context(), "a1", "", "persistent")
-	mgr.CreateSession(t.Context(), "a2", "", "persistent")
+	mgr.CreateInstance(t.Context(), "a1", "", "persistent")
+	mgr.CreateInstance(t.Context(), "a2", "", "persistent")
 
-	agents := mgr.ListSessions()
+	agents := mgr.ListInstances()
 	if len(agents) != 2 {
 		t.Fatalf("expected 2 agents, got %d", len(agents))
 	}
@@ -508,10 +508,10 @@ func TestManager_Shutdown(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	mgr.Shutdown()
 
-	if len(mgr.ListSessions()) != 0 {
+	if len(mgr.ListInstances()) != 0 {
 		t.Error("expected 0 agents after shutdown")
 	}
 }
@@ -529,10 +529,10 @@ model: fake-model
 ---
 Child.`)
 
-	rootID, _ := mgr.CreateSession(t.Context(), "root", "", "persistent")
-	childID, _ := mgr.CreateSession(t.Context(), "child", rootID, "persistent")
+	rootID, _ := mgr.CreateInstance(t.Context(), "root", "", "persistent")
+	childID, _ := mgr.CreateInstance(t.Context(), "child", rootID, "persistent")
 
-	info, _ := mgr.GetSession(childID)
+	info, _ := mgr.GetInstance(childID)
 	if info.ParentID != rootID {
 		t.Errorf("child parentID = %q, want %q", info.ParentID, rootID)
 	}
@@ -597,8 +597,8 @@ model: fake-model
 ---
 Child.`)
 
-	rootID, _ := mgr.CreateSession(t.Context(), "root", "", "persistent")
-	childID, _ := mgr.CreateSession(t.Context(), "child", rootID, "persistent")
+	rootID, _ := mgr.CreateInstance(t.Context(), "root", "", "persistent")
+	childID, _ := mgr.CreateInstance(t.Context(), "child", rootID, "persistent")
 
 	if !mgr.IsDescendant(childID, rootID) {
 		t.Error("child should be descendant of root")
@@ -624,11 +624,11 @@ model: fake-model
 ---
 Child.`)
 
-	parentID, _ := mgr.CreateSession(t.Context(), "parent", "", "persistent")
-	mgr.CreateSession(t.Context(), "child", parentID, "persistent")
+	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent")
+	mgr.CreateInstance(t.Context(), "child", parentID, "persistent")
 
 	// ListChildren scoped to parent
-	children := mgr.ListChildSessions(parentID)
+	children := mgr.ListChildInstances(parentID)
 	if len(children) != 1 {
 		t.Fatalf("expected 1 child, got %d", len(children))
 	}
@@ -637,7 +637,7 @@ Child.`)
 	}
 
 	// ListChildren for agent with no children
-	noKids := mgr.ListChildSessions("nonexistent")
+	noKids := mgr.ListChildInstances("nonexistent")
 	if len(noKids) != 0 {
 		t.Errorf("expected 0 children, got %d", len(noKids))
 	}
@@ -647,12 +647,12 @@ func TestManager_SessionDirCreated(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	sessDir := filepath.Join(dir, "sessions", id)
+	sessDir := filepath.Join(dir, "instances", id)
 	if _, err := os.Stat(sessDir); err != nil {
 		t.Fatalf("session dir should exist at %s: %v", sessDir, err)
 	}
@@ -662,13 +662,29 @@ func TestManager_SessionSubdirs(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	sessDir := filepath.Join(dir, "sessions", id)
-	for _, sub := range []string{"db", "scratch", "tmp"} {
+	instDir := filepath.Join(dir, "instances", id)
+
+	// Instance dir should exist.
+	if _, err := os.Stat(instDir); err != nil {
+		t.Fatalf("instance dir should exist: %v", err)
+	}
+
+	// Session dir should exist under instance dir.
+	sessionsDir := filepath.Join(instDir, "sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		t.Fatalf("sessions dir should exist: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 session dir, got %d", len(entries))
+	}
+	sessDir := filepath.Join(sessionsDir, entries[0].Name())
+	for _, sub := range []string{"scratch", "tmp"} {
 		subDir := filepath.Join(sessDir, sub)
 		info, err := os.Stat(subDir)
 		if err != nil {
@@ -686,18 +702,18 @@ func TestManager_EphemeralCleanup(t *testing.T) {
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	// Start a persistent parent
-	parentID, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	parentID, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 
 	// Start an ephemeral child directly
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
-	ephID, _ := mgr.startSession(t.Context(), "ephemeral-test-id", cfg, parentID, config.ModeEphemeral)
+	ephID, _ := mgr.startInstance(t.Context(), "ephemeral-test-id", "ephemeral-sess-id", cfg, parentID, config.ModeEphemeral)
 
-	sessDir := filepath.Join(dir, "sessions", ephID)
+	sessDir := filepath.Join(dir, "instances", ephID)
 	if _, err := os.Stat(sessDir); err != nil {
 		t.Fatalf("ephemeral session dir should exist: %v", err)
 	}
 
-	mgr.StopSession(ephID)
+	mgr.StopInstance(ephID)
 
 	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
 		t.Error("ephemeral session dir should be cleaned up after stop")
@@ -708,10 +724,10 @@ func TestManager_PersistentNotCleaned(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	sessDir := filepath.Join(dir, "sessions", id)
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
+	sessDir := filepath.Join(dir, "instances", id)
 
-	mgr.StopSession(id)
+	mgr.StopInstance(id)
 
 	if _, err := os.Stat(sessDir); os.IsNotExist(err) {
 		t.Error("persistent session dir should survive stop")
@@ -730,7 +746,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 		WorkingDir: dir,
 	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
+	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -740,12 +756,12 @@ func TestManager_RestoreSessions(t *testing.T) {
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
 	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
-	if err := mgr2.RestoreSessions(ctx); err != nil {
+	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
 	// The agent should be running with the same ID
-	info, ok := mgr2.GetSession(id)
+	info, ok := mgr2.GetInstance(id)
 	if !ok {
 		t.Fatal("restored agent not found")
 	}
@@ -766,36 +782,36 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 		WorkingDir: dir,
 	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
+	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	mgr1.StopSession(id)
+	mgr1.StopInstance(id)
 	mgr1.Shutdown()
 
 	// Create a new manager and restore.
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
 	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
-	if err := mgr2.RestoreSessions(ctx); err != nil {
+	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
 	// The agent should be restored as stopped, not running.
-	info, ok := mgr2.GetSession(id)
+	info, ok := mgr2.GetInstance(id)
 	if !ok {
 		t.Fatal("stopped agent not found after restore")
 	}
-	if info.Status != SessionStatusStopped {
+	if info.Status != InstanceStatusStopped {
 		t.Errorf("restored status = %q, want stopped", info.Status)
 	}
 
 	// Restarting it should work and clear the stopped state.
-	if err := mgr2.StartSession(ctx, id); err != nil {
+	if err := mgr2.StartInstance(ctx, id); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
-	info, _ = mgr2.GetSession(id)
-	if info.Status != SessionStatusRunning {
+	info, _ = mgr2.GetInstance(id)
+	if info.Status != InstanceStatusRunning {
 		t.Errorf("status after restart = %q, want running", info.Status)
 	}
 }
@@ -806,13 +822,13 @@ func TestManager_SpawnSession_NoLoop(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.SpawnSession(t.Context(), "test-agent", "do something", "", nil)
+	_, err := mgr.SpawnEphemeral(t.Context(), "test-agent", "do something", "", nil)
 	if err == nil {
 		t.Fatal("expected error when no inference loop")
 	}
 
 	// Ephemeral agent should be cleaned up even on failure.
-	agents := mgr.ListSessions()
+	agents := mgr.ListInstances()
 	if len(agents) != 0 {
 		t.Errorf("expected 0 agents after spawn, got %d", len(agents))
 	}
@@ -860,7 +876,7 @@ func TestManager_UIDPool_Assigned(t *testing.T) {
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -897,8 +913,8 @@ model: fake-model
 ---
 B.`)
 
-	mgr.CreateSession(t.Context(), "a", "", "persistent")
-	mgr.CreateSession(t.Context(), "b", "", "persistent")
+	mgr.CreateInstance(t.Context(), "a", "", "persistent")
+	mgr.CreateInstance(t.Context(), "b", "", "persistent")
 
 	if len(*configs) != 2 {
 		t.Fatalf("expected 2 spawn configs, got %d", len(*configs))
@@ -916,12 +932,12 @@ func TestManager_UIDPool_ReleasedOnStop(t *testing.T) {
 	mgr, dir, _ := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if pool.InUse() != 1 {
 		t.Fatalf("expected 1 UID in use, got %d", pool.InUse())
 	}
 
-	mgr.StopSession(id)
+	mgr.StopInstance(id)
 	if pool.InUse() != 0 {
 		t.Fatalf("expected 0 UIDs in use after stop, got %d", pool.InUse())
 	}
@@ -932,8 +948,8 @@ func TestManager_UIDPool_ReleasedOnShutdown(t *testing.T) {
 	mgr, dir, _ := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
-	mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
+	mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if pool.InUse() != 2 {
 		t.Fatalf("expected 2 UIDs in use, got %d", pool.InUse())
 	}
@@ -953,7 +969,7 @@ func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
 	}, nil, logger, failingWorkerFactory(), pool, nil)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err == nil {
 		t.Fatal("expected spawn failure")
 	}
@@ -969,15 +985,15 @@ func TestManager_UIDPool_Exhaustion(t *testing.T) {
 	mgr, dir, _ := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start 1: %v", err)
 	}
-	_, err = mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start 2: %v", err)
 	}
-	_, err = mgr.CreateSession(t.Context(), "test-agent", "", "persistent")
+	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err == nil {
 		t.Fatal("expected pool exhaustion error")
 	}
@@ -997,14 +1013,14 @@ model: fake-model
 ---
 Child.`)
 
-	parentID, _ := mgr.CreateSession(t.Context(), "parent", "", "persistent")
-	mgr.CreateSession(t.Context(), "child", parentID, "persistent")
+	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent")
+	mgr.CreateInstance(t.Context(), "child", parentID, "persistent")
 	if pool.InUse() != 2 {
 		t.Fatalf("expected 2 UIDs, got %d", pool.InUse())
 	}
 
 	// Stop parent — should release both parent and child UIDs
-	mgr.StopSession(parentID)
+	mgr.StopInstance(parentID)
 	if pool.InUse() != 0 {
 		t.Fatalf("expected 0 UIDs after stopping parent+child, got %d", pool.InUse())
 	}
@@ -1024,7 +1040,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 		WorkingDir: dir,
 	}, nil, logger, factory1, pool, pdb)
 
-	id, err := mgr1.CreateSession(ctx, "test-agent", "", "persistent")
+	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1039,7 +1055,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
 	}, nil, logger, factory2, pool2, pdb)
-	if err := mgr2.RestoreSessions(ctx); err != nil {
+	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
@@ -1055,7 +1071,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	}
 
 	// Verify same agent ID
-	info, ok := mgr2.GetSession(id)
+	info, ok := mgr2.GetInstance(id)
 	if !ok {
 		t.Fatal("restored agent not found")
 	}
@@ -1071,7 +1087,7 @@ func TestManager_UIDPool_SpawnSubagent(t *testing.T) {
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, _ = mgr.SpawnSession(t.Context(), "test-agent", "do something", "", nil)
+	_, _ = mgr.SpawnEphemeral(t.Context(), "test-agent", "do something", "", nil)
 	// Error expected (no loop), but cleanup should happen.
 
 	if len(*configs) != 1 {
@@ -1115,10 +1131,10 @@ func TestBuildAllowedToolsMap_EphemeralMode(t *testing.T) {
 	allowed := buildAllowedToolsMap(effective, config.ModeEphemeral, false)
 
 	// Ephemeral agents get spawn_agent but NOT coordinator or persistent tools.
-	if !allowed["spawn_session"] {
-		t.Error("ephemeral agents should get spawn_session")
+	if !allowed["spawn_instance"] {
+		t.Error("ephemeral agents should get spawn_instance")
 	}
-	if allowed["create_session"] || allowed["resume_session"] || allowed["stop_session"] || allowed["delete_session"] || allowed["send_message"] || allowed["list_sessions"] {
+	if allowed["create_instance"] || allowed["resume_instance"] || allowed["stop_instance"] || allowed["delete_instance"] || allowed["send_message"] || allowed["list_instances"] {
 		t.Error("ephemeral agents should not get coordinator tools")
 	}
 	if allowed["memory_read"] || allowed["memory_write"] || allowed["todos"] {
@@ -1131,14 +1147,14 @@ func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
 	allowed := buildAllowedToolsMap(effective, config.ModePersistent, false)
 
 	// Persistent agents get spawn_agent + persistent tools, but NOT coordinator tools.
-	if !allowed["spawn_session"] {
-		t.Error("persistent agents should get spawn_session")
+	if !allowed["spawn_instance"] {
+		t.Error("persistent agents should get spawn_instance")
 	}
 	if !allowed["memory_read"] || !allowed["memory_write"] || !allowed["todos"] ||
 		!allowed["history_search"] || !allowed["history_recall"] {
 		t.Error("persistent agents should get persistent tools")
 	}
-	if allowed["resume_session"] || allowed["stop_session"] || allowed["send_message"] || allowed["list_sessions"] {
+	if allowed["resume_instance"] || allowed["stop_instance"] || allowed["send_message"] || allowed["list_instances"] {
 		t.Error("persistent agents should not get coordinator tools")
 	}
 }
@@ -1148,10 +1164,10 @@ func TestBuildAllowedToolsMap_CoordinatorMode(t *testing.T) {
 	allowed := buildAllowedToolsMap(effective, config.ModeCoordinator, false)
 
 	// Coordinator agents get everything: spawn + coordinator + persistent tools.
-	if !allowed["spawn_session"] {
-		t.Error("coordinators should get spawn_session")
+	if !allowed["spawn_instance"] {
+		t.Error("coordinators should get spawn_instance")
 	}
-	if !allowed["resume_session"] || !allowed["stop_session"] || !allowed["delete_session"] || !allowed["send_message"] || !allowed["list_sessions"] {
+	if !allowed["resume_instance"] || !allowed["stop_instance"] || !allowed["delete_instance"] || !allowed["send_message"] || !allowed["list_instances"] {
 		t.Error("coordinators should get coordinator tools")
 	}
 	if !allowed["memory_read"] || !allowed["memory_write"] || !allowed["todos"] ||
@@ -1182,7 +1198,7 @@ Coordinator.`)
 	// Start coordinator, shut down
 	pdb := openTestPDB(t, dir)
 	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
-	id, err := mgr1.CreateSession(ctx, "coord", "", "coordinator")
+	id, err := mgr1.CreateInstance(ctx, "coord", "", "coordinator")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1190,10 +1206,10 @@ Coordinator.`)
 
 	// Restore — coordinator mode should survive (it's persistent)
 	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
-	if err := mgr2.RestoreSessions(ctx); err != nil {
+	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
-	info, ok := mgr2.GetSession(id)
+	info, ok := mgr2.GetInstance(id)
 	if !ok {
 		t.Fatal("coordinator should be restored")
 	}
@@ -1210,10 +1226,10 @@ model: fake-model
 ---
 Coordinator.`)
 
-	id, _ := mgr.CreateSession(t.Context(), "coord", "", "coordinator")
-	sessDir := filepath.Join(dir, "sessions", id)
+	id, _ := mgr.CreateInstance(t.Context(), "coord", "", "coordinator")
+	sessDir := filepath.Join(dir, "instances", id)
 
-	mgr.StopSession(id)
+	mgr.StopInstance(id)
 
 	if _, err := os.Stat(sessDir); os.IsNotExist(err) {
 		t.Error("coordinator session dir should survive stop (like persistent)")
@@ -1230,18 +1246,18 @@ tools: [bash]
 ---
 Coordinator.`)
 
-	_, err := mgr.CreateSession(t.Context(), "coord", "", "coordinator")
+	_, err := mgr.CreateInstance(t.Context(), "coord", "", "coordinator")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
 	cfg := (*configs)[0]
 	// Coordinator should have coordinator tools in effective tools
-	if !cfg.EffectiveTools["delete_session"] {
-		t.Error("coordinator should have delete_session in effective tools")
+	if !cfg.EffectiveTools["delete_instance"] {
+		t.Error("coordinator should have delete_instance in effective tools")
 	}
-	if !cfg.EffectiveTools["spawn_session"] {
-		t.Error("coordinator should have spawn_session in effective tools")
+	if !cfg.EffectiveTools["spawn_instance"] {
+		t.Error("coordinator should have spawn_instance in effective tools")
 	}
 	if !cfg.EffectiveTools["memory_read"] {
 		t.Error("coordinator should have memory_read in effective tools")
@@ -1259,7 +1275,7 @@ tools: [bash]
 ---
 Coordinator.`)
 
-	_, err := mgr.CreateSession(t.Context(), "coord", "", "coordinator")
+	_, err := mgr.CreateInstance(t.Context(), "coord", "", "coordinator")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1292,7 +1308,7 @@ tools: [bash]
 ---
 Coordinator.`)
 
-	_, err := mgr.CreateSession(t.Context(), "coord", "", "coordinator")
+	_, err := mgr.CreateInstance(t.Context(), "coord", "", "coordinator")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1318,7 +1334,7 @@ tools: [bash]
 ---
 Worker.`)
 
-	_, err := mgr.CreateSession(t.Context(), "worker", "", "persistent")
+	_, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1345,11 +1361,11 @@ Worker.`)
 
 	// Start an ephemeral agent directly
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("worker"))
-	mgr.startSession(t.Context(), "test-eph-id", cfg, "", config.ModeEphemeral)
+	mgr.startInstance(t.Context(), "test-eph-id", "test-eph-sess-id", cfg, "", config.ModeEphemeral)
 
 	spawnCfg := (*configs)[0]
-	if !spawnCfg.EffectiveTools["spawn_session"] {
-		t.Error("ephemeral agent should have spawn_session")
+	if !spawnCfg.EffectiveTools["spawn_instance"] {
+		t.Error("ephemeral agent should have spawn_instance")
 	}
 	if spawnCfg.EffectiveTools["memory_read"] {
 		t.Error("ephemeral should NOT have memory_read")
@@ -1384,7 +1400,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	os.MkdirAll(agentDir, 0755)
 	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\nmodel: claude-sonnet-4-20250514\ntools: [bash, read_file]\n---\nWork."), 0644)
 
-	id, err := mgr.CreateSession(t.Context(), "worker", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1394,7 +1410,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	mgr.pushConfigUpdate("worker")
 
 	// Verify the description was updated in-memory.
-	info, ok := mgr.GetSession(id)
+	info, ok := mgr.GetInstance(id)
 	if !ok {
 		t.Fatal("session not found")
 	}
@@ -1412,21 +1428,21 @@ func TestManager_PushConfigUpdate_SkipsStopped(t *testing.T) {
 	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\n---\nWork."), 0644)
 
 	// Start and stop a session
-	id, err := mgr.CreateSession(t.Context(), "worker", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent")
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr.StopSession(id)
+	mgr.StopInstance(id)
 
 	// Push — should not crash or send to stopped agent
 	mgr.pushConfigUpdate("worker")
 
 	// Verify no update was sent (worker is nil after stop)
 	mgr.mu.RLock()
-	s := mgr.sessions[id]
+	s := mgr.instances[id]
 	mgr.mu.RUnlock()
 
-	if s.info.Status != SessionStatusStopped {
+	if s.info.Status != InstanceStatusStopped {
 		t.Error("expected session to be stopped")
 	}
 }
@@ -1438,7 +1454,7 @@ func TestManager_PushConfigUpdate_UpdatesDescription(t *testing.T) {
 	os.MkdirAll(agentDir, 0755)
 	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\n---\nWork."), 0644)
 
-	id, err := mgr.CreateSession(t.Context(), "worker", "", "persistent")
+	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1447,7 +1463,7 @@ func TestManager_PushConfigUpdate_UpdatesDescription(t *testing.T) {
 	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\n---\nWork."), 0644)
 	mgr.pushConfigUpdate("worker")
 
-	info, ok := mgr.GetSession(id)
+	info, ok := mgr.GetInstance(id)
 	if !ok {
 		t.Fatal("session not found")
 	}
@@ -1466,11 +1482,11 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 			[]byte("---\nname: "+name+"\ndescription: old\ntools: [bash]\n---\nDo stuff."), 0644)
 	}
 
-	idA, err := mgr.CreateSession(t.Context(), "alpha", "", "persistent")
+	idA, err := mgr.CreateInstance(t.Context(), "alpha", "", "persistent")
 	if err != nil {
 		t.Fatal(err)
 	}
-	idB, err := mgr.CreateSession(t.Context(), "beta", "", "persistent")
+	idB, err := mgr.CreateInstance(t.Context(), "beta", "", "persistent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1486,7 +1502,7 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 
 	// Descriptions should be updated in-memory.
 	for _, id := range []string{idA, idB} {
-		info, ok := mgr.GetSession(id)
+		info, ok := mgr.GetInstance(id)
 		if !ok {
 			t.Errorf("session %s not found", id)
 			continue

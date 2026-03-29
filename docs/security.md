@@ -10,12 +10,12 @@ Hive runs untrusted LLM-driven agents that can execute arbitrary code. The secur
 │                                                     │
 │  Control Plane (root)                               │
 │  ├── config.yaml (0600, secrets + tool policies)    │
-│  ├── Inference loops (fantasy agent per session)     │
-│  └── Session lifecycle management                   │
+│  ├── Inference loops (fantasy agent per instance)    │
+│  └── Instance lifecycle management                  │
 │                                                     │
 │  ┌──────────────┐  ┌──────────────┐                 │
 │  │ Agent (UID A) │  │ Agent (UID B) │  ...           │
-│  │ sessions/a/   │  │ sessions/b/   │               │
+│  │ instances/a/  │  │ instances/b/  │               │
 │  │ (0700, own)   │  │ (0700, own)   │               │
 │  └──────────────┘  └──────────────┘                 │
 │                                                     │
@@ -40,7 +40,7 @@ Each agent runs as a separate OS process, spawned from the same `hive` binary wi
 **Spawn protocol:**
 
 1. Control plane calls `os/exec.Command("hive", "agent")` with a dedicated Unix socket path.
-2. `SpawnConfig` (session ID, agent name, tool whitelist, socket paths, etc.) is written as JSON to the child's stdin.
+2. `SpawnConfig` (instance ID, agent name, tool whitelist, socket paths, etc.) is written as JSON to the child's stdin.
 3. The agent process starts a gRPC server on its Unix socket and writes `ready` to stdout.
 4. The control plane connects to the agent's socket as a gRPC client.
 
@@ -59,12 +59,12 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 **Per-agent isolation:**
 
 - When an agent starts, the control plane acquires a UID from the pool and sets `SysProcAttr.Credential` on the child process so it runs as that user.
-- The agent's session directory is `chown`ed to its UID:GID before the process starts.
-- Session directories use `0700` permissions — only the owning agent can read or write its own memory, history, and todos.
+- The agent's instance directory is `chown`ed to its UID:GID before the process starts.
+- Instance directories use `0700` permissions — only the owning agent can read or write its own memory, history, and todos.
 - Coordinator-mode agents receive `hive-coordinators` as a supplementary group via `Credential.Groups`, granting write access to `agents/` and `skills/`.
 - When an agent stops, its UID is released back to the pool.
 
-**Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={session-dir}`, `LANG`, `LC_ALL`, `HIVE_API_KEY`, `MISE_DATA_DIR`) rather than inheriting the control plane's full environment. Setting `HOME` to the session directory gives each agent an isolated home for dotfiles, caches, and temp data.
+**Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={instance-dir}`, `LANG`, `LC_ALL`, `HIVE_API_KEY`, `MISE_DATA_DIR`) rather than inheriting the control plane's full environment. Setting `HOME` to the instance directory gives each agent an isolated home for dotfiles, caches, and temp data.
 
 ### 4. File System Permissions
 
@@ -75,10 +75,10 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 | `agents/` | `2775` (setgid) | root:hive-coordinators | Agent definitions. Readable by all (via "other" bits), writable by coordinator agents only. |
 | `skills/` | `2775` (setgid) | root:hive-coordinators | Shared skills. Same access as `agents/`. |
 | `workspace/` | `0775` | root:hive-agents | Shared collaborative space. All agents can read and write. |
-| `sessions/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, todos, scratch, tmp). Only the owning agent can access. |
-| `db/hive.db` | default | root | Unified platform database (sessions, messages, usage). Accessed only by the control plane process. |
+| `instances/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, sessions with todos, scratch, tmp). Only the owning agent can access. |
+| `db/hive.db` | default | root | Unified platform database (instances, sessions, messages, usage). Accessed only by the control plane process. |
 | `/opt/mise/` | `2775` (setgid) | root:hive-agents | Shared tool installations (mise, node, python, etc.). All agents can read, write, and install new tools. |
-| Agent socket | default | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hive-agent-{session-id}.sock`. |
+| Agent socket | default | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hive-agent-{instance-id}.sock`. |
 
 ### 5. Tool Capability System
 
@@ -95,8 +95,8 @@ Effective tools = declared tools ∩ control plane policy ∩ parent's effective
 **Parent inheritance:** A child agent's effective tools are intersected with its parent's effective tools. A child can never have more capabilities than its parent.
 
 **Structural tools** bypass this system — they are intrinsic to the agent's mode:
-- `spawn_session` is available to all agents.
-- Coordinator tools (`resume_session`, `stop_session`, `delete_session`, `send_message`, `list_sessions`) are only available to coordinator-mode agents.
+- `spawn_instance` is available to all agents.
+- Coordinator tools (`resume_instance`, `stop_instance`, `delete_instance`, `send_message`, `list_instances`) are only available to coordinator-mode agents.
 - Persistent tools (`memory_read`, `memory_write`, `todos`, `history_search`, `history_recall`) are available to persistent and coordinator agents.
 
 ### 6. Secrets Management
@@ -117,20 +117,20 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 
 **How it works:**
 
-1. Each session's inference loop receives its session ID as a `callerID` via context propagation.
-2. Coordinator tools (`send_message`, `stop_session`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
+1. Each instance's inference loop receives its instance ID as a `callerID` via context propagation.
+2. Coordinator tools (`send_message`, `stop_instance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
 3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the platform DB. If the target is not a descendant of the caller, the request is rejected.
 
 **Scoping rules:**
 
 | Operation | Authorization |
 |---|---|
-| `spawn_session` | No check needed — caller becomes the parent. |
-| `resume_session` | Target must be a descendant of caller. Coordinator mode only. |
+| `spawn_instance` | No check needed — caller becomes the parent. |
+| `resume_instance` | Target must be a descendant of caller. Coordinator mode only. |
 | `send_message` | Target must be a descendant of caller. Coordinator mode only. |
-| `stop_session` | Target must be a descendant of caller. Coordinator mode only. |
-| `delete_session` | Target must be a descendant of caller. Coordinator mode only. |
-| `list_sessions` | Returns only direct children of caller. Coordinator mode only. |
+| `stop_instance` | Target must be a descendant of caller. Coordinator mode only. |
+| `delete_instance` | Target must be a descendant of caller. Coordinator mode only. |
+| `list_instances` | Returns only direct children of caller. Coordinator mode only. |
 
 An agent cannot send messages to, stop, or inspect siblings, ancestors, or unrelated agents.
 
@@ -140,9 +140,9 @@ All inter-process communication uses gRPC over Unix domain sockets. No TCP ports
 
 **Single socket direction:**
 
-- **Agent sockets** (`/tmp/hive-agent-{session-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
+- **Agent sockets** (`/tmp/hive-agent-{instance-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
 
-There is no worker→control plane socket. All inference, session management, and coordinator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
+There is no worker→control plane socket. All inference, instance management, and coordinator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
 
 gRPC uses `insecure.NewCredentials()` for transport — this is safe because Unix sockets are local-only.
 
@@ -158,7 +158,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### What agents CANNOT do
 
-- Read other agents' session data (memory, history, todos) — blocked by `0700` ownership.
+- Read other agents' instance data (memory, history, todos) — blocked by `0700` ownership.
 - Read `config.yaml` or secret values directly — blocked by `0600` root ownership.
 - Manage agents outside their descendant tree — blocked by ScopedManager descendant checks.
 - Use tools they weren't granted — blocked by the three-layer capability intersection.
@@ -174,7 +174,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### Limitations
 
-- **No network isolation between agents.** Agents share the container's network namespace. An agent with `bash` could connect to another agent's gRPC socket by enumerating `/tmp/hive-agent-*.sock` — the path format is known but the UUID suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations. Network policies or additional namespacing would be needed for stronger isolation.
+- **No network isolation between agents.** Agents share the container's network namespace. An agent with `bash` could connect to another agent's gRPC socket by enumerating `/tmp/hive-agent-*.sock` — the path format is known but the UUID suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations.
 - **Shared workspace is collaborative.** Any agent can read or modify files in `/hive/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
 - **No syscall filtering.** Agents are not confined by seccomp, AppArmor, or similar mechanisms beyond what Docker applies by default.

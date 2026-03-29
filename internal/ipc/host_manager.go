@@ -3,31 +3,35 @@ package ipc
 import "context"
 
 // HostManager is the interface that the inference loop uses to manage
-// sessions. The agent.Manager implements this directly.
+// instances. The agent.Manager implements this directly.
 type HostManager interface {
-	// SpawnSession runs an ephemeral session and returns its result.
-	SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ChatEvent) error) (string, error)
+	// SpawnEphemeral runs an ephemeral instance and returns its result.
+	SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, onEvent func(ChatEvent) error) (string, error)
 
-	// CreateSession creates and starts a new child session in the given mode.
-	CreateSession(ctx context.Context, name, parentID string, mode string) (string, error)
+	// CreateInstance creates and starts a new child instance in the given mode.
+	CreateInstance(ctx context.Context, name, parentInstanceID string, mode string) (string, error)
 
-	// SendMessage sends a message to a running session and returns the response.
-	SendMessage(ctx context.Context, sessionID, message string, onEvent func(ChatEvent) error) (string, error)
+	// SendMessage sends a message to a running instance and returns the response.
+	SendMessage(ctx context.Context, instanceID, message string, onEvent func(ChatEvent) error) (string, error)
 
-	// StopSession stops a session and its entire subtree.
-	StopSession(sessionID string) (SessionInfo, error)
+	// StopInstance stops an instance and its entire subtree.
+	StopInstance(instanceID string) (InstanceInfo, error)
 
-	// StartSession restarts a stopped session.
-	StartSession(ctx context.Context, sessionID string) error
+	// StartInstance restarts a stopped instance (creates a new session within it).
+	StartInstance(ctx context.Context, instanceID string) error
 
-	// DeleteSession stops and permanently removes a session and its subtree.
-	DeleteSession(sessionID string) error
+	// DeleteInstance stops and permanently removes an instance and its subtree.
+	DeleteInstance(instanceID string) error
 
-	// IsDescendant reports whether targetID is a descendant of ancestorID.
+	// NewSession ends the current session and starts a new one within the instance.
+	NewSession(instanceID string) (string, error)
+
+	// IsDescendant reports whether targetID is a descendant of ancestorID
+	// in the instance tree.
 	IsDescendant(targetID, ancestorID string) bool
 
-	// ListChildSessions returns direct child sessions of the given parent.
-	ListChildSessions(callerID string) []SessionInfo
+	// ListChildInstances returns direct child instances of the given parent.
+	ListChildInstances(callerInstanceID string) []InstanceInfo
 
 	// SecretNames returns the names of available secrets.
 	SecretNames() []string

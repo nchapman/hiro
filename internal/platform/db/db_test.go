@@ -94,17 +94,23 @@ func TestSessions_CRUD(t *testing.T) {
 		t.Errorf("expected stopped with timestamp, got %+v", s)
 	}
 
-	// IsDescendant — parameter order: (targetID, ancestorID).
-	ok, err := d.IsDescendant("sess-2", "sess-1")
+	// Instance descendant checking.
+	if err := d.CreateInstance(Instance{ID: "inst-1", AgentName: "coordinator", Mode: "coordinator"}); err != nil {
+		t.Fatalf("CreateInstance parent: %v", err)
+	}
+	if err := d.CreateInstance(Instance{ID: "inst-2", AgentName: "researcher", Mode: "persistent", ParentID: "inst-1"}); err != nil {
+		t.Fatalf("CreateInstance child: %v", err)
+	}
+	ok, err := d.IsInstanceDescendant("inst-2", "inst-1")
 	if err != nil {
-		t.Fatalf("IsDescendant: %v", err)
+		t.Fatalf("IsInstanceDescendant: %v", err)
 	}
 	if !ok {
-		t.Error("expected sess-2 to be descendant of sess-1")
+		t.Error("expected inst-2 to be descendant of inst-1")
 	}
-	ok, _ = d.IsDescendant("sess-1", "sess-2")
+	ok, _ = d.IsInstanceDescendant("inst-1", "inst-2")
 	if ok {
-		t.Error("sess-1 should not be descendant of sess-2")
+		t.Error("inst-1 should not be descendant of inst-2")
 	}
 
 	// Delete parent — child is cascade-deleted.

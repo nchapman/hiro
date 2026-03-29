@@ -87,18 +87,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Allow targeting a specific session via query param, default to leader
-	sessionID := r.URL.Query().Get("session_id")
-	if sessionID == "" {
-		sessionID = s.leaderID
+	// Allow targeting a specific instance via query param, default to leader
+	instanceID := r.URL.Query().Get("instance_id")
+	if instanceID == "" {
+		instanceID = s.leaderID
 	}
-	info, ok := s.manager.GetSession(sessionID)
+	info, ok := s.manager.GetInstance(instanceID)
 	if !ok || info.Mode == config.ModeEphemeral {
-		http.Error(w, "session not found", http.StatusNotFound)
+		http.Error(w, "instance not found", http.StatusNotFound)
 		return
 	}
-	if info.Status == agent.SessionStatusStopped {
-		http.Error(w, "session is stopped", http.StatusConflict)
+	if info.Status == agent.InstanceStatusStopped {
+		http.Error(w, "instance is stopped", http.StatusConflict)
 		return
 	}
 
@@ -132,12 +132,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 		// Handle config changes (model switch, reasoning toggle).
 		if msg.Type == "config" {
-			if err := s.manager.UpdateSessionConfig(ctx, sessionID, msg.Model, msg.ReasoningEffort); err != nil {
+			if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
 				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
 			} else {
 				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
 			}
-			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(sessionID)}
+			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
 			if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
 				return
 			}
@@ -193,7 +193,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Stream response — agent process owns the conversation.
-		_, streamErr := s.manager.SendMessageWithFiles(ctx, sessionID, msg.Content, files, onEvent)
+		_, streamErr := s.manager.SendMessageWithFiles(ctx, instanceID, msg.Content, files, onEvent)
 
 		if streamErr != nil {
 			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}
@@ -201,7 +201,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Still send done so the frontend exits streaming state.
-			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(sessionID)}
+			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
 			if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
 				return
 			}
@@ -210,24 +210,32 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 		// Signal end of response with usage data.
 		done := ChatMessage{Type: "done", Role: "assistant"}
-		done.Usage = s.buildUsageInfo(sessionID)
+		done.Usage = s.buildUsageInfo(instanceID)
 		if err := wsjson.Write(ctx, conn, done); err != nil {
 			return
 		}
 	}
 }
 
-// buildUsageInfo queries the platform DB for session usage and returns it
+// buildUsageInfo queries the platform DB for instance usage and returns it
 // as a UsageInfo struct for inclusion in WebSocket messages.
-func (s *Server) buildUsageInfo(sessionID string) *UsageInfo {
+func (s *Server) buildUsageInfo(instanceID string) *UsageInfo {
 	if s.pdb == nil {
 		return nil
 	}
 
 	var model string
 	if s.manager != nil {
-		if info, ok := s.manager.GetSession(sessionID); ok {
+		if info, ok := s.manager.GetInstance(instanceID); ok {
 			model = info.Model
+		}
+	}
+
+	// Use the active session for usage tracking.
+	sessionID := instanceID
+	if s.manager != nil {
+		if sid := s.manager.ActiveSessionID(instanceID); sid != "" {
+			sessionID = sid
 		}
 	}
 

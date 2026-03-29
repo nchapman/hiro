@@ -31,25 +31,30 @@ type UsageInfo struct {
 	Model         string `json:"model,omitempty"`
 }
 
-func (s *Server) handleSessionUsage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleInstanceUsage(w http.ResponseWriter, r *http.Request) {
 	if s.pdb == nil {
 		http.Error(w, "usage tracking unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
 
-	// Look up session to get the model and verify it exists.
+	// Look up instance to get the model and verify it exists.
 	var model string
 	if s.manager != nil {
-		info, ok := s.manager.GetSession(id)
+		info, ok := s.manager.GetInstance(id)
 		if !ok {
-			http.Error(w, "session not found", http.StatusNotFound)
+			http.Error(w, "instance not found", http.StatusNotFound)
 			return
 		}
 		model = info.Model
 	}
 
-	writeJSON(w, http.StatusOK, s.buildUsageInfoForSession(id, model))
+	// Use the active session for usage tracking.
+	sessionID := s.manager.ActiveSessionID(id)
+	if sessionID == "" {
+		sessionID = id // fallback
+	}
+	writeJSON(w, http.StatusOK, s.buildUsageInfoForSession(sessionID, model))
 }
 
 // buildUsageInfoForSession constructs a UsageInfo from the DB for a given session.

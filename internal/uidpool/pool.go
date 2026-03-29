@@ -24,7 +24,7 @@ type Pool struct {
 	gid            uint32            // GID of the hive-agents group
 	coordinatorGID uint32            // GID of hive-coordinators group; 0 = not available
 	size           int               // number of UIDs in the pool
-	inUse          map[uint32]string // UID -> session ID
+	inUse          map[uint32]string // UID -> instance ID
 }
 
 // New creates a UID pool starting at baseUID with the given group ID and size.

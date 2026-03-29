@@ -2,8 +2,10 @@
 // the control plane and agent worker processes.
 package ipc
 
-// SessionInfo describes a session (agent instance) for external consumers.
-type SessionInfo struct {
+import "time"
+
+// InstanceInfo describes an agent instance for external consumers.
+type InstanceInfo struct {
 	ID          string
 	Name        string
 	Mode        string
@@ -13,9 +15,18 @@ type SessionInfo struct {
 	Model       string // resolved model ID (e.g. "claude-sonnet-4-20250514")
 }
 
+// SessionInfo describes a session within an instance.
+type SessionInfo struct {
+	ID         string
+	InstanceID string
+	Status     string // "running", "stopped"
+	CreatedAt  time.Time
+}
+
 // SpawnConfig is the configuration passed to an agent worker process at startup.
 // Workers are thin tool-execution sandboxes — they only need paths and UID info.
 type SpawnConfig struct {
+	InstanceID     string          `json:"instance_id"`
 	SessionID      string          `json:"session_id"`
 	AgentName      string          `json:"agent_name"`
 	EffectiveTools map[string]bool `json:"effective_tools"`

@@ -146,7 +146,7 @@ export default function App() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch("/api/sessions")
+      const res = await fetch("/api/instances")
       if (res.ok) {
         const data: SessionInfo[] = await res.json()
         setSessions(data)

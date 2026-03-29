@@ -20,7 +20,7 @@ var defaultAgents embed.FS
 var requiredDirs = []string{
 	"agents",
 	"db",
-	"sessions",
+	"instances",
 	"skills",
 	"workspace", // setgid so files created inside inherit the hive-agents group
 }

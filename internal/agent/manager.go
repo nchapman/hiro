@@ -28,22 +28,22 @@ import (
 	"github.com/nchapman/hivebot/internal/watcher"
 )
 
-// SessionStatus represents the lifecycle state of an agent.
-type SessionStatus string
+// InstanceStatus represents the lifecycle state of an instance.
+type InstanceStatus string
 
 const (
-	SessionStatusRunning SessionStatus = "running"
-	SessionStatusStopped SessionStatus = "stopped"
+	InstanceStatusRunning InstanceStatus = "running"
+	InstanceStatusStopped InstanceStatus = "stopped"
 )
 
-// SessionInfo describes an agent for external consumers.
-type SessionInfo struct {
+// InstanceInfo describes an agent instance for external consumers.
+type InstanceInfo struct {
 	ID          string
 	Name        string
 	Mode        config.AgentMode
 	Description string
-	ParentID    string // empty for top-level agents
-	Status      SessionStatus
+	ParentID    string // empty for top-level instances
+	Status      InstanceStatus
 	Model       string // resolved model ID
 }
 
@@ -59,31 +59,35 @@ type WorkerHandle struct {
 // OS processes. Tests inject alternatives that return fake workers.
 type WorkerFactory func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error)
 
-// session tracks a live agent session within the manager.
-type session struct {
+// instance tracks a live agent instance within the manager.
+type instance struct {
 	mu             sync.Mutex // serializes calls through the worker
-	info           SessionInfo
+	info           InstanceInfo
+	activeSession  string             // current session ID
 	worker         ipc.AgentWorker
 	handle         *WorkerHandle
-	loop           *inference.Loop // inference loop (runs in control plane)
-	effectiveTools map[string]bool // built-in tools this agent is allowed; nil = unrestricted
+	loop           *inference.Loop    // inference loop (runs in control plane)
+	effectiveTools map[string]bool    // built-in tools this instance is allowed; nil = unrestricted
+	uid            uint32             // isolated UID (0 = no isolation)
+	gid            uint32             // isolated GID
+	groups         []uint32           // supplementary groups (includes hive-coordinators for coordinators)
 }
 
-// Manager supervises agent lifecycles on a single node.
+// Manager supervises agent instance lifecycles on a single node.
 type Manager struct {
-	mu       sync.RWMutex
-	sessions map[string]*session // agent ID -> running agent
-	children map[string][]string      // parent ID -> child IDs
+	mu        sync.RWMutex
+	instances map[string]*instance  // instance ID -> running instance
+	children  map[string][]string   // parent instance ID -> child instance IDs
 
-	ctx     context.Context // long-lived context for persistent agents
+	ctx     context.Context // long-lived context for persistent instances
 	rootDir string
 	opts    Options
 	cp      ControlPlane // operator-level tool/secret config
 	logger  *slog.Logger
 
-	workerFactory WorkerFactory // creates agent workers (default = OS processes)
-	uidPool       *uidpool.Pool // per-agent Unix user isolation; nil = disabled
-	pdb           *platformdb.DB // unified platform database
+	workerFactory WorkerFactory     // creates agent workers (default = OS processes)
+	uidPool       *uidpool.Pool     // per-agent Unix user isolation; nil = disabled
+	pdb           *platformdb.DB    // unified platform database
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.
@@ -99,18 +103,18 @@ type ControlPlane interface {
 }
 
 // NewManager creates a new agent manager. rootDir is the hive platform root
-// containing agents/, sessions/, skills/, and workspace/ subdirectories. The context
-// controls the lifetime of persistent agents. cp may be nil if no control
+// containing agents/, instances/, skills/, and workspace/ subdirectories. The context
+// controls the lifetime of persistent instances. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.
 func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, wf WorkerFactory, pool *uidpool.Pool, pdb *platformdb.DB) *Manager {
 	if wf == nil {
 		wf = defaultWorkerFactory
 	}
 	return &Manager{
-		sessions:      make(map[string]*session),
+		instances:     make(map[string]*instance),
 		children:      make(map[string][]string),
 		ctx:           ctx,
-		rootDir:  rootDir,
+		rootDir:       rootDir,
 		opts:          opts,
 		cp:            cp,
 		logger:        logger,
@@ -120,13 +124,13 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 	}
 }
 
-// CreateSession loads an agent definition by name and starts a session in the
+// CreateInstance loads an agent definition by name and starts an instance in the
 // given mode. The ctx parameter is used only for config loading and worker
-// spawning — persistent/coordinator sessions use the manager's lifetime context.
-// parentID tracks lineage; pass "" for top-level agents.
+// spawning — persistent/coordinator instances use the manager's lifetime context.
+// parentInstanceID tracks lineage; pass "" for top-level instances.
 // mode is a string to satisfy the ipc.HostManager interface boundary; it must
 // be one of "persistent", "ephemeral", or "coordinator".
-func (m *Manager) CreateSession(ctx context.Context, name, parentID string, mode string) (string, error) {
+func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID string, mode string) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
 	}
@@ -144,16 +148,17 @@ func (m *Manager) CreateSession(ctx context.Context, name, parentID string, mode
 		return "", fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
-	id := uuid.Must(uuid.NewV7()).String()
-	return m.startSession(ctx, id, cfg, parentID, agentMode)
+	instanceID := uuid.Must(uuid.NewV7()).String()
+	sessionID := uuid.Must(uuid.NewV7()).String()
+	return m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode)
 }
 
-// SpawnSession starts an ephemeral agent that runs the given prompt and returns
-// the result. Blocks until the subagent completes. The agent always runs in
+// SpawnEphemeral starts an ephemeral instance that runs the given prompt and returns
+// the result. Blocks until the subagent completes. The instance always runs in
 // ephemeral mode — the caller controls the lifecycle.
-// parentID identifies the spawning agent (empty for top-level spawns).
+// parentInstanceID identifies the spawning instance (empty for top-level spawns).
 // onEvent receives streaming events during execution (may be nil).
-func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID string, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -163,17 +168,18 @@ func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID 
 		return "", fmt.Errorf("loading agent %q: %w", agentName, err)
 	}
 
-	id := uuid.Must(uuid.NewV7()).String()
-	agentID, err := m.startSession(ctx, id, cfg, parentID, config.ModeEphemeral)
+	instanceID := uuid.Must(uuid.NewV7()).String()
+	sessionID := uuid.Must(uuid.NewV7()).String()
+	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral)
 	if err != nil {
 		return "", err
 	}
 
 	// Run the prompt and collect the result
-	result, err := m.SendMessage(ctx, agentID, prompt, onEvent)
+	result, err := m.SendMessage(ctx, instID, prompt, onEvent)
 
-	// Clean up the ephemeral agent and its entire subtree
-	m.StopSession(agentID)
+	// Clean up the ephemeral instance and its entire subtree
+	m.StopInstance(instID)
 
 	if err != nil {
 		return "", fmt.Errorf("subagent %q failed: %w", agentName, err)
@@ -181,25 +187,27 @@ func (m *Manager) SpawnSession(ctx context.Context, agentName, prompt, parentID 
 	return result, nil
 }
 
-// UpdateSessionConfig changes the model and/or reasoning effort for a running session.
+// UpdateInstanceConfig changes the model and/or reasoning effort for a running instance.
 // Changes take effect on the next Chat() call.
-func (m *Manager) UpdateSessionConfig(ctx context.Context, sessionID, model string, reasoningEffort *string) error {
-	ra := m.getSession(sessionID)
-	if ra == nil {
-		return fmt.Errorf("session %q not found", sessionID)
-	}
-	if ra.info.Status == SessionStatusStopped {
-		return fmt.Errorf("session %q is stopped", sessionID)
-	}
-	if ra.loop == nil {
-		return fmt.Errorf("session %q has no inference loop", sessionID)
+func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string) error {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return fmt.Errorf("instance %q not found", instanceID)
 	}
 
-	// Serialize with SendMessage to prevent concurrent access to session state.
-	ra.mu.Lock()
-	defer ra.mu.Unlock()
+	// Serialize with SendMessage to prevent concurrent access to instance state.
+	// Status and loop checks must be inside the lock to avoid races with softStop.
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
 
-	if model != "" && model != ra.info.Model {
+	if inst.info.Status == InstanceStatusStopped {
+		return fmt.Errorf("instance %q is stopped", instanceID)
+	}
+	if inst.loop == nil {
+		return fmt.Errorf("instance %q has no inference loop", instanceID)
+	}
+
+	if model != "" && model != inst.info.Model {
 		// Find which configured provider owns this model.
 		provider, apiKey, baseURL, err := m.resolveProviderForModel(model)
 		if err != nil {
@@ -210,25 +218,25 @@ func (m *Manager) UpdateSessionConfig(ctx context.Context, sessionID, model stri
 		if err != nil {
 			return fmt.Errorf("creating language model %q: %w", model, err)
 		}
-		ra.loop.UpdateModel(lm, model, provider)
-		ra.info.Model = model
+		inst.loop.UpdateModel(lm, model, provider)
+		inst.info.Model = model
 	}
 
 	if reasoningEffort != nil {
 		if !validReasoningEffort(*reasoningEffort) {
 			return fmt.Errorf("invalid reasoning effort %q", *reasoningEffort)
 		}
-		ra.loop.SetReasoningEffort(*reasoningEffort)
+		inst.loop.SetReasoningEffort(*reasoningEffort)
 	}
 
 	// Persist config to DB so it survives restarts.
 	if m.pdb != nil {
-		cfg := platformdb.SessionConfig{
-			ModelOverride:   ra.info.Model,
-			ReasoningEffort: ra.loop.ReasoningEffort(),
+		cfg := platformdb.InstanceConfig{
+			ModelOverride:   inst.info.Model,
+			ReasoningEffort: inst.loop.ReasoningEffort(),
 		}
-		if err := m.pdb.UpdateSessionConfig(sessionID, cfg); err != nil {
-			m.logger.Warn("failed to persist session config", "session", sessionID, "error", err)
+		if err := m.pdb.UpdateInstanceConfig(instanceID, cfg); err != nil {
+			m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
 		}
 	}
 
@@ -244,175 +252,357 @@ func validReasoningEffort(effort string) bool {
 	return validEfforts[effort]
 }
 
-// SendMessage sends a message to a running agent and streams the response.
+// SendMessage sends a message to a running instance and streams the response.
 // onEvent is called for each streaming event; it may be nil. Calls are serialized
-// per agent to prevent conversation corruption.
-func (m *Manager) SendMessage(ctx context.Context, agentID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	return m.SendMessageWithFiles(ctx, agentID, message, nil, onEvent)
+// per instance to prevent conversation corruption.
+func (m *Manager) SendMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessageWithFiles(ctx, instanceID, message, nil, onEvent)
 }
 
 // SendMessageWithFiles is like SendMessage but includes file attachments
 // (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
-func (m *Manager) SendMessageWithFiles(ctx context.Context, agentID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (m *Manager) SendMessageWithFiles(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
 	// Cycle detection: prevent re-entrant deadlocks when coordinator tools
 	// send messages in a loop (A → send_message(B) → B sends back to A).
-	if inference.IsInCallChain(ctx, agentID) {
-		return "", fmt.Errorf("circular message dependency: session %s is already awaiting a response in this call chain", agentID)
+	if inference.IsInCallChain(ctx, instanceID) {
+		return "", fmt.Errorf("circular message dependency: instance %s is already awaiting a response in this call chain", instanceID)
 	}
 
-	ra := m.getSession(agentID)
-	if ra == nil {
-		return "", fmt.Errorf("session %q not found", agentID)
-	}
-	if ra.info.Status == SessionStatusStopped {
-		return "", fmt.Errorf("session %q is stopped", agentID)
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return "", fmt.Errorf("instance %q not found", instanceID)
 	}
 
-	ra.mu.Lock()
-	defer ra.mu.Unlock()
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
 
-	// Add this session to the call chain and set the caller ID for tool scoping.
-	ctx = inference.ContextWithCallChain(ctx, agentID)
-	ctx = inference.ContextWithCallerID(ctx, agentID)
-
-	if ra.loop != nil {
-		return ra.loop.Chat(ctx, message, files, onEvent)
+	// Status check inside lock to avoid race with softStop/watchWorker.
+	if inst.info.Status == InstanceStatusStopped {
+		return "", fmt.Errorf("instance %q is stopped", instanceID)
 	}
-	return "", fmt.Errorf("session %q has no inference loop", agentID)
+
+	// Add this instance to the call chain and set the caller ID for tool scoping.
+	ctx = inference.ContextWithCallChain(ctx, instanceID)
+	ctx = inference.ContextWithCallerID(ctx, instanceID)
+
+	if inst.loop != nil {
+		return inst.loop.Chat(ctx, message, files, onEvent)
+	}
+	return "", fmt.Errorf("instance %q has no inference loop", instanceID)
 }
 
-// StopAgent stops a running agent and all its descendants.
-// Persistent agents are soft-stopped (process killed, kept in registry as "stopped").
-// Ephemeral agents are fully removed. Returns the info of the stopped root agent.
-func (m *Manager) StopSession(agentID string) (ipc.SessionInfo, error) {
+// StopInstance stops a running instance and all its descendants.
+// Persistent instances are soft-stopped (process killed, kept in registry as "stopped").
+// Ephemeral instances are fully removed. Returns the info of the stopped root instance.
+func (m *Manager) StopInstance(instanceID string) (ipc.InstanceInfo, error) {
 	// Collect the entire subtree in one snapshot, then stop leaf-first
-	toStop := m.collectDescendants(agentID)
+	toStop := m.collectDescendants(instanceID)
 	if len(toStop) == 0 {
-		return ipc.SessionInfo{}, fmt.Errorf("session %q not found", agentID)
+		return ipc.InstanceInfo{}, fmt.Errorf("instance %q not found", instanceID)
 	}
 
 	// Check if already stopped
-	rootInfo, _ := m.GetSession(agentID)
-	if rootInfo.Status == SessionStatusStopped {
-		return m.sessionInfoToIPC(rootInfo), nil
+	rootInfo, _ := m.GetInstance(instanceID)
+	if rootInfo.Status == InstanceStatusStopped {
+		return m.instanceInfoToIPC(rootInfo), nil
 	}
 
 	for i := len(toStop) - 1; i >= 0; i-- {
 		id := toStop[i]
-		ra := m.getSession(id)
-		if ra == nil || ra.info.Status == SessionStatusStopped {
+		inst := m.getInstance(id)
+		if inst == nil || inst.info.Status == InstanceStatusStopped {
 			continue
 		}
-		if ra.info.Mode.IsPersistent() {
+		if inst.info.Mode.IsPersistent() {
 			m.softStop(id)
 		} else {
-			m.removeSession(id)
+			m.removeInstance(id)
 		}
-		m.logger.Info("session stopped", "id", id)
+		m.logger.Info("instance stopped", "id", id)
 	}
 
 	// Re-read info after stop (status may have changed)
-	rootInfo, _ = m.GetSession(agentID)
-	return m.sessionInfoToIPC(rootInfo), nil
+	rootInfo, _ = m.GetInstance(instanceID)
+	return m.instanceInfoToIPC(rootInfo), nil
 }
 
-// DeleteAgent stops and permanently removes an agent and all its descendants.
-// Session directories are always deleted regardless of agent mode.
-func (m *Manager) DeleteSession(agentID string) error {
-	toStop := m.collectDescendants(agentID)
+// DeleteInstance stops and permanently removes an instance and all its descendants.
+// Instance directories are always deleted regardless of mode.
+func (m *Manager) DeleteInstance(instanceID string) error {
+	toStop := m.collectDescendants(instanceID)
 	if len(toStop) == 0 {
-		return fmt.Errorf("session %q not found", agentID)
+		return fmt.Errorf("instance %q not found", instanceID)
 	}
 
 	for i := len(toStop) - 1; i >= 0; i-- {
 		id := toStop[i]
 		m.mu.RLock()
-		ra, ok := m.sessions[id]
+		inst, ok := m.instances[id]
 		m.mu.RUnlock()
 		if !ok {
 			continue
 		}
 
-		if ra.info.Status == SessionStatusStopped {
-			// Already stopped — just unregister and delete session dir.
+		if inst.info.Status == InstanceStatusStopped {
+			// Already stopped — just unregister and delete instance dir.
 			m.mu.Lock()
-			m.unregisterLocked(id, ra)
+			m.unregisterLocked(id, inst)
 			m.mu.Unlock()
 		} else {
 			// Running — do full graceful shutdown + unregister.
-			m.removeSession(id)
+			m.removeInstance(id)
 		}
 
-		// Always delete session dir and DB record regardless of mode.
-		os.RemoveAll(m.sessionDir(id))
+		// Always delete instance dir and DB record regardless of mode.
+		os.RemoveAll(m.instanceDir(id))
 		if m.pdb != nil {
-			m.pdb.DeleteSession(id)
+			m.pdb.DeleteInstance(id)
 		}
-		m.logger.Info("session deleted", "id", id)
+		m.logger.Info("instance deleted", "id", id)
 	}
 	return nil
 }
 
-// RestartAgent restarts a stopped persistent agent, reusing its session directory.
-func (m *Manager) StartSession(ctx context.Context, agentID string) error {
+// StartInstance restarts a stopped persistent instance, creating a new session.
+func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	m.mu.RLock()
-	ra, ok := m.sessions[agentID]
+	inst, ok := m.instances[instanceID]
 	m.mu.RUnlock()
 	if !ok {
-		return ErrSessionNotFound
+		return ErrInstanceNotFound
 	}
-	if ra.info.Status != SessionStatusStopped {
-		return ErrSessionNotStopped
+	if inst.info.Status != InstanceStatusStopped {
+		return ErrInstanceNotStopped
 	}
 
-	name := ra.info.Name
-	parentID := ra.info.ParentID
-	mode := ra.info.Mode
+	name := inst.info.Name
+	parentID := inst.info.ParentID
+	mode := inst.info.Mode
 
-	// Remove the stopped entry so startSession can re-register it.
+	// Remove the stopped entry so startInstance can re-register it.
 	m.mu.Lock()
-	m.unregisterLocked(agentID, ra)
+	m.unregisterLocked(instanceID, inst)
 	m.mu.Unlock()
 
 	cfg, err := config.LoadAgentDir(m.agentDefDir(name))
 	if err != nil {
-		// Re-register as stopped so the session remains visible.
-		m.reregisterStopped(agentID, ra)
+		// Re-register as stopped so the instance remains visible.
+		m.reregisterStopped(instanceID, inst)
 		return fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
-	if _, err = m.startSession(ctx, agentID, cfg, parentID, mode); err != nil {
-		// Re-register as stopped so the session remains visible.
-		m.reregisterStopped(agentID, ra)
+	sessionID := uuid.Must(uuid.NewV7()).String()
+	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode); err != nil {
+		// Re-register as stopped so the instance remains visible.
+		m.reregisterStopped(instanceID, inst)
 		return err
 	}
 
-	// Clear the stopped flag so the agent starts on next server restart.
-	m.setSessionStatus(agentID, "running")
+	// Clear the stopped flag so the instance starts on next server restart.
+	m.setInstanceStatus(instanceID, "running")
 	return nil
 }
 
-// shutdownWorker sends a graceful shutdown to the worker, waits for exit under
-// a deadline, and force-kills if necessary. Does not modify the session registry.
+// NewSession ends the current session and starts a new one within the same instance.
+// This is the /clear handler — memory and identity persist, messages and todos reset.
+func (m *Manager) NewSession(instanceID string) (string, error) {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return "", ErrInstanceNotFound
+	}
+
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+
+	// Status check inside lock to avoid race with softStop/watchWorker.
+	if inst.info.Status == InstanceStatusStopped {
+		return "", fmt.Errorf("instance %q is stopped", instanceID)
+	}
+
+	// Capture and nil out handle before shutdown so the old watchWorker
+	// goroutine sees nil and bails out instead of tearing down the instance.
+	oldHandle := inst.handle
+	inst.worker = nil
+	inst.handle = nil
+	inst.loop = nil
+
+	// Shut down the old worker (blocks until exit).
+	m.shutdownHandle(oldHandle)
+	if oldHandle != nil {
+		oldHandle.Close()
+	}
+
+	// Mark the old session as stopped in DB.
+	if m.pdb != nil && inst.activeSession != "" {
+		m.pdb.UpdateSessionStatus(inst.activeSession, "stopped")
+	}
+
+	// Create new session directory.
+	newSessionID := uuid.Must(uuid.NewV7()).String()
+	sessDir := m.instanceSessionDir(instanceID, newSessionID)
+	if err := os.MkdirAll(sessDir, 0700); err != nil {
+		return "", fmt.Errorf("creating session dir: %w", err)
+	}
+	for _, sub := range []string{"scratch", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0700); err != nil {
+			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
+		}
+	}
+
+	// Register new session in DB.
+	if m.pdb != nil {
+		if err := m.pdb.CreateSession(platformdb.Session{
+			ID:         newSessionID,
+			InstanceID: instanceID,
+			AgentName:  inst.info.Name,
+			Mode:       string(inst.info.Mode),
+			ParentID:   inst.info.ParentID,
+		}); err != nil {
+			return "", fmt.Errorf("creating session in db: %w", err)
+		}
+	}
+
+	// Chown session dir using the UID already held for this instance.
+	if inst.uid != 0 {
+		filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			return os.Chown(path, int(inst.uid), int(inst.gid))
+		})
+	}
+
+	// Reload agent config and resolve provider.
+	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.info.Name))
+	if err != nil {
+		return "", fmt.Errorf("loading agent %q: %w", inst.info.Name, err)
+	}
+
+	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
+	if err != nil {
+		return "", err
+	}
+	model := m.resolveModel(cfg)
+	cfg.Model = model
+
+	hasSkills := len(cfg.Skills) > 0
+	if !hasSkills {
+		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
+		if _, err := os.Stat(skillsDir); err == nil {
+			hasSkills = true
+		}
+	}
+	allowedTools := buildAllowedToolsMap(inst.effectiveTools, inst.info.Mode, hasSkills)
+
+	spawnCtx := m.ctx // persistent instances always use manager context
+
+	spawnCfg := ipc.SpawnConfig{
+		InstanceID:     instanceID,
+		SessionID:      newSessionID,
+		AgentName:      cfg.Name,
+		EffectiveTools: allowedTools,
+		WorkingDir:     m.opts.WorkingDir,
+		SessionDir:     sessDir,
+		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", newSessionID)),
+		UID:            inst.uid,
+		GID:            inst.gid,
+		Groups:         inst.groups,
+	}
+
+	// failStopped marks the instance as stopped on spawn/loop failure.
+	// The old worker is already dead, so there's nothing to recover to.
+	failStopped := func(err error) (string, error) {
+		inst.info.Status = InstanceStatusStopped
+		m.setInstanceStatus(instanceID, "stopped")
+		os.RemoveAll(sessDir)
+		if m.pdb != nil {
+			m.pdb.DeleteSession(newSessionID)
+		}
+		return "", err
+	}
+
+	handle, err := m.workerFactory(spawnCtx, spawnCfg)
+	if err != nil {
+		return failStopped(fmt.Errorf("spawning agent %q: %w", cfg.Name, err))
+	}
+	if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
+		wc.SetSecretEnvFn(m.SecretEnv)
+	}
+
+	// Create new inference loop.
+	var loop *inference.Loop
+	if provider != "" {
+		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, baseURL, model)
+		if err != nil {
+			handle.Kill()
+			return failStopped(fmt.Errorf("creating language model for %q: %w", cfg.Name, err))
+		}
+
+		loop, err = inference.NewLoop(inference.LoopConfig{
+			InstanceID:     instanceID,
+			SessionID:      newSessionID,
+			AgentConfig:    cfg,
+			Mode:           inst.info.Mode,
+			WorkingDir:     m.opts.WorkingDir,
+			InstanceDir:    m.instanceDir(instanceID),
+			SessionDir:     sessDir,
+			AgentDefDir:    m.agentDefDir(cfg.Name),
+			SharedSkillDir: m.sharedSkillsDir(),
+			LM:             lm,
+			Executor:       handle.Worker,
+			PDB:            m.pdb,
+			AllowedTools:   allowedTools,
+			HasSkills:      hasSkills,
+			SecretNamesFn:  m.SecretNames,
+			SecretEnvFn:    m.SecretEnv,
+			Logger:         m.logger.With("instance", instanceID, "session", newSessionID, "agent", cfg.Name),
+			HostManager:    m,
+			CallerMode:     inst.info.Mode,
+		})
+		if err != nil {
+			handle.Kill()
+			return failStopped(fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err))
+		}
+	}
+
+	inst.activeSession = newSessionID
+	inst.worker = handle.Worker
+	inst.handle = handle
+	inst.loop = loop
+
+	go m.watchWorker(instanceID, handle.Done)
+
+	m.logger.Info("new session created",
+		"instance", instanceID,
+		"session", newSessionID,
+		"agent", inst.info.Name,
+	)
+
+	return newSessionID, nil
+}
+
+// shutdownGrace is the deadline for a graceful worker shutdown before force-killing.
 const shutdownGrace = 5 * time.Second
 
-func (m *Manager) shutdownWorker(ra *session) {
-	if ra.worker == nil {
+// shutdownHandle sends a graceful shutdown to a worker handle, waits for exit
+// under a deadline, and force-kills if necessary.
+func (m *Manager) shutdownHandle(h *WorkerHandle) {
+	if h == nil || h.Worker == nil {
 		return
 	}
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	ra.worker.Shutdown(shutCtx)
+	h.Worker.Shutdown(shutCtx)
 
 	select {
-	case <-ra.handle.Done:
+	case <-h.Done:
 		// Process exited cleanly.
 	case <-shutCtx.Done():
 		// Deadline expired — force-kill and wait.
-		if ra.handle.Kill != nil {
-			ra.handle.Kill()
+		if h.Kill != nil {
+			h.Kill()
 		}
-		<-ra.handle.Done
+		<-h.Done
 	}
 }
 
@@ -427,48 +617,50 @@ func (m *Manager) cleanupWorker(id string, h *WorkerHandle) {
 	}
 }
 
-// softStop gracefully shuts down a persistent agent's worker process
+// softStop gracefully shuts down a persistent instance's worker process
 // but keeps it in the registry with status "stopped".
 func (m *Manager) softStop(id string) {
-	m.mu.RLock()
-	ra, ok := m.sessions[id]
-	m.mu.RUnlock()
+	// Capture the handle under both locks and mark stopped atomically.
+	// Lock order: m.mu → inst.mu (no reverse path exists in the codebase).
+	// Both locks are needed: m.mu for watchWorker, inst.mu for SendMessage/UpdateConfig.
+	m.mu.Lock()
+	inst, ok := m.instances[id]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
-
-	m.shutdownWorker(ra)
-
-	// Mark stopped BEFORE cleanup so watchWorker sees it and bails out.
-	m.mu.Lock()
-	h := ra.handle
-	ra.worker = nil
-	ra.handle = nil
-	ra.loop = nil
-	ra.info.Status = SessionStatusStopped
+	inst.mu.Lock()
+	h := inst.handle
+	inst.worker = nil
+	inst.handle = nil
+	inst.loop = nil
+	inst.info.Status = InstanceStatusStopped
+	inst.mu.Unlock()
 	m.mu.Unlock()
 
+	// Shutdown the captured handle outside the lock (blocks on I/O).
+	m.shutdownHandle(h)
 	m.cleanupWorker(id, h)
 
 	// Persist stopped state so it survives server restarts.
-	m.setSessionStatus(id, "stopped")
+	m.setInstanceStatus(id, "stopped")
 }
 
-// reregisterStopped puts a session back into the registry as stopped.
-// Used when StartSession fails after unregistering.
-func (m *Manager) reregisterStopped(id string, s *session) {
-	s.info.Status = SessionStatusStopped
+// reregisterStopped puts an instance back into the registry as stopped.
+// Used when StartInstance fails after unregistering.
+func (m *Manager) reregisterStopped(id string, inst *instance) {
 	m.mu.Lock()
-	m.sessions[id] = s
-	if s.info.ParentID != "" {
-		m.children[s.info.ParentID] = append(m.children[s.info.ParentID], id)
+	inst.info.Status = InstanceStatusStopped
+	m.instances[id] = inst
+	if inst.info.ParentID != "" {
+		m.children[inst.info.ParentID] = append(m.children[inst.info.ParentID], id)
 	}
 	m.mu.Unlock()
 }
 
-// sessionInfoToIPC converts an SessionInfo to ipc.SessionInfo.
-func (m *Manager) sessionInfoToIPC(info SessionInfo) ipc.SessionInfo {
-	return ipc.SessionInfo{
+// instanceInfoToIPC converts an InstanceInfo to ipc.InstanceInfo.
+func (m *Manager) instanceInfoToIPC(info InstanceInfo) ipc.InstanceInfo {
+	return ipc.InstanceInfo{
 		ID:          info.ID,
 		Name:        info.Name,
 		Mode:        string(info.Mode),
@@ -479,46 +671,46 @@ func (m *Manager) sessionInfoToIPC(info SessionInfo) ipc.SessionInfo {
 	}
 }
 
-// GetAgent returns info about an agent (running or stopped).
-func (m *Manager) GetSession(agentID string) (SessionInfo, bool) {
+// GetInstance returns info about an instance (running or stopped).
+func (m *Manager) GetInstance(instanceID string) (InstanceInfo, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	ra, ok := m.sessions[agentID]
+	inst, ok := m.instances[instanceID]
 	if !ok {
-		return SessionInfo{}, false
+		return InstanceInfo{}, false
 	}
-	return ra.info, true
+	return inst.info, true
 }
 
-// ListAgents returns a snapshot of all agents (running and stopped) sorted by creation order.
-// Agent IDs are UUIDv7 (time-ordered), so lexicographic sort gives creation order.
-func (m *Manager) ListSessions() []SessionInfo {
+// ListInstances returns a snapshot of all instances (running and stopped) sorted by creation order.
+// Instance IDs are UUIDv7 (time-ordered), so lexicographic sort gives creation order.
+func (m *Manager) ListInstances() []InstanceInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	result := make([]SessionInfo, 0, len(m.sessions))
-	for _, ra := range m.sessions {
-		result = append(result, ra.info)
+	result := make([]InstanceInfo, 0, len(m.instances))
+	for _, inst := range m.instances {
+		result = append(result, inst.info)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
 
-// ListChildren returns a snapshot of agents that are direct children of callerID.
-func (m *Manager) ListChildSessions(callerID string) []ipc.SessionInfo {
+// ListChildInstances returns a snapshot of instances that are direct children of callerInstanceID.
+func (m *Manager) ListChildInstances(callerInstanceID string) []ipc.InstanceInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	childIDs := m.children[callerID]
-	result := make([]ipc.SessionInfo, 0, len(childIDs))
+	childIDs := m.children[callerInstanceID]
+	result := make([]ipc.InstanceInfo, 0, len(childIDs))
 	for _, cid := range childIDs {
-		if ra, ok := m.sessions[cid]; ok {
-			result = append(result, ipc.SessionInfo{
-				ID:          ra.info.ID,
-				Name:        ra.info.Name,
-				Mode:        string(ra.info.Mode),
-				Description: ra.info.Description,
-				ParentID:    ra.info.ParentID,
-				Status:      string(ra.info.Status),
-				Model:       ra.info.Model,
+		if inst, ok := m.instances[cid]; ok {
+			result = append(result, ipc.InstanceInfo{
+				ID:          inst.info.ID,
+				Name:        inst.info.Name,
+				Mode:        string(inst.info.Mode),
+				Description: inst.info.Description,
+				ParentID:    inst.info.ParentID,
+				Status:      string(inst.info.Status),
+				Model:       inst.info.Model,
 			})
 		}
 	}
@@ -533,30 +725,39 @@ type HistoryMessage struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// ErrSessionNotFound is returned when an agent ID does not match a known agent.
-var ErrSessionNotFound = errors.New("session not found")
+// ErrInstanceNotFound is returned when an instance ID does not match a known instance.
+var ErrInstanceNotFound = errors.New("instance not found")
 
-// ErrSessionNotStopped is returned when an operation requires a stopped agent.
-var ErrSessionNotStopped = errors.New("session is not stopped")
+// ErrInstanceNotStopped is returned when an operation requires a stopped instance.
+var ErrInstanceNotStopped = errors.New("instance is not stopped")
 
-// GetHistory returns recent messages from a persistent agent's conversation history.
-func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error) {
+// GetHistory returns recent messages from the active session of a persistent instance.
+func (m *Manager) GetHistory(instanceID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()
-	ra, ok := m.sessions[agentID]
+	inst, ok := m.instances[instanceID]
+	var sessionID string
+	var persistent bool
+	if ok {
+		sessionID = inst.activeSession
+		persistent = inst.info.Mode.IsPersistent()
+	}
 	m.mu.RUnlock()
 	if !ok {
-		return nil, ErrSessionNotFound
+		return nil, ErrInstanceNotFound
 	}
 
-	if !ra.info.Mode.IsPersistent() {
+	if !persistent {
 		return nil, nil
 	}
 
 	if m.pdb == nil {
 		return nil, nil
 	}
+	if sessionID == "" {
+		return nil, nil
+	}
 
-	msgs, err := m.pdb.RecentMessages(agentID, limit)
+	msgs, err := m.pdb.RecentMessages(sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("reading history: %w", err)
 	}
@@ -579,22 +780,61 @@ func (m *Manager) GetHistory(agentID string, limit int) ([]HistoryMessage, error
 	return result, nil
 }
 
-// SessionByAgentName returns the ID and status of an agent by name.
-// Prefers running sessions; falls back to stopped ones. If multiple
-// sessions share a name, running ones take priority.
-func (m *Manager) SessionByAgentName(name string) (id string, running bool) {
+// GetSessionHistory returns recent messages from a specific session (for history browsing).
+func (m *Manager) GetSessionHistory(sessionID string, limit int) ([]HistoryMessage, error) {
+	if m.pdb == nil {
+		return nil, nil
+	}
+
+	msgs, err := m.pdb.RecentMessages(sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("reading history: %w", err)
+	}
+
+	result := make([]HistoryMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "tool" {
+			rawJSON := msg.RawJSON
+			if msg.Role == "assistant" && rawJSON != "" {
+				rawJSON = inference.InjectStatusMessages(rawJSON)
+			}
+			result = append(result, HistoryMessage{
+				Role:      msg.Role,
+				Content:   msg.Content,
+				RawJSON:   rawJSON,
+				Timestamp: msg.CreatedAt.Format(time.RFC3339),
+			})
+		}
+	}
+	return result, nil
+}
+
+// InstanceByAgentName returns the ID and status of an instance by agent name.
+// Prefers running instances; falls back to stopped ones. If multiple
+// instances share a name, running ones take priority.
+func (m *Manager) InstanceByAgentName(name string) (id string, running bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for sid, ra := range m.sessions {
-		if ra.info.Name == name {
-			if ra.info.Status == SessionStatusRunning {
-				return sid, true
+	for iid, inst := range m.instances {
+		if inst.info.Name == name {
+			if inst.info.Status == InstanceStatusRunning {
+				return iid, true
 			}
 			// Remember the stopped one, but keep looking for a running one.
-			id = sid
+			id = iid
 		}
 	}
 	return id, false
+}
+
+// ActiveSessionID returns the active session ID for an instance.
+func (m *Manager) ActiveSessionID(instanceID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if inst, ok := m.instances[instanceID]; ok {
+		return inst.activeSession
+	}
+	return ""
 }
 
 // IsDescendant reports whether targetID is a descendant of (or equal to) ancestorID.
@@ -624,95 +864,97 @@ func (m *Manager) SecretEnv() []string {
 	return m.cp.SecretEnv()
 }
 
-// RestoreSessions reads persistent/coordinator sessions from the platform
+// RestoreInstances reads persistent/coordinator instances from the platform
 // database and restarts them. Call once after NewManager.
-func (m *Manager) RestoreSessions(ctx context.Context) error {
+func (m *Manager) RestoreInstances(ctx context.Context) error {
 	if m.pdb == nil {
 		return nil
 	}
 
-	sessions, err := m.pdb.ListSessions("", "")
+	instances, err := m.pdb.ListInstances("", "")
 	if err != nil {
-		return fmt.Errorf("listing sessions from db: %w", err)
+		return fmt.Errorf("listing instances from db: %w", err)
 	}
 
-	for _, s := range sessions {
-		mode := config.AgentMode(s.Mode)
+	for _, dbInst := range instances {
+		mode := config.AgentMode(dbInst.Mode)
 		if !mode.IsPersistent() {
-			// Clean up stale ephemeral sessions from db and disk.
-			m.pdb.DeleteSession(s.ID)
-			os.RemoveAll(m.sessionDir(s.ID))
+			// Clean up stale ephemeral instances from db and disk.
+			m.pdb.DeleteInstance(dbInst.ID)
+			os.RemoveAll(m.instanceDir(dbInst.ID))
 			continue
 		}
 
-		if err := validateAgentName(s.AgentName); err != nil {
-			m.logger.Warn("skipping session with invalid agent name",
-				"id", s.ID, "agent", s.AgentName, "error", err)
+		if err := validateAgentName(dbInst.AgentName); err != nil {
+			m.logger.Warn("skipping instance with invalid agent name",
+				"id", dbInst.ID, "agent", dbInst.AgentName, "error", err)
 			continue
 		}
 
-		cfg, err := config.LoadAgentDir(m.agentDefDir(s.AgentName))
+		cfg, err := config.LoadAgentDir(m.agentDefDir(dbInst.AgentName))
 		if err != nil {
-			m.logger.Warn("skipping session with missing agent definition",
-				"agent", s.AgentName, "error", err)
+			m.logger.Warn("skipping instance with missing agent definition",
+				"agent", dbInst.AgentName, "error", err)
 			continue
 		}
 
-		if s.Status == "stopped" {
-			ra := &session{
-				info: SessionInfo{
-					ID:          s.ID,
+		if dbInst.Status == "stopped" {
+			inst := &instance{
+				info: InstanceInfo{
+					ID:          dbInst.ID,
 					Name:        cfg.Name,
 					Mode:        mode,
 					Description: cfg.Description,
-					ParentID:    s.ParentID,
-					Status:      SessionStatusStopped,
+					ParentID:    dbInst.ParentID,
+					Status:      InstanceStatusStopped,
 					Model:       m.resolveModel(cfg),
 				},
 			}
 			m.mu.Lock()
-			m.sessions[s.ID] = ra
-			if s.ParentID != "" {
-				m.children[s.ParentID] = append(m.children[s.ParentID], s.ID)
+			m.instances[dbInst.ID] = inst
+			if dbInst.ParentID != "" {
+				m.children[dbInst.ParentID] = append(m.children[dbInst.ParentID], dbInst.ID)
 			}
 			m.mu.Unlock()
-			m.logger.Info("restored stopped agent",
-				"id", s.ID, "name", cfg.Name)
+			m.logger.Info("restored stopped instance",
+				"id", dbInst.ID, "name", cfg.Name)
 			continue
 		}
 
-		// Verify session dir exists — without it, history and state are lost.
-		if _, err := os.Stat(m.sessionDir(s.ID)); os.IsNotExist(err) {
-			m.logger.Warn("session dir missing, removing orphaned DB record",
-				"id", s.ID, "agent", s.AgentName)
-			m.pdb.DeleteSession(s.ID)
+		// Verify instance dir exists.
+		if _, err := os.Stat(m.instanceDir(dbInst.ID)); os.IsNotExist(err) {
+			m.logger.Warn("instance dir missing, removing orphaned DB record",
+				"id", dbInst.ID, "agent", dbInst.AgentName)
+			m.pdb.DeleteInstance(dbInst.ID)
 			continue
 		}
 
-		_, err = m.startSession(ctx, s.ID, cfg, s.ParentID, mode)
+		// Create a new session for the restored instance.
+		sessionID := uuid.Must(uuid.NewV7()).String()
+		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode)
 		if err != nil {
-			m.logger.Warn("failed to restore agent",
-				"id", s.ID, "agent", s.AgentName, "error", err)
+			m.logger.Warn("failed to restore instance",
+				"id", dbInst.ID, "agent", dbInst.AgentName, "error", err)
 			continue
 		}
 
-		// Restore per-session config (model override, reasoning effort).
-		if sessCfg, cfgErr := m.pdb.GetSessionConfig(s.ID); cfgErr == nil {
-			if sessCfg.ModelOverride != "" || sessCfg.ReasoningEffort != "" {
-				effort := sessCfg.ReasoningEffort
-				_ = m.UpdateSessionConfig(ctx, s.ID, sessCfg.ModelOverride, &effort)
+		// Restore per-instance config (model override, reasoning effort).
+		if instCfg, cfgErr := m.pdb.GetInstanceConfig(dbInst.ID); cfgErr == nil {
+			if instCfg.ModelOverride != "" || instCfg.ReasoningEffort != "" {
+				effort := instCfg.ReasoningEffort
+				_ = m.UpdateInstanceConfig(ctx, dbInst.ID, instCfg.ModelOverride, &effort)
 			}
 		}
 	}
 	return nil
 }
 
-// Shutdown stops all running agents. Ephemeral session directories are cleaned up.
-// Stopped agents are unregistered without attempting worker shutdown.
+// Shutdown stops all running instances. Ephemeral instance directories are cleaned up.
+// Stopped instances are unregistered without attempting worker shutdown.
 func (m *Manager) Shutdown() {
 	m.mu.RLock()
-	ids := make([]string, 0, len(m.sessions))
-	for id := range m.sessions {
+	ids := make([]string, 0, len(m.instances))
+	for id := range m.instances {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
@@ -732,45 +974,61 @@ func (m *Manager) Shutdown() {
 
 	for i := len(ordered) - 1; i >= 0; i-- {
 		id := ordered[i]
-		ra := m.getSession(id)
-		if ra != nil && ra.info.Status == SessionStatusStopped {
+		inst := m.getInstance(id)
+		if inst != nil && inst.info.Status == InstanceStatusStopped {
 			// Already stopped — just unregister.
 			m.mu.Lock()
-			m.unregisterLocked(id, ra)
+			m.unregisterLocked(id, inst)
 			m.mu.Unlock()
 			continue
 		}
-		m.removeSession(id)
+		m.removeInstance(id)
 	}
 
-	m.logger.Info("session manager shut down")
+	m.logger.Info("instance manager shut down")
 }
 
-// startSession creates a session directory, spawns a worker process,
-// and registers the agent in the manager.
-func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentConfig, parentID string, mode config.AgentMode) (string, error) {
-	// Create session directory and standard subdirectories.
-	sessDir := m.sessionDir(id)
-	_, statErr := os.Stat(sessDir)
+// startInstance creates instance and session directories, spawns a worker process,
+// and registers the instance in the manager.
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode) (string, error) {
+	// Create instance directory with instance-level state.
+	instDir := m.instanceDir(instanceID)
+	_, statErr := os.Stat(instDir)
 	dirIsNew := os.IsNotExist(statErr)
+	if err := os.MkdirAll(instDir, 0700); err != nil {
+		return "", fmt.Errorf("creating instance dir: %w", err)
+	}
+
+	// Create session directory with session-level state.
+	sessDir := m.instanceSessionDir(instanceID, sessionID)
 	if err := os.MkdirAll(sessDir, 0700); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
-	for _, sub := range []string{"db", "scratch", "tmp"} {
+	for _, sub := range []string{"scratch", "tmp"} {
 		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0700); err != nil {
 			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
 		}
 	}
 
-	// Register session in the platform database.
+	// Register instance in the platform database.
 	if m.pdb != nil {
-		if err := m.pdb.CreateSession(platformdb.Session{
-			ID:        id,
+		if err := m.pdb.CreateInstance(platformdb.Instance{
+			ID:        instanceID,
 			AgentName: cfg.Name,
 			Mode:      string(mode),
 			ParentID:  parentID,
 		}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
-			// ErrDuplicate is expected on the restore path — session already exists.
+			return "", fmt.Errorf("creating instance in db: %w", err)
+		}
+
+		// Register session in the platform database.
+		if err := m.pdb.CreateSession(platformdb.Session{
+			ID:         sessionID,
+			InstanceID: instanceID,
+			AgentName:  cfg.Name,
+			Mode:       string(mode),
+			ParentID:   parentID,
+		}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
 			return "", fmt.Errorf("creating session in db: %w", err)
 		}
 	}
@@ -786,48 +1044,43 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	}
 	allowedTools := buildAllowedToolsMap(effectiveTools, mode, hasSkills)
 
-	// Persistent agents use the manager's long-lived context so they
-	// survive beyond the tool call that started them. Ephemeral agents
+	// Persistent instances use the manager's long-lived context so they
+	// survive beyond the tool call that started them. Ephemeral instances
 	// use the caller's context (typically the parent's tool call).
 	spawnCtx := ctx
 	if mode.IsPersistent() {
 		spawnCtx = m.ctx
 	}
 
-	// Acquire a dedicated Unix UID for this agent (if isolation is enabled).
+	// Acquire a dedicated Unix UID for this instance (if isolation is enabled).
 	var uid, gid uint32
 	var groups []uint32
 	if m.uidPool != nil {
 		var err error
-		uid, gid, err = m.uidPool.Acquire(id)
+		uid, gid, err = m.uidPool.Acquire(instanceID)
 		if err != nil {
 			return "", fmt.Errorf("acquiring UID: %w", err)
 		}
 		groups = []uint32{gid}
-		// Coordinator agents get write access to agents/ and skills/.
+		// Coordinator instances get write access to agents/ and skills/.
 		if mode == config.ModeCoordinator {
 			if coordGID := m.uidPool.CoordinatorGID(); coordGID != 0 {
 				groups = append(groups, coordGID)
 			}
 		}
-		// Transfer ownership of the session dir to the agent user.
-		// WalkDir handles both fresh dirs (just the dir itself) and
-		// restored sessions (dir + existing files like memory.md, todos.yaml).
-		if err := filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, err error) error {
+		// Transfer ownership of the instance dir (and all contents) to the agent user.
+		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			return os.Chown(path, int(uid), int(gid))
 		}); err != nil {
-			// Chown requires root. If we're not root (misconfigured),
-			// log and continue — the UID will still be set on the child
-			// process, but file permissions won't isolate session dirs.
 			if os.IsPermission(err) {
-				m.logger.Warn("cannot chown session dir (not root); file isolation degraded",
-					"session", id, "uid", uid)
+				m.logger.Warn("cannot chown instance dir (not root); file isolation degraded",
+					"instance", instanceID, "uid", uid)
 			} else {
-				m.uidPool.Release(id)
-				return "", fmt.Errorf("chowning session dir: %w", err)
+				m.uidPool.Release(instanceID)
+				return "", fmt.Errorf("chowning instance dir: %w", err)
 			}
 		}
 	}
@@ -841,12 +1094,13 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 	cfg.Model = model // ensure the loop sees the resolved model
 
 	spawnCfg := ipc.SpawnConfig{
-		SessionID:      id,
+		InstanceID:     instanceID,
+		SessionID:      sessionID,
 		AgentName:      cfg.Name,
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
-		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", id)),
+		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", sessionID)),
 		UID:            uid,
 		GID:            gid,
 		Groups:         groups,
@@ -859,14 +1113,19 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			wc.SetSecretEnvFn(m.SecretEnv)
 		}
 	}
-	if err != nil {
-		if m.uidPool != nil {
-			m.uidPool.Release(id)
-		}
-		// Clean up session dir on failure (only if we just created it)
+	// cleanup removes directories and releases UID on failure.
+	cleanup := func() {
+		os.RemoveAll(sessDir) // always clean the session dir
 		if dirIsNew {
-			os.RemoveAll(sessDir)
+			os.RemoveAll(instDir)
 		}
+		if m.uidPool != nil {
+			m.uidPool.Release(instanceID)
+		}
+	}
+
+	if err != nil {
+		cleanup()
 		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
 	}
 
@@ -876,20 +1135,17 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, baseURL, model)
 		if err != nil {
 			handle.Kill()
-			if m.uidPool != nil {
-				m.uidPool.Release(id)
-			}
-			if dirIsNew {
-				os.RemoveAll(sessDir)
-			}
+			cleanup()
 			return "", fmt.Errorf("creating language model for %q: %w", cfg.Name, err)
 		}
 
 		loop, err = inference.NewLoop(inference.LoopConfig{
-			SessionID:      id,
+			InstanceID:     instanceID,
+			SessionID:      sessionID,
 			AgentConfig:    cfg,
 			Mode:           mode,
 			WorkingDir:     m.opts.WorkingDir,
+			InstanceDir:    instDir,
 			SessionDir:     sessDir,
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
@@ -900,171 +1156,191 @@ func (m *Manager) startSession(ctx context.Context, id string, cfg config.AgentC
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
-			Logger:         m.logger.With("session", id, "agent", cfg.Name),
+			Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 			HostManager:    m,
 			CallerMode:     mode,
 		})
 		if err != nil {
 			handle.Kill()
-			if m.uidPool != nil {
-				m.uidPool.Release(id)
-			}
-			if dirIsNew {
-				os.RemoveAll(sessDir)
-			}
+			cleanup()
 			return "", fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err)
 		}
 	}
 
-	ra := &session{
-		info: SessionInfo{
-			ID:          id,
+	inst := &instance{
+		info: InstanceInfo{
+			ID:          instanceID,
 			Name:        cfg.Name,
 			Mode:        mode,
 			Description: cfg.Description,
 			ParentID:    parentID,
-			Status:      SessionStatusRunning,
+			Status:      InstanceStatusRunning,
 			Model:       model,
 		},
+		activeSession:  sessionID,
 		worker:         handle.Worker,
 		handle:         handle,
 		loop:           loop,
 		effectiveTools: effectiveTools,
+		uid:            uid,
+		gid:            gid,
+		groups:         groups,
 	}
 
 	m.mu.Lock()
-	m.sessions[id] = ra
+	m.instances[instanceID] = inst
 	if parentID != "" {
-		m.children[parentID] = append(m.children[parentID], id)
+		m.children[parentID] = append(m.children[parentID], instanceID)
 	}
 	m.mu.Unlock()
 
 	// Start death-watcher goroutine for unexpected process exits.
-	go m.watchWorker(id, handle.Done)
+	go m.watchWorker(instanceID, handle.Done)
 
-	m.logger.Info("session started",
-		"id", id,
+	m.logger.Info("instance started",
+		"id", instanceID,
+		"session", sessionID,
 		"name", cfg.Name,
 		"mode", mode,
 		"parent", parentID,
 	)
 
-	return id, nil
+	return instanceID, nil
 }
 
 // watchWorker monitors a worker's Done channel and handles unexpected exits.
-func (m *Manager) watchWorker(agentID string, done <-chan struct{}) {
+func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
 	<-done
 
 	m.mu.RLock()
-	ra, ok := m.sessions[agentID]
+	inst, ok := m.instances[instanceID]
+	// Bail out if the instance was removed, stopped, or if the handle was
+	// cleared by NewSession (which nils handle before shutting down the old
+	// worker to prevent this goroutine from interfering with the new session).
+	stale := !ok || inst.info.Status == InstanceStatusStopped || inst.handle == nil
+	var name string
+	if ok {
+		name = inst.info.Name
+	}
 	m.mu.RUnlock()
-	if !ok || ra.info.Status == SessionStatusStopped {
-		return // already removed or intentionally stopped
+	if stale {
+		return
 	}
 
-	m.logger.Warn("session process exited unexpectedly",
-		"id", agentID,
-		"name", ra.info.Name,
+	m.logger.Warn("instance process exited unexpectedly",
+		"id", instanceID,
+		"name", name,
 	)
 
-	// Handle the dead agent and its children.
-	descendants := m.collectDescendants(agentID)
+	// Handle the dead instance and its children.
+	descendants := m.collectDescendants(instanceID)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		id := descendants[i]
 		m.mu.RLock()
-		deadRA, exists := m.sessions[id]
+		deadInst, exists := m.instances[id]
 		m.mu.RUnlock()
-		if !exists || deadRA.info.Status == SessionStatusStopped {
+		if !exists || deadInst.info.Status == InstanceStatusStopped {
 			continue
 		}
 
-		if deadRA.info.Mode.IsPersistent() {
-			// Persistent sessions become "stopped" — visible but not running.
-			// Capture handle under lock and set status atomically to prevent
-			// double-cleanup race with softStop.
+		if deadInst.info.Mode.IsPersistent() {
 			m.mu.Lock()
-			if deadRA.info.Status == SessionStatusStopped {
+			deadInst.mu.Lock()
+			if deadInst.info.Status == InstanceStatusStopped {
+				deadInst.mu.Unlock()
 				m.mu.Unlock()
-				continue // softStop already handled this
+				continue
 			}
-			h := deadRA.handle
-			deadRA.worker = nil
-			deadRA.handle = nil
-			deadRA.info.Status = SessionStatusStopped
+			h := deadInst.handle
+			deadInst.worker = nil
+			deadInst.handle = nil
+			deadInst.loop = nil
+			deadInst.info.Status = InstanceStatusStopped
+			deadInst.mu.Unlock()
 			m.mu.Unlock()
 
 			m.cleanupWorker(id, h)
-			m.setSessionStatus(id, "stopped")
+			m.setInstanceStatus(id, "stopped")
 		} else {
-			// Ephemeral sessions are fully removed.
 			m.mu.Lock()
-			h := deadRA.handle
-			m.unregisterLocked(id, deadRA)
+			h := deadInst.handle
+			deadInst.worker = nil
+			deadInst.handle = nil
+			deadInst.loop = nil
+			m.unregisterLocked(id, deadInst)
 			m.mu.Unlock()
 
 			m.cleanupWorker(id, h)
-			os.RemoveAll(m.sessionDir(id))
+			os.RemoveAll(m.instanceDir(id))
 		}
 	}
 }
 
-// removeSession gracefully shuts down and removes an agent from the registry.
-// Ephemeral session directories are cleaned up.
-func (m *Manager) removeSession(id string) {
+// removeInstance gracefully shuts down and removes an instance from the registry.
+// Ephemeral instance directories are cleaned up.
+func (m *Manager) removeInstance(id string) {
 	m.mu.Lock()
-	ra, ok := m.sessions[id]
-	m.unregisterLocked(id, ra)
+	inst, ok := m.instances[id]
+	var h *WorkerHandle
+	if ok {
+		inst.mu.Lock()
+		h = inst.handle
+		inst.worker = nil
+		inst.handle = nil
+		inst.loop = nil
+		inst.mu.Unlock()
+	}
+	m.unregisterLocked(id, inst)
 	m.mu.Unlock()
 
-	if !ok || ra.worker == nil {
-		return // not found or already soft-stopped
+	if !ok {
+		return
 	}
 
-	m.shutdownWorker(ra)
-	m.cleanupWorker(id, ra.handle)
+	m.shutdownHandle(h)
+	m.cleanupWorker(id, h)
 
-	if !ra.info.Mode.IsPersistent() {
-		os.RemoveAll(m.sessionDir(id))
+	if !inst.info.Mode.IsPersistent() {
+		os.RemoveAll(m.instanceDir(id))
 	}
 }
 
-// getSession returns the session for the given ID, or nil.
-func (m *Manager) getSession(id string) *session {
+// getInstance returns the instance for the given ID, or nil.
+func (m *Manager) getInstance(id string) *instance {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.sessions[id]
+	return m.instances[id]
 }
 
-// unregisterLocked removes an agent from the registry and its parent's children
+// unregisterLocked removes an instance from the registry and its parent's children
 // list. Must be called with m.mu held.
-func (m *Manager) unregisterLocked(id string, ra *session) {
-	delete(m.sessions, id)
+func (m *Manager) unregisterLocked(id string, inst *instance) {
+	delete(m.instances, id)
 	delete(m.children, id)
-	if ra != nil && ra.info.ParentID != "" {
-		siblings := m.children[ra.info.ParentID]
+	if inst != nil && inst.info.ParentID != "" {
+		siblings := m.children[inst.info.ParentID]
 		updated := make([]string, 0, len(siblings))
 		for _, cid := range siblings {
 			if cid != id {
 				updated = append(updated, cid)
 			}
 		}
-		m.children[ra.info.ParentID] = updated
+		m.children[inst.info.ParentID] = updated
 	}
 }
 
-// collectDescendants returns agentID plus all its descendants via BFS,
+// collectDescendants returns instanceID plus all its descendants via BFS,
 // in parent-first order (reverse for leaf-first shutdown).
-func (m *Manager) collectDescendants(agentID string) []string {
+func (m *Manager) collectDescendants(instanceID string) []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if _, ok := m.sessions[agentID]; !ok {
+	if _, ok := m.instances[instanceID]; !ok {
 		return nil
 	}
 
 	var result []string
-	queue := []string{agentID}
+	queue := []string{instanceID}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -1074,22 +1350,20 @@ func (m *Manager) collectDescendants(agentID string) []string {
 	return result
 }
 
-// spawnTool is injected into all agents. Non-coordinators are restricted
-// to ephemeral mode at the tool layer.
-var spawnTool = "spawn_session"
+// spawnTool is injected into all agents.
+var spawnTool = "spawn_instance"
 
-// coordinatorTools are injected only for coordinator-mode agents. These
-// manage persistent agent lifecycles and require hive-coordinators group.
+// coordinatorTools are injected only for coordinator-mode instances.
 var coordinatorTools = []string{
-	"resume_session", "list_sessions", "send_message", "stop_session", "delete_session",
+	"resume_instance", "list_instances", "send_message", "stop_instance", "delete_instance",
 }
 
-// persistentTools are injected for persistent and coordinator agents.
+// persistentTools are injected for persistent and coordinator instances.
 var persistentTools = []string{
 	"memory_read", "memory_write", "todos", "history_search", "history_recall",
 }
 
-// computeEffectiveTools returns the set of built-in tools this agent is
+// computeEffectiveTools returns the set of built-in tools this instance is
 // allowed to use, computed as the intersection of:
 //  1. The agent's declared tools (from agent.md frontmatter)
 //  2. The control plane override (if any)
@@ -1128,7 +1402,7 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 	// Intersect with parent's effective tools if parent exists.
 	if parentID != "" {
 		m.mu.RLock()
-		parent, ok := m.sessions[parentID]
+		parent, ok := m.instances[parentID]
 		m.mu.RUnlock()
 		if ok && parent.effectiveTools != nil {
 			for t := range effective {
@@ -1150,17 +1424,17 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 		allowed[t] = true
 	}
 
-	// All agents get spawn_session; coordinators can use all modes.
+	// All instances get spawn_instance; coordinators can use all modes.
 	allowed[spawnTool] = true
 
-	// Coordinator agents get full agent management tools.
+	// Coordinator instances get full instance management tools.
 	if mode == config.ModeCoordinator {
 		for _, t := range coordinatorTools {
 			allowed[t] = true
 		}
 	}
 
-	// Persistent and coordinator agents get memory/todos/history tools.
+	// Persistent and coordinator instances get memory/todos/history tools.
 	if mode.IsPersistent() {
 		for _, t := range persistentTools {
 			allowed[t] = true
@@ -1196,13 +1470,10 @@ func (m *Manager) resolveProvider(cfg config.AgentConfig) (provider, apiKey, bas
 }
 
 // resolveProviderForModel finds which configured provider offers the given model.
-// It searches all configured providers and returns the first match.
-// Falls back to the default provider if no match is found (allows unknown models).
 func (m *Manager) resolveProviderForModel(model string) (provider, apiKey, baseURL string, err error) {
 	if m.cp == nil {
 		return "", "", "", fmt.Errorf("no control plane configured")
 	}
-	// Search all configured providers for the model.
 	for _, pt := range m.cp.ConfiguredProviderTypes() {
 		for _, mi := range models.ModelsForProvider(pt) {
 			if mi.ID == model {
@@ -1217,7 +1488,6 @@ func (m *Manager) resolveProviderForModel(model string) (provider, apiKey, baseU
 }
 
 // resolveModel returns the resolved model for an agent config.
-// Priority: env override → agent config → control plane default.
 func (m *Manager) resolveModel(cfg config.AgentConfig) string {
 	model := cfg.Model
 	if m.cp != nil {
@@ -1232,11 +1502,7 @@ func (m *Manager) resolveModel(cfg config.AgentConfig) string {
 }
 
 // WatchAgentDefinitions subscribes to agent.md changes via the filesystem
-// watcher and pushes resolved structural config (model, provider, tools,
-// description) to affected running agents. Only watches agent.md because
-// structural config lives in its YAML frontmatter; text-only files
-// (soul.md, tools.md, skills/) are re-read from disk every turn by the
-// agent process itself.
+// watcher and pushes resolved structural config to affected running instances.
 func (m *Manager) WatchAgentDefinitions(w *watcher.Watcher) {
 	w.Subscribe("agents/*/agent.md", func(events []watcher.Event) {
 		seen := make(map[string]bool)
@@ -1252,10 +1518,8 @@ func (m *Manager) WatchAgentDefinitions(w *watcher.Watcher) {
 }
 
 // pushConfigUpdate reloads an agent definition from disk and pushes the
-// resolved config to all running sessions of that agent.
+// resolved config to all running instances of that agent.
 func (m *Manager) pushConfigUpdate(agentName string) {
-	// Load config and resolve provider/model outside the lock to avoid
-	// disk I/O under the session mutex.
 	cfg, err := config.LoadAgentDir(m.agentDefDir(agentName))
 	if err != nil {
 		m.logger.Warn("failed to load agent definition for config push",
@@ -1271,7 +1535,6 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	}
 	model := m.resolveModel(cfg)
 
-	// Check for skills directory (disk I/O, done outside lock).
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
 		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
@@ -1280,7 +1543,6 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		}
 	}
 
-	// Snapshot running sessions under RLock, then release before pushing.
 	type pushTarget struct {
 		id           string
 		parentID     string
@@ -1291,47 +1553,50 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 
 	m.mu.RLock()
 	var targets []pushTarget
-	for id, s := range m.sessions {
-		if s.info.Name == agentName && s.info.Status == SessionStatusRunning {
-			targets = append(targets, pushTarget{id: id, parentID: s.info.ParentID, mode: s.info.Mode, loop: s.loop, currentModel: s.info.Model})
+	for id, inst := range m.instances {
+		if inst.info.Name == agentName && inst.info.Status == InstanceStatusRunning {
+			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode, loop: inst.loop, currentModel: inst.info.Model})
 		}
 	}
 	m.mu.RUnlock()
 
 	for _, t := range targets {
-		if t.loop != nil && model != t.currentModel {
-			// Apply model changes when the resolved model differs from what's running.
+		inst := m.getInstance(t.id)
+		if inst == nil {
+			continue // removed between snapshot and push
+		}
+
+		inst.mu.Lock()
+		if inst.info.Status == InstanceStatusStopped {
+			inst.mu.Unlock()
+			continue
+		}
+		// Model switch requires a live loop; description is always updated.
+		if inst.loop != nil && model != inst.info.Model {
 			lm, err := CreateLanguageModel(context.Background(), ProviderType(provider), apiKey, baseURL, model)
 			if err != nil {
 				m.logger.Warn("failed to create language model for config push",
 					"agent", agentName, "model", model, "error", err)
 			} else {
-				t.loop.UpdateModel(lm, model, provider)
+				inst.loop.UpdateModel(lm, model, provider)
+				inst.info.Model = model
 			}
 		}
-		m.logger.Info("pushed config update to agent",
-			"agent", agentName, "session", t.id, "model", model)
+		inst.info.Description = cfg.Description
+		inst.mu.Unlock()
 
-		// Update cached info under write lock so API handlers
-		// reading SessionInfo don't race.
-		m.mu.Lock()
-		if s, ok := m.sessions[t.id]; ok {
-			s.info.Description = cfg.Description
-			s.info.Model = model
-		}
-		m.mu.Unlock()
+		m.logger.Info("pushed config update to instance",
+			"agent", agentName, "instance", t.id, "model", model)
 	}
 }
 
-// PushConfigUpdateAll recomputes and pushes config to all running agents.
-// Called when config.yaml changes (provider/model defaults or tool policies may have changed).
+// PushConfigUpdateAll recomputes and pushes config to all running instances.
 func (m *Manager) PushConfigUpdateAll() {
-	// Collect unique agent names from running sessions.
 	m.mu.RLock()
 	names := make(map[string]bool)
-	for _, s := range m.sessions {
-		if s.info.Status == SessionStatusRunning {
-			names[s.info.Name] = true
+	for _, inst := range m.instances {
+		if inst.info.Status == InstanceStatusRunning {
+			names[inst.info.Name] = true
 		}
 	}
 	m.mu.RUnlock()
@@ -1343,7 +1608,6 @@ func (m *Manager) PushConfigUpdateAll() {
 
 // extractAgentName extracts the agent name from a watcher path like "agents/foo/agent.md".
 func extractAgentName(path string) string {
-	// Expected format: "agents/<name>/agent.md" or "agents/<name>/soul.md" etc.
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 2 || parts[0] != "agents" {
 		return ""
@@ -1361,29 +1625,27 @@ func (m *Manager) sharedSkillsDir() string {
 	return filepath.Join(m.rootDir, "skills")
 }
 
-func (m *Manager) sessionsDir() string {
-	return filepath.Join(m.rootDir, "sessions")
+func (m *Manager) instanceDir(id string) string {
+	return filepath.Join(m.rootDir, "instances", id)
 }
 
-func (m *Manager) sessionDir(id string) string {
-	return filepath.Join(m.rootDir, "sessions", id)
+func (m *Manager) instanceSessionDir(instanceID, sessionID string) string {
+	return filepath.Join(m.rootDir, "instances", instanceID, "sessions", sessionID)
 }
 
-// setSessionStatus updates the session status in the platform database.
-// Best-effort: errors are logged but not returned.
-func (m *Manager) setSessionStatus(id, status string) {
+// setInstanceStatus updates the instance status in the platform database.
+func (m *Manager) setInstanceStatus(id, status string) {
 	if m.pdb == nil {
 		return
 	}
-	if err := m.pdb.UpdateSessionStatus(id, status); err != nil {
-		m.logger.Warn("failed to update session status in db", "id", id, "status", status, "error", err)
+	if err := m.pdb.UpdateInstanceStatus(id, status); err != nil {
+		m.logger.Warn("failed to update instance status in db", "id", id, "status", status, "error", err)
 	}
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // validateAgentName rejects names that could escape the agents directory.
-// Only letters, numbers, hyphens, and underscores are allowed.
 func validateAgentName(name string) error {
 	if name == "" {
 		return fmt.Errorf("agent name is required")

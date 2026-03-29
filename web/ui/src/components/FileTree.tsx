@@ -9,7 +9,7 @@ const MAX_UPLOAD_LABEL = `${MAX_UPLOAD_SIZE >> 20} MB`
 
 // Platform-critical paths that cannot be deleted or renamed.
 // Must match protectedPaths in internal/api/files.go.
-const protectedPaths = new Set(["agents", "sessions", "skills", "workspace", "config.yaml"])
+const protectedPaths = new Set(["agents", "instances", "skills", "workspace", "config.yaml"])
 
 // Pure path helpers for drag-and-drop.
 const parentOf = (path: string) =>

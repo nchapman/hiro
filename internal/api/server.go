@@ -23,12 +23,12 @@ type CommandHandler interface {
 
 // Server is the HTTP server for the Hive leader.
 type Server struct {
-	manager      *agent.Manager          // session manager (nil = no sessions)
-	leaderID     string                  // ID of the leader session for chat
+	manager      *agent.Manager          // instance manager (nil = no instances)
+	leaderID     string                  // ID of the leader instance for chat
 	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
 	cp           *controlplane.ControlPlane // control plane (for auth + settings)
 	pdb          *platformdb.DB          // platform database (nil = no usage endpoints)
-	startManager func() error            // callback to start the session manager (set by main)
+	startManager func() error            // callback to start the instance manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
 	watcher      *watcher.Watcher        // filesystem watcher for HIVE_ROOT (nil = no watching)
@@ -76,20 +76,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))
 	s.mux.HandleFunc("POST /api/settings/providers/{type}/test", s.requireAuth(s.handleTestProviderByType))
 
-	// Session API routes (authenticated)
+	// Instance API routes (authenticated)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/sessions", s.requireAuth(s.handleListSessions))
+	s.mux.HandleFunc("GET /api/instances", s.requireAuth(s.handleListInstances))
+	s.mux.HandleFunc("GET /api/instances/{id}/messages", s.requireAuth(s.handleInstanceMessages))
+	s.mux.HandleFunc("POST /api/instances/{id}/stop", s.requireAuth(s.handleStopInstance))
+	s.mux.HandleFunc("POST /api/instances/{id}/start", s.requireAuth(s.handleStartInstance))
+	s.mux.HandleFunc("POST /api/instances/{id}/clear", s.requireAuth(s.handleClearInstance))
+	s.mux.HandleFunc("DELETE /api/instances/{id}", s.requireAuth(s.handleDeleteInstance))
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleSessionMessages))
-	s.mux.HandleFunc("POST /api/sessions/{id}/stop", s.requireAuth(s.handleStopSession))
-	s.mux.HandleFunc("POST /api/sessions/{id}/start", s.requireAuth(s.handleStartSession))
-	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 
 	// Models & provider types API (authenticated)
 	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
 	s.mux.HandleFunc("GET /api/provider-types", s.requireAuth(s.handleListProviderTypes))
 
 	// Usage API routes (authenticated)
-	s.mux.HandleFunc("GET /api/sessions/{id}/usage", s.requireAuth(s.handleSessionUsage))
+	s.mux.HandleFunc("GET /api/instances/{id}/usage", s.requireAuth(s.handleInstanceUsage))
 	s.mux.HandleFunc("GET /api/usage", s.requireAuth(s.handleTotalUsage))
 	s.mux.HandleFunc("GET /api/usage/models", s.requireAuth(s.handleUsageByModel))
 	s.mux.HandleFunc("GET /api/usage/daily", s.requireAuth(s.handleUsageByDay))
@@ -151,14 +153,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 	modeFilter := r.URL.Query().Get("mode")
-	sessions := s.manager.ListSessions()
-	type sessionResponse struct {
+	instances := s.manager.ListInstances()
+	type instanceResponse struct {
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Mode        string `json:"mode"`
@@ -167,36 +169,36 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		ParentID    string `json:"parent_id,omitempty"`
 		Model       string `json:"model,omitempty"`
 	}
-	result := make([]sessionResponse, 0, len(sessions))
-	for _, si := range sessions {
-		if modeFilter != "" && string(si.Mode) != modeFilter {
+	result := make([]instanceResponse, 0, len(instances))
+	for _, inst := range instances {
+		if modeFilter != "" && string(inst.Mode) != modeFilter {
 			continue
 		}
-		result = append(result, sessionResponse{
-			ID:          si.ID,
-			Name:        si.Name,
-			Mode:        string(si.Mode),
-			Status:      string(si.Status),
-			Description: si.Description,
-			ParentID:    si.ParentID,
-			Model:       si.Model,
+		result = append(result, instanceResponse{
+			ID:          inst.ID,
+			Name:        inst.Name,
+			Mode:        string(inst.Mode),
+			Status:      string(inst.Status),
+			Description: inst.Description,
+			ParentID:    inst.ParentID,
+			Model:       inst.Model,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleInstanceMessages(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
-		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
 	msgs, err := s.manager.GetHistory(id, 100)
 	if err != nil {
-		if errors.Is(err, agent.ErrSessionNotFound) {
-			http.Error(w, "session not found", http.StatusNotFound)
+		if errors.Is(err, agent.ErrInstanceNotFound) {
+			http.Error(w, "instance not found", http.StatusNotFound)
 		} else {
-			s.logger.Error("failed to read session history", "id", id, "error", err)
+			s.logger.Error("failed to read instance history", "id", id, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 		return
@@ -204,57 +206,71 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, msgs)
 }
 
-func (s *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
-		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	msgs, err := s.manager.GetSessionHistory(id, 100)
+	if err != nil {
+		s.logger.Error("failed to read session history", "id", id, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
 
-	// Protect root session (coordinator).
-	info, ok := s.manager.GetSession(id)
+	// Protect root instance (coordinator).
+	info, ok := s.manager.GetInstance(id)
 	if !ok {
-		http.Error(w, "session not found", http.StatusNotFound)
+		http.Error(w, "instance not found", http.StatusNotFound)
 		return
 	}
 	if info.ParentID == "" {
-		http.Error(w, "cannot stop the root session", http.StatusForbidden)
+		http.Error(w, "cannot stop the root instance", http.StatusForbidden)
 		return
 	}
 
-	if _, err := s.manager.StopSession(id); err != nil {
-		s.logger.Error("failed to stop session", "id", id, "error", err)
+	if _, err := s.manager.StopInstance(id); err != nil {
+		s.logger.Error("failed to stop instance", "id", id, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
-		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
 
-	// Protect root session (coordinator).
-	info, ok := s.manager.GetSession(id)
+	info, ok := s.manager.GetInstance(id)
 	if !ok {
-		http.Error(w, "session not found", http.StatusNotFound)
+		http.Error(w, "instance not found", http.StatusNotFound)
 		return
 	}
 	if info.ParentID == "" {
-		http.Error(w, "cannot restart the root session", http.StatusForbidden)
+		http.Error(w, "cannot restart the root instance", http.StatusForbidden)
 		return
 	}
 
-	if err := s.manager.StartSession(r.Context(), id); err != nil {
-		if errors.Is(err, agent.ErrSessionNotFound) {
-			http.Error(w, "session not found", http.StatusNotFound)
-		} else if errors.Is(err, agent.ErrSessionNotStopped) {
-			http.Error(w, "session is not stopped", http.StatusConflict)
+	if err := s.manager.StartInstance(r.Context(), id); err != nil {
+		if errors.Is(err, agent.ErrInstanceNotFound) {
+			http.Error(w, "instance not found", http.StatusNotFound)
+		} else if errors.Is(err, agent.ErrInstanceNotStopped) {
+			http.Error(w, "instance is not stopped", http.StatusConflict)
 		} else {
-			s.logger.Error("failed to start session", "id", id, "error", err)
+			s.logger.Error("failed to start instance", "id", id, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 		return
@@ -262,26 +278,46 @@ func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleClearInstance(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
-		http.Error(w, "no session manager", http.StatusServiceUnavailable)
+		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
 
-	// Protect root session (coordinator).
-	info, ok := s.manager.GetSession(id)
+	newSessionID, err := s.manager.NewSession(id)
+	if err != nil {
+		if errors.Is(err, agent.ErrInstanceNotFound) {
+			http.Error(w, "instance not found", http.StatusNotFound)
+		} else {
+			s.logger.Error("failed to clear instance", "id", id, "error", err)
+			http.Error(w, err.Error(), http.StatusConflict)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"new_session_id": newSessionID})
+}
+
+func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+
+	// Protect root instance (coordinator).
+	info, ok := s.manager.GetInstance(id)
 	if !ok {
-		http.Error(w, "session not found", http.StatusNotFound)
+		http.Error(w, "instance not found", http.StatusNotFound)
 		return
 	}
 	if info.ParentID == "" {
-		http.Error(w, "cannot delete the root session", http.StatusForbidden)
+		http.Error(w, "cannot delete the root instance", http.StatusForbidden)
 		return
 	}
 
-	if err := s.manager.DeleteSession(id); err != nil {
-		s.logger.Error("failed to delete session", "id", id, "error", err)
+	if err := s.manager.DeleteInstance(id); err != nil {
+		s.logger.Error("failed to delete instance", "id", id, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -161,19 +161,19 @@ func run() error {
 		// Watch agent definitions for config changes and push to running agents.
 		mgr.WatchAgentDefinitions(fsWatcher)
 
-		// Restore any persistent agents from previous run
-		if err := mgr.RestoreSessions(ctx); err != nil {
-			logger.Warn("failed to restore some agent sessions", "error", err)
+		// Restore any persistent instances from previous run
+		if err := mgr.RestoreInstances(ctx); err != nil {
+			logger.Warn("failed to restore some agent instances", "error", err)
 		}
 
 		// Start coordinator if not already restored from a previous run.
 		// If a stopped coordinator exists, restart it rather than creating a duplicate.
-		leaderID, alreadyRunning := mgr.SessionByAgentName("coordinator")
+		leaderID, alreadyRunning := mgr.InstanceByAgentName("coordinator")
 		if alreadyRunning {
-			// Already running from RestoreSessions — nothing to do.
+			// Already running from RestoreInstances — nothing to do.
 		} else if leaderID != "" {
 			// Stopped coordinator found — restart it.
-			if err := mgr.StartSession(ctx, leaderID); err != nil {
+			if err := mgr.StartInstance(ctx, leaderID); err != nil {
 				if os.IsNotExist(err) {
 					logger.Info("coordinator agent definition missing, skipping restart")
 					leaderID = ""
@@ -184,7 +184,7 @@ func run() error {
 		} else {
 			// No coordinator at all — create one.
 			var err error
-			leaderID, err = mgr.CreateSession(ctx, "coordinator", "", "coordinator")
+			leaderID, err = mgr.CreateInstance(ctx, "coordinator", "", "coordinator")
 			if err != nil {
 				if os.IsNotExist(err) {
 					logger.Info("no coordinator agent defined, skipping")

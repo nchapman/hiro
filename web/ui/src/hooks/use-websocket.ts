@@ -67,7 +67,7 @@ export function useWebSocket(sessionId: string | null) {
       const protocol =
         window.location.protocol === "https:" ? "wss:" : "ws:"
       const ws = new WebSocket(
-        `${protocol}//${window.location.host}/ws/chat?session_id=${encodeURIComponent(id)}`
+        `${protocol}//${window.location.host}/ws/chat?instance_id=${encodeURIComponent(id)}`
       )
 
       ws.onopen = () => setConnected(true)

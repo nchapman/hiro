@@ -73,7 +73,7 @@ func TestIsolation_UIDAssigned(t *testing.T) {
 	mgr, dir, workers := setupIsolationManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.CreateSession(t.Context(), "test-agent", "")
+	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -97,13 +97,13 @@ func TestIsolation_SessionDirOwnership(t *testing.T) {
 	mgr, dir, workers := setupIsolationManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
 	w := (*workers)[0]
-	sessDir := filepath.Join(dir, "sessions", id)
+	sessDir := filepath.Join(dir, "instances", id)
 
 	// Verify the session dir is owned by the agent's UID
 	info, err := os.Stat(sessDir)
@@ -121,11 +121,11 @@ func TestIsolation_DifferentUIDs(t *testing.T) {
 	writeAgentMD(t, dir, "agent-a", testAgentMD)
 	writeAgentMD(t, dir, "agent-b", testAgentMD)
 
-	_, err := mgr.CreateSession(t.Context(), "agent-a", "")
+	_, err := mgr.CreateInstance(t.Context(), "agent-a", "", "persistent")
 	if err != nil {
 		t.Fatalf("start agent-a: %v", err)
 	}
-	_, err = mgr.CreateSession(t.Context(), "agent-b", "")
+	_, err = mgr.CreateInstance(t.Context(), "agent-b", "", "persistent")
 	if err != nil {
 		t.Fatalf("start agent-b: %v", err)
 	}
@@ -145,16 +145,16 @@ func TestIsolation_UIDReleasedOnStop(t *testing.T) {
 	mgr, dir, _ := setupIsolationManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateSession(t.Context(), "test-agent", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	mgr.StopSession(id)
+	mgr.StopInstance(id)
 
 	// UID should be released — we should be able to start 64 more agents
 	// (pool size) without exhaustion. Just verify one more works.
-	_, err = mgr.CreateSession(t.Context(), "test-agent", "")
+	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent")
 	if err != nil {
 		t.Fatalf("start after stop: %v", err)
 	}
@@ -182,15 +182,15 @@ func TestIsolation_PoolExhaustion(t *testing.T) {
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	ctx := t.Context()
-	if _, err := mgr.CreateSession(ctx, "test-agent", ""); err != nil {
+	if _, err := mgr.CreateInstance(ctx, "test-agent", "", "persistent"); err != nil {
 		t.Fatalf("start 1: %v", err)
 	}
-	if _, err := mgr.CreateSession(ctx, "test-agent", ""); err != nil {
+	if _, err := mgr.CreateInstance(ctx, "test-agent", "", "persistent"); err != nil {
 		t.Fatalf("start 2: %v", err)
 	}
 
 	// Third should fail — pool exhausted
-	_, err = mgr.CreateSession(ctx, "test-agent", "")
+	_, err = mgr.CreateInstance(ctx, "test-agent", "", "persistent")
 	if err == nil {
 		t.Fatal("expected error on pool exhaustion")
 	}
@@ -201,14 +201,14 @@ func TestIsolation_SessionDirInaccessible(t *testing.T) {
 	writeAgentMD(t, dir, "agent-a", testAgentMD)
 	writeAgentMD(t, dir, "agent-b", testAgentMD)
 
-	idA, _ := mgr.CreateSession(t.Context(), "agent-a", "")
-	idB, _ := mgr.CreateSession(t.Context(), "agent-b", "")
+	idA, _ := mgr.CreateInstance(t.Context(), "agent-a", "", "persistent")
+	idB, _ := mgr.CreateInstance(t.Context(), "agent-b", "", "persistent")
 
 	uidA := (*workers)[0].spawnCfg.UID
 	uidB := (*workers)[1].spawnCfg.UID
 
-	sessDirA := filepath.Join(dir, "sessions", idA)
-	sessDirB := filepath.Join(dir, "sessions", idB)
+	sessDirA := filepath.Join(dir, "instances", idA)
+	sessDirB := filepath.Join(dir, "instances", idB)
 
 	// Verify each session dir is owned by its agent
 	checkOwnership(t, sessDirA, uidA, (*workers)[0].spawnCfg.GID)

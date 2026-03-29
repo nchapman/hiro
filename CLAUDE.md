@@ -43,7 +43,7 @@ cd web/ui && npm run dev
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
 | `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_ROOT` | `.` | Platform root containing `agents/`, `sessions/`, `skills/`, `workspace/` |
+| `HIVE_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 A `.env` file is loaded automatically via godotenv (does not override existing vars).
@@ -57,13 +57,13 @@ Hive uses **process isolation**: the control plane owns all inference (LLM calls
 ```
 Control Plane Process (hive)
 ├── HTTP/WS API (web UI, REST, chat)
-├── Inference loops (fantasy agent per session)
-├── Unified database (db/hive.db — sessions, messages, usage)
+├── Inference loops (fantasy agent per instance)
+├── Unified database (db/hive.db — instances, sessions, messages, usage)
 ├── System prompt assembly, context management, compaction
 ├── Local tools: memory, todos, history, spawn, coordinator, skills
 ├── Secrets + tool policies (config.yaml)
-├── Process registry + session lifecycle
-└── Spawns: hive agent (one worker per session)
+├── Process registry + instance lifecycle
+└── Spawns: hive agent (one worker per instance)
 
 Agent Worker Process (hive agent)
 ├── Tool execution sandbox (bash, file ops, glob, grep, fetch)
@@ -73,7 +73,7 @@ Agent Worker Process (hive agent)
 
 **Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
 
-**Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Session dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
+**Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
 
 **Group-based access control**: Two Unix groups control filesystem access:
 - `hive-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hive` and `/opt/mise`.
@@ -86,21 +86,23 @@ Agent Worker Process (hive agent)
 ```
 agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inference Loop + spawns worker
                                                                        ↓
-                                                              sessions/<uuid>/
+                                                              instances/<uuid>/
                                                                 memory.md
                                                                 identity.md
-                                                                todos.yaml
-                                                                scratch/
-                                                                tmp/
-                                                              db/hive.db (shared, all sessions)
+                                                                sessions/<session-id>/
+                                                                  todos.yaml
+                                                                  scratch/
+                                                                  tmp/
+                                                              db/hive.db (shared, all instances)
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
-- **Sessions** are runtime state stored in `sessions/<uuid>/`. Persistent and coordinator agents survive restarts via `RestoreSessions()`.
-- **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at session creation time (`CreateSession` takes a `mode` parameter). The `spawn_session` tool accepts a `mode` parameter (defaulting to ephemeral).
-- **Ephemeral sessions** run a single prompt and are cleaned up automatically.
-- **Persistent sessions** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
-- **Coordinator sessions** are a superset of persistent — they additionally get agent management tools (`resume_session`, `stop_session`, `send_message`, `list_sessions`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
+- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `memory.md` and `identity.md`. Persistent and coordinator instances survive restarts via `RestoreInstances()`.
+- **Sessions** are task-scoped work within an instance. Session-level state includes `todos.yaml`, `scratch/`, and `tmp/`. A new session is created on `/clear`.
+- **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `spawn_instance` tool accepts a `mode` parameter (defaulting to ephemeral).
+- **Ephemeral instances** run a single prompt and are cleaned up automatically.
+- **Persistent instances** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
+- **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
 
 ### Agent Definition Structure
 
@@ -158,10 +160,10 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 ### Key Packages
 
 - **`cmd/hive`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC).
-- **`internal/agent`** — Session management. `Manager` supervises session lifecycles, spawns workers via `WorkerFactory`, creates inference loops. `CreateLanguageModel` handles LLM provider setup.
-- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per session. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, coordinator, skills). `ScopedManager` enforces descendant scoping. Context-based cycle detection prevents re-entrant deadlocks.
-- **`internal/platform/db`** — Unified SQLite database (`db/hive.db`). Stores sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
-- **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
+- **`internal/agent`** — Instance management. `Manager` supervises instance lifecycles, spawns workers via `WorkerFactory`, creates inference loops. `CreateLanguageModel` handles LLM provider setup.
+- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per instance. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, coordinator, skills). `ScopedManager` enforces descendant scoping via instance IDs. Context-based cycle detection prevents re-entrant deadlocks.
+- **`internal/platform/db`** — Unified SQLite database (`db/hive.db`). Stores instances, sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
+- **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup). Error sentinels include `ErrInstanceNotFound`.
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
 - **`internal/agent/tools/`** — Built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch). These run in worker processes.
@@ -169,7 +171,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, memory/todos persistence.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
 - **`internal/transport`** — Wire protocol (WebSocket JSON envelopes) for leader↔worker communication.
-- **`internal/api`** — HTTP server with REST endpoints (`/api/health`, `/api/agents`, `/api/agents/{id}/messages`) and WebSocket chat (`/ws/chat`).
+- **`internal/api`** — HTTP server with REST endpoints (`/api/health`, `/api/agents`, `/api/instances`, `/api/instances/{id}/messages`) and WebSocket chat (`/ws/chat`).
 - **`web/`** — Embedded React UI (Vite + TypeScript + React 19). Built assets in `web/ui/dist/` are embedded via `//go:embed`. Strict TypeScript (`noUnusedLocals`, `noUnusedParameters`).
 
 ## Agent Tools
@@ -194,23 +196,23 @@ Implementations in `internal/agent/tools/*.go`. These run in worker processes an
 
 ### Spawn Tool (all agents)
 
-All agents get `spawn_session`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/local_tools.go`.
+All agents get `spawn_instance`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/local_tools.go`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `spawn_session` | Spawn a new session from an agent definition | `agent` (name), `prompt`, `mode` (ephemeral/persistent/coordinator) | Ephemeral (default): blocks until done, returns result, cleans up. Persistent/coordinator: creates long-lived session, returns ID. 32KB max result |
+| `spawn_instance` | Spawn a new instance from an agent definition | `agent` (name), `prompt`, `mode` (ephemeral/persistent/coordinator) | Ephemeral (default): blocks until done, returns result, cleans up. Persistent/coordinator: creates long-lived instance, returns ID. 32KB max result |
 
 ### Coordinator Tools (coordinator mode only)
 
-Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mode sessions. Scoped to descendants via `ScopedManager.checkDescendant()`.
+Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mode instances. Scoped to descendants via `ScopedManager.checkDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `resume_session` | Restart a stopped session | `session_id` | Resumes with previous memory, history, todos |
-| `send_message` | Send message to child and get response | `session_id`, `message` | Blocks; scoped to descendants; serialized per-session (mutex); 32KB max result |
-| `stop_session` | Stop session and its subtree | `session_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent sessions |
-| `delete_session` | Permanently delete session and subtree | `session_id` | Removes all data; cannot be undone |
-| `list_sessions` | List direct child sessions | *(none)* | Shows name, ID, mode, description for direct children only |
+| `resume_instance` | Restart a stopped instance | `instance_id` | Resumes with previous memory, history, todos |
+| `send_message` | Send message to child and get response | `instance_id`, `message` | Blocks; scoped to descendants; serialized per-instance (mutex); 32KB max result |
+| `stop_instance` | Stop instance and its subtree | `instance_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent instances |
+| `delete_instance` | Permanently delete instance and subtree | `instance_id` | Removes all data; cannot be undone |
+| `list_instances` | List direct child instances | *(none)* | Shows name, ID, mode, description for direct children only |
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
@@ -218,7 +220,7 @@ Defined in `internal/inference/local_tools.go`. Run in the control plane process
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
-| `memory_read` | Read `memory.md` from session dir | *(none)* | Returns empty if no memories yet |
+| `memory_read` | Read `memory.md` from instance dir | *(none)* | Returns empty if no memories yet |
 | `memory_write` | Overwrite `memory.md` | `content` | Full replacement — read first to avoid data loss; 0600 perms; visible in system prompt next turn |
 | `todos` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
 | `history_search` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
@@ -232,9 +234,9 @@ Defined in `internal/inference/local_tools.go`. Run in the control plane process
 
 ### Tool Totals by Agent Type
 
-- **Ephemeral sessions:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
-- **Persistent sessions:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
-- **Coordinator sessions:** 11 built-in + 1 spawn + 5 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
+- **Ephemeral instances:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
+- **Persistent instances:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
+- **Coordinator instances:** 11 built-in + 1 spawn + 5 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
@@ -243,11 +245,11 @@ The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started 
 **Bootstrap flow** (`cmd/hive/main.go`):
 1. Check `HIVE_API_KEY` is set
 2. Create `Manager` with provider/API key
-3. `RestoreSessions()` — resume any persistent agents from prior runs
-4. `SessionByAgentName("coordinator")` — check if already running (from restore)
-5. If not running, `CreateSession(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
+3. `RestoreInstances()` — resume any persistent agents from prior runs
+4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
+5. If not running, `CreateInstance(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
 
-Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`resume_session`, `stop_session`, `send_message`, `list_sessions`, `delete_session`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `spawn_session` which supports all modes (non-coordinators are restricted to ephemeral).
+Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`, `delete_instance`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `spawn_instance` which supports all modes (non-coordinators are restricted to ephemeral).
 
 ## Control Plane
 
@@ -286,28 +288,28 @@ agents:
 
 Agents can create new agent definitions at runtime using their file tools:
 1. Use `write_file` / `edit_file` to create `agents/<name>/agent.md` (and optionally `soul.md`, `tools.md`, `skills/*.md`)
-2. Use `spawn_session` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
+2. Use `spawn_instance` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 
 Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next inference loop turn.
 
 ## Conversation Modes
 
-- **Coordinator and persistent agents** use the unified platform database (`db/hive.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-session locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
+- **Coordinator and persistent agents** use the unified platform database (`db/hive.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
 - **WebSocket chat** sends messages to the coordinator's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
 
 ### Agent Tool Scoping
 
-Coordinator tools (`resume_session`, `stop_session`, `send_message`, `list_sessions`, `delete_session`) and `spawn_session` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+Coordinator tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`, `delete_instance`) and `spawn_instance` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
 
 ## Testing Notes
 
-- Manager tests inject a `testWorkerFactory` that returns fake `ipc.AgentWorker` implementations — no real processes or LLM calls. Without a provider configured, sessions have no inference loop (SendMessage returns an error).
+- Manager tests inject a `testWorkerFactory` that returns fake `ipc.AgentWorker` implementations — no real processes or LLM calls. Without a provider configured, instances have no inference loop (SendMessage returns an error).
 - Platform DB tests (`internal/platform/db`) test the unified database schema, CRUD operations, FTS search, usage tracking, and cascade deletes.
 - The `tools/` package tests run actual file/process operations in temp directories.
 - gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing of `ExecuteTool` and `Shutdown` RPCs.
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Session dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).
+- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).

@@ -74,7 +74,7 @@ func resolveFilesPath(rootDir, relPath string) (string, error) {
 // be deleted or renamed through the file browser API.
 var protectedPaths = map[string]bool{
 	"agents":      true,
-	"sessions":    true,
+	"instances":   true,
 	"skills":      true,
 	"workspace":   true,
 	"config.yaml": true,

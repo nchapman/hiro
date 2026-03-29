@@ -332,7 +332,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     streamingMsgId.current = null
     setLoadingHistory(true)
 
-    fetch(`/api/sessions/${encodeURIComponent(session.id)}/usage`, {
+    fetch(`/api/instances/${encodeURIComponent(session.id)}/usage`, {
       signal: ac.signal,
     })
       .then((res) => (res.ok ? res.json() : null))
@@ -341,7 +341,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
       })
       .catch(() => {})
 
-    fetch(`/api/sessions/${encodeURIComponent(session.id)}/messages`, {
+    fetch(`/api/instances/${encodeURIComponent(session.id)}/messages`, {
       signal: ac.signal,
     })
       .then((res) => {
@@ -568,7 +568,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
   const handleStop = async () => {
     if (!session) return
-    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/stop`, {
+    const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}/stop`, {
       method: "POST",
     })
     if (!res.ok) console.error("Failed to stop session:", res.status, await res.text())
@@ -577,7 +577,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
   const handleStart = async () => {
     if (!session) return
-    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/start`, {
+    const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}/start`, {
       method: "POST",
     })
     if (!res.ok) console.error("Failed to start session:", res.status, await res.text())
@@ -586,7 +586,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
   const handleDelete = async () => {
     if (!session) return
-    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+    const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}`, {
       method: "DELETE",
     })
     if (!res.ok) console.error("Failed to delete session:", res.status, await res.text())
