@@ -56,6 +56,20 @@ func NewWorkerStream(cfg WorkerStreamConfig) *WorkerStream {
 	}
 }
 
+// LeaderAddr returns the current leader address.
+func (w *WorkerStream) LeaderAddr() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.leaderAddr
+}
+
+// SetLeaderAddr updates the leader address for the next connection attempt.
+func (w *WorkerStream) SetLeaderAddr(addr string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.leaderAddr = addr
+}
+
 // SetSpawnHandler sets the callback for SpawnWorker commands.
 func (w *WorkerStream) SetSpawnHandler(fn func(ctx context.Context, msg *pb.SpawnWorker)) {
 	w.onSpawnWorker = fn

@@ -21,9 +21,6 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	if envAddr := os.Getenv("HIVE_LEADER"); envAddr != "" {
 		leaderAddr = envAddr
 	}
-	if leaderAddr == "" {
-		return fmt.Errorf("worker mode requires cluster.leader_addr in config.yaml or HIVE_LEADER env var")
-	}
 
 	joinToken := cp.ClusterJoinToken()
 	if envToken := os.Getenv("HIVE_JOIN_TOKEN"); envToken != "" {
@@ -41,6 +38,47 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// If tracker is configured, start discovery and use it to find the leader.
+	var discovery *cluster.DiscoveryClient
+	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
+		swarmCode := cp.ClusterSwarmCode()
+		if swarmCode == "" {
+			return fmt.Errorf("HIVE_SWARM_CODE is required when tracker_url is set")
+		}
+
+		identity, err := cluster.LoadOrCreateIdentity(rootDir)
+		if err != nil {
+			return fmt.Errorf("loading node identity: %w", err)
+		}
+		logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
+
+		discovery = cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
+			TrackerURL: trackerURL,
+			SwarmCode:  swarmCode,
+			Role:       "worker",
+			GRPCPort:   0, // workers don't serve gRPC
+			Identity:   identity,
+			NodeName:   nodeName,
+			Logger:     logger,
+		})
+		go discovery.Run(ctx)
+		logger.Info("tracker discovery started", "tracker", trackerURL, "role", "worker")
+	}
+
+	// Resolve leader address: static config takes precedence, then tracker discovery.
+	if leaderAddr == "" {
+		if discovery == nil {
+			return fmt.Errorf("worker mode requires cluster.leader_addr, HIVE_LEADER, or tracker_url + HIVE_SWARM_CODE")
+		}
+		logger.Info("waiting for leader via tracker discovery...")
+		var err error
+		leaderAddr, err = discovery.WaitForLeader(ctx)
+		if err != nil {
+			return fmt.Errorf("discovering leader: %w", err)
+		}
+		logger.Info("leader discovered via tracker", "leader", leaderAddr)
+	}
 
 	// Create workspace directories locally.
 	for _, dir := range []string{"workspace", "instances"} {
@@ -119,6 +157,15 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		}
 		if ctx.Err() != nil {
 			break
+		}
+
+		// Re-resolve leader address from tracker if available.
+		if discovery != nil {
+			discovery.Announce(ctx) // fresh data before checking
+			if newAddr := discovery.LeaderAddr(); newAddr != "" && newAddr != ws.LeaderAddr() {
+				logger.Info("leader address changed via tracker", "old", ws.LeaderAddr(), "new", newAddr)
+				ws.SetLeaderAddr(newAddr)
+			}
 		}
 	}
 

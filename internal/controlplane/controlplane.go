@@ -47,6 +47,8 @@ type ClusterConfig struct {
 	JoinToken  string            `yaml:"join_token,omitempty"`  // auth token (worker mode)
 	NodeName   string            `yaml:"node_name,omitempty"`   // human-friendly node name
 	JoinTokens map[string]string `yaml:"join_tokens,omitempty"` // named tokens for node auth (leader mode)
+	TrackerURL string            `yaml:"tracker_url,omitempty"` // discovery tracker URL (e.g. https://discover.hellohiro.ai)
+	SwarmCode  string            `yaml:"swarm_code,omitempty"`  // shared swarm code for tracker discovery
 }
 
 // Config is the on-disk representation of the control plane state.
@@ -157,7 +159,8 @@ func (cp *ControlPlane) hasContent() bool {
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
 		len(cp.config.Agents) > 0 ||
-		cp.config.Cluster.Mode != ""
+		cp.config.Cluster.Mode != "" ||
+		cp.config.Cluster.TrackerURL != ""
 }
 
 // Reload re-reads config.yaml from disk and replaces the in-memory state.
@@ -549,6 +552,28 @@ func (cp *ControlPlane) ClusterNodeName() string {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 	return cp.config.Cluster.NodeName
+}
+
+// ClusterTrackerURL returns the tracker URL for discovery.
+// HIVE_TRACKER_URL env var takes precedence over config.yaml.
+func (cp *ControlPlane) ClusterTrackerURL() string {
+	if envURL := os.Getenv("HIVE_TRACKER_URL"); envURL != "" {
+		return envURL
+	}
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Cluster.TrackerURL
+}
+
+// ClusterSwarmCode returns the swarm code for tracker discovery.
+// HIVE_SWARM_CODE env var takes precedence over config.yaml.
+func (cp *ControlPlane) ClusterSwarmCode() string {
+	if v := os.Getenv("HIVE_SWARM_CODE"); v != "" {
+		return v
+	}
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Cluster.SwarmCode
 }
 
 // ClusterJoinTokens returns a copy of the named join tokens (leader mode).

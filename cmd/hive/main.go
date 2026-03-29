@@ -147,6 +147,44 @@ func run() error {
 		}
 	}()
 
+	// Start tracker discovery announcements if configured.
+	discoveryCtx, discoveryCancel := context.WithCancel(ctx)
+	defer discoveryCancel()
+	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
+		swarmCode := cp.ClusterSwarmCode()
+		if swarmCode == "" {
+			return fmt.Errorf("HIVE_SWARM_CODE is required when tracker_url is set")
+		}
+
+		identity, err := cluster.LoadOrCreateIdentity(absRootDir)
+		if err != nil {
+			return fmt.Errorf("loading node identity: %w", err)
+		}
+		logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
+
+		// Parse gRPC port from cluster address.
+		_, portStr, _ := net.SplitHostPort(clusterAddr)
+		grpcPort, _ := strconv.Atoi(portStr)
+
+		nodeName := cp.ClusterNodeName()
+		if nodeName == "" {
+			nodeName = envOr("HOSTNAME", "leader")
+		}
+
+		dc := cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
+			TrackerURL: trackerURL,
+			SwarmCode:  swarmCode,
+			Role:       "leader",
+			GRPCPort:   grpcPort,
+			Identity:   identity,
+			NodeName:   nodeName,
+			Logger:     logger,
+		})
+
+		go dc.Run(discoveryCtx)
+		logger.Info("tracker discovery started", "tracker", trackerURL, "role", "leader")
+	}
+
 	// Shared state for the manager lifecycle — the manager can be started
 	// at boot (if providers are configured) or later via the setup API.
 	var mgr *agent.Manager
@@ -283,6 +321,7 @@ func run() error {
 	defer shutdownCancel()
 
 	err = httpServer.Shutdown(shutdownCtx)
+	discoveryCancel()
 	clusterGRPC.GracefulStop()
 	leaderSync.Stop()
 	if mgr != nil {
