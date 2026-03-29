@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/config"
 	"charm.land/fantasy"
 
@@ -42,9 +43,10 @@ type InstanceInfo struct {
 	Name        string
 	Mode        config.AgentMode
 	Description string
-	ParentID    string // empty for top-level instances
+	ParentID    string         // empty for top-level instances
 	Status      InstanceStatus
-	Model       string // resolved model ID
+	Model       string         // resolved model ID
+	NodeID      cluster.NodeID // which node this instance runs on
 }
 
 // WorkerHandle represents a running agent worker (process or mock).
@@ -71,6 +73,7 @@ type instance struct {
 	uid            uint32             // isolated UID (0 = no isolation)
 	gid            uint32             // isolated GID
 	groups         []uint32           // supplementary groups (includes hive-coordinators for coordinators)
+	nodeID         cluster.NodeID     // which node this instance runs on ("home" for local)
 }
 
 // Manager supervises agent instance lifecycles on a single node.
@@ -85,9 +88,10 @@ type Manager struct {
 	cp      ControlPlane // operator-level tool/secret config
 	logger  *slog.Logger
 
-	workerFactory WorkerFactory     // creates agent workers (default = OS processes)
-	uidPool       *uidpool.Pool     // per-agent Unix user isolation; nil = disabled
-	pdb           *platformdb.DB    // unified platform database
+	workerFactory  WorkerFactory          // creates agent workers (default = OS processes)
+	uidPool        *uidpool.Pool          // per-agent Unix user isolation; nil = disabled
+	pdb            *platformdb.DB         // unified platform database
+	clusterService *cluster.LeaderService // cluster orchestration; nil = standalone
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.
@@ -130,7 +134,7 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 // parentInstanceID tracks lineage; pass "" for top-level instances.
 // mode is a string to satisfy the ipc.HostManager interface boundary; it must
 // be one of "persistent", "ephemeral", or "coordinator".
-func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID string, mode string) (string, error) {
+func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID cluster.NodeID) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
 	}
@@ -150,7 +154,7 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID str
 
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
-	return m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode)
+	return m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID)
 }
 
 // SpawnEphemeral starts an ephemeral instance that runs the given prompt and returns
@@ -158,7 +162,7 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID str
 // ephemeral mode — the caller controls the lifecycle.
 // parentInstanceID identifies the spawning instance (empty for top-level spawns).
 // onEvent receives streaming events during execution (may be nil).
-func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, nodeID cluster.NodeID, onEvent func(ipc.ChatEvent) error) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -170,7 +174,7 @@ func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentI
 
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
-	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral)
+	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID)
 	if err != nil {
 		return "", err
 	}
@@ -401,7 +405,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	if sessionID == "" {
 		sessionID = uuid.Must(uuid.NewV7()).String()
 	}
-	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode); err != nil {
+	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID); err != nil {
 		// Re-register as stopped so the instance remains visible.
 		m.reregisterStopped(instanceID, inst)
 		return err
@@ -873,6 +877,33 @@ func (m *Manager) SecretEnv() []string {
 	return m.cp.SecretEnv()
 }
 
+// SetClusterService sets the cluster leader service for remote node management.
+// Must be called before any remote spawns. If nil, all spawns are local.
+func (m *Manager) SetClusterService(svc *cluster.LeaderService) {
+	m.clusterService = svc
+}
+
+// ListNodes returns all nodes in the cluster registry. Returns nil if
+// clustering is not enabled.
+func (m *Manager) ListNodes() []ipc.NodeInfo {
+	if m.clusterService == nil {
+		return nil
+	}
+	nodes := m.clusterService.Registry().List()
+	result := make([]ipc.NodeInfo, len(nodes))
+	for i, n := range nodes {
+		result[i] = ipc.NodeInfo{
+			ID:          n.ID,
+			Name:        n.Name,
+			Status:      string(n.Status),
+			IsHome:      n.IsHome,
+			Capacity:    n.Capacity,
+			ActiveCount: n.ActiveCount,
+		}
+	}
+	return result
+}
+
 // RestoreInstances reads persistent/coordinator instances from the platform
 // database and restarts them. Call once after NewManager.
 func (m *Manager) RestoreInstances(ctx context.Context) error {
@@ -949,7 +980,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			m.logger.Info("creating new session (no previous session found)",
 				"instance", dbInst.ID, "session", sessionID, "agent", dbInst.AgentName)
 		}
-		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode)
+		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode, cluster.HomeNodeID)
 		if err != nil {
 			m.logger.Warn("failed to restore instance",
 				"id", dbInst.ID, "agent", dbInst.AgentName, "error", err)
@@ -1007,8 +1038,9 @@ func (m *Manager) Shutdown() {
 }
 
 // startInstance creates instance and session directories, spawns a worker process,
-// and registers the instance in the manager.
-func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode) (string, error) {
+// and registers the instance in the manager. nodeID targets a specific cluster
+// node ("" or "home" for local execution).
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID cluster.NodeID) (string, error) {
 	// Create instance directory with instance-level state.
 	instDir := m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
@@ -1186,6 +1218,11 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		}
 	}
 
+	resolvedNodeID := nodeID
+	if resolvedNodeID == "" {
+		resolvedNodeID = cluster.HomeNodeID
+	}
+
 	inst := &instance{
 		info: InstanceInfo{
 			ID:          instanceID,
@@ -1195,6 +1232,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			ParentID:    parentID,
 			Status:      InstanceStatusRunning,
 			Model:       model,
+			NodeID:      resolvedNodeID,
 		},
 		activeSession:  sessionID,
 		worker:         handle.Worker,
@@ -1204,6 +1242,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		uid:            uid,
 		gid:            gid,
 		groups:         groups,
+		nodeID:         resolvedNodeID,
 	}
 
 	m.mu.Lock()

@@ -1,6 +1,8 @@
 package controlplane
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,6 +34,8 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 		result, mutated, err = cp.handleSecrets(verb, args)
 	case "tools":
 		result, mutated, err = cp.handleTools(verb, args)
+	case "cluster":
+		result, mutated, err = cp.handleCluster(verb, args)
 	default:
 		return "", fmt.Errorf("unknown command: %s", noun)
 	}
@@ -168,6 +172,72 @@ func parseKeyValue(args []string) (name, value string, ok bool) {
 		return args[0], strings.Join(args[1:], " "), true
 	}
 	return "", "", false
+}
+
+func (cp *ControlPlane) handleCluster(verb string, args []string) (string, bool, error) {
+	switch verb {
+	case "token":
+		if len(args) < 1 {
+			return "Usage: /cluster token <create|revoke|list>", false, nil
+		}
+		return cp.handleClusterToken(args[0], args[1:])
+
+	case "":
+		return "Usage: /cluster token <create|revoke|list>", false, nil
+
+	default:
+		return "", false, fmt.Errorf("unknown cluster command: %s", verb)
+	}
+}
+
+func (cp *ControlPlane) handleClusterToken(action string, args []string) (string, bool, error) {
+	switch action {
+	case "create":
+		name := "default"
+		if len(args) > 0 {
+			name = args[0]
+		}
+		// Generate a random 32-byte token.
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			return "", false, fmt.Errorf("generating token: %w", err)
+		}
+		token := hex.EncodeToString(b)
+		cp.SetClusterJoinToken(name, token)
+		return fmt.Sprintf("Join token %q created:\n\n  %s\n\nWorkers use this to connect. Store it securely.", name, token), true, nil
+
+	case "revoke", "rm", "delete":
+		if len(args) < 1 {
+			return "Usage: /cluster token revoke <name>", false, nil
+		}
+		name := args[0]
+		cp.DeleteClusterJoinToken(name)
+		return fmt.Sprintf("Join token %q revoked.", name), true, nil
+
+	case "list", "ls":
+		tokens := cp.ClusterJoinTokens()
+		if len(tokens) == 0 {
+			return "No join tokens configured. Use `/cluster token create [name]` to create one.", false, nil
+		}
+		names := make([]string, 0, len(tokens))
+		for name := range tokens {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		var b strings.Builder
+		b.WriteString("Join tokens:\n")
+		for _, name := range names {
+			// Show only first/last 4 chars of token for security.
+			token := tokens[name]
+			masked := token[:4] + "..." + token[len(token)-4:]
+			fmt.Fprintf(&b, "  • %s: %s\n", name, masked)
+		}
+		return strings.TrimRight(b.String(), "\n"), false, nil
+
+	default:
+		return "Usage: /cluster token <create|revoke|list>", false, nil
+	}
 }
 
 // parseToolList parses tool names from args. Tools can be comma-separated

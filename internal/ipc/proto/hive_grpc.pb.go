@@ -167,3 +167,113 @@ var AgentWorker_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "internal/ipc/proto/hive.proto",
 }
+
+const (
+	Cluster_NodeStream_FullMethodName = "/hive.Cluster/NodeStream"
+)
+
+// ClusterClient is the client API for Cluster service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Cluster is served by the leader. Worker nodes dial the leader and open
+// a long-lived bidirectional stream for spawning workers, executing tools,
+// and receiving file sync updates.
+type ClusterClient interface {
+	// NodeStream is a bidirectional stream between a worker node and the
+	// leader. The node sends registration, tool results, and heartbeats.
+	// The leader sends spawn commands, tool execution requests, and file sync.
+	NodeStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[NodeMessage, LeaderMessage], error)
+}
+
+type clusterClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewClusterClient(cc grpc.ClientConnInterface) ClusterClient {
+	return &clusterClient{cc}
+}
+
+func (c *clusterClient) NodeStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[NodeMessage, LeaderMessage], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Cluster_ServiceDesc.Streams[0], Cluster_NodeStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[NodeMessage, LeaderMessage]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cluster_NodeStreamClient = grpc.BidiStreamingClient[NodeMessage, LeaderMessage]
+
+// ClusterServer is the server API for Cluster service.
+// All implementations must embed UnimplementedClusterServer
+// for forward compatibility.
+//
+// Cluster is served by the leader. Worker nodes dial the leader and open
+// a long-lived bidirectional stream for spawning workers, executing tools,
+// and receiving file sync updates.
+type ClusterServer interface {
+	// NodeStream is a bidirectional stream between a worker node and the
+	// leader. The node sends registration, tool results, and heartbeats.
+	// The leader sends spawn commands, tool execution requests, and file sync.
+	NodeStream(grpc.BidiStreamingServer[NodeMessage, LeaderMessage]) error
+	mustEmbedUnimplementedClusterServer()
+}
+
+// UnimplementedClusterServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedClusterServer struct{}
+
+func (UnimplementedClusterServer) NodeStream(grpc.BidiStreamingServer[NodeMessage, LeaderMessage]) error {
+	return status.Error(codes.Unimplemented, "method NodeStream not implemented")
+}
+func (UnimplementedClusterServer) mustEmbedUnimplementedClusterServer() {}
+func (UnimplementedClusterServer) testEmbeddedByValue()                 {}
+
+// UnsafeClusterServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ClusterServer will
+// result in compilation errors.
+type UnsafeClusterServer interface {
+	mustEmbedUnimplementedClusterServer()
+}
+
+func RegisterClusterServer(s grpc.ServiceRegistrar, srv ClusterServer) {
+	// If the following call panics, it indicates UnimplementedClusterServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Cluster_ServiceDesc, srv)
+}
+
+func _Cluster_NodeStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ClusterServer).NodeStream(&grpc.GenericServerStream[NodeMessage, LeaderMessage]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cluster_NodeStreamServer = grpc.BidiStreamingServer[NodeMessage, LeaderMessage]
+
+// Cluster_ServiceDesc is the grpc.ServiceDesc for Cluster service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Cluster_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "hive.Cluster",
+	HandlerType: (*ClusterServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "NodeStream",
+			Handler:       _Cluster_NodeStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "internal/ipc/proto/hive.proto",
+}

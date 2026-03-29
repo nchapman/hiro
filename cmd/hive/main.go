@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,9 +15,11 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"google.golang.org/grpc"
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
+	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/platform"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
@@ -51,12 +52,6 @@ func run() error {
 		Level: slog.LevelInfo,
 	}))
 
-	swarmCode := os.Getenv("HIVE_SWARM_CODE")
-	if swarmCode == "" {
-		swarmCode = generateRandomCode()
-		logger.Warn("HIVE_SWARM_CODE not set — generated ephemeral code",
-			"code", swarmCode)
-	}
 	listenAddr := envOr("HIVE_ADDR", ":8080")
 	rootDir := envOr("HIVE_ROOT", ".")
 
@@ -84,6 +79,11 @@ func run() error {
 		return fmt.Errorf("loading control plane: %w", err)
 	}
 
+	// Check cluster mode: worker nodes take a completely different path.
+	if cp.ClusterMode() == "worker" {
+		return runWorkerNode(absRootDir, cp, logger)
+	}
+
 	webFS, err := web.DistFS()
 	if err != nil {
 		return fmt.Errorf("loading web UI: %w", err)
@@ -105,6 +105,32 @@ func run() error {
 	srv.SetControlPlane(cp)
 	srv.SetDB(pdb)
 	srv.SetWatcher(fsWatcher)
+
+	// Start cluster gRPC server for worker node connections.
+	clusterAddr := envOr("HIVE_CLUSTER_ADDR", ":8081")
+	registry := cluster.NewNodeRegistry()
+	registry.RegisterHome(envOr("HOSTNAME", "leader"))
+
+	leaderStream := cluster.NewLeaderStream(registry, func(token string) string {
+		return cp.ValidateJoinToken(token)
+	}, logger)
+
+	clusterGRPC := grpc.NewServer()
+	leaderStream.Register(clusterGRPC)
+
+	clusterLis, err := net.Listen("tcp", clusterAddr)
+	if err != nil {
+		return fmt.Errorf("listening on cluster addr %s: %w", clusterAddr, err)
+	}
+
+	clusterSvc := cluster.NewLeaderService(leaderStream, registry, logger)
+
+	go func() {
+		logger.Info("cluster gRPC server starting", "addr", clusterAddr)
+		if err := clusterGRPC.Serve(clusterLis); err != nil {
+			logger.Error("cluster gRPC error", "error", err)
+		}
+	}()
 
 	// Shared state for the manager lifecycle — the manager can be started
 	// at boot (if providers are configured) or later via the setup API.
@@ -157,6 +183,7 @@ func run() error {
 		mgr = agent.NewManager(ctx, rootDir, agent.Options{
 			WorkingDir: absRootDir,
 		}, cp, logger, nil, pool, pdb)
+		mgr.SetClusterService(clusterSvc)
 
 		// Watch agent definitions for config changes and push to running agents.
 		mgr.WatchAgentDefinitions(fsWatcher)
@@ -184,7 +211,7 @@ func run() error {
 		} else {
 			// No coordinator at all — create one.
 			var err error
-			leaderID, err = mgr.CreateInstance(ctx, "coordinator", "", "coordinator")
+			leaderID, err = mgr.CreateInstance(ctx, "coordinator", "", "coordinator", "")
 			if err != nil {
 				if os.IsNotExist(err) {
 					logger.Info("no coordinator agent defined, skipping")
@@ -225,7 +252,7 @@ func run() error {
 	}
 
 	go func() {
-		logger.Info("hive starting", "addr", listenAddr, "swarm", swarmCode)
+		logger.Info("hive starting", "addr", listenAddr, "cluster", clusterAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "error", err)
 			cancel()
@@ -241,6 +268,7 @@ func run() error {
 	defer shutdownCancel()
 
 	err = httpServer.Shutdown(shutdownCtx)
+	clusterGRPC.GracefulStop()
 	if mgr != nil {
 		mgr.Shutdown()
 	}
@@ -257,10 +285,3 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func generateRandomCode() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return hex.EncodeToString(b)
-}

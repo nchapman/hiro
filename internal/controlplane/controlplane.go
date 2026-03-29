@@ -39,6 +39,15 @@ type AgentPolicy struct {
 	Tools []string `yaml:"tools,omitempty"`
 }
 
+// ClusterConfig holds settings for leader-worker clustering.
+type ClusterConfig struct {
+	Mode       string            `yaml:"mode,omitempty"`        // "leader" (default) or "worker"
+	LeaderAddr string            `yaml:"leader_addr,omitempty"` // gRPC address for worker→leader connection
+	JoinToken  string            `yaml:"join_token,omitempty"`  // auth token (worker mode)
+	NodeName   string            `yaml:"node_name,omitempty"`   // human-friendly node name
+	JoinTokens map[string]string `yaml:"join_tokens,omitempty"` // named tokens for node auth (leader mode)
+}
+
 // Config is the on-disk representation of the control plane state.
 type Config struct {
 	Auth            AuthConfig                `yaml:"auth,omitempty"`
@@ -47,6 +56,7 @@ type Config struct {
 	DefaultModel    string                    `yaml:"default_model,omitempty"`
 	Secrets         map[string]string         `yaml:"secrets,omitempty"`
 	Agents          map[string]AgentPolicy    `yaml:"agents,omitempty"`
+	Cluster         ClusterConfig             `yaml:"cluster,omitempty"`
 }
 
 // ControlPlane holds operator-level state in memory during runtime.
@@ -145,7 +155,8 @@ func (cp *ControlPlane) hasContent() bool {
 		cp.config.DefaultProvider != "" ||
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
-		len(cp.config.Agents) > 0
+		len(cp.config.Agents) > 0 ||
+		cp.config.Cluster.Mode != ""
 }
 
 // Reload re-reads config.yaml from disk and replaces the in-memory state.
@@ -500,4 +511,88 @@ func (cp *ControlPlane) AllPolicies() map[string]AgentPolicy {
 		result[k] = v
 	}
 	return result
+}
+
+// --- Cluster ---
+
+// ClusterMode returns the cluster mode: "leader" (default) or "worker".
+func (cp *ControlPlane) ClusterMode() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	if cp.config.Cluster.Mode == "" {
+		return "leader"
+	}
+	return cp.config.Cluster.Mode
+}
+
+// ClusterLeaderAddr returns the leader's gRPC address (worker mode).
+func (cp *ControlPlane) ClusterLeaderAddr() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Cluster.LeaderAddr
+}
+
+// ClusterJoinToken returns the join token (worker mode).
+func (cp *ControlPlane) ClusterJoinToken() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Cluster.JoinToken
+}
+
+// ClusterNodeName returns the human-friendly node name.
+func (cp *ControlPlane) ClusterNodeName() string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.config.Cluster.NodeName
+}
+
+// ClusterJoinTokens returns a copy of the named join tokens (leader mode).
+func (cp *ControlPlane) ClusterJoinTokens() map[string]string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	if cp.config.Cluster.JoinTokens == nil {
+		return nil
+	}
+	tokens := make(map[string]string, len(cp.config.Cluster.JoinTokens))
+	for k, v := range cp.config.Cluster.JoinTokens {
+		tokens[k] = v
+	}
+	return tokens
+}
+
+// ValidateJoinToken checks if a token matches any named join token.
+// Returns the token name if valid, empty string if not.
+func (cp *ControlPlane) ValidateJoinToken(token string) string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	for name, t := range cp.config.Cluster.JoinTokens {
+		if t == token {
+			return name
+		}
+	}
+	return ""
+}
+
+// SetClusterMode sets the cluster mode.
+func (cp *ControlPlane) SetClusterMode(mode string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.Cluster.Mode = mode
+}
+
+// SetClusterJoinToken adds or updates a named join token.
+func (cp *ControlPlane) SetClusterJoinToken(name, token string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	if cp.config.Cluster.JoinTokens == nil {
+		cp.config.Cluster.JoinTokens = make(map[string]string)
+	}
+	cp.config.Cluster.JoinTokens[name] = token
+}
+
+// DeleteClusterJoinToken removes a named join token.
+func (cp *ControlPlane) DeleteClusterJoinToken(name string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	delete(cp.config.Cluster.JoinTokens, name)
 }

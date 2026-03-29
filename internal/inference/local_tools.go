@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 
+	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
@@ -39,6 +40,7 @@ type spawnInstanceInput struct {
 	Agent  string `json:"agent"  description:"The name of the agent definition to run (matches a directory name under agents/)."`
 	Prompt string `json:"prompt" description:"The task prompt. Required for ephemeral mode. For persistent/coordinator instances, use send_message after creation."`
 	Mode   string `json:"mode"   description:"Instance mode: 'ephemeral' (default) runs the prompt and returns the result; 'persistent' or 'coordinator' creates a long-lived instance and returns its ID." default:"ephemeral"`
+	Node   string `json:"node"   description:"Target node to run on. Omit or use 'home' for the local machine. Use list_nodes to see available nodes."`
 }
 
 func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.AgentTool {
@@ -57,12 +59,14 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.Ag
 			// Extract caller ID from context for parent lineage.
 			callerID := callerIDFromContext(ctx)
 
+			nodeID := cluster.NodeID(input.Node)
+
 			switch config.AgentMode(mode) {
 			case config.ModeEphemeral:
 				if input.Prompt == "" {
 					return fantasy.NewTextErrorResponse("prompt is required for ephemeral mode"), nil
 				}
-				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nil)
+				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
 				}
@@ -73,7 +77,7 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.Ag
 					return fantasy.NewTextErrorResponse(
 						fmt.Sprintf("only coordinator agents can spawn %s instances", mode)), nil
 				}
-				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode)
+				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create instance: %v", err)), nil
 				}
@@ -94,10 +98,36 @@ func buildCoordinatorTools(mgr ipc.HostManager) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		buildResumeInstance(mgr),
 		buildListInstances(mgr),
+		buildListNodes(mgr),
 		buildSendMessage(mgr),
 		buildStopInstance(mgr),
 		buildDeleteInstance(mgr),
 	}
+}
+
+func buildListNodes(mgr ipc.HostManager) fantasy.AgentTool {
+	return fantasy.NewAgentTool("list_nodes",
+		"List all nodes in the cluster. Shows each node's name, status, capacity, and active worker count. Use node names with spawn_instance to run agents on specific machines.",
+		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			nodes := mgr.ListNodes()
+			if len(nodes) == 0 {
+				return fantasy.NewTextResponse("No cluster nodes configured. All agents run locally."), nil
+			}
+			var sb strings.Builder
+			for _, n := range nodes {
+				label := n.Name
+				if n.IsHome {
+					label += " (home)"
+				}
+				fmt.Fprintf(&sb, "- **%s** (id: %s, status: %s", label, n.ID, n.Status)
+				if n.Capacity > 0 {
+					fmt.Fprintf(&sb, ", capacity: %d", n.Capacity)
+				}
+				fmt.Fprintf(&sb, ", active: %d)\n", n.ActiveCount)
+			}
+			return fantasy.NewTextResponse(sb.String()), nil
+		},
+	)
 }
 
 type resumeInstanceInput struct {

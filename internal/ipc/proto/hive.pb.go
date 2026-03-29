@@ -213,6 +213,1088 @@ func (*ShutdownResponse) Descriptor() ([]byte, []int) {
 	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{3}
 }
 
+// NodeMessage is sent from a worker node to the leader.
+type NodeMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*NodeMessage_Register
+	//	*NodeMessage_SpawnResult
+	//	*NodeMessage_ToolResult
+	//	*NodeMessage_Heartbeat
+	//	*NodeMessage_WorkerExited
+	//	*NodeMessage_FileUpdate
+	//	*NodeMessage_FileSyncAck
+	Msg           isNodeMessage_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeMessage) Reset() {
+	*x = NodeMessage{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeMessage) ProtoMessage() {}
+
+func (x *NodeMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeMessage.ProtoReflect.Descriptor instead.
+func (*NodeMessage) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *NodeMessage) GetMsg() isNodeMessage_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetRegister() *NodeRegister {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_Register); ok {
+			return x.Register
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetSpawnResult() *SpawnResult {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_SpawnResult); ok {
+			return x.SpawnResult
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetToolResult() *NodeToolResult {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_ToolResult); ok {
+			return x.ToolResult
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetHeartbeat() *NodeHeartbeat {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_Heartbeat); ok {
+			return x.Heartbeat
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetWorkerExited() *WorkerExited {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_WorkerExited); ok {
+			return x.WorkerExited
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetFileUpdate() *FileUpdate {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_FileUpdate); ok {
+			return x.FileUpdate
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetFileSyncAck() *FileSyncAck {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_FileSyncAck); ok {
+			return x.FileSyncAck
+		}
+	}
+	return nil
+}
+
+type isNodeMessage_Msg interface {
+	isNodeMessage_Msg()
+}
+
+type NodeMessage_Register struct {
+	Register *NodeRegister `protobuf:"bytes,1,opt,name=register,proto3,oneof"`
+}
+
+type NodeMessage_SpawnResult struct {
+	SpawnResult *SpawnResult `protobuf:"bytes,2,opt,name=spawn_result,json=spawnResult,proto3,oneof"`
+}
+
+type NodeMessage_ToolResult struct {
+	ToolResult *NodeToolResult `protobuf:"bytes,3,opt,name=tool_result,json=toolResult,proto3,oneof"`
+}
+
+type NodeMessage_Heartbeat struct {
+	Heartbeat *NodeHeartbeat `protobuf:"bytes,4,opt,name=heartbeat,proto3,oneof"`
+}
+
+type NodeMessage_WorkerExited struct {
+	WorkerExited *WorkerExited `protobuf:"bytes,5,opt,name=worker_exited,json=workerExited,proto3,oneof"`
+}
+
+type NodeMessage_FileUpdate struct {
+	FileUpdate *FileUpdate `protobuf:"bytes,6,opt,name=file_update,json=fileUpdate,proto3,oneof"` // worker → leader: file changed on this node
+}
+
+type NodeMessage_FileSyncAck struct {
+	FileSyncAck *FileSyncAck `protobuf:"bytes,7,opt,name=file_sync_ack,json=fileSyncAck,proto3,oneof"` // worker → leader: initial sync received
+}
+
+func (*NodeMessage_Register) isNodeMessage_Msg() {}
+
+func (*NodeMessage_SpawnResult) isNodeMessage_Msg() {}
+
+func (*NodeMessage_ToolResult) isNodeMessage_Msg() {}
+
+func (*NodeMessage_Heartbeat) isNodeMessage_Msg() {}
+
+func (*NodeMessage_WorkerExited) isNodeMessage_Msg() {}
+
+func (*NodeMessage_FileUpdate) isNodeMessage_Msg() {}
+
+func (*NodeMessage_FileSyncAck) isNodeMessage_Msg() {}
+
+type FileSyncAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileSyncAck) Reset() {
+	*x = FileSyncAck{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileSyncAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileSyncAck) ProtoMessage() {}
+
+func (x *FileSyncAck) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileSyncAck.ProtoReflect.Descriptor instead.
+func (*FileSyncAck) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{5}
+}
+
+// LeaderMessage is sent from the leader to a worker node.
+type LeaderMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*LeaderMessage_Registered
+	//	*LeaderMessage_SpawnWorker
+	//	*LeaderMessage_ExecuteTool
+	//	*LeaderMessage_ShutdownWorker
+	//	*LeaderMessage_KillWorker
+	//	*LeaderMessage_FileSync
+	//	*LeaderMessage_FileUpdate
+	Msg           isLeaderMessage_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaderMessage) Reset() {
+	*x = LeaderMessage{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaderMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaderMessage) ProtoMessage() {}
+
+func (x *LeaderMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaderMessage.ProtoReflect.Descriptor instead.
+func (*LeaderMessage) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *LeaderMessage) GetMsg() isLeaderMessage_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetRegistered() *NodeRegistered {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_Registered); ok {
+			return x.Registered
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetSpawnWorker() *SpawnWorker {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_SpawnWorker); ok {
+			return x.SpawnWorker
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetExecuteTool() *ExecuteToolRemote {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_ExecuteTool); ok {
+			return x.ExecuteTool
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetShutdownWorker() *ShutdownWorker {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_ShutdownWorker); ok {
+			return x.ShutdownWorker
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetKillWorker() *KillWorker {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_KillWorker); ok {
+			return x.KillWorker
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetFileSync() *FileSyncData {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_FileSync); ok {
+			return x.FileSync
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetFileUpdate() *FileUpdate {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_FileUpdate); ok {
+			return x.FileUpdate
+		}
+	}
+	return nil
+}
+
+type isLeaderMessage_Msg interface {
+	isLeaderMessage_Msg()
+}
+
+type LeaderMessage_Registered struct {
+	Registered *NodeRegistered `protobuf:"bytes,1,opt,name=registered,proto3,oneof"`
+}
+
+type LeaderMessage_SpawnWorker struct {
+	SpawnWorker *SpawnWorker `protobuf:"bytes,2,opt,name=spawn_worker,json=spawnWorker,proto3,oneof"`
+}
+
+type LeaderMessage_ExecuteTool struct {
+	ExecuteTool *ExecuteToolRemote `protobuf:"bytes,3,opt,name=execute_tool,json=executeTool,proto3,oneof"`
+}
+
+type LeaderMessage_ShutdownWorker struct {
+	ShutdownWorker *ShutdownWorker `protobuf:"bytes,4,opt,name=shutdown_worker,json=shutdownWorker,proto3,oneof"`
+}
+
+type LeaderMessage_KillWorker struct {
+	KillWorker *KillWorker `protobuf:"bytes,5,opt,name=kill_worker,json=killWorker,proto3,oneof"`
+}
+
+type LeaderMessage_FileSync struct {
+	FileSync *FileSyncData `protobuf:"bytes,6,opt,name=file_sync,json=fileSync,proto3,oneof"`
+}
+
+type LeaderMessage_FileUpdate struct {
+	FileUpdate *FileUpdate `protobuf:"bytes,7,opt,name=file_update,json=fileUpdate,proto3,oneof"`
+}
+
+func (*LeaderMessage_Registered) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_SpawnWorker) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_ExecuteTool) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_ShutdownWorker) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_KillWorker) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_FileSync) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_FileUpdate) isLeaderMessage_Msg() {}
+
+type NodeRegister struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeName      string                 `protobuf:"bytes,1,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`    // human-friendly node name
+	JoinToken     string                 `protobuf:"bytes,2,opt,name=join_token,json=joinToken,proto3" json:"join_token,omitempty"` // auth token
+	Capacity      int32                  `protobuf:"varint,3,opt,name=capacity,proto3" json:"capacity,omitempty"`                   // max concurrent workers (0 = unlimited)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeRegister) Reset() {
+	*x = NodeRegister{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeRegister) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeRegister) ProtoMessage() {}
+
+func (x *NodeRegister) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeRegister.ProtoReflect.Descriptor instead.
+func (*NodeRegister) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *NodeRegister) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
+func (x *NodeRegister) GetJoinToken() string {
+	if x != nil {
+		return x.JoinToken
+	}
+	return ""
+}
+
+func (x *NodeRegister) GetCapacity() int32 {
+	if x != nil {
+		return x.Capacity
+	}
+	return 0
+}
+
+type NodeRegistered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // assigned node ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeRegistered) Reset() {
+	*x = NodeRegistered{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeRegistered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeRegistered) ProtoMessage() {}
+
+func (x *NodeRegistered) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeRegistered.ProtoReflect.Descriptor instead.
+func (*NodeRegistered) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *NodeRegistered) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+type SpawnWorker struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // correlates with SpawnResult
+	InstanceId     string                 `protobuf:"bytes,2,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	SessionId      string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AgentName      string                 `protobuf:"bytes,4,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	EffectiveTools map[string]bool        `protobuf:"bytes,5,rep,name=effective_tools,json=effectiveTools,proto3" json:"effective_tools,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	WorkingDir     string                 `protobuf:"bytes,6,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"` // relative to node's HIVE_ROOT
+	SessionDir     string                 `protobuf:"bytes,7,opt,name=session_dir,json=sessionDir,proto3" json:"session_dir,omitempty"` // relative to node's HIVE_ROOT
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SpawnWorker) Reset() {
+	*x = SpawnWorker{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpawnWorker) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpawnWorker) ProtoMessage() {}
+
+func (x *SpawnWorker) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpawnWorker.ProtoReflect.Descriptor instead.
+func (*SpawnWorker) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SpawnWorker) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SpawnWorker) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *SpawnWorker) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SpawnWorker) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *SpawnWorker) GetEffectiveTools() map[string]bool {
+	if x != nil {
+		return x.EffectiveTools
+	}
+	return nil
+}
+
+func (x *SpawnWorker) GetWorkingDir() string {
+	if x != nil {
+		return x.WorkingDir
+	}
+	return ""
+}
+
+func (x *SpawnWorker) GetSessionDir() string {
+	if x != nil {
+		return x.SessionDir
+	}
+	return ""
+}
+
+type SpawnResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // correlates with SpawnWorker
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                          // empty on success
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpawnResult) Reset() {
+	*x = SpawnResult{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpawnResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpawnResult) ProtoMessage() {}
+
+func (x *SpawnResult) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpawnResult.ProtoReflect.Descriptor instead.
+func (*SpawnResult) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SpawnResult) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SpawnResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ShutdownWorker struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // identifies which worker to shutdown
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownWorker) Reset() {
+	*x = ShutdownWorker{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownWorker) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownWorker) ProtoMessage() {}
+
+func (x *ShutdownWorker) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownWorker.ProtoReflect.Descriptor instead.
+func (*ShutdownWorker) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ShutdownWorker) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type KillWorker struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // identifies which worker to kill
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillWorker) Reset() {
+	*x = KillWorker{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillWorker) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillWorker) ProtoMessage() {}
+
+func (x *KillWorker) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillWorker.ProtoReflect.Descriptor instead.
+func (*KillWorker) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *KillWorker) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type WorkerExited struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // worker that exited
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                          // non-empty if unexpected exit
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerExited) Reset() {
+	*x = WorkerExited{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerExited) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerExited) ProtoMessage() {}
+
+func (x *WorkerExited) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerExited.ProtoReflect.Descriptor instead.
+func (*WorkerExited) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *WorkerExited) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *WorkerExited) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ExecuteToolRemote struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // identifies which worker to use
+	CallId        string                 `protobuf:"bytes,2,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	ToolName      string                 `protobuf:"bytes,3,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	Input         string                 `protobuf:"bytes,4,opt,name=input,proto3" json:"input,omitempty"`                          // JSON-encoded tool arguments
+	SecretEnv     []string               `protobuf:"bytes,5,rep,name=secret_env,json=secretEnv,proto3" json:"secret_env,omitempty"` // secret env vars for bash
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecuteToolRemote) Reset() {
+	*x = ExecuteToolRemote{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecuteToolRemote) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecuteToolRemote) ProtoMessage() {}
+
+func (x *ExecuteToolRemote) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecuteToolRemote.ProtoReflect.Descriptor instead.
+func (*ExecuteToolRemote) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ExecuteToolRemote) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ExecuteToolRemote) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *ExecuteToolRemote) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *ExecuteToolRemote) GetInput() string {
+	if x != nil {
+		return x.Input
+	}
+	return ""
+}
+
+func (x *ExecuteToolRemote) GetSecretEnv() []string {
+	if x != nil {
+		return x.SecretEnv
+	}
+	return nil
+}
+
+type NodeToolResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CallId        string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	IsError       bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`                          // transport-level error (distinct from tool error)
+	SessionId     string                 `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // which worker this result belongs to
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeToolResult) Reset() {
+	*x = NodeToolResult{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeToolResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeToolResult) ProtoMessage() {}
+
+func (x *NodeToolResult) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeToolResult.ProtoReflect.Descriptor instead.
+func (*NodeToolResult) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *NodeToolResult) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *NodeToolResult) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *NodeToolResult) GetIsError() bool {
+	if x != nil {
+		return x.IsError
+	}
+	return false
+}
+
+func (x *NodeToolResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *NodeToolResult) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type NodeHeartbeat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ActiveWorkers int32                  `protobuf:"varint,1,opt,name=active_workers,json=activeWorkers,proto3" json:"active_workers,omitempty"` // current count for leader tracking
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeHeartbeat) Reset() {
+	*x = NodeHeartbeat{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeHeartbeat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeHeartbeat) ProtoMessage() {}
+
+func (x *NodeHeartbeat) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeHeartbeat.ProtoReflect.Descriptor instead.
+func (*NodeHeartbeat) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *NodeHeartbeat) GetActiveWorkers() int32 {
+	if x != nil {
+		return x.ActiveWorkers
+	}
+	return 0
+}
+
+type FileSyncData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`    // tar.gz chunk
+	Final         bool                   `protobuf:"varint,2,opt,name=final,proto3" json:"final,omitempty"` // true for the last chunk
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileSyncData) Reset() {
+	*x = FileSyncData{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileSyncData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileSyncData) ProtoMessage() {}
+
+func (x *FileSyncData) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileSyncData.ProtoReflect.Descriptor instead.
+func (*FileSyncData) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *FileSyncData) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *FileSyncData) GetFinal() bool {
+	if x != nil {
+		return x.Final
+	}
+	return false
+}
+
+type FileUpdate struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Path           string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`                                              // relative path within HIVE_ROOT
+	Content        []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`                                        // file content (empty for deletion)
+	Deleted        bool                   `protobuf:"varint,3,opt,name=deleted,proto3" json:"deleted,omitempty"`                                       // true if file was deleted
+	Mode           uint32                 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`                                             // file permission bits (e.g., 0644)
+	MtimeUnixNanos int64                  `protobuf:"varint,5,opt,name=mtime_unix_nanos,json=mtimeUnixNanos,proto3" json:"mtime_unix_nanos,omitempty"` // modification time for conflict detection
+	OriginNode     string                 `protobuf:"bytes,6,opt,name=origin_node,json=originNode,proto3" json:"origin_node,omitempty"`                // which node made this change (for conflict files)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *FileUpdate) Reset() {
+	*x = FileUpdate{}
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileUpdate) ProtoMessage() {}
+
+func (x *FileUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileUpdate.ProtoReflect.Descriptor instead.
+func (*FileUpdate) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *FileUpdate) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *FileUpdate) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *FileUpdate) GetDeleted() bool {
+	if x != nil {
+		return x.Deleted
+	}
+	return false
+}
+
+func (x *FileUpdate) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
+}
+
+func (x *FileUpdate) GetMtimeUnixNanos() int64 {
+	if x != nil {
+		return x.MtimeUnixNanos
+	}
+	return 0
+}
+
+func (x *FileUpdate) GetOriginNode() string {
+	if x != nil {
+		return x.OriginNode
+	}
+	return ""
+}
+
 var File_internal_ipc_proto_hive_proto protoreflect.FileDescriptor
 
 const file_internal_ipc_proto_hive_proto_rawDesc = "" +
@@ -228,10 +1310,106 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\"\x11\n" +
 	"\x0fShutdownRequest\"\x12\n" +
-	"\x10ShutdownResponse2\x8c\x01\n" +
+	"\x10ShutdownResponse\"\x95\x03\n" +
+	"\vNodeMessage\x120\n" +
+	"\bregister\x18\x01 \x01(\v2\x12.hive.NodeRegisterH\x00R\bregister\x126\n" +
+	"\fspawn_result\x18\x02 \x01(\v2\x11.hive.SpawnResultH\x00R\vspawnResult\x127\n" +
+	"\vtool_result\x18\x03 \x01(\v2\x14.hive.NodeToolResultH\x00R\n" +
+	"toolResult\x123\n" +
+	"\theartbeat\x18\x04 \x01(\v2\x13.hive.NodeHeartbeatH\x00R\theartbeat\x129\n" +
+	"\rworker_exited\x18\x05 \x01(\v2\x12.hive.WorkerExitedH\x00R\fworkerExited\x123\n" +
+	"\vfile_update\x18\x06 \x01(\v2\x10.hive.FileUpdateH\x00R\n" +
+	"fileUpdate\x127\n" +
+	"\rfile_sync_ack\x18\a \x01(\v2\x11.hive.FileSyncAckH\x00R\vfileSyncAckB\x05\n" +
+	"\x03msg\"\r\n" +
+	"\vFileSyncAck\"\xa2\x03\n" +
+	"\rLeaderMessage\x126\n" +
+	"\n" +
+	"registered\x18\x01 \x01(\v2\x14.hive.NodeRegisteredH\x00R\n" +
+	"registered\x126\n" +
+	"\fspawn_worker\x18\x02 \x01(\v2\x11.hive.SpawnWorkerH\x00R\vspawnWorker\x12<\n" +
+	"\fexecute_tool\x18\x03 \x01(\v2\x17.hive.ExecuteToolRemoteH\x00R\vexecuteTool\x12?\n" +
+	"\x0fshutdown_worker\x18\x04 \x01(\v2\x14.hive.ShutdownWorkerH\x00R\x0eshutdownWorker\x123\n" +
+	"\vkill_worker\x18\x05 \x01(\v2\x10.hive.KillWorkerH\x00R\n" +
+	"killWorker\x121\n" +
+	"\tfile_sync\x18\x06 \x01(\v2\x12.hive.FileSyncDataH\x00R\bfileSync\x123\n" +
+	"\vfile_update\x18\a \x01(\v2\x10.hive.FileUpdateH\x00R\n" +
+	"fileUpdateB\x05\n" +
+	"\x03msg\"f\n" +
+	"\fNodeRegister\x12\x1b\n" +
+	"\tnode_name\x18\x01 \x01(\tR\bnodeName\x12\x1d\n" +
+	"\n" +
+	"join_token\x18\x02 \x01(\tR\tjoinToken\x12\x1a\n" +
+	"\bcapacity\x18\x03 \x01(\x05R\bcapacity\")\n" +
+	"\x0eNodeRegistered\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\xe0\x02\n" +
+	"\vSpawnWorker\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1f\n" +
+	"\vinstance_id\x18\x02 \x01(\tR\n" +
+	"instanceId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x04 \x01(\tR\tagentName\x12N\n" +
+	"\x0feffective_tools\x18\x05 \x03(\v2%.hive.SpawnWorker.EffectiveToolsEntryR\x0eeffectiveTools\x12\x1f\n" +
+	"\vworking_dir\x18\x06 \x01(\tR\n" +
+	"workingDir\x12\x1f\n" +
+	"\vsession_dir\x18\a \x01(\tR\n" +
+	"sessionDir\x1aA\n" +
+	"\x13EffectiveToolsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"B\n" +
+	"\vSpawnResult\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"/\n" +
+	"\x0eShutdownWorker\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"+\n" +
+	"\n" +
+	"KillWorker\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"C\n" +
+	"\fWorkerExited\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x9d\x01\n" +
+	"\x11ExecuteToolRemote\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
+	"\acall_id\x18\x02 \x01(\tR\x06callId\x12\x1b\n" +
+	"\ttool_name\x18\x03 \x01(\tR\btoolName\x12\x14\n" +
+	"\x05input\x18\x04 \x01(\tR\x05input\x12\x1d\n" +
+	"\n" +
+	"secret_env\x18\x05 \x03(\tR\tsecretEnv\"\x93\x01\n" +
+	"\x0eNodeToolResult\x12\x17\n" +
+	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\x12\x19\n" +
+	"\bis_error\x18\x03 \x01(\bR\aisError\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\"6\n" +
+	"\rNodeHeartbeat\x12%\n" +
+	"\x0eactive_workers\x18\x01 \x01(\x05R\ractiveWorkers\"8\n" +
+	"\fFileSyncData\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
+	"\x05final\x18\x02 \x01(\bR\x05final\"\xb3\x01\n" +
+	"\n" +
+	"FileUpdate\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\x12\x18\n" +
+	"\adeleted\x18\x03 \x01(\bR\adeleted\x12\x12\n" +
+	"\x04mode\x18\x04 \x01(\rR\x04mode\x12(\n" +
+	"\x10mtime_unix_nanos\x18\x05 \x01(\x03R\x0emtimeUnixNanos\x12\x1f\n" +
+	"\vorigin_node\x18\x06 \x01(\tR\n" +
+	"originNode2\x8c\x01\n" +
 	"\vAgentWorker\x12B\n" +
 	"\vExecuteTool\x12\x18.hive.ExecuteToolRequest\x1a\x19.hive.ExecuteToolResponse\x129\n" +
-	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponseB0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
+	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponse2C\n" +
+	"\aCluster\x128\n" +
+	"\n" +
+	"NodeStream\x12\x11.hive.NodeMessage\x1a\x13.hive.LeaderMessage(\x010\x01B0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
 
 var (
 	file_internal_ipc_proto_hive_proto_rawDescOnce sync.Once
@@ -245,23 +1423,56 @@ func file_internal_ipc_proto_hive_proto_rawDescGZIP() []byte {
 	return file_internal_ipc_proto_hive_proto_rawDescData
 }
 
-var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_internal_ipc_proto_hive_proto_goTypes = []any{
 	(*ExecuteToolRequest)(nil),  // 0: hive.ExecuteToolRequest
 	(*ExecuteToolResponse)(nil), // 1: hive.ExecuteToolResponse
 	(*ShutdownRequest)(nil),     // 2: hive.ShutdownRequest
 	(*ShutdownResponse)(nil),    // 3: hive.ShutdownResponse
+	(*NodeMessage)(nil),         // 4: hive.NodeMessage
+	(*FileSyncAck)(nil),         // 5: hive.FileSyncAck
+	(*LeaderMessage)(nil),       // 6: hive.LeaderMessage
+	(*NodeRegister)(nil),        // 7: hive.NodeRegister
+	(*NodeRegistered)(nil),      // 8: hive.NodeRegistered
+	(*SpawnWorker)(nil),         // 9: hive.SpawnWorker
+	(*SpawnResult)(nil),         // 10: hive.SpawnResult
+	(*ShutdownWorker)(nil),      // 11: hive.ShutdownWorker
+	(*KillWorker)(nil),          // 12: hive.KillWorker
+	(*WorkerExited)(nil),        // 13: hive.WorkerExited
+	(*ExecuteToolRemote)(nil),   // 14: hive.ExecuteToolRemote
+	(*NodeToolResult)(nil),      // 15: hive.NodeToolResult
+	(*NodeHeartbeat)(nil),       // 16: hive.NodeHeartbeat
+	(*FileSyncData)(nil),        // 17: hive.FileSyncData
+	(*FileUpdate)(nil),          // 18: hive.FileUpdate
+	nil,                         // 19: hive.SpawnWorker.EffectiveToolsEntry
 }
 var file_internal_ipc_proto_hive_proto_depIdxs = []int32{
-	0, // 0: hive.AgentWorker.ExecuteTool:input_type -> hive.ExecuteToolRequest
-	2, // 1: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
-	1, // 2: hive.AgentWorker.ExecuteTool:output_type -> hive.ExecuteToolResponse
-	3, // 3: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	7,  // 0: hive.NodeMessage.register:type_name -> hive.NodeRegister
+	10, // 1: hive.NodeMessage.spawn_result:type_name -> hive.SpawnResult
+	15, // 2: hive.NodeMessage.tool_result:type_name -> hive.NodeToolResult
+	16, // 3: hive.NodeMessage.heartbeat:type_name -> hive.NodeHeartbeat
+	13, // 4: hive.NodeMessage.worker_exited:type_name -> hive.WorkerExited
+	18, // 5: hive.NodeMessage.file_update:type_name -> hive.FileUpdate
+	5,  // 6: hive.NodeMessage.file_sync_ack:type_name -> hive.FileSyncAck
+	8,  // 7: hive.LeaderMessage.registered:type_name -> hive.NodeRegistered
+	9,  // 8: hive.LeaderMessage.spawn_worker:type_name -> hive.SpawnWorker
+	14, // 9: hive.LeaderMessage.execute_tool:type_name -> hive.ExecuteToolRemote
+	11, // 10: hive.LeaderMessage.shutdown_worker:type_name -> hive.ShutdownWorker
+	12, // 11: hive.LeaderMessage.kill_worker:type_name -> hive.KillWorker
+	17, // 12: hive.LeaderMessage.file_sync:type_name -> hive.FileSyncData
+	18, // 13: hive.LeaderMessage.file_update:type_name -> hive.FileUpdate
+	19, // 14: hive.SpawnWorker.effective_tools:type_name -> hive.SpawnWorker.EffectiveToolsEntry
+	0,  // 15: hive.AgentWorker.ExecuteTool:input_type -> hive.ExecuteToolRequest
+	2,  // 16: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
+	4,  // 17: hive.Cluster.NodeStream:input_type -> hive.NodeMessage
+	1,  // 18: hive.AgentWorker.ExecuteTool:output_type -> hive.ExecuteToolResponse
+	3,  // 19: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
+	6,  // 20: hive.Cluster.NodeStream:output_type -> hive.LeaderMessage
+	18, // [18:21] is the sub-list for method output_type
+	15, // [15:18] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_internal_ipc_proto_hive_proto_init() }
@@ -269,15 +1480,33 @@ func file_internal_ipc_proto_hive_proto_init() {
 	if File_internal_ipc_proto_hive_proto != nil {
 		return
 	}
+	file_internal_ipc_proto_hive_proto_msgTypes[4].OneofWrappers = []any{
+		(*NodeMessage_Register)(nil),
+		(*NodeMessage_SpawnResult)(nil),
+		(*NodeMessage_ToolResult)(nil),
+		(*NodeMessage_Heartbeat)(nil),
+		(*NodeMessage_WorkerExited)(nil),
+		(*NodeMessage_FileUpdate)(nil),
+		(*NodeMessage_FileSyncAck)(nil),
+	}
+	file_internal_ipc_proto_hive_proto_msgTypes[6].OneofWrappers = []any{
+		(*LeaderMessage_Registered)(nil),
+		(*LeaderMessage_SpawnWorker)(nil),
+		(*LeaderMessage_ExecuteTool)(nil),
+		(*LeaderMessage_ShutdownWorker)(nil),
+		(*LeaderMessage_KillWorker)(nil),
+		(*LeaderMessage_FileSync)(nil),
+		(*LeaderMessage_FileUpdate)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hive_proto_rawDesc), len(file_internal_ipc_proto_hive_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   20,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_internal_ipc_proto_hive_proto_goTypes,
 		DependencyIndexes: file_internal_ipc_proto_hive_proto_depIdxs,

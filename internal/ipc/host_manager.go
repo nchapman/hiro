@@ -2,14 +2,30 @@ package ipc
 
 import "context"
 
+// NodeID uniquely identifies a node in the cluster.
+// Empty string or "home" represents the local leader node.
+type NodeID = string
+
+// NodeInfo describes a node in the cluster for external consumers.
+type NodeInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	IsHome      bool   `json:"is_home"`
+	Capacity    int    `json:"capacity"`
+	ActiveCount int    `json:"active_count"`
+}
+
 // HostManager is the interface that the inference loop uses to manage
 // instances. The agent.Manager implements this directly.
 type HostManager interface {
 	// SpawnEphemeral runs an ephemeral instance and returns its result.
-	SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, onEvent func(ChatEvent) error) (string, error)
+	// nodeID targets a specific cluster node ("" or "home" for local).
+	SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, nodeID NodeID, onEvent func(ChatEvent) error) (string, error)
 
 	// CreateInstance creates and starts a new child instance in the given mode.
-	CreateInstance(ctx context.Context, name, parentInstanceID string, mode string) (string, error)
+	// nodeID targets a specific cluster node ("" or "home" for local).
+	CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID NodeID) (string, error)
 
 	// SendMessage sends a message to a running instance and returns the response.
 	SendMessage(ctx context.Context, instanceID, message string, onEvent func(ChatEvent) error) (string, error)
@@ -38,4 +54,8 @@ type HostManager interface {
 
 	// SecretEnv returns secret env vars (KEY=VALUE pairs).
 	SecretEnv() []string
+
+	// ListNodes returns all nodes in the cluster. Returns nil if clustering
+	// is not enabled.
+	ListNodes() []NodeInfo
 }

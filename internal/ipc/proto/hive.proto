@@ -29,3 +29,127 @@ message ExecuteToolResponse {
 message ShutdownRequest {}
 
 message ShutdownResponse {}
+
+// -----------------------------------------------------------------------
+// Cluster: leader-worker node communication
+// -----------------------------------------------------------------------
+
+// Cluster is served by the leader. Worker nodes dial the leader and open
+// a long-lived bidirectional stream for spawning workers, executing tools,
+// and receiving file sync updates.
+service Cluster {
+  // NodeStream is a bidirectional stream between a worker node and the
+  // leader. The node sends registration, tool results, and heartbeats.
+  // The leader sends spawn commands, tool execution requests, and file sync.
+  rpc NodeStream(stream NodeMessage) returns (stream LeaderMessage);
+}
+
+// NodeMessage is sent from a worker node to the leader.
+message NodeMessage {
+  oneof msg {
+    NodeRegister register = 1;
+    SpawnResult spawn_result = 2;
+    NodeToolResult tool_result = 3;
+    NodeHeartbeat heartbeat = 4;
+    WorkerExited worker_exited = 5;
+    FileUpdate file_update = 6;       // worker → leader: file changed on this node
+    FileSyncAck file_sync_ack = 7;    // worker → leader: initial sync received
+  }
+}
+
+message FileSyncAck {}
+
+// LeaderMessage is sent from the leader to a worker node.
+message LeaderMessage {
+  oneof msg {
+    NodeRegistered registered = 1;
+    SpawnWorker spawn_worker = 2;
+    ExecuteToolRemote execute_tool = 3;
+    ShutdownWorker shutdown_worker = 4;
+    KillWorker kill_worker = 5;
+    FileSyncData file_sync = 6;
+    FileUpdate file_update = 7;
+  }
+}
+
+// --- Node registration ---
+
+message NodeRegister {
+  string node_name = 1;   // human-friendly node name
+  string join_token = 2;  // auth token
+  int32 capacity = 3;     // max concurrent workers (0 = unlimited)
+}
+
+message NodeRegistered {
+  string node_id = 1;     // assigned node ID
+}
+
+// --- Worker lifecycle ---
+
+message SpawnWorker {
+  string request_id = 1;           // correlates with SpawnResult
+  string instance_id = 2;
+  string session_id = 3;
+  string agent_name = 4;
+  map<string, bool> effective_tools = 5;
+  string working_dir = 6;          // relative to node's HIVE_ROOT
+  string session_dir = 7;          // relative to node's HIVE_ROOT
+}
+
+message SpawnResult {
+  string request_id = 1;           // correlates with SpawnWorker
+  string error = 2;                // empty on success
+}
+
+message ShutdownWorker {
+  string session_id = 1;           // identifies which worker to shutdown
+}
+
+message KillWorker {
+  string session_id = 1;           // identifies which worker to kill
+}
+
+message WorkerExited {
+  string session_id = 1;           // worker that exited
+  string error = 2;                // non-empty if unexpected exit
+}
+
+// --- Tool execution ---
+
+message ExecuteToolRemote {
+  string session_id = 1;           // identifies which worker to use
+  string call_id = 2;
+  string tool_name = 3;
+  string input = 4;                // JSON-encoded tool arguments
+  repeated string secret_env = 5;  // secret env vars for bash
+}
+
+message NodeToolResult {
+  string call_id = 1;
+  string content = 2;
+  bool is_error = 3;
+  string error = 4;                // transport-level error (distinct from tool error)
+  string session_id = 5;           // which worker this result belongs to
+}
+
+// --- Heartbeat ---
+
+message NodeHeartbeat {
+  int32 active_workers = 1;        // current count for leader tracking
+}
+
+// --- File sync ---
+
+message FileSyncData {
+  bytes data = 1;                  // tar.gz chunk
+  bool final = 2;                  // true for the last chunk
+}
+
+message FileUpdate {
+  string path = 1;                 // relative path within HIVE_ROOT
+  bytes content = 2;               // file content (empty for deletion)
+  bool deleted = 3;                // true if file was deleted
+  uint32 mode = 4;                 // file permission bits (e.g., 0644)
+  int64 mtime_unix_nanos = 5;      // modification time for conflict detection
+  string origin_node = 6;          // which node made this change (for conflict files)
+}
