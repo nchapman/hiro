@@ -89,6 +89,14 @@ func runAgent() error {
 	}
 	defer os.Remove(socketPath)
 
+	// Restrict socket access to this agent's UID only, preventing
+	// cross-agent socket access from sibling UIDs in the hive-agents group.
+	if cfg.UID != 0 {
+		if err := os.Chmod(socketPath, 0700); err != nil {
+			return fmt.Errorf("securing socket permissions: %w", err)
+		}
+	}
+
 	srv := grpc.NewServer()
 	ws := grpcipc.NewWorkerServer(worker)
 	ws.SetSecretEnvCallback(func(env []string) {

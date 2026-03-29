@@ -28,9 +28,10 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	// Place socket inside instance dir so it's protected by the instance dir's
-	// 0700 permissions — other agent UIDs cannot connect to it.
-	socketPath := fmt.Sprintf("%s/agent.sock", cfg.SessionDir)
+	// Use a short socket path in /tmp (Unix sockets have a 104-byte path limit).
+	// The agent process sets 0700 permissions after creation so only the agent's
+	// UID can connect — preventing cross-agent socket access.
+	socketPath := fmt.Sprintf("/tmp/hive-%s.sock", cfg.SessionID)
 	cfg.AgentSocket = socketPath
 
 	cmd := exec.CommandContext(ctx, self, "agent")
