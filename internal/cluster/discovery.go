@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -73,14 +74,16 @@ type announceRequest struct {
 
 // signedMessage constructs the canonical message for signing.
 // Must match the tracker's signedMessage() exactly.
+// Fields are newline-delimited; sanitizeField strips any newlines to prevent
+// field injection attacks in the canonical form.
 func (req *announceRequest) signedMessage() []byte {
-	msg := req.SwarmHash + "\n" +
+	msg := sanitizeField(req.SwarmHash) + "\n" +
 		strconv.FormatInt(req.Timestamp, 10) + "\n" +
-		req.Role + "\n" +
+		sanitizeField(req.Role) + "\n" +
 		strconv.Itoa(req.GRPCPort) + "\n" +
-		req.WGPubKey + "\n" +
-		req.WGEndpoint + "\n" +
-		req.TLSFingerprint
+		sanitizeField(req.WGPubKey) + "\n" +
+		sanitizeField(req.WGEndpoint) + "\n" +
+		sanitizeField(req.TLSFingerprint)
 	if len(req.Meta) > 0 {
 		keys := make([]string, 0, len(req.Meta))
 		for k := range req.Meta {
@@ -88,10 +91,16 @@ func (req *announceRequest) signedMessage() []byte {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			msg += "\n" + k + "=" + req.Meta[k]
+			msg += "\n" + sanitizeField(k) + "=" + sanitizeField(req.Meta[k])
 		}
 	}
 	return []byte(msg)
+}
+
+// sanitizeField strips newlines from a field to prevent injection in the
+// newline-delimited signed message format.
+func sanitizeField(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", "")
 }
 
 type announceResponse struct {
@@ -155,9 +164,9 @@ func (d *DiscoveryClient) Peers() []DiscoveredPeer {
 	return out
 }
 
-// LeaderAddr returns the gRPC address of the most recently seen leader,
-// or empty string if none found. Logs a warning if multiple leaders are present.
-func (d *DiscoveryClient) LeaderAddr() string {
+// Leader returns the most recently seen leader peer, or nil if none found.
+// Logs a warning if multiple leaders are present.
+func (d *DiscoveryClient) Leader() *DiscoveredPeer {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	var best *DiscoveredPeer
@@ -169,16 +178,27 @@ func (d *DiscoveryClient) LeaderAddr() string {
 		}
 		leaderCount++
 		if best == nil || p.LastSeen.After(best.LastSeen) {
-			best = p
+			cp := *p // copy
+			best = &cp
 		}
 	}
 	if best == nil {
-		return ""
+		return nil
 	}
 	if leaderCount > 1 {
 		d.logger.Warn("multiple leaders discovered, using most recent", "count", leaderCount)
 	}
-	return fmt.Sprintf("%s:%d", best.Endpoint, best.GRPCPort)
+	return best
+}
+
+// LeaderAddr returns the gRPC address of the most recently seen leader,
+// or empty string if none found.
+func (d *DiscoveryClient) LeaderAddr() string {
+	leader := d.Leader()
+	if leader == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", leader.Endpoint, leader.GRPCPort)
 }
 
 // Announce triggers a single announce call to the tracker, updating the peer cache.

@@ -28,10 +28,16 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	// Use a short socket path in /tmp (Unix sockets have a 104-byte path limit).
-	// The agent process sets 0700 permissions after creation so only the agent's
-	// UID can connect — preventing cross-agent socket access.
-	socketPath := fmt.Sprintf("/tmp/hive-%s.sock", cfg.SessionID)
+	// Create a private socket directory so the socket is inaccessible to other
+	// agent UIDs from the moment it's created (no TOCTOU window). The directory
+	// is 0700, owned by the agent's UID. Short path to stay under the 104-byte
+	// Unix socket limit.
+	socketDir := fmt.Sprintf("/tmp/hive-%s", cfg.SessionID[:18])
+	os.MkdirAll(socketDir, 0700)
+	if cfg.UID != 0 {
+		os.Chown(socketDir, int(cfg.UID), int(cfg.GID))
+	}
+	socketPath := socketDir + "/a.sock"
 	cfg.AgentSocket = socketPath
 
 	cmd := exec.CommandContext(ctx, self, "agent")
@@ -146,6 +152,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		Close: func() {
 			conn.Close()
 			os.Remove(socketPath)
+			os.Remove(socketDir)
 		},
 		Done: done,
 	}, nil

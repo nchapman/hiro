@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -98,10 +100,19 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		"node_name", nodeName,
 	)
 
-	// Build mTLS config. When using tracker discovery, we could pin the leader's
-	// public key from the tracker response. For direct leader_addr, the operator
-	// already trusts the address — TLS encrypts, join token authenticates.
-	clientTLS := cluster.ClientTLSConfig(tlsCert, nil)
+	// Build mTLS config. When using tracker discovery, pin the leader's public
+	// key so a MITM can't intercept the connection. For direct leader_addr,
+	// the operator already trusts the address — TLS encrypts, join token authenticates.
+	var leaderPubKey ed25519.PublicKey
+	if discovery != nil {
+		if leader := discovery.Leader(); leader != nil {
+			if raw, err := base64.StdEncoding.DecodeString(leader.PublicKey); err == nil && len(raw) == ed25519.PublicKeySize {
+				leaderPubKey = ed25519.PublicKey(raw)
+				logger.Info("pinning leader public key from tracker", "node_id", leader.NodeID[:16]+"...")
+			}
+		}
+	}
+	clientTLS := cluster.ClientTLSConfig(tlsCert, leaderPubKey)
 
 	// Create the worker stream client.
 	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
