@@ -16,6 +16,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
@@ -107,7 +108,20 @@ func run() error {
 	srv.SetDB(pdb)
 	srv.SetWatcher(fsWatcher)
 
-	// Start cluster gRPC server for worker node connections.
+	// Load or create node identity for mTLS and tracker announcements.
+	identity, err := cluster.LoadOrCreateIdentity(absRootDir)
+	if err != nil {
+		return fmt.Errorf("loading node identity: %w", err)
+	}
+	logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
+
+	tlsCert, err := cluster.TLSCertFromIdentity(identity)
+	if err != nil {
+		return fmt.Errorf("generating TLS certificate: %w", err)
+	}
+	logger.Info("cluster mTLS enabled", "fingerprint", cluster.TLSFingerprint(tlsCert)[:16]+"...")
+
+	// Start cluster gRPC server for worker node connections (mTLS).
 	clusterAddr := envOr("HIVE_CLUSTER_ADDR", ":8081")
 	registry := cluster.NewNodeRegistry()
 	registry.RegisterHome(envOr("HOSTNAME", "leader"))
@@ -116,7 +130,8 @@ func run() error {
 		return cp.ValidateJoinToken(token)
 	}, logger)
 
-	clusterGRPC := grpc.NewServer()
+	serverTLS := cluster.ServerTLSConfig(tlsCert)
+	clusterGRPC := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
 	leaderStream.Register(clusterGRPC)
 
 	clusterLis, err := net.Listen("tcp", clusterAddr)
@@ -156,12 +171,6 @@ func run() error {
 			return fmt.Errorf("HIVE_SWARM_CODE is required when tracker_url is set")
 		}
 
-		identity, err := cluster.LoadOrCreateIdentity(absRootDir)
-		if err != nil {
-			return fmt.Errorf("loading node identity: %w", err)
-		}
-		logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
-
 		// Parse gRPC port from cluster address.
 		_, portStr, _ := net.SplitHostPort(clusterAddr)
 		grpcPort, _ := strconv.Atoi(portStr)
@@ -172,13 +181,14 @@ func run() error {
 		}
 
 		dc := cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
-			TrackerURL: trackerURL,
-			SwarmCode:  swarmCode,
-			Role:       "leader",
-			GRPCPort:   grpcPort,
-			Identity:   identity,
-			NodeName:   nodeName,
-			Logger:     logger,
+			TrackerURL:     trackerURL,
+			SwarmCode:      swarmCode,
+			Role:           "leader",
+			GRPCPort:       grpcPort,
+			Identity:       identity,
+			TLSFingerprint: cluster.TLSFingerprint(tlsCert),
+			NodeName:       nodeName,
+			Logger:         logger,
 		})
 
 		go dc.Run(discoveryCtx)

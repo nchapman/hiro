@@ -333,7 +333,7 @@ func TestSignedMessage_Deterministic(t *testing.T) {
 		t.Fatal("signed message not deterministic")
 	}
 
-	expected := fmt.Sprintf("abc123\n1000\nleader\n8081\n\n\na=1\nb=2")
+	expected := fmt.Sprintf("abc123\n1000\nleader\n8081\n\n\n\na=1\nb=2")
 	if string(msg1) != expected {
 		t.Errorf("unexpected signed message:\ngot:  %q\nwant: %q", string(msg1), expected)
 	}

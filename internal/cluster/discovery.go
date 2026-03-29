@@ -20,25 +20,27 @@ import (
 
 // DiscoveryConfig configures the tracker discovery client.
 type DiscoveryConfig struct {
-	TrackerURL string // e.g. "https://discover.hellohiro.ai"
-	SwarmCode  string // raw swarm code (hashed before sending)
-	Role       string // "leader" or "worker"
-	GRPCPort   int    // cluster gRPC port to announce
-	Identity   *NodeIdentity
-	NodeName   string
-	Logger     *slog.Logger
+	TrackerURL     string // e.g. "https://discover.hellohiro.ai"
+	SwarmCode      string // raw swarm code (hashed before sending)
+	Role           string // "leader" or "worker"
+	GRPCPort       int    // cluster gRPC port to announce
+	Identity       *NodeIdentity
+	TLSFingerprint string // hex SHA-256 of self-signed TLS cert
+	NodeName       string
+	Logger         *slog.Logger
 }
 
 // DiscoveryClient periodically announces to the tracker and caches discovered peers.
 type DiscoveryClient struct {
-	trackerURL string
-	swarmHash  string // hex(sha256(swarm_code))
-	role       string
-	grpcPort   int
-	identity   *NodeIdentity
-	nodeName   string
-	logger     *slog.Logger
-	client     *http.Client
+	trackerURL     string
+	swarmHash      string // hex(sha256(swarm_code))
+	role           string
+	grpcPort       int
+	identity       *NodeIdentity
+	tlsFingerprint string
+	nodeName       string
+	logger         *slog.Logger
+	client         *http.Client
 
 	mu    sync.RWMutex
 	peers []DiscoveredPeer
@@ -46,25 +48,27 @@ type DiscoveryClient struct {
 
 // DiscoveredPeer is a peer returned by the tracker.
 type DiscoveredPeer struct {
-	NodeID    string
-	PublicKey string
-	Role      string
-	Endpoint  string
-	GRPCPort  int
-	LastSeen  time.Time
+	NodeID         string
+	PublicKey      string
+	Role           string
+	Endpoint       string
+	GRPCPort       int
+	TLSFingerprint string
+	LastSeen       time.Time
 }
 
 // announceRequest matches the tracker's API contract.
 type announceRequest struct {
-	SwarmHash  string            `json:"swarm_hash"`
-	PublicKey  string            `json:"public_key"`
-	Signature  string            `json:"signature"`
-	Timestamp  int64             `json:"timestamp"`
-	Role       string            `json:"role"`
-	GRPCPort   int               `json:"grpc_port"`
-	WGPubKey   string            `json:"wg_pubkey,omitempty"`
-	WGEndpoint string            `json:"wg_endpoint,omitempty"`
-	Meta       map[string]string `json:"meta,omitempty"`
+	SwarmHash      string            `json:"swarm_hash"`
+	PublicKey      string            `json:"public_key"`
+	Signature      string            `json:"signature"`
+	Timestamp      int64             `json:"timestamp"`
+	Role           string            `json:"role"`
+	GRPCPort       int               `json:"grpc_port"`
+	WGPubKey       string            `json:"wg_pubkey,omitempty"`
+	WGEndpoint     string            `json:"wg_endpoint,omitempty"`
+	TLSFingerprint string            `json:"tls_fingerprint,omitempty"`
+	Meta           map[string]string `json:"meta,omitempty"`
 }
 
 // signedMessage constructs the canonical message for signing.
@@ -75,7 +79,8 @@ func (req *announceRequest) signedMessage() []byte {
 		req.Role + "\n" +
 		strconv.Itoa(req.GRPCPort) + "\n" +
 		req.WGPubKey + "\n" +
-		req.WGEndpoint
+		req.WGEndpoint + "\n" +
+		req.TLSFingerprint
 	if len(req.Meta) > 0 {
 		keys := make([]string, 0, len(req.Meta))
 		for k := range req.Meta {
@@ -96,25 +101,27 @@ type announceResponse struct {
 }
 
 type announceJSON struct {
-	NodeID    string `json:"node_id"`
-	PublicKey string `json:"public_key"`
-	Role      string `json:"role"`
-	Endpoint  string `json:"endpoint"`
-	GRPCPort  int    `json:"grpc_port"`
-	LastSeen  string `json:"last_seen"`
+	NodeID         string `json:"node_id"`
+	PublicKey      string `json:"public_key"`
+	Role           string `json:"role"`
+	Endpoint       string `json:"endpoint"`
+	GRPCPort       int    `json:"grpc_port"`
+	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
+	LastSeen       string `json:"last_seen"`
 }
 
 // NewDiscoveryClient creates a discovery client. Call Run() to start announcing.
 func NewDiscoveryClient(cfg DiscoveryConfig) *DiscoveryClient {
 	hash := sha256.Sum256([]byte(cfg.SwarmCode))
 	return &DiscoveryClient{
-		trackerURL: cfg.TrackerURL,
-		swarmHash:  hex.EncodeToString(hash[:]),
-		role:       cfg.Role,
-		grpcPort:   cfg.GRPCPort,
-		identity:   cfg.Identity,
-		nodeName:   cfg.NodeName,
-		logger:     cfg.Logger,
+		trackerURL:     cfg.TrackerURL,
+		swarmHash:      hex.EncodeToString(hash[:]),
+		role:           cfg.Role,
+		grpcPort:       cfg.GRPCPort,
+		identity:       cfg.Identity,
+		tlsFingerprint: cfg.TLSFingerprint,
+		nodeName:       cfg.NodeName,
+		logger:         cfg.Logger,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -206,11 +213,12 @@ func (d *DiscoveryClient) WaitForLeader(ctx context.Context) (string, error) {
 
 func (d *DiscoveryClient) announce(ctx context.Context) {
 	req := &announceRequest{
-		SwarmHash: d.swarmHash,
-		PublicKey: base64.StdEncoding.EncodeToString(d.identity.PublicKey),
-		Timestamp: time.Now().Unix(),
-		Role:      d.role,
-		GRPCPort:  d.grpcPort,
+		SwarmHash:      d.swarmHash,
+		PublicKey:      base64.StdEncoding.EncodeToString(d.identity.PublicKey),
+		Timestamp:      time.Now().Unix(),
+		Role:           d.role,
+		GRPCPort:       d.grpcPort,
+		TLSFingerprint: d.tlsFingerprint,
 		Meta: map[string]string{
 			"node_name": d.nodeName,
 		},
@@ -263,12 +271,13 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 			d.logger.Debug("failed to parse peer LastSeen", "value", p.LastSeen, "error", err)
 		}
 		peers = append(peers, DiscoveredPeer{
-			NodeID:    p.NodeID,
-			PublicKey: p.PublicKey,
-			Role:      p.Role,
-			Endpoint:  p.Endpoint,
-			GRPCPort:  p.GRPCPort,
-			LastSeen:  lastSeen,
+			NodeID:         p.NodeID,
+			PublicKey:      p.PublicKey,
+			Role:           p.Role,
+			Endpoint:       p.Endpoint,
+			GRPCPort:       p.GRPCPort,
+			TLSFingerprint: p.TLSFingerprint,
+			LastSeen:       lastSeen,
 		})
 	}
 

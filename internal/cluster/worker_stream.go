@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -20,6 +22,7 @@ type WorkerStream struct {
 	nodeName   string
 	joinToken  string
 	capacity   int32
+	tlsConfig  *tls.Config
 	logger     *slog.Logger
 
 	// Handlers for incoming commands from the leader.
@@ -42,6 +45,7 @@ type WorkerStreamConfig struct {
 	NodeName   string
 	JoinToken  string
 	Capacity   int32
+	TLSConfig  *tls.Config // if set, use mTLS; otherwise plaintext
 	Logger     *slog.Logger
 }
 
@@ -52,6 +56,7 @@ func NewWorkerStream(cfg WorkerStreamConfig) *WorkerStream {
 		nodeName:   cfg.NodeName,
 		joinToken:  cfg.JoinToken,
 		capacity:   cfg.Capacity,
+		tlsConfig:  cfg.TLSConfig,
 		logger:     cfg.Logger,
 	}
 }
@@ -103,8 +108,15 @@ func (w *WorkerStream) SetFileUpdateHandler(fn func(ctx context.Context, msg *pb
 // Connect dials the leader, registers, and enters the message loop.
 // Blocks until the context is cancelled or the connection drops.
 func (w *WorkerStream) Connect(ctx context.Context) error {
+	var creds credentials.TransportCredentials
+	if w.tlsConfig != nil {
+		creds = credentials.NewTLS(w.tlsConfig)
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
 	conn, err := grpc.NewClient(w.leaderAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
 		return fmt.Errorf("dialing leader at %s: %w", w.leaderAddr, err)

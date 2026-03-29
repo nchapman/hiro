@@ -39,6 +39,18 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Load or create node identity for mTLS.
+	identity, err := cluster.LoadOrCreateIdentity(rootDir)
+	if err != nil {
+		return fmt.Errorf("loading node identity: %w", err)
+	}
+	logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
+
+	tlsCert, err := cluster.TLSCertFromIdentity(identity)
+	if err != nil {
+		return fmt.Errorf("generating TLS certificate: %w", err)
+	}
+
 	// If tracker is configured, start discovery and use it to find the leader.
 	var discovery *cluster.DiscoveryClient
 	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
@@ -47,20 +59,15 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 			return fmt.Errorf("HIVE_SWARM_CODE is required when tracker_url is set")
 		}
 
-		identity, err := cluster.LoadOrCreateIdentity(rootDir)
-		if err != nil {
-			return fmt.Errorf("loading node identity: %w", err)
-		}
-		logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
-
 		discovery = cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
-			TrackerURL: trackerURL,
-			SwarmCode:  swarmCode,
-			Role:       "worker",
-			GRPCPort:   0, // workers don't serve gRPC
-			Identity:   identity,
-			NodeName:   nodeName,
-			Logger:     logger,
+			TrackerURL:     trackerURL,
+			SwarmCode:      swarmCode,
+			Role:           "worker",
+			GRPCPort:       0, // workers don't serve gRPC
+			Identity:       identity,
+			TLSFingerprint: cluster.TLSFingerprint(tlsCert),
+			NodeName:       nodeName,
+			Logger:         logger,
 		})
 		go discovery.Run(ctx)
 		logger.Info("tracker discovery started", "tracker", trackerURL, "role", "worker")
@@ -72,7 +79,6 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 			return fmt.Errorf("worker mode requires cluster.leader_addr, HIVE_LEADER, or tracker_url + HIVE_SWARM_CODE")
 		}
 		logger.Info("waiting for leader via tracker discovery...")
-		var err error
 		leaderAddr, err = discovery.WaitForLeader(ctx)
 		if err != nil {
 			return fmt.Errorf("discovering leader: %w", err)
@@ -92,11 +98,17 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		"node_name", nodeName,
 	)
 
+	// Build mTLS config. When using tracker discovery, we could pin the leader's
+	// public key from the tracker response. For direct leader_addr, the operator
+	// already trusts the address — TLS encrypts, join token authenticates.
+	clientTLS := cluster.ClientTLSConfig(tlsCert, nil)
+
 	// Create the worker stream client.
 	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
 		LeaderAddr: leaderAddr,
 		NodeName:   nodeName,
 		JoinToken:  joinToken,
+		TLSConfig:  clientTLS,
 		Logger:     logger,
 	})
 
