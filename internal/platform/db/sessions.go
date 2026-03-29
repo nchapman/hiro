@@ -139,6 +139,29 @@ func (d *DB) ListSessionsByInstance(instanceID string) ([]Session, error) {
 	return scanSessions(rows)
 }
 
+// LatestSessionByInstance returns the most recently created session for an instance.
+// Returns the session and true if found, zero value and false otherwise.
+func (d *DB) LatestSessionByInstance(instanceID string) (Session, bool) {
+	var s Session
+	var parentID, stoppedAt *string
+	err := d.db.QueryRow(
+		`SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at
+		 FROM sessions WHERE instance_id = ? ORDER BY created_at DESC LIMIT 1`, instanceID,
+	).Scan(&s.ID, &s.AgentName, &s.Mode, &parentID, &s.Status, &s.CreatedAt, &stoppedAt)
+	if err != nil {
+		return Session{}, false
+	}
+	if parentID != nil {
+		s.ParentID = *parentID
+	}
+	if stoppedAt != nil {
+		t, _ := time.Parse("2006-01-02 15:04:05", *stoppedAt)
+		s.StoppedAt = &t
+	}
+	s.InstanceID = instanceID
+	return s, true
+}
+
 // UpdateSessionStatus sets the session status. If status is "stopped",
 // stopped_at is set to now.
 func (d *DB) UpdateSessionStatus(id, status string) error {

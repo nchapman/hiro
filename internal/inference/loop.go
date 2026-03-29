@@ -171,7 +171,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 		if needsSync {
 			l.compactMu.Lock()
-			compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm}, cfg, l.logger)
+			compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm, providerOptions: providerOpts}, cfg, l.logger)
 			if result, err := compactor.CompactIfNeeded(context.Background(), lastTokens); err != nil {
 				l.logger.Warn("synchronous compaction failed", "error", err)
 			} else if result.HardThresholdExceeded {
@@ -250,7 +250,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	// Persist results.
 	if l.mode.IsPersistent() && l.pdb != nil {
-		l.persistTurn(ctx, prompt, files, result, lm, agentModel)
+		l.persistTurn(ctx, prompt, files, result, lm, agentModel, providerOpts)
 	} else {
 		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
 		for _, step := range result.Steps {
@@ -267,9 +267,9 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 }
 
 // persistTurn stores the user message and all step messages in the platform DB,
-// then kicks off async compaction. lm and model are snapshots captured at the
-// start of the turn to avoid racing with UpdateModel.
-func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string) {
+// then kicks off async compaction. lm, model, and providerOpts are snapshots
+// captured at the start of the turn to avoid racing with UpdateModel.
+func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
 	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
 	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens); err != nil {
@@ -300,7 +300,7 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.F
 	go func() {
 		l.compactMu.Lock()
 		defer l.compactMu.Unlock()
-		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm}, CompactionConfigForModel(model), l.logger)
+		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm, providerOptions: providerOpts}, CompactionConfigForModel(model), l.logger)
 		compactResult, err := compactor.CompactIfNeeded(context.Background(), lastInputTokens)
 		if err != nil {
 			l.logger.Warn("compaction failed", "error", err)
@@ -381,12 +381,11 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 	provider := l.provider
 	model := l.agentConfig.Model
 
-	if effort == "" {
-		return nil
-	}
-
 	switch provider {
 	case "anthropic":
+		if effort == "" {
+			return nil
+		}
 		m, _ := models.Lookup(model)
 		if len(m.ReasoningLevels) > 0 {
 			// New models with effort levels.
@@ -403,6 +402,18 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 		}
 
 	case "openrouter":
+		if effort == "" {
+			// OpenRouter enables thinking by default for models that support it.
+			// Explicitly disable it when reasoning effort is not set.
+			enabled := false
+			return fantasy.ProviderOptions{
+				openrouter.Name: &openrouter.ProviderOptions{
+					Reasoning: &openrouter.ReasoningOptions{
+						Enabled: &enabled,
+					},
+				},
+			}
+		}
 		e := openrouter.ReasoningEffort(effort)
 		enabled := true
 		return fantasy.ProviderOptions{

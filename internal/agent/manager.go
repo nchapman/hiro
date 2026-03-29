@@ -928,8 +928,13 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			continue
 		}
 
-		// Create a new session for the restored instance.
-		sessionID := uuid.Must(uuid.NewV7()).String()
+		// Resume the latest session if one exists, otherwise create a new one.
+		var sessionID string
+		if sess, ok := m.pdb.LatestSessionByInstance(dbInst.ID); ok {
+			sessionID = sess.ID
+		} else {
+			sessionID = uuid.Must(uuid.NewV7()).String()
+		}
 		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode)
 		if err != nil {
 			m.logger.Warn("failed to restore instance",

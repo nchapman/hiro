@@ -21,7 +21,8 @@ type Summarizer interface {
 
 // lmSummarizer adapts a fantasy.LanguageModel to the Summarizer interface.
 type lmSummarizer struct {
-	lm fantasy.LanguageModel
+	lm              fantasy.LanguageModel
+	providerOptions fantasy.ProviderOptions
 }
 
 func (s *lmSummarizer) Summarize(ctx context.Context, systemPrompt, input string) (string, error) {
@@ -30,6 +31,7 @@ func (s *lmSummarizer) Summarize(ctx context.Context, systemPrompt, input string
 			fantasy.NewSystemMessage(systemPrompt),
 			fantasy.NewUserMessage(input),
 		},
+		ProviderOptions: s.providerOptions,
 	})
 	if err != nil {
 		return "", err
