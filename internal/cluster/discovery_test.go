@@ -317,6 +317,58 @@ func TestDiscoveryClient_MultiplePeers(t *testing.T) {
 	}
 }
 
+func TestDiscoveryClient_TLSFingerprint(t *testing.T) {
+	fingerprint := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	var receivedFingerprint string
+	var receivedInPeers bool
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req announceRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		receivedFingerprint = req.TLSFingerprint
+		json.NewEncoder(w).Encode(announceResponse{
+			YourIP: "1.2.3.4",
+			Peers: []announceJSON{
+				{
+					NodeID:         "leader-1",
+					Role:           "leader",
+					Endpoint:       "10.0.0.1",
+					GRPCPort:       8081,
+					TLSFingerprint: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	dc := NewDiscoveryClient(DiscoveryConfig{
+		TrackerURL:     ts.URL,
+		SwarmCode:      "test",
+		Role:           "worker",
+		Identity:       testIdentity(t),
+		TLSFingerprint: fingerprint,
+		NodeName:       "test",
+		Logger:         slog.Default(),
+	})
+
+	dc.announce(context.Background())
+
+	// Verify fingerprint was sent.
+	if receivedFingerprint != fingerprint {
+		t.Errorf("expected fingerprint %q, got %q", fingerprint, receivedFingerprint)
+	}
+
+	// Verify peer fingerprint was parsed.
+	peers := dc.Peers()
+	if len(peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(peers))
+	}
+	if peers[0].TLSFingerprint != "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" {
+		t.Errorf("peer fingerprint = %q", peers[0].TLSFingerprint)
+	}
+	_ = receivedInPeers
+}
+
 func TestSignedMessage_Deterministic(t *testing.T) {
 	req := &announceRequest{
 		SwarmHash: "abc123",

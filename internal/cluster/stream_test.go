@@ -2,6 +2,7 @@ package cluster_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"log/slog"
 	"net"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/nchapman/hivebot/internal/cluster"
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
@@ -22,6 +24,15 @@ func validToken(token string) string {
 		return "test-worker"
 	}
 	return ""
+}
+
+// testIdentityFromSeed creates a deterministic identity for testing.
+func testIdentityFromSeed(seed byte) *cluster.NodeIdentity {
+	s := make([]byte, ed25519.SeedSize)
+	s[0] = seed
+	priv := ed25519.NewKeyFromSeed(s)
+	pub := priv.Public().(ed25519.PublicKey)
+	return &cluster.NodeIdentity{PrivateKey: priv, PublicKey: pub, NodeID: "test-node"}
 }
 
 // setupClusterTest creates a bufconn-based leader gRPC server and returns
@@ -41,6 +52,32 @@ func setupClusterTest(t *testing.T, registry *cluster.NodeRegistry) (*cluster.Le
 		return lis.DialContext(ctx)
 	}
 	return leader, dialer
+}
+
+// setupClusterTestTLS creates a real TCP-based leader gRPC server with mTLS.
+func setupClusterTestTLS(t *testing.T, registry *cluster.NodeRegistry) (*cluster.LeaderStream, string, *cluster.NodeIdentity) {
+	t.Helper()
+	logger := slog.Default()
+	leader := cluster.NewLeaderStream(registry, validToken, logger)
+
+	serverID := testIdentityFromSeed(0)
+	serverCert, err := cluster.TLSCertFromIdentity(serverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serverTLS := cluster.ServerTLSConfig(serverCert)
+	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
+	leader.Register(srv)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	return leader, lis.Addr().String(), serverID
 }
 
 func connectWorker(t *testing.T, ctx context.Context, dialer func(context.Context, string) (net.Conn, error), name string) *cluster.WorkerStream {
@@ -328,4 +365,159 @@ func TestStream_ToolExecution(t *testing.T) {
 
 	cancel()
 	nodeWg.Wait()
+}
+
+// TestStream_mTLS_Registration tests the full registration flow over mTLS
+// using real TCP connections (not bufconn). This exercises the same code
+// path as production: TLS handshake → gRPC stream → registration → confirmation.
+func TestStream_mTLS_Registration(t *testing.T) {
+	registry := cluster.NewNodeRegistry()
+	leader, addr, serverID := setupClusterTestTLS(t, registry)
+	_ = leader
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	// Create a worker identity and TLS cert.
+	clientID := testIdentityFromSeed(1)
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Connect with mTLS, pinning the server's public key.
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
+
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "mtls-node",
+		JoinToken:  "valid-token",
+		Capacity:   2,
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
+	})
+
+	var connectErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		connectErr = ws.Connect(ctx)
+	}()
+
+	// Wait for registration to appear in registry.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		nodes := registry.List()
+		for _, n := range nodes {
+			if n.Name == "mtls-node" {
+				cancel() // success — stop the connection
+				wg.Wait()
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	cancel()
+	wg.Wait()
+	if connectErr != nil {
+		t.Fatalf("connect error: %v", connectErr)
+	}
+	t.Fatal("mtls-node never appeared in registry")
+}
+
+// TestStream_mTLS_WrongServerKey verifies that a worker rejects a leader
+// whose public key doesn't match what the tracker reported.
+func TestStream_mTLS_WrongServerKey(t *testing.T) {
+	registry := cluster.NewNodeRegistry()
+	_, addr, _ := setupClusterTestTLS(t, registry)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	clientID := testIdentityFromSeed(1)
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pin a WRONG public key — simulates a MITM or stale tracker data.
+	wrongID := testIdentityFromSeed(99)
+	clientTLS := cluster.ClientTLSConfig(clientCert, wrongID.PublicKey)
+
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "wrong-key-node",
+		JoinToken:  "valid-token",
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
+	})
+
+	err = ws.Connect(ctx)
+	if err == nil {
+		t.Fatal("expected connection to fail with wrong server key")
+	}
+
+	// Should not have registered.
+	if registry.Len() != 0 {
+		t.Error("node should not have registered with wrong key")
+	}
+}
+
+// TestStream_mTLS_NoPinning verifies that workers without pubkey pinning
+// (direct leader_addr mode) still connect successfully over mTLS.
+func TestStream_mTLS_NoPinning(t *testing.T) {
+	registry := cluster.NewNodeRegistry()
+	leader, addr, _ := setupClusterTestTLS(t, registry)
+	_ = leader
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	clientID := testIdentityFromSeed(2)
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No pinning — nil expectedPubKey. Direct leader_addr mode.
+	clientTLS := cluster.ClientTLSConfig(clientCert, nil)
+
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "no-pin-node",
+		JoinToken:  "valid-token",
+		Capacity:   1,
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
+	})
+
+	var connectErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		connectErr = ws.Connect(ctx)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		nodes := registry.List()
+		for _, n := range nodes {
+			if n.Name == "no-pin-node" {
+				cancel()
+				wg.Wait()
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	cancel()
+	wg.Wait()
+	if connectErr != nil {
+		t.Fatalf("connect error: %v", connectErr)
+	}
+	t.Fatal("no-pin-node never appeared in registry")
 }
