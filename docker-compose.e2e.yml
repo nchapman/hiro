@@ -5,9 +5,6 @@ services:
     ports:
       - "0:8080" # random host port to avoid conflicts
     environment:
-      - HIVE_API_KEY
-      - HIVE_PROVIDER=${HIVE_PROVIDER:-anthropic}
-      - HIVE_MODEL=${HIVE_MODEL:-}
       - HIVE_ADDR=:8080
       - HIVE_ROOT=/hive
     volumes:

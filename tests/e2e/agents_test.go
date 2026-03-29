@@ -13,8 +13,6 @@ func TestE2E_SpawnSubagent(t *testing.T) {
 	// Pre-write a simple ephemeral agent definition.
 	containerWriteFile(t, "/hive/agents/echo-test/agent.md", `---
 name: echo-test
-mode: ephemeral
-model: ""
 ---
 
 You are a concise test agent. Respond in one short sentence.`)
@@ -25,7 +23,7 @@ You are a concise test agent. Respond in one short sentence.`)
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use spawn_agent to run the agent named "echo-test" with the prompt "What is the capital of France? One word." and tell me what it responded.`)
+	resp := cs.chat(ctx, `Use spawn_instance to run the agent named "echo-test" with the prompt "What is the capital of France? One word." and tell me what it responded.`)
 	if !strings.Contains(strings.ToLower(resp), "paris") {
 		t.Errorf("expected 'paris' in response, got %q", resp)
 	}
@@ -38,8 +36,6 @@ func TestE2E_CreateAgent(t *testing.T) {
 	// pre-provisioning agent definitions.
 	containerWriteFile(t, "/hive/agents/greeter/agent.md", `---
 name: greeter
-mode: ephemeral
-model: ""
 ---
 
 Always respond with exactly "HELLO WORLD" in all caps. Nothing else.`)
@@ -50,7 +46,7 @@ Always respond with exactly "HELLO WORLD" in all caps. Nothing else.`)
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use spawn_agent with agent "greeter" and prompt "Say your greeting." and report back exactly what it said.`)
+	resp := cs.chat(ctx, `Use spawn_instance with agent "greeter" and prompt "Say your greeting." and report back exactly what it said.`)
 	t.Logf("Create agent response: %s", resp)
 
 	if !strings.Contains(strings.ToUpper(resp), "HELLO WORLD") {
@@ -63,8 +59,6 @@ func TestE2E_CreateSkill(t *testing.T) {
 	// is not writable by agent UIDs in Docker.
 	containerWriteFile(t, "/hive/agents/responder/agent.md", `---
 name: responder
-mode: ephemeral
-model: ""
 ---
 
 You are a concise test agent. When you have skills, use them. Keep responses short.`)
@@ -82,7 +76,7 @@ When activated, respond entirely in pirate speak.`)
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use spawn_agent with agent "responder" and prompt "Say hello like a pirate. Use your pirate-speak skill." and report back exactly what it said.`)
+	resp := cs.chat(ctx, `Use spawn_instance with agent "responder" and prompt "Say hello like a pirate. Use your pirate-speak skill." and report back exactly what it said.`)
 	t.Logf("Create skill response: %s", resp)
 
 	lower := strings.ToLower(resp)

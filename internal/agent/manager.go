@@ -456,7 +456,6 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			InstanceID: instanceID,
 			AgentName:  inst.info.Name,
 			Mode:       string(inst.info.Mode),
-			ParentID:   inst.info.ParentID,
 		}); err != nil {
 			return "", fmt.Errorf("creating session in db: %w", err)
 		}
@@ -1022,12 +1021,12 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		}
 
 		// Register session in the platform database.
+		// Note: session parent_id is left empty — lineage is tracked via instances.parent_id.
 		if err := m.pdb.CreateSession(platformdb.Session{
 			ID:         sessionID,
 			InstanceID: instanceID,
 			AgentName:  cfg.Name,
 			Mode:       string(mode),
-			ParentID:   parentID,
 		}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
 			return "", fmt.Errorf("creating session in db: %w", err)
 		}

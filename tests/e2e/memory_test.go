@@ -11,9 +11,9 @@ import (
 )
 
 func TestE2E_MemoryInjection(t *testing.T) {
-	// Write a memory into the coordinator's session dir.
-	sessDir := sessionDir(t, coordinatorID)
-	memPath := sessDir + "/memory.md"
+	// Write a memory into the coordinator's instance dir (instance-level state).
+	instDir := instanceDir(t, coordinatorID)
+	memPath := instDir + "/memory.md"
 
 	// Capture original content so we can restore it after the test.
 	origCmd := exec.Command("docker", "exec", containerName, "cat", memPath)
@@ -46,9 +46,9 @@ func TestE2E_MemoryWriteTool(t *testing.T) {
 
 	cs.chat(ctx, "Use memory_write now to save: 'The project uses PostgreSQL 16'.")
 
-	// Verify memory.md was written.
-	sessDir := sessionDir(t, coordinatorID)
-	content := containerExec(t, "cat", sessDir+"/memory.md")
+	// Verify memory.md was written at instance level.
+	instDir := instanceDir(t, coordinatorID)
+	content := containerExec(t, "cat", instDir+"/memory.md")
 	if !strings.Contains(strings.ToLower(content), "postgresql") {
 		t.Errorf("expected 'postgresql' in memory.md, got %q", content)
 	}

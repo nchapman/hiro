@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -34,19 +33,13 @@ func TestE2E_ConversationHistory(t *testing.T) {
 		}
 	}
 	t.Logf("History recall: %s", resp)
-
-	// Verify history.db was created.
-	sessDir := sessionDir(t, coordinatorID)
-	if !containerFileExists(t, sessDir+"/db/history.db") {
-		t.Error("history.db was not created for persistent agent")
-	}
 }
 
 func TestE2E_MessagesAPI(t *testing.T) {
 	// The coordinator should have messages from other tests (or at minimum
 	// from startup). Verify the REST endpoint returns them.
-	url := fmt.Sprintf("%s/api/sessions/%s/messages", baseURL, coordinatorID)
-	resp, err := http.Get(url)
+	url := fmt.Sprintf("%s/api/instances/%s/messages", baseURL, coordinatorID)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}

@@ -11,11 +11,14 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -31,6 +34,7 @@ var (
 	baseURL       string
 	containerName string
 	coordinatorID string
+	httpClient    *http.Client // shared client with cookie jar for auth
 )
 
 func TestMain(m *testing.M) {
@@ -46,6 +50,10 @@ func TestMain(m *testing.M) {
 		containerName = "hive-e2e"
 	}
 
+	// Create HTTP client with cookie jar for authenticated requests.
+	jar, _ := cookiejar.New(nil)
+	httpClient = &http.Client{Jar: jar}
+
 	// Wait for server to be healthy (container startup + binary init).
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer healthCancel()
@@ -53,6 +61,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "server never became healthy: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Run setup to configure the LLM provider (fresh container has no config).
+	if err := runSetup(); err != nil {
+		fmt.Fprintf(os.Stderr, "setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("setup complete")
 
 	// Wait for the coordinator agent to be ready (requires LLM call to spawn).
 	coordCtx, coordCancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -68,9 +83,50 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// runSetup calls POST /api/setup to configure the LLM provider and admin password.
+// Reads HIVE_API_KEY, HIVE_PROVIDER, and HIVE_MODEL from environment.
+// The session cookie is stored in the shared httpClient's cookie jar.
+func runSetup() error {
+	apiKey := os.Getenv("HIVE_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("HIVE_API_KEY must be set")
+	}
+	provider := os.Getenv("HIVE_PROVIDER")
+	if provider == "" {
+		provider = "anthropic"
+	}
+	model := os.Getenv("HIVE_MODEL")
+
+	body, _ := json.Marshal(map[string]string{
+		"password":      "e2e-test-password-12345",
+		"provider_type": provider,
+		"api_key":       apiKey,
+		"default_model": model,
+	})
+
+	host := strings.TrimPrefix(baseURL, "http://")
+	host = strings.TrimPrefix(host, "https://")
+
+	req, _ := http.NewRequest("POST", baseURL+"/api/setup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+host)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /api/setup: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("POST /api/setup: status %d: %s", resp.StatusCode, respBody)
+	}
+	return nil
+}
+
 // --- HTTP helpers ---
 
 func waitHealthy(ctx context.Context) error {
+	// Health check runs before setup, so use a plain client (no auth needed).
 	var lastErr error
 	for {
 		if ctx.Err() != nil {
@@ -90,31 +146,32 @@ func waitHealthy(ctx context.Context) error {
 	}
 }
 
-type sessionInfo struct {
+type instanceInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Mode        string `json:"mode"`
 	Status      string `json:"status"`
 	Description string `json:"description,omitempty"`
 	ParentID    string `json:"parent_id,omitempty"`
+	Model       string `json:"model,omitempty"`
 }
 
-func listSessions(t *testing.T) []sessionInfo {
+func listInstances(t *testing.T) []instanceInfo {
 	t.Helper()
-	resp, err := http.Get(baseURL + "/api/sessions")
+	resp, err := httpClient.Get(baseURL + "/api/instances")
 	if err != nil {
-		t.Fatalf("GET /api/sessions: %v", err)
+		t.Fatalf("GET /api/instances: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/sessions: status %d: %s", resp.StatusCode, body)
+		t.Fatalf("GET /api/instances: status %d: %s", resp.StatusCode, body)
 	}
-	var sessions []sessionInfo
-	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
-		t.Fatalf("decoding sessions: %v", err)
+	var instances []instanceInfo
+	if err := json.NewDecoder(resp.Body).Decode(&instances); err != nil {
+		t.Fatalf("decoding instances: %v", err)
 	}
-	return sessions
+	return instances
 }
 
 func waitForCoordinator(ctx context.Context) (string, error) {
@@ -122,14 +179,14 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("timed out waiting for coordinator: %w", ctx.Err())
 		}
-		resp, err := http.Get(baseURL + "/api/sessions")
+		resp, err := httpClient.Get(baseURL + "/api/instances")
 		if err == nil && resp.StatusCode == 200 {
-			var sessions []sessionInfo
-			if err := json.NewDecoder(resp.Body).Decode(&sessions); err == nil {
-				for _, a := range sessions {
-					if a.Name == "coordinator" {
+			var instances []instanceInfo
+			if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
+				for _, inst := range instances {
+					if inst.Name == "coordinator" {
 						resp.Body.Close()
-						return a.ID, nil
+						return inst.ID, nil
 					}
 				}
 			}
@@ -165,17 +222,27 @@ func openChat(t *testing.T, ctx context.Context, agentID string) *chatSession {
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL += "/ws/chat"
 	if agentID != "" {
-		wsURL += "?session_id=" + agentID
+		wsURL += "?instance_id=" + agentID
 	}
 
 	// Origin must match the server's Host for the origin check.
 	host := strings.TrimPrefix(baseURL, "http://")
 	host = strings.TrimPrefix(host, "https://")
 
+	// Build headers with origin and session cookie for auth.
+	headers := http.Header{
+		"Origin": {"http://" + host},
+	}
+	if httpClient != nil && httpClient.Jar != nil {
+		if u, parseErr := url.Parse(baseURL); parseErr == nil {
+			for _, c := range httpClient.Jar.Cookies(u) {
+				headers.Add("Cookie", c.String())
+			}
+		}
+	}
+
 	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
-		HTTPHeader: http.Header{
-			"Origin": {"http://" + host},
-		},
+		HTTPHeader: headers,
 	})
 	if err != nil {
 		t.Fatalf("dial %s: %v", wsURL, err)
@@ -273,8 +340,91 @@ func containerWriteFile(t *testing.T, filePath, content string) {
 	}
 }
 
-// sessionDir returns the container path to an agent's session directory.
-func sessionDir(t *testing.T, agentID string) string {
+// --- REST helpers ---
+
+// postInstance sends a POST to /api/instances/{id}/{action} and returns the status code and body.
+func postInstance(t *testing.T, instanceID, action string) (int, string) {
 	t.Helper()
-	return "/hive/sessions/" + agentID
+	resp, err := httpClient.Post(baseURL+"/api/instances/"+instanceID+"/"+action, "", nil)
+	if err != nil {
+		t.Fatalf("POST /api/instances/%s/%s: %v", instanceID, action, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+// deleteInstance sends a DELETE to /api/instances/{id} and returns the status code and body.
+func deleteInstance(t *testing.T, instanceID string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest("DELETE", baseURL+"/api/instances/"+instanceID, nil)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /api/instances/%s: %v", instanceID, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+// findInstance searches the instance list for an instance with the given agent name.
+// Returns the instance info and true if found, zero value and false otherwise.
+func findInstance(t *testing.T, name string) (instanceInfo, bool) {
+	t.Helper()
+	for _, inst := range listInstances(t) {
+		if inst.Name == name {
+			return inst, true
+		}
+	}
+	return instanceInfo{}, false
+}
+
+// spawnPersistentAgent writes an agent definition and asks the coordinator to
+// spawn it as a persistent instance. Returns the instance ID.
+func spawnPersistentAgent(t *testing.T, ctx context.Context, name string) string {
+	t.Helper()
+
+	containerWriteFile(t, fmt.Sprintf("/hive/agents/%s/agent.md", name), fmt.Sprintf(`---
+name: %s
+tools: [read_file, write_file, edit_file, glob, grep, bash]
+---
+
+You are a test agent. Be concise.`, name))
+
+	// Snapshot existing instance IDs so we can find the new one.
+	before := make(map[string]bool)
+	for _, inst := range listInstances(t) {
+		before[inst.ID] = true
+	}
+
+	cs := openChat(t, ctx, "")
+	defer cs.close()
+
+	cs.chat(ctx, fmt.Sprintf(`Use spawn_instance with agent "%s" and mode "persistent" and prompt "Acknowledge you are ready." Do not use any other tools.`, name))
+
+	// Find the new instance (not in the snapshot).
+	for _, inst := range listInstances(t) {
+		if !before[inst.ID] && inst.Name == name {
+			return inst.ID
+		}
+	}
+	t.Fatalf("persistent instance %q not found after spawn", name)
+	return ""
+}
+
+// instanceDir returns the container path to an instance's directory.
+func instanceDir(_ *testing.T, instanceID string) string {
+	return "/hive/instances/" + instanceID
+}
+
+// activeSessionDir returns the container path to an instance's active session directory.
+// Session IDs are UUID v7 (time-ordered), so the last entry alphabetically is the newest.
+func activeSessionDir(t *testing.T, instanceID string) string {
+	t.Helper()
+	out := containerExec(t, "sh", "-c", fmt.Sprintf("ls -1 /hive/instances/%s/sessions/ | tail -1", instanceID))
+	sessionID := strings.TrimSpace(out)
+	if sessionID == "" {
+		t.Fatalf("no sessions found for instance %s", instanceID)
+	}
+	return fmt.Sprintf("/hive/instances/%s/sessions/%s", instanceID, sessionID)
 }

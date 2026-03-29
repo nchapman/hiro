@@ -30,23 +30,23 @@ func TestE2E_Health(t *testing.T) {
 	}
 }
 
-func TestE2E_ListSessions(t *testing.T) {
-	agents := listSessions(t)
-	if len(agents) == 0 {
-		t.Fatal("expected at least one agent (coordinator)")
+func TestE2E_ListInstances(t *testing.T) {
+	instances := listInstances(t)
+	if len(instances) == 0 {
+		t.Fatal("expected at least one instance (coordinator)")
 	}
 
 	found := false
-	for _, a := range agents {
-		if a.Name == "coordinator" {
+	for _, inst := range instances {
+		if inst.Name == "coordinator" {
 			found = true
-			if a.Mode != "persistent" {
-				t.Errorf("coordinator mode: expected persistent, got %q", a.Mode)
+			if inst.Mode != "coordinator" {
+				t.Errorf("coordinator mode: expected coordinator, got %q", inst.Mode)
 			}
 			break
 		}
 	}
 	if !found {
-		t.Error("coordinator not found in agent list")
+		t.Error("coordinator not found in instance list")
 	}
 }

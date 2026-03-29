@@ -19,8 +19,8 @@ func TestE2E_Todos(t *testing.T) {
 	resp := cs.chat(ctx, "Create a todo list with exactly 3 tasks for building a REST API: design schema, implement endpoints, write tests. Use the todos tool now.")
 	t.Logf("Todo response: %s", resp)
 
-	// Verify todos.yaml was created in the coordinator's session dir.
-	sessDir := sessionDir(t, coordinatorID)
+	// Verify todos.yaml was created in the coordinator's active session dir.
+	sessDir := activeSessionDir(t, coordinatorID)
 	content := containerExec(t, "cat", sessDir+"/todos.yaml")
 	if content == "" {
 		t.Fatal("expected todos.yaml to be created, got empty")
