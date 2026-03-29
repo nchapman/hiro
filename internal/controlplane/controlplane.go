@@ -5,6 +5,7 @@
 package controlplane
 
 import (
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -516,7 +517,11 @@ func (cp *ControlPlane) AllPolicies() map[string]AgentPolicy {
 // --- Cluster ---
 
 // ClusterMode returns the cluster mode: "leader" (default) or "worker".
+// HIVE_MODE env var takes precedence over config.yaml.
 func (cp *ControlPlane) ClusterMode() string {
+	if envMode := os.Getenv("HIVE_MODE"); envMode != "" {
+		return envMode
+	}
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 	if cp.config.Cluster.Mode == "" {
@@ -562,15 +567,18 @@ func (cp *ControlPlane) ClusterJoinTokens() map[string]string {
 
 // ValidateJoinToken checks if a token matches any named join token.
 // Returns the token name if valid, empty string if not.
+// Uses constant-time comparison to prevent timing side-channel attacks.
 func (cp *ControlPlane) ValidateJoinToken(token string) string {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
+	// Compare all tokens to prevent leaking token count via timing.
+	found := ""
 	for name, t := range cp.config.Cluster.JoinTokens {
-		if t == token {
-			return name
+		if subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
+			found = name
 		}
 	}
-	return ""
+	return found
 }
 
 // SetClusterMode sets the cluster mode.

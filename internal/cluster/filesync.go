@@ -247,7 +247,7 @@ func (s *FileSyncService) ApplyInitialSync(data []byte) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode)&0666)
 			if err != nil {
 				return fmt.Errorf("creating file %s: %w", header.Name, err)
 			}
@@ -305,10 +305,15 @@ func (s *FileSyncService) WatchAndSync() error {
 				continue
 			}
 
-			// If a new directory was created, watch it recursively.
+			// If a new directory was created, watch it recursively and
+			// scan for files that were written before the watch was added.
+			// This covers the race where mkdir + write happens atomically
+			// (e.g., API file upload creates parent dirs then writes the file
+			// before fsnotify processes the directory creation event).
 			if event.Has(fsnotify.Create) {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					s.addWatchRecursive(watcher, event.Name)
+					s.scanNewDir(event.Name, &mu, pending, timer)
 				}
 			}
 
@@ -457,7 +462,9 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 
 	mode := os.FileMode(0644)
 	if update.Mode != 0 {
-		mode = os.FileMode(update.Mode)
+		// Strip execute, setuid, setgid, and sticky bits from remote files
+		// to prevent a compromised node from planting executables.
+		mode = os.FileMode(update.Mode) & 0666
 	}
 
 	if err := os.WriteFile(absPath, update.Content, mode); err != nil {
@@ -612,6 +619,29 @@ func (s *FileSyncService) addWatchRecursive(w *fsnotify.Watcher, dir string) err
 		if err := w.Add(path); err != nil {
 			s.logger.Debug("failed to watch dir", "path", path, "error", err)
 		}
+		return nil
+	})
+}
+
+// scanNewDir walks a newly created directory and adds any files found to the
+// pending change set. This handles the race where files are written inside a
+// new directory before fsnotify can register a watch on it.
+func (s *FileSyncService) scanNewDir(dir string, mu *sync.Mutex, pending map[string]bool, timer *time.Timer) {
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(s.rootDir, path)
+		if err != nil || shouldIgnore(relPath) {
+			return nil
+		}
+		if s.isEchoSuppressed(relPath) {
+			return nil
+		}
+		mu.Lock()
+		pending[relPath] = false
+		timer.Reset(debounceInterval)
+		mu.Unlock()
 		return nil
 	})
 }

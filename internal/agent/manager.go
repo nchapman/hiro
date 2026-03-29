@@ -1156,13 +1156,6 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		Groups:         groups,
 	}
 
-	handle, err := m.workerFactory(spawnCtx, spawnCfg)
-	if err == nil {
-		// Inject secret env provider so bash commands in the worker can access secrets.
-		if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
-			wc.SetSecretEnvFn(m.SecretEnv)
-		}
-	}
 	// cleanup removes directories and releases UID on failure.
 	cleanup := func() {
 		os.RemoveAll(sessDir) // always clean the session dir
@@ -1174,9 +1167,43 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		}
 	}
 
-	if err != nil {
-		cleanup()
-		return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
+	// Spawn the worker — either locally or on a remote node.
+	isRemote := nodeID != "" && nodeID != cluster.HomeNodeID && m.clusterService != nil
+	var handle *WorkerHandle
+
+	if isRemote {
+		rh, err := m.clusterService.SpawnOnNode(spawnCtx, nodeID, cluster.SpawnRequest{
+			InstanceID:     instanceID,
+			SessionID:      sessionID,
+			AgentName:      cfg.Name,
+			EffectiveTools: allowedTools,
+			WorkingDir:     ".", // relative to node's HIVE_ROOT
+			SessionDir:     filepath.Join("instances", instanceID, "sessions", sessionID),
+		})
+		if err != nil {
+			cleanup()
+			return "", fmt.Errorf("spawning agent %q on node %s: %w", cfg.Name, nodeID, err)
+		}
+		if rw, ok := rh.Worker.(*cluster.RemoteWorker); ok {
+			rw.SetSecretEnvFn(m.SecretEnv)
+		}
+		handle = &WorkerHandle{
+			Worker: rh.Worker,
+			Kill:   rh.Kill,
+			Close:  rh.Close,
+			Done:   rh.Done,
+		}
+	} else {
+		var err error
+		handle, err = m.workerFactory(spawnCtx, spawnCfg)
+		if err != nil {
+			cleanup()
+			return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
+		}
+		// Inject secret env provider so bash commands in the worker can access secrets.
+		if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
+			wc.SetSecretEnvFn(m.SecretEnv)
+		}
 	}
 
 	// Create the inference loop (skipped if no provider — test mode).

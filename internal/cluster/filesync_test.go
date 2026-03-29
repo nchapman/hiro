@@ -3,6 +3,7 @@ package cluster
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -321,6 +322,63 @@ func TestEchoSuppression(t *testing.T) {
 	if svc.isEchoSuppressed("workspace/other.txt") {
 		t.Error("expected different file to not be suppressed")
 	}
+}
+
+// TestWatchAndSync_NewDirWithFile verifies that files written into a
+// brand-new directory are detected by the watcher via scanNewDir, even
+// when the file write happens before fsnotify registers the new directory.
+func TestWatchAndSync_NewDirWithFile(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+
+	var mu sync.Mutex
+	var sent []string
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test-node",
+		SendFn: func(update *pb.FileUpdate) error {
+			mu.Lock()
+			sent = append(sent, update.Path)
+			mu.Unlock()
+			return nil
+		},
+	})
+
+	go svc.WatchAndSync()
+	defer svc.Stop()
+
+	// Give the watcher time to start.
+	time.Sleep(100 * time.Millisecond)
+
+	// Create a new subdirectory with a file in a single burst.
+	// This simulates the API upload race: mkdir + write before fsnotify
+	// can register the new directory.
+	subdir := filepath.Join(dir, "workspace", "new-project")
+	os.MkdirAll(subdir, 0755)
+	os.WriteFile(filepath.Join(subdir, "README.md"), []byte("hello"), 0644)
+
+	// Wait for debounce + processing.
+	wantPath := filepath.Join("workspace", "new-project", "README.md")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		found := false
+		for _, p := range sent {
+			if p == wantPath {
+				found = true
+				break
+			}
+		}
+		mu.Unlock()
+		if found {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	mu.Lock()
+	t.Errorf("expected file sync for %s, got: %v", wantPath, sent)
+	mu.Unlock()
 }
 
 func TestSanitizeNodeID(t *testing.T) {

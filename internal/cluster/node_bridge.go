@@ -63,7 +63,10 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	nb.logger.Info("spawning worker", "instance_id", msg.InstanceId, "session_id", msg.SessionId, "agent", msg.AgentName)
 
 	// Translate paths to local filesystem.
-	workingDir := filepath.Join(nb.rootDir, msg.WorkingDir)
+	workingDir := nb.rootDir
+	if msg.WorkingDir != "" && msg.WorkingDir != "." {
+		workingDir = filepath.Join(nb.rootDir, msg.WorkingDir)
+	}
 	sessionDir := filepath.Join(nb.rootDir, msg.SessionDir)
 
 	// Create directories.

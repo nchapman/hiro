@@ -1,0 +1,42 @@
+# Cluster e2e test — run with: make test-cluster
+# Starts a leader and worker node, verifies clustering end-to-end.
+#
+# HIVE_JOIN_TOKEN must be set in the environment before `docker compose up`.
+# The Makefile generates it with `openssl rand -hex 32`.
+services:
+  leader:
+    build: .
+    init: true
+    ports:
+      - "0:8080"  # HTTP API (random host port)
+      - "0:8081"  # Cluster gRPC (random host port)
+    environment:
+      - HIVE_ADDR=:8080
+      - HIVE_CLUSTER_ADDR=:8081
+      - HIVE_ROOT=/hive
+    volumes:
+      - leader-hive:/hive
+      - ./tests/e2e_cluster/leader-config.yaml:/hive/config.yaml
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+
+  worker:
+    build: .
+    init: true
+    depends_on:
+      leader:
+        condition: service_healthy
+    environment:
+      - HIVE_ROOT=/hive
+      - HIVE_MODE=worker
+      - HIVE_LEADER=leader:8081
+      - HIVE_JOIN_TOKEN=${HIVE_JOIN_TOKEN}
+    volumes:
+      - worker-hive:/hive
+
+volumes:
+  leader-hive:
+  worker-hive:

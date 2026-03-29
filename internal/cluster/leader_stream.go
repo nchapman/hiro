@@ -18,9 +18,10 @@ import (
 type LeaderStream struct {
 	pb.UnimplementedClusterServer
 
-	registry     *NodeRegistry
-	validateToken func(token string) string // returns token name or "" if invalid
-	logger       *slog.Logger
+	registry       *NodeRegistry
+	validateToken  func(token string) string // returns token name or "" if invalid
+	onNodeConnected func(nodeID NodeID)       // called when a node successfully registers
+	logger         *slog.Logger
 
 	mu    sync.Mutex
 	conns map[NodeID]*nodeConn // node ID → active connection
@@ -39,6 +40,7 @@ type NodeHandlers struct {
 	OnSpawnResult  func(nodeID NodeID, msg *pb.SpawnResult)
 	OnToolResult   func(nodeID NodeID, msg *pb.NodeToolResult)
 	OnWorkerExited func(nodeID NodeID, msg *pb.WorkerExited)
+	OnFileUpdate   func(nodeID NodeID, msg *pb.FileUpdate)
 }
 
 // NewLeaderStream creates a new leader-side cluster gRPC service.
@@ -49,6 +51,11 @@ func NewLeaderStream(registry *NodeRegistry, validateToken func(string) string, 
 		logger:        logger,
 		conns:         make(map[NodeID]*nodeConn),
 	}
+}
+
+// SetOnNodeConnected sets a callback invoked when a node successfully registers.
+func (s *LeaderStream) SetOnNodeConnected(fn func(nodeID NodeID)) {
+	s.onNodeConnected = fn
 }
 
 // Register registers this service with a gRPC server.
@@ -99,7 +106,8 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 
 	s.logger.Info("node registered", "node_id", nodeID, "name", reg.NodeName, "capacity", reg.Capacity, "token", tokenName)
 
-	// Send registration confirmation.
+	// Send registration confirmation before notifying the service layer.
+	// The node must receive Registered before any other messages (FileSync, etc.).
 	if err := s.sendToNode(conn, &pb.LeaderMessage{
 		Msg: &pb.LeaderMessage_Registered{
 			Registered: &pb.NodeRegistered{NodeId: string(nodeID)},
@@ -107,6 +115,11 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	}); err != nil {
 		s.cleanupNode(nodeID)
 		return fmt.Errorf("sending registered: %w", err)
+	}
+
+	// Notify the service layer so it can wire up handlers and send initial sync.
+	if s.onNodeConnected != nil {
+		s.onNodeConnected(nodeID)
 	}
 
 	// Enter message loop.
@@ -130,26 +143,36 @@ func (s *LeaderStream) readLoop(conn *nodeConn) error {
 			return err
 		}
 
+		// Snapshot handlers under lock so reads are safe against
+		// concurrent SetHandlers calls.
+		s.mu.Lock()
+		h := conn.handlers
+		s.mu.Unlock()
+
+		s.registry.Touch(conn.nodeID)
+
 		switch m := msg.Msg.(type) {
 		case *pb.NodeMessage_SpawnResult:
-			s.registry.Touch(conn.nodeID)
-			if h := conn.handlers.OnSpawnResult; h != nil {
-				h(conn.nodeID, m.SpawnResult)
+			if h.OnSpawnResult != nil {
+				h.OnSpawnResult(conn.nodeID, m.SpawnResult)
 			}
 
 		case *pb.NodeMessage_ToolResult:
-			s.registry.Touch(conn.nodeID)
-			if h := conn.handlers.OnToolResult; h != nil {
-				h(conn.nodeID, m.ToolResult)
+			if h.OnToolResult != nil {
+				h.OnToolResult(conn.nodeID, m.ToolResult)
 			}
 
 		case *pb.NodeMessage_Heartbeat:
-			s.registry.Touch(conn.nodeID)
+			// Touch already called above.
 
 		case *pb.NodeMessage_WorkerExited:
-			s.registry.Touch(conn.nodeID)
-			if h := conn.handlers.OnWorkerExited; h != nil {
-				h(conn.nodeID, m.WorkerExited)
+			if h.OnWorkerExited != nil {
+				h.OnWorkerExited(conn.nodeID, m.WorkerExited)
+			}
+
+		case *pb.NodeMessage_FileUpdate:
+			if h.OnFileUpdate != nil {
+				h.OnFileUpdate(conn.nodeID, m.FileUpdate)
 			}
 		}
 	}

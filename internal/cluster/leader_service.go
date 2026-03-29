@@ -24,17 +24,29 @@ type LeaderService struct {
 	mu         sync.Mutex
 	workers    map[string]*RemoteWorker // session ID → remote worker
 	spawnChans map[string]chan string   // request ID → spawn result channel
+
+	fileSync *FileSyncService // for sending file updates to nodes; nil if not configured
 }
 
 // NewLeaderService creates a new cluster leader service.
 func NewLeaderService(stream *LeaderStream, registry *NodeRegistry, logger *slog.Logger) *LeaderService {
-	return &LeaderService{
+	svc := &LeaderService{
 		stream:     stream,
 		registry:   registry,
 		logger:     logger,
 		workers:    make(map[string]*RemoteWorker),
 		spawnChans: make(map[string]chan string),
 	}
+
+	// Auto-wire handlers and send initial sync when nodes connect.
+	stream.SetOnNodeConnected(func(nodeID NodeID) {
+		svc.WireNodeHandlers(nodeID)
+		if svc.getFileSync() != nil {
+			go svc.sendInitialSync(nodeID)
+		}
+	})
+
+	return svc
 }
 
 // Stream returns the underlying LeaderStream for gRPC registration.
@@ -68,6 +80,9 @@ func (s *LeaderService) WireNodeHandlers(nodeID NodeID) {
 		},
 		OnWorkerExited: func(_ NodeID, msg *pb.WorkerExited) {
 			s.handleWorkerExited(msg)
+		},
+		OnFileUpdate: func(fromNode NodeID, msg *pb.FileUpdate) {
+			s.handleFileUpdate(fromNode, msg)
 		},
 	})
 }
@@ -204,6 +219,115 @@ func (s *LeaderService) cleanupSpawn(sessionID, requestID string) {
 	delete(s.workers, sessionID)
 	delete(s.spawnChans, requestID)
 	s.mu.Unlock()
+}
+
+// SetFileSync configures the leader's file sync service. When set, new nodes
+// receive an initial file sync on connect and incremental updates thereafter.
+func (s *LeaderService) SetFileSync(fs *FileSyncService) {
+	s.mu.Lock()
+	s.fileSync = fs
+	s.mu.Unlock()
+}
+
+// sendInitialSync sends the initial file sync (zstd tar) to a newly
+// connected node, then runs a reconciliation pass to catch any files
+// that changed during the tar creation.
+func (s *LeaderService) sendInitialSync(nodeID NodeID) {
+	fs := s.getFileSync()
+	if fs == nil {
+		return
+	}
+	data, err := fs.CreateInitialSync()
+	if err != nil {
+		s.logger.Error("failed to create initial sync, node will rely on incremental sync", "node", nodeID, "error", err)
+		// Send empty Final:true so the node doesn't block waiting for sync.
+		_ = s.stream.SendToNode(nodeID, &pb.LeaderMessage{
+			Msg: &pb.LeaderMessage_FileSync{FileSync: &pb.FileSyncData{Final: true}},
+		})
+		return
+	}
+
+	// Send in chunks. Always send at least one chunk (even if empty)
+	// so the node receives a Final:true signal to complete initial sync.
+	if len(data) == 0 {
+		if err := s.stream.SendToNode(nodeID, &pb.LeaderMessage{
+			Msg: &pb.LeaderMessage_FileSync{
+				FileSync: &pb.FileSyncData{Data: nil, Final: true},
+			},
+		}); err != nil {
+			s.logger.Error("failed to send empty file sync", "node", nodeID, "error", err)
+			return
+		}
+	} else {
+		for i := 0; i < len(data); i += initialSyncChunkSize {
+			end := i + initialSyncChunkSize
+			isFinal := false
+			if end >= len(data) {
+				end = len(data)
+				isFinal = true
+			}
+			if err := s.stream.SendToNode(nodeID, &pb.LeaderMessage{
+				Msg: &pb.LeaderMessage_FileSync{
+					FileSync: &pb.FileSyncData{
+						Data:  data[i:end],
+						Final: isFinal,
+					},
+				},
+			}); err != nil {
+				s.logger.Error("failed to send file sync chunk", "node", nodeID, "error", err)
+				return
+			}
+		}
+	}
+
+	s.logger.Info("initial file sync sent", "node", nodeID, "size", len(data))
+}
+
+// getFileSync returns the file sync service, protected by the mutex.
+func (s *LeaderService) getFileSync() *FileSyncService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fileSync
+}
+
+// handleFileUpdate processes an incoming file update from a worker node.
+// It applies the change to the leader's filesystem and re-broadcasts to
+// other connected nodes (excluding the sender).
+func (s *LeaderService) handleFileUpdate(fromNode NodeID, msg *pb.FileUpdate) {
+	fs := s.getFileSync()
+	if fs == nil {
+		return
+	}
+	// Stamp the authenticated node ID to prevent OriginNode spoofing.
+	msg.OriginNode = string(fromNode)
+	if err := fs.ApplyFileUpdate(msg); err != nil {
+		s.logger.Warn("failed to apply file update from node", "node", fromNode, "path", msg.Path, "error", err)
+		return
+	}
+	s.logger.Debug("applied file update from node", "node", fromNode, "path", msg.Path)
+
+	// Re-broadcast to other nodes (not back to the sender).
+	for _, nodeID := range s.stream.ConnectedNodes() {
+		if nodeID == fromNode {
+			continue
+		}
+		if err := s.stream.SendToNode(nodeID, &pb.LeaderMessage{
+			Msg: &pb.LeaderMessage_FileUpdate{FileUpdate: msg},
+		}); err != nil {
+			s.logger.Debug("failed to forward file update to node", "node", nodeID, "error", err)
+		}
+	}
+}
+
+// BroadcastFileUpdate sends a file update to all connected nodes.
+func (s *LeaderService) BroadcastFileUpdate(update *pb.FileUpdate) {
+	for _, nodeID := range s.stream.ConnectedNodes() {
+		if err := s.stream.SendToNode(nodeID, &pb.LeaderMessage{
+			Msg: &pb.LeaderMessage_FileUpdate{FileUpdate: update},
+		}); err != nil {
+			s.logger.Debug("failed to send file update to node", "node", nodeID, "error", err)
+		}
+	}
 }
 
 // SpawnRequest contains the information needed to spawn a worker on a remote node.

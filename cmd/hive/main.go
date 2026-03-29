@@ -21,6 +21,7 @@ import (
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"github.com/nchapman/hivebot/internal/platform"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
@@ -124,6 +125,20 @@ func run() error {
 	}
 
 	clusterSvc := cluster.NewLeaderService(leaderStream, registry, logger)
+
+	// Set up file sync: leader watches workspace/agents/skills and pushes to nodes.
+	leaderSync := cluster.NewFileSyncService(cluster.FileSyncConfig{
+		RootDir:  absRootDir,
+		SyncDirs: []string{"agents", "skills", "workspace"},
+		NodeID:   "leader",
+		SendFn: func(update *pb.FileUpdate) error {
+			clusterSvc.BroadcastFileUpdate(update)
+			return nil
+		},
+		Logger: logger,
+	})
+	clusterSvc.SetFileSync(leaderSync)
+	go leaderSync.WatchAndSync()
 
 	go func() {
 		logger.Info("cluster gRPC server starting", "addr", clusterAddr)
@@ -269,6 +284,7 @@ func run() error {
 
 	err = httpServer.Shutdown(shutdownCtx)
 	clusterGRPC.GracefulStop()
+	leaderSync.Stop()
 	if mgr != nil {
 		mgr.Shutdown()
 	}
