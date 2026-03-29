@@ -41,6 +41,10 @@ type LoopConfig struct {
 	SecretEnvFn    func() []string
 	Logger         *slog.Logger
 
+	// Provider is the resolved provider type (e.g. "anthropic", "openrouter").
+	// This may differ from AgentConfig.Provider when the agent uses the platform default.
+	Provider string
+
 	// For building local tools — the Loop needs access to the Manager
 	// for coordinator/spawn tools. This avoids a circular dependency
 	// by using the HostManager interface.
@@ -130,7 +134,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	// Store tools for agent recreation on model switch.
 	l.tools = agentTools
-	l.provider = cfg.AgentConfig.Provider
+	l.provider = cfg.Provider
 
 	// Build the initial system prompt.
 	systemPrompt := l.currentSystemPrompt()

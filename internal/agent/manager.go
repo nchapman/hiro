@@ -391,7 +391,16 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 		return fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
-	sessionID := uuid.Must(uuid.NewV7()).String()
+	// Resume the latest session if one exists, otherwise create a new one.
+	var sessionID string
+	if m.pdb != nil {
+		if sess, ok := m.pdb.LatestSessionByInstance(instanceID); ok {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" {
+		sessionID = uuid.Must(uuid.NewV7()).String()
+	}
 	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode); err != nil {
 		// Re-register as stopped so the instance remains visible.
 		m.reregisterStopped(instanceID, inst)
@@ -548,6 +557,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
+			Provider:       provider,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
@@ -1154,6 +1164,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
+			Provider:       provider,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
