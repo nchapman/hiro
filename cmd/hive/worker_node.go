@@ -241,7 +241,7 @@ func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string,
 			ch <- result{nil, dialCtx.Err(), "relay"}
 			return
 		}
-		conn, err := cluster.DialRelay(relayAddr, swarmCode, identity)
+		conn, err := cluster.DialRelay(dialCtx, relayAddr, swarmCode, identity)
 		ch <- result{conn, err, "relay"}
 	}()
 

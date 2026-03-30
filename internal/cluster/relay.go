@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -29,20 +30,21 @@ const (
 	relayStatusFull     = 0x04
 	relayStatusConflict = 0x05
 	relayNotifyIncoming = 0xFF
+
+	maxPendingRelayConns = 16
 )
 
 // RelayClient manages a leader's connection to the relay server.
 // It maintains a persistent control connection and opens data connections
 // on demand when workers need to connect through the relay.
 type RelayClient struct {
-	relayAddr  string
-	swarmHash  [32]byte
-	identity   *NodeIdentity
-	logger     *slog.Logger
+	relayAddr string
+	swarmHash [32]byte
+	identity  *NodeIdentity
+	logger    *slog.Logger
 
 	mu       sync.Mutex
 	ctrlConn net.Conn
-	done     chan struct{}
 }
 
 // RelayConfig configures the relay client.
@@ -61,7 +63,6 @@ func NewRelayClient(cfg RelayConfig) *RelayClient {
 		swarmHash: hash,
 		identity:  cfg.Identity,
 		logger:    cfg.Logger,
-		done:      make(chan struct{}),
 	}
 }
 
@@ -73,14 +74,16 @@ func NewRelayClient(cfg RelayConfig) *RelayClient {
 func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 	backoff := 5 * time.Second
 	for {
-		err := rc.connectAndServe(ctx, onConnection)
+		wasConnected, err := rc.connectAndServe(ctx, onConnection)
 		if ctx.Err() != nil {
 			return
 		}
 
-		// If we were connected (not just a handshake failure), reset backoff.
-		if err != nil && !isConflictError(err) {
+		// Reset backoff after a healthy session; increase on immediate failures.
+		if wasConnected {
 			backoff = 5 * time.Second
+		} else if backoff < 120*time.Second {
+			backoff = backoff * 2
 		}
 
 		rc.logger.Warn("relay control connection lost, reconnecting...", "error", err, "backoff", backoff)
@@ -89,19 +92,14 @@ func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 		case <-ctx.Done():
 			return
 		}
-		// Exponential backoff when relay rejects us (stale entry not yet cleaned up).
-		if isConflictError(err) && backoff < 120*time.Second {
-			backoff = backoff * 2
-		}
 	}
 }
 
-func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(net.Conn)) error {
+func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(net.Conn)) (wasConnected bool, err error) {
 	conn, err := net.DialTimeout("tcp", rc.relayAddr, 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("dialing relay: %w", err)
+		return false, fmt.Errorf("dialing relay: %w", err)
 	}
-	// Set TCP keepalive to detect dead connections at the OS level.
 	if tc, ok := conn.(*net.TCPConn); ok {
 		tc.SetKeepAlive(true)
 		tc.SetKeepAlivePeriod(15 * time.Second)
@@ -110,21 +108,21 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 	// Send leader handshake.
 	if err := rc.sendHandshake(conn, relayRoleLeader); err != nil {
 		conn.Close()
-		return err
+		return false, err
 	}
 
 	status, err := readRelayStatus(conn)
 	if err != nil {
 		conn.Close()
-		return err
+		return false, err
 	}
 	if status == relayStatusConflict {
 		conn.Close()
-		return fmt.Errorf("relay: leader already registered for this swarm")
+		return false, fmt.Errorf("relay: leader already registered for this swarm")
 	}
 	if status != relayStatusOK {
 		conn.Close()
-		return fmt.Errorf("relay registration failed: status %d", status)
+		return false, fmt.Errorf("relay registration failed: status %d", status)
 	}
 
 	rc.mu.Lock()
@@ -133,62 +131,69 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 
 	rc.logger.Info("registered with relay", "relay", rc.relayAddr)
 
-	// Context cancellation closes the connection.
+	// Per-connection context: cancels both helper goroutines when
+	// connectAndServe returns (for any reason).
+	connCtx, connCancel := context.WithCancel(ctx)
+	defer connCancel()
+
+	// Close connection on context cancellation.
 	go func() {
-		<-ctx.Done()
+		<-connCtx.Done()
 		conn.Close()
 	}()
 
-	// Send keepalive bytes every 15s to prevent the relay's 90s read timeout
-	// and any intermediate NAT/proxy idle timeouts.
+	// Keepalive: send bytes every 15s to prevent NAT/proxy idle timeouts.
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				rc.mu.Lock()
-				c := rc.ctrlConn
-				rc.mu.Unlock()
-				if c == nil {
+				conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if _, err := conn.Write([]byte{0x00}); err != nil {
+					rc.logger.Warn("relay keepalive write failed", "error", err)
+					conn.Close() // unblocks the read loop
 					return
 				}
-				c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				if _, err := c.Write([]byte{0x00}); err != nil {
-					rc.logger.Warn("relay keepalive write failed", "error", err)
-					return // connection dead, read loop will handle cleanup
-				}
-				c.SetWriteDeadline(time.Time{})
-				rc.logger.Debug("relay keepalive sent")
-			case <-ctx.Done():
+				conn.SetWriteDeadline(time.Time{})
+			case <-connCtx.Done():
 				return
 			}
 		}
 	}()
 
+	// Semaphore to cap concurrent incoming connection handlers.
+	sem := make(chan struct{}, maxPendingRelayConns)
+
 	buf := make([]byte, 1)
 	for {
-		// No read deadline — the keepalive goroutine detects dead connections
-		// via write failures. The read blocks until a 0xFF notification arrives
-		// or the connection is closed (by ctx cancel or keepalive failure).
+		// No read deadline — keepalive write failures and context cancel
+		// close the connection, which unblocks this read.
 		_, err := conn.Read(buf)
 		if err != nil {
 			rc.mu.Lock()
 			rc.ctrlConn = nil
 			rc.mu.Unlock()
-			return fmt.Errorf("control connection read: %w", err)
+			return true, fmt.Errorf("control connection read: %w", err)
 		}
 
 		if buf[0] == relayNotifyIncoming {
-			// Worker is waiting — open a data connection.
-			go rc.handleIncoming(onConnection)
+			select {
+			case sem <- struct{}{}:
+				go func() {
+					defer func() { <-sem }()
+					rc.handleIncoming(connCtx, onConnection)
+				}()
+			default:
+				rc.logger.Warn("relay: too many pending connections, dropping notification")
+			}
 		}
-		// Other bytes are keepalive echoes, ignore.
 	}
 }
 
-func (rc *RelayClient) handleIncoming(onConnection func(net.Conn)) {
-	conn, err := net.DialTimeout("tcp", rc.relayAddr, 10*time.Second)
+func (rc *RelayClient) handleIncoming(ctx context.Context, onConnection func(net.Conn)) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", rc.relayAddr)
 	if err != nil {
 		rc.logger.Error("failed to dial relay for data connection", "error", err)
 		return
@@ -234,10 +239,11 @@ func (rc *RelayClient) sendHandshake(conn net.Conn, role byte) error {
 
 // DialRelay connects to the relay as a worker and returns the paired connection.
 // Used by workers for the relay leg of happy eyeballs.
-func DialRelay(relayAddr string, swarmCode string, identity *NodeIdentity) (net.Conn, error) {
+func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity *NodeIdentity) (net.Conn, error) {
 	hash := sha256.Sum256([]byte(swarmCode))
 
-	conn, err := net.DialTimeout("tcp", relayAddr, 10*time.Second)
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", relayAddr)
 	if err != nil {
 		return nil, fmt.Errorf("dialing relay: %w", err)
 	}
@@ -272,10 +278,19 @@ func DialRelay(relayAddr string, swarmCode string, identity *NodeIdentity) (net.
 	return conn, nil
 }
 
-// SelfTestReachability checks if this node is reachable at the given address
-// by performing a TCP dial to itself via its public IP.
-func SelfTestReachability(addr string) bool {
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+// SelfTestReachability checks if this node's gRPC server is reachable at the
+// given address by performing a TLS handshake. A bare TCP connect would give
+// false positives from captive portals or middleboxes.
+func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
+	tlsCfg := &tls.Config{
+		Certificates:       []tls.Certificate{tlsCert},
+		InsecureSkipVerify: true, // we're dialing ourselves
+		NextProtos:         []string{"h2"},
+	}
+	conn, err := tls.DialWithDialer(
+		&net.Dialer{Timeout: 3 * time.Second},
+		"tcp", addr, tlsCfg,
+	)
 	if err != nil {
 		return false
 	}
@@ -314,4 +329,50 @@ func relayStatusName(status byte) string {
 	default:
 		return hex.EncodeToString([]byte{status})
 	}
+}
+
+// ChannelListener is a net.Listener backed by a channel.
+// Relayed connections are enqueued via Enqueue() and consumed by gRPC's Serve().
+type ChannelListener struct {
+	ch   chan net.Conn
+	done chan struct{}
+	addr net.Addr
+}
+
+func NewChannelListener(addr net.Addr) *ChannelListener {
+	return &ChannelListener{
+		ch:   make(chan net.Conn, 16),
+		done: make(chan struct{}),
+		addr: addr,
+	}
+}
+
+func (l *ChannelListener) Enqueue(conn net.Conn) {
+	select {
+	case l.ch <- conn:
+	case <-l.done:
+		conn.Close()
+	}
+}
+
+func (l *ChannelListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.ch:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *ChannelListener) Close() error {
+	select {
+	case <-l.done:
+	default:
+		close(l.done)
+	}
+	return nil
+}
+
+func (l *ChannelListener) Addr() net.Addr {
+	return l.addr
 }

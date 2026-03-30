@@ -194,17 +194,27 @@ func run() error {
 		go dc.Run(discoveryCtx)
 		logger.Info("tracker discovery started", "tracker", trackerURL, "role", "leader")
 
+		// Create a shared listener for relayed connections. gRPC's Serve()
+		// is called once and accepts connections as they arrive via Enqueue().
+		relayLis := cluster.NewChannelListener(clusterLis.Addr())
+		go clusterGRPC.Serve(relayLis)
+
 		// After first announce, check if we're reachable. If not, register
 		// with the relay so workers can reach us through it.
 		go func() {
-			// Wait for the first announce to complete so we have yourIP and relayURL.
-			time.Sleep(3 * time.Second)
-			if dc.YourIP() == "" {
-				return
+			// Poll until we have our public IP from the tracker.
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for dc.YourIP() == "" {
+				select {
+				case <-ticker.C:
+				case <-discoveryCtx.Done():
+					return
+				}
 			}
 
 			publicAddr := fmt.Sprintf("%s:%d", dc.YourIP(), grpcPort)
-			if cluster.SelfTestReachability(publicAddr) {
+			if cluster.SelfTestReachability(publicAddr, tlsCert) {
 				logger.Info("leader is publicly reachable", "addr", publicAddr)
 				return
 			}
@@ -226,12 +236,10 @@ func run() error {
 				Logger:    logger,
 			})
 
-			// Relayed connections feed into the same gRPC server.
-			// The gRPC server already has TLS credentials, so we pass the
-			// raw TCP connection — gRPC handles the mTLS handshake itself.
+			// Relayed connections feed into the shared gRPC listener.
+			// The gRPC server handles mTLS on each connection.
 			rc.Run(discoveryCtx, func(conn net.Conn) {
-				lis := newSingleConnListener(conn)
-				clusterGRPC.Serve(lis)
+				relayLis.Enqueue(conn)
 			})
 		}()
 	}
@@ -391,43 +399,4 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// singleConnListener wraps a single net.Conn as a net.Listener.
-// Accept returns the connection once, then blocks until Close is called.
-type singleConnListener struct {
-	conn net.Conn
-	ch   chan net.Conn
-	done chan struct{}
-}
-
-func newSingleConnListener(conn net.Conn) net.Listener {
-	l := &singleConnListener{
-		conn: conn,
-		ch:   make(chan net.Conn, 1),
-		done: make(chan struct{}),
-	}
-	l.ch <- conn
-	return l
-}
-
-func (l *singleConnListener) Accept() (net.Conn, error) {
-	select {
-	case c := <-l.ch:
-		return c, nil
-	case <-l.done:
-		return nil, net.ErrClosed
-	}
-}
-
-func (l *singleConnListener) Close() error {
-	select {
-	case <-l.done:
-	default:
-		close(l.done)
-	}
-	return nil
-}
-
-func (l *singleConnListener) Addr() net.Addr {
-	return l.conn.LocalAddr()
-}
 
