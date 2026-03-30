@@ -243,14 +243,19 @@ Wire protocol for leader ↔ worker WebSocket communication.
 
 ## 10. Control Plane (`internal/controlplane/`)
 
-Operator-level config management — secrets and tool policies.
+Operator-level config management — auth, providers, secrets, tool policies, clustering. Split into focused files (was 631 LOC monolith).
 
 | File | LOC | Role |
 |------|-----|------|
-| `controlplane.go` | 631 | Config loading/saving, secret injection, tool allowlist enforcement |
-| `commands.go` | 256 | Slash command parsing (`/secrets`, `/tools`) |
+| `controlplane.go` | 211 | Core types (Config, ControlPlane), Load/Save/Reload, initMaps |
+| `controlplane_auth.go` | 84 | NeedsSetup, PasswordHash, SetPasswordHash, TokenSigner |
+| `controlplane_providers.go` | 160 | Provider CRUD, ProviderInfo, maskKey, default resolution |
+| `controlplane_secrets.go` | 45 | SecretNames, SecretEnv, SetSecret, DeleteSecret |
+| `controlplane_policies.go` | 42 | AgentTools, SetAgentTools, ClearAgentTools, AllPolicies |
+| `controlplane_cluster.go` | 117 | ClusterMode, join token CRUD, ValidateJoinToken, env var overrides |
+| `commands.go` | 259 | Slash command parsing (`/secrets`, `/tools`, `/cluster`) |
 
-**Tests**: `controlplane_test.go`.
+**Tests**: `controlplane_test.go` (46 tests covering auth, providers, secrets, policies, cluster, commands, reload, error paths).
 
 ---
 
@@ -389,7 +394,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 9 | **Relay** | `cluster/relay.go` | 399 | (manual) | NAT traversal relay server. |
 | 10 | **Discovery** | `cluster/discovery.go` | 332 | `discovery_test.go` | Tracker registration, heartbeat, node lookup. |
 | 11 | **Transport** | `transport/server.go`, `client.go`, `protocol.go` | ~765 | `transport_test.go` | WebSocket wire protocol, reconnect, auth. |
-| 12 | **Control Plane** | `controlplane/controlplane.go`, `commands.go` | ~887 | `controlplane_test.go` | Secrets, tool policies, slash commands. |
+| 12 | **Control Plane** | `controlplane/*.go` (7 files) | ~918 | `controlplane_test.go` (46 tests) | Split into 7 focused files. Auth, providers, secrets, policies, cluster, commands. |
 | 13 | **HTTP API** | `api/server.go`, `chat.go` | ~667 | 6 test files (85 tests) | REST routes, WebSocket chat, middleware, auth, settings, usage. |
 | 14 | **File Browser API** | `api/files.go` | 490 | `files_test.go` | List/read/write/rename/delete files. |
 | 15 | **Terminal** | `api/terminal.go` | ~80 | — | PTY WebSocket. |
@@ -425,7 +430,6 @@ Files over 500 LOC or with high cyclomatic complexity deserve the most attention
 |------|-----|-------------|
 | `cluster/filesync.go` | 723 | Complex streaming + atomic writes + watcher coordination |
 | `inference/compaction.go` | 682 | Async LLM calls + locking + tree summarization |
-| `controlplane/controlplane.go` | 631 | Config, secrets, tool policy — multiple concerns |
 | `platform/db/messages.go` | 613 | Message storage + FTS + summary hierarchy |
 | `inference/loop.go` | 564 | Core loop — streaming, error recovery, tool dispatch |
 | `api/files.go` | 490 | File CRUD — path traversal security surface |
@@ -454,6 +458,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 |---------|-------|--------|
 | ~~**manager.go is a god object**~~ | `agent/manager*.go` | **DONE** — Split into 8 focused files (155 LOC core + 7 modules). |
 | ~~**local_tools.go packs 15+ tools**~~ | `inference/tools_*.go` | **DONE** — Split into 5 files by tool category. |
+| ~~**controlplane.go mixes concerns**~~ | `controlplane/*.go` | **DONE** — Split into 7 focused files (211 LOC core + 6 modules). |
 | **filesync.go does too much** (723 LOC) | `cluster/filesync.go` | Initial sync, incremental sync, conflict resolution, watcher management. Could split into modules. |
 | **Cleanup logic duplicated** | `agent/manager_worker.go` | Worker cleanup appears in `cleanupWorker()`, `softStop()`, `removeInstance()`, and `watchWorker()`. Now colocated in one file. |
 | **Resource limits scattered** | `agent/tools/*.go`, `inference/*.go` | File sizes, output caps, timeouts, token estimates spread across files as bare constants. Centralize into a config struct. |
@@ -468,6 +473,9 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**Memory/todos not atomic**~~ | `config/memory.go`, `config/todos.go` | **FIXED** — Both use `atomicWrite()` (temp+rename). |
 | ~~**Compaction depth unbounded**~~ | `inference/compaction.go` | **FIXED** — Added `MaxSummaryDepth` (scales 4–8 with context window). Condensation stops at limit. |
 | ~~**Job ID collision**~~ | `agent/tools/background.go` | **FIXED** — Widened from 12-bit (4K) to 24-bit (16M) hex ID space. |
+| ~~**HandleCommand swallows save errors**~~ | `controlplane/commands.go` | **FIXED** — Appends warning to result string when Save() fails. |
+| ~~**hasContent misses JoinTokens**~~ | `controlplane/controlplane.go` | **FIXED** — Join tokens now included in hasContent(); were silently not persisted. |
+| ~~**SetProvider lacks validation**~~ | `controlplane/controlplane_providers.go` | **FIXED** — Returns error for empty provider type or API key. Callers updated. |
 
 ### Security Surface
 
@@ -477,8 +485,12 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | **mTLS + join tokens** | `cluster/tls.go`, `discovery.go` | Positive — Constant-time token comparison, Ed25519 identity, cert pinning. |
 | **Secret redaction** | `inference/redact.go` | Positive — Sorts by length desc, min 8-byte guard. |
 | ~~**resolve.go doesn't EvalSymlinks**~~ | `agent/tools/resolve.go` | **FIXED** — EvalSymlinks added; rejects paths that resolve outside roots via symlink. |
+| ~~**API key masking revealed short keys**~~ | `controlplane/controlplane_providers.go` | **FIXED** — Raised threshold so keys ≤10 chars are fully masked. |
 | **SSRF protection opt-in** | `agent/tools/fetch.go` | Low — Must call `SetSSRFProtection(true)` explicitly. Should default to true. |
 | **Relay status bytes unauthenticated** | `cluster/relay.go` | Low — MITM could inject false status. Mitigated by mTLS on the data path. |
+| **Rate limiter ignores reverse proxy** | `api/auth.go` | Medium — Keys on `RemoteAddr`; behind a proxy, all clients share the same key. Needs trusted-proxy header extraction. |
+| **Setup CSRF vulnerable to DNS rebinding** | `api/server.go` | Medium — `isSameOrigin` accepts matching Origin/Host from any domain. Restrict to loopback during setup. |
+| **Password change silently logs out user** | `api/auth.go` | Medium — Session secret rotated but no new token issued in response. |
 
 ### Concurrency
 
@@ -486,6 +498,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 |---------|-------|-------|
 | **Lock hierarchy well-documented** | `agent/manager.go` | `m.mu → inst.mu` ordering prevents deadlocks. |
 | **Dual compaction locks** | `inference/loop.go` | `updateMu` (fast config) + `compactMu` (slow DB) — good design. |
+| ~~**TokenSigner write-locks on hot path**~~ | `controlplane/controlplane_auth.go` | **FIXED** — Read-lock fast path with double-checked write-lock upgrade. |
 | **allowedRoots is a global** | `agent/tools/resolve.go` | Set once, never guarded. Should be immutable or mutex-protected. |
 | **No gRPC flow control** | `cluster/leader_stream.go` | Can queue unlimited messages before receiver drains. No `MaxConcurrentStreams` set. (TODO) |
 | ~~**Unbounded handler goroutines**~~ | `cluster/worker_stream.go` | **FIXED** — Added semaphore (64 concurrent handlers max). |
@@ -496,6 +509,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | Gap | Where | Recommendation |
 |-----|-------|----------------|
 | ~~**API endpoints largely untested**~~ | `api/` | **DONE** — 85 tests across 6 files covering auth, instances, settings, usage, files. Remaining gaps: chat WebSocket, terminal WebSocket, setup flow, share endpoints. |
+| ~~**Control plane providers/cluster untested**~~ | `controlplane/` | **DONE** — 25 → 46 tests. Added coverage for providers (10), cluster commands (5), cluster config (6), error paths (1), env overrides (2). |
 | **No CI/CD pipeline** | Project-wide | All testing is manual via Makefile. Add GitHub Actions. |
 | **No integration tests for manager lifecycle** | `agent/manager_test.go` | Mock worker is simplistic. Test full create→send→stop→restore flow. |
 | **No concurrency stress tests for inference** | `inference/` | Model switch during Chat(), concurrent SendMessage. |
@@ -537,4 +551,4 @@ Completed items struck through. Next priorities:
 6. ~~**Tool correctness**~~ — **DONE** (atomic writes for write_file/memory/todos, resolve.go symlink protection, job ID space widened).
 7. ~~**API test coverage**~~ — **DONE** (2 → 85 tests: auth, instances, settings, usage, files). Remaining: chat/terminal WebSocket, setup flow, share endpoints.
 8. **Web UI polish** — Toast system, error display, virtualization.
-9. **Control plane cleanup** — Reload error swallowing, provider validation, split concerns.
+9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 46 tests). Remaining: rate limiter proxy support, setup CSRF hardening, password change session reissue.

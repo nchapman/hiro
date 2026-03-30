@@ -47,6 +47,9 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 	if mutated {
 		if saveErr := cp.Save(); saveErr != nil {
 			cp.logger.Warn("failed to save config after command", "error", saveErr)
+			// Intentionally use a static message — do not include saveErr, which
+			// contains the config file path and could leak it to the user.
+			result += "\n\nWarning: failed to save to disk. Change is active but may not survive a restart."
 		}
 	}
 
@@ -236,7 +239,7 @@ func (cp *ControlPlane) handleClusterToken(action string, args []string) (string
 		return strings.TrimRight(b.String(), "\n"), false, nil
 
 	default:
-		return "Usage: /cluster token <create|revoke|list>", false, nil
+		return "", false, fmt.Errorf("unknown cluster token command: %s", action)
 	}
 }
 

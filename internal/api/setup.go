@@ -58,9 +58,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	// Apply config
 	s.cp.SetPasswordHash(string(hash))
-	s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
+	if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
 		APIKey: req.APIKey,
-	})
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	s.cp.SetDefaultProvider(req.ProviderType)
 	if req.DefaultModel != "" {
 		s.cp.SetDefaultModel(req.DefaultModel)

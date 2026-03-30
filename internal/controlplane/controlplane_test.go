@@ -524,3 +524,360 @@ func TestCommandEmpty(t *testing.T) {
 	}
 }
 
+// --- Provider tests ---
+
+func TestProviderCRUD(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	// Initially no providers.
+	if cp.IsConfigured() {
+		t.Error("expected not configured initially")
+	}
+
+	// Set a provider.
+	if err := cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-ant-123"}); err != nil {
+		t.Fatal(err)
+	}
+	if !cp.IsConfigured() {
+		t.Error("expected configured after SetProvider")
+	}
+
+	// Get it back.
+	p, ok := cp.GetProvider("anthropic")
+	if !ok || p.APIKey != "sk-ant-123" {
+		t.Errorf("unexpected provider: %+v, ok=%v", p, ok)
+	}
+
+	// Missing provider.
+	_, ok = cp.GetProvider("openrouter")
+	if ok {
+		t.Error("expected no openrouter provider")
+	}
+
+	// Delete clears default if matching.
+	cp.SetDefaultProvider("anthropic")
+	cp.DeleteProvider("anthropic")
+	if cp.DefaultProvider() != "" {
+		t.Error("expected default cleared after deleting matching provider")
+	}
+	if cp.IsConfigured() {
+		t.Error("expected not configured after delete")
+	}
+}
+
+func TestProviderInfo_DefaultProvider(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-ant-111"})
+	cp.SetProvider("openrouter", ProviderConfig{APIKey: "sk-or-222"})
+	cp.SetDefaultProvider("openrouter")
+
+	pType, apiKey, _, ok := cp.ProviderInfo()
+	if !ok || pType != "openrouter" || apiKey != "sk-or-222" {
+		t.Errorf("expected openrouter as default, got type=%s key=%s ok=%v", pType, apiKey, ok)
+	}
+}
+
+func TestProviderInfo_AlphabeticFallback(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetProvider("openrouter", ProviderConfig{APIKey: "sk-or-222"})
+	cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-ant-111"})
+	// No default set — should fall back to alphabetically first.
+
+	pType, _, _, ok := cp.ProviderInfo()
+	if !ok || pType != "anthropic" {
+		t.Errorf("expected anthropic as alphabetic fallback, got %s", pType)
+	}
+}
+
+func TestProviderInfo_NoProviders(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	_, _, _, ok := cp.ProviderInfo()
+	if ok {
+		t.Error("expected ok=false with no providers")
+	}
+}
+
+func TestProviderByType(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-123", BaseURL: "https://custom.api"})
+
+	apiKey, baseURL, ok := cp.ProviderByType("anthropic")
+	if !ok || apiKey != "sk-123" || baseURL != "https://custom.api" {
+		t.Errorf("unexpected: key=%s url=%s ok=%v", apiKey, baseURL, ok)
+	}
+
+	_, _, ok = cp.ProviderByType("missing")
+	if ok {
+		t.Error("expected ok=false for missing provider")
+	}
+}
+
+func TestConfiguredProviderTypes(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetProvider("openrouter", ProviderConfig{APIKey: "sk-or"})
+	cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-ant"})
+
+	types := cp.ConfiguredProviderTypes()
+	if len(types) != 2 || types[0] != "anthropic" || types[1] != "openrouter" {
+		t.Errorf("expected sorted [anthropic, openrouter], got %v", types)
+	}
+}
+
+func TestListProviders_MaskedKeys(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-ant-api03-longenoughkey"})
+
+	providers := cp.ListProviders()
+	p := providers["anthropic"]
+	if p.APIKey == "sk-ant-api03-longenoughkey" {
+		t.Error("expected masked key, got original")
+	}
+	if !strings.Contains(p.APIKey, "...") {
+		t.Errorf("expected masked key to contain '...', got %s", p.APIKey)
+	}
+}
+
+func TestMaskKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"short", "*****"},
+		{"12345678", "********"},
+		{"1234567890", "**********"},       // 10 chars: prefix+suffix would reveal all, so fully masked
+		{"12345678901", "123456...8901"},    // 11 chars: just enough to mask 1 middle char
+		{"sk-ant-api03-longkey", "sk-ant...gkey"},
+	}
+	for _, tt := range tests {
+		got := maskKey(tt.input)
+		if got != tt.want {
+			t.Errorf("maskKey(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestSetProvider_Validation(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	if err := cp.SetProvider("", ProviderConfig{APIKey: "key"}); err == nil {
+		t.Error("expected error for empty provider type")
+	}
+	if err := cp.SetProvider("anthropic", ProviderConfig{APIKey: ""}); err == nil {
+		t.Error("expected error for empty API key")
+	}
+	if err := cp.SetProvider("anthropic", ProviderConfig{APIKey: "key"}); err != nil {
+		t.Errorf("unexpected error for valid provider: %v", err)
+	}
+}
+
+// --- Cluster command tests ---
+
+func TestCommandClusterTokenCreate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cp, _ := Load(path, testLogger())
+
+	result, err := cp.HandleCommand("/cluster token create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "default") || !strings.Contains(result, "created") {
+		t.Errorf("unexpected result: %s", result)
+	}
+
+	tokens := cp.ClusterJoinTokens()
+	if _, ok := tokens["default"]; !ok {
+		t.Error("expected 'default' token to exist")
+	}
+
+	// Verify persisted to disk.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "join_tokens") {
+		t.Error("expected join_tokens in config.yaml")
+	}
+}
+
+func TestCommandClusterTokenCreateNamed(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	result, err := cp.HandleCommand("/cluster token create worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "worker-1") {
+		t.Errorf("unexpected result: %s", result)
+	}
+
+	tokens := cp.ClusterJoinTokens()
+	if _, ok := tokens["worker-1"]; !ok {
+		t.Error("expected 'worker-1' token to exist")
+	}
+}
+
+func TestCommandClusterTokenRevoke(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetClusterJoinToken("test", "abc123")
+
+	result, err := cp.HandleCommand("/cluster token revoke test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "revoked") {
+		t.Errorf("unexpected result: %s", result)
+	}
+
+	tokens := cp.ClusterJoinTokens()
+	if tokens != nil {
+		if _, ok := tokens["test"]; ok {
+			t.Error("expected token to be revoked")
+		}
+	}
+}
+
+func TestCommandClusterTokenList(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetClusterJoinToken("node-a", "abcdef1234567890abcdef1234567890")
+
+	result, err := cp.HandleCommand("/cluster token list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "node-a") {
+		t.Errorf("expected token name in output: %s", result)
+	}
+	// Token should be masked.
+	if strings.Contains(result, "abcdef1234567890abcdef1234567890") {
+		t.Error("full token should not appear in list output")
+	}
+	if !strings.Contains(result, "...") {
+		t.Error("expected masked token with '...'")
+	}
+}
+
+func TestCommandClusterTokenListEmpty(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	result, err := cp.HandleCommand("/cluster token list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "No join tokens") {
+		t.Errorf("expected empty message, got: %s", result)
+	}
+}
+
+// --- Cluster config tests ---
+
+func TestValidateJoinToken(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetClusterJoinToken("worker-1", "secret-token-1")
+	cp.SetClusterJoinToken("worker-2", "secret-token-2")
+
+	// Valid token returns name.
+	if name := cp.ValidateJoinToken("secret-token-1"); name != "worker-1" {
+		t.Errorf("expected 'worker-1', got %q", name)
+	}
+	if name := cp.ValidateJoinToken("secret-token-2"); name != "worker-2" {
+		t.Errorf("expected 'worker-2', got %q", name)
+	}
+
+	// Invalid token returns empty.
+	if name := cp.ValidateJoinToken("wrong-token"); name != "" {
+		t.Errorf("expected empty string for invalid token, got %q", name)
+	}
+}
+
+func TestClusterMode_Default(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	if mode := cp.ClusterMode(); mode != "leader" {
+		t.Errorf("expected 'leader' default, got %q", mode)
+	}
+
+	cp.SetClusterMode("worker")
+	if mode := cp.ClusterMode(); mode != "worker" {
+		t.Errorf("expected 'worker', got %q", mode)
+	}
+}
+
+func TestClusterMode_EnvOverride(t *testing.T) {
+	t.Setenv("HIVE_MODE", "worker")
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetClusterMode("leader")
+
+	if mode := cp.ClusterMode(); mode != "worker" {
+		t.Errorf("expected HIVE_MODE env var to take precedence, got %q", mode)
+	}
+}
+
+func TestClusterTrackerURL_EnvOverride(t *testing.T) {
+	t.Setenv("HIVE_TRACKER_URL", "https://env-tracker.example.com")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("cluster:\n  tracker_url: https://config-tracker.example.com\n"), 0600)
+
+	cp, _ := Load(path, testLogger())
+	if url := cp.ClusterTrackerURL(); url != "https://env-tracker.example.com" {
+		t.Errorf("expected env var to take precedence, got %q", url)
+	}
+}
+
+func TestClusterJoinTokens_Copy(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetClusterJoinToken("a", "token-a")
+
+	tokens := cp.ClusterJoinTokens()
+	tokens["b"] = "token-b" // modify the copy
+
+	// Original should be unaffected.
+	tokens2 := cp.ClusterJoinTokens()
+	if _, ok := tokens2["b"]; ok {
+		t.Error("modifying returned map should not affect ControlPlane")
+	}
+}
+
+func TestClusterJoinTokens_NilWhenEmpty(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	tokens := cp.ClusterJoinTokens()
+	if tokens != nil {
+		t.Errorf("expected nil for no tokens, got %v", tokens)
+	}
+}
+
+// --- Error path tests ---
+
+func TestHandleCommand_SaveWarning(t *testing.T) {
+	// Point config path to a directory (not a file) to force Save failure.
+	dir := t.TempDir()
+	badPath := filepath.Join(dir, "nowrite", "config.yaml")
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.path = badPath
+
+	// Create the parent dir as a file to block MkdirAll.
+	os.WriteFile(filepath.Join(dir, "nowrite"), []byte("not a dir"), 0600)
+
+	result, err := cp.HandleCommand("/secrets set TOKEN=abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// In-memory state should be set.
+	names := cp.SecretNames()
+	if len(names) != 1 || names[0] != "TOKEN" {
+		t.Errorf("expected secret set in memory, got %v", names)
+	}
+	// Result should contain warning about save failure.
+	if !strings.Contains(result, "Warning") || !strings.Contains(result, "failed to save") {
+		t.Errorf("expected save warning in result, got: %s", result)
+	}
+}
+

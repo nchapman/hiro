@@ -43,6 +43,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	s.cp.SetDefaultModel(req.DefaultModel)
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after settings update", "error", err)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": "saved in memory but failed to persist to disk"})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -90,14 +92,16 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cp.SetProvider(providerType, controlplane.ProviderConfig{
+	if err := s.cp.SetProvider(providerType, controlplane.ProviderConfig{
 		APIKey:  req.APIKey,
 		BaseURL: req.BaseURL,
-	})
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// If this is the only provider, make it the default.
-	providers := s.cp.ListProviders()
-	if len(providers) == 1 {
+	if len(s.cp.ConfiguredProviderTypes()) == 1 {
 		s.cp.SetDefaultProvider(providerType)
 	}
 	if err := s.cp.Save(); err != nil {
@@ -119,8 +123,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prevent deleting the only configured provider.
-	providers := s.cp.ListProviders()
-	if len(providers) <= 1 {
+	if len(s.cp.ConfiguredProviderTypes()) <= 1 {
 		http.Error(w, "cannot delete the only provider", http.StatusConflict)
 		return
 	}
