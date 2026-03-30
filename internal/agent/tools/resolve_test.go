@@ -72,8 +72,8 @@ func TestResolvePath(t *testing.T) {
 
 func TestResolveAndConfine(t *testing.T) {
 	// Save and restore global state.
-	origRoots := allowedRoots
-	defer func() { allowedRoots = origRoots }()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
 
 	SetAllowedRoots([]string{"/hive"})
 	wd := "/hive/workspace"
@@ -112,8 +112,8 @@ func TestResolveAndConfine(t *testing.T) {
 }
 
 func TestResolveAndConfine_NoRoots(t *testing.T) {
-	origRoots := allowedRoots
-	defer func() { allowedRoots = origRoots }()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
 
 	// No roots configured = no confinement (non-isolated mode).
 	SetAllowedRoots(nil)
@@ -128,8 +128,8 @@ func TestResolveAndConfine_NoRoots(t *testing.T) {
 }
 
 func TestResolveAndConfine_MultipleRoots(t *testing.T) {
-	origRoots := allowedRoots
-	defer func() { allowedRoots = origRoots }()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
 
 	SetAllowedRoots([]string{"/hive", "/workspace"})
 
@@ -150,8 +150,8 @@ func TestResolveAndConfine_MultipleRoots(t *testing.T) {
 }
 
 func TestResolveAndConfine_SymlinkEscape(t *testing.T) {
-	origRoots := allowedRoots
-	defer func() { allowedRoots = origRoots }()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
 
 	// Create a temp directory as the "allowed root" and a sibling as the "escape target".
 	root := t.TempDir()

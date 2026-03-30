@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/cluster"
@@ -58,7 +60,18 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	}, logger)
 
 	serverTLS := cluster.ServerTLSConfig(tlsCert)
-	grpcSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
+	grpcSrv := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(serverTLS)),
+		grpc.MaxConcurrentStreams(64), // per-connection; scales with worker count
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second, // ping idle connections every 30s
+			Timeout: 10 * time.Second, // close if no response within 10s
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second, // minimum ping interval from clients
+			PermitWithoutStream: true,             // allow pings even with no active RPCs
+		}),
+	)
 	leaderStream.Register(grpcSrv)
 
 	lis, err := net.Listen("tcp", clusterAddr)

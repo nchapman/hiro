@@ -5,17 +5,35 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // allowedRoots defines the directory prefixes that file tools may access.
-// Paths outside these roots are rejected. Set via SetAllowedRoots at startup.
-var allowedRoots []string
+// Paths outside these roots are rejected. Stored as atomic.Value for
+// goroutine-safe reads after a single SetAllowedRoots call at startup.
+var allowedRoots atomic.Value // holds []string
+
+// getAllowedRoots returns the current allowed roots, or nil if unset/empty.
+func getAllowedRoots() []string {
+	v := allowedRoots.Load()
+	if v == nil {
+		return nil
+	}
+	s := v.([]string)
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}
 
 // SetAllowedRoots configures the directories file tools may access.
 // Must be called before any tool invocations. Paths should be absolute
 // and cleaned. Typically: the platform root (/hive) and any instance dirs.
 func SetAllowedRoots(roots []string) {
-	allowedRoots = roots
+	if roots == nil {
+		roots = []string{}
+	}
+	allowedRoots.Store(roots)
 }
 
 // resolvePath resolves a potentially relative path against the working directory.
@@ -34,12 +52,13 @@ func resolveAndConfine(workingDir, path string) (string, error) {
 	resolved := resolvePath(workingDir, path)
 
 	// If no roots are configured, allow everything (non-isolated mode).
-	if len(allowedRoots) == 0 {
+	roots := getAllowedRoots()
+	if len(roots) == 0 {
 		return resolved, nil
 	}
 
 	// Lexical check: the cleaned path must be within a root.
-	if !isInsideRoots(resolved) {
+	if !isInsideRoots(resolved, roots) {
 		return "", fmt.Errorf("access denied: %s is outside the allowed workspace", path)
 	}
 
@@ -48,7 +67,7 @@ func resolveAndConfine(workingDir, path string) (string, error) {
 	// If the path doesn't exist yet, skip the symlink check — there's
 	// nothing on disk to exploit.
 	real, err := filepath.EvalSymlinks(resolved)
-	if err == nil && !isInsideRoots(real) {
+	if err == nil && !isInsideRoots(real, roots) {
 		return "", fmt.Errorf("access denied: %s resolves outside the allowed workspace via symlink", path)
 	}
 
@@ -58,8 +77,8 @@ func resolveAndConfine(workingDir, path string) (string, error) {
 // isInsideRoots reports whether path is equal to or under any allowed root.
 // Resolves symlinks in roots to handle systems where temp dirs are symlinked
 // (e.g., macOS /var → /private/var).
-func isInsideRoots(path string) bool {
-	for _, root := range allowedRoots {
+func isInsideRoots(path string, roots []string) bool {
+	for _, root := range roots {
 		if path == root || strings.HasPrefix(path, root+string(filepath.Separator)) {
 			return true
 		}
