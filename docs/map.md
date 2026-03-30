@@ -561,7 +561,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | **Schema design is solid** | Proper FKs, CHECK constraints, FTS5, WAL mode, cascade deletes. |
 | **FTS design is clever** | External content for integer-PK tables, standalone for text-PK. Trigger-based sync. |
 | ~~**No VACUUM/optimize strategy**~~ | **FIXED** — `PRAGMA optimize` + `PRAGMA wal_checkpoint(TRUNCATE)` on `Close()`. |
-| **Single reader bottleneck** | `MaxOpenConns=1` serializes reads. Documented why and when to increase. Fine for typical load. |
+| ~~**Single reader bottleneck**~~ | **FIXED** — `MaxOpenConns=4` with `_pragma` DSN params for per-connection setup. Concurrent WAL readers. |
 
 ---
 
