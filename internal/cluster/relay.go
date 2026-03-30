@@ -116,10 +116,34 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 
 	rc.logger.Info("registered with relay", "relay", rc.relayAddr)
 
-	// Read loop: watch for 0xFF notifications and context cancellation.
+	// Context cancellation closes the connection.
 	go func() {
 		<-ctx.Done()
 		conn.Close()
+	}()
+
+	// Send keepalive bytes every 30s to prevent the relay's 90s read timeout.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rc.mu.Lock()
+				c := rc.ctrlConn
+				rc.mu.Unlock()
+				if c == nil {
+					return
+				}
+				c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if _, err := c.Write([]byte{0x00}); err != nil {
+					return // connection dead, read loop will handle cleanup
+				}
+				c.SetWriteDeadline(time.Time{})
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	buf := make([]byte, 1)

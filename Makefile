@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation test-online test-cluster check clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation test-online test-cluster test-cluster-relay check clean web build-dev docker docker-up docker-down proto
 
 BINARY := hive
 PKG := github.com/nchapman/hivebot
@@ -57,6 +57,38 @@ test-cluster:
 	echo "=== WORKER LOGS ==="; \
 	docker compose -f docker-compose.cluster.yml logs worker --tail=50; \
 	docker compose -f docker-compose.cluster.yml down -v; \
+	rm -f tests/e2e_cluster/leader-config.yaml; \
+	exit $$EXIT
+
+test-cluster-relay:
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	if [ -z "$$HIVE_API_KEY" ]; then echo "HIVE_API_KEY must be set (via env or .env)"; exit 1; fi; \
+	TOKEN=$$(openssl rand -hex 32); \
+	SWARM=$$(openssl rand -hex 16); \
+	echo "cluster:" > tests/e2e_cluster/leader-config.yaml; \
+	echo "  mode: leader" >> tests/e2e_cluster/leader-config.yaml; \
+	echo "  join_tokens:" >> tests/e2e_cluster/leader-config.yaml; \
+	echo "    e2e-worker: $$TOKEN" >> tests/e2e_cluster/leader-config.yaml; \
+	echo "Generated join token and swarm code for relay cluster e2e test"; \
+	docker compose -f docker-compose.cluster-relay.yml build; \
+	export HIVE_JOIN_TOKEN=$$TOKEN; \
+	export HIVE_SWARM_CODE=$$SWARM; \
+	docker compose -f docker-compose.cluster-relay.yml up -d; \
+	echo "Waiting for leader + relay registration..."; \
+	sleep 15; \
+	PORT=$$(docker compose -f docker-compose.cluster-relay.yml port leader 8080 | cut -d: -f2); \
+	LEADER_ID=$$(docker compose -f docker-compose.cluster-relay.yml ps -q leader); \
+	WORKER_ID=$$(docker compose -f docker-compose.cluster-relay.yml ps -q worker); \
+	HIVE_E2E_URL=http://localhost:$$PORT \
+	HIVE_LEADER_CONTAINER=$$LEADER_ID \
+	HIVE_WORKER_CONTAINER=$$WORKER_ID \
+	go test ./tests/e2e_cluster/... -tags=e2e_cluster -v -count=1 -timeout=10m; \
+	EXIT=$$?; \
+	echo "=== LEADER LOGS ==="; \
+	docker compose -f docker-compose.cluster-relay.yml logs leader --tail=50; \
+	echo "=== WORKER LOGS ==="; \
+	docker compose -f docker-compose.cluster-relay.yml logs worker --tail=50; \
+	docker compose -f docker-compose.cluster-relay.yml down -v; \
 	rm -f tests/e2e_cluster/leader-config.yaml; \
 	exit $$EXIT
 

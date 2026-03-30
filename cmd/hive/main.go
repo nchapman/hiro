@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -228,20 +227,10 @@ func run() error {
 			})
 
 			// Relayed connections feed into the same gRPC server.
+			// The gRPC server already has TLS credentials, so we pass the
+			// raw TCP connection — gRPC handles the mTLS handshake itself.
 			rc.Run(discoveryCtx, func(conn net.Conn) {
-				// Wrap the relayed connection with TLS and feed it to the gRPC server.
-				// The gRPC server is already configured with ServerTLSConfig, but relayed
-				// connections arrive as raw TCP. We need to manually wrap them in TLS.
-				tlsConn := tls.Server(conn, serverTLS)
-				if err := tlsConn.Handshake(); err != nil {
-					logger.Warn("relay: mTLS handshake failed", "error", err)
-					conn.Close()
-					return
-				}
-				// Serve this single connection on the gRPC server.
-				// grpc.Server doesn't have a ServeConn method, so we create a
-				// single-connection listener.
-				lis := newSingleConnListener(tlsConn)
+				lis := newSingleConnListener(conn)
 				clusterGRPC.Serve(lis)
 			})
 		}()

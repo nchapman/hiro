@@ -1,0 +1,55 @@
+# Cluster relay e2e test — run with: make test-cluster-relay
+# Leader and worker are on SEPARATE Docker networks so they cannot
+# reach each other directly. Both have internet access to reach the
+# live tracker (discover.hellohiro.ai) and relay (relay.hellohiro.ai).
+# The leader self-tests, finds itself unreachable, connects to the relay.
+# The worker discovers the leader via tracker, direct fails, falls back
+# to relay. All gRPC traffic flows through the relay with mTLS end-to-end.
+services:
+  leader:
+    build: .
+    init: true
+    networks:
+      - leader-net
+    ports:
+      - "0:8080"  # HTTP API for test harness (host access only)
+    environment:
+      - HIVE_ADDR=:8080
+      - HIVE_CLUSTER_ADDR=:8081
+      - HIVE_ROOT=/hive
+      - HIVE_TRACKER_URL=https://discover.hellohiro.ai
+      - HIVE_SWARM_CODE=${HIVE_SWARM_CODE}
+    volumes:
+      - leader-hive:/hive
+      - ./tests/e2e_cluster/leader-config.yaml:/hive/config.yaml
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+
+  worker:
+    build: .
+    init: true
+    networks:
+      - worker-net  # separate network — no direct path to leader
+    depends_on:
+      leader:
+        condition: service_healthy
+    environment:
+      - HIVE_ROOT=/hive
+      - HIVE_MODE=worker
+      - HIVE_TRACKER_URL=https://discover.hellohiro.ai
+      - HIVE_SWARM_CODE=${HIVE_SWARM_CODE}
+      - HIVE_JOIN_TOKEN=${HIVE_JOIN_TOKEN}
+      # No HIVE_LEADER — discovers via tracker, connects via relay
+    volumes:
+      - worker-hive:/hive
+
+networks:
+  leader-net:
+  worker-net:
+
+volumes:
+  leader-hive:
+  worker-hive:

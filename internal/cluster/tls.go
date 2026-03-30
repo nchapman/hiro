@@ -58,6 +58,7 @@ func ServerTLSConfig(cert tls.Certificate) *tls.Config {
 		Certificates: []tls.Certificate{cert},
 		ClientAuth:   tls.RequireAnyClientCert,
 		MinVersion:   tls.VersionTLS13,
+		NextProtos:   []string{"h2"}, // required for gRPC over TLS
 	}
 }
 
@@ -71,6 +72,7 @@ func ClientTLSConfig(clientCert tls.Certificate, expectedPubKey ed25519.PublicKe
 		Certificates:       []tls.Certificate{clientCert},
 		InsecureSkipVerify: true, // we do our own verification below
 		MinVersion:         tls.VersionTLS13,
+		NextProtos:         []string{"h2"}, // required for gRPC over TLS
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
 				return errors.New("server presented no certificate")
