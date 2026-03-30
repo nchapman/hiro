@@ -525,10 +525,10 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**Race on ephemeralMsgs**~~ | `inference/loop.go` | **FIXED** — New `ephemeralMu` mutex with copy-on-read pattern. |
 | ~~**Race on lastShared skills cache**~~ | `inference/loop.go` | **FIXED** — New `skillsMu` mutex. Lock ordering: `updateMu` → `skillsMu`. |
 | ~~**Config push uses unbounded context**~~ | `agent/manager_session.go` | **FIXED** — 10s `context.WithTimeout` for `CreateLanguageModel` in config push. |
-| **allowedRoots is a global** | `agent/tools/resolve.go` | Set once, never guarded. Should be immutable or mutex-protected. |
-| **No gRPC flow control** | `cluster/leader_stream.go` | Can queue unlimited messages before receiver drains. No `MaxConcurrentStreams` set. (TODO) |
+| ~~**allowedRoots is a global**~~ | `agent/tools/resolve.go` | **FIXED** — `atomic.Value` for goroutine-safe reads; `isInsideRoots` takes roots as parameter. |
+| ~~**No gRPC flow control**~~ | `cmd/hive/bootstrap.go` | **FIXED** — `MaxConcurrentStreams(64)` per-connection cap. |
 | ~~**Unbounded handler goroutines**~~ | `cluster/worker_stream.go` | **FIXED** — Added semaphore (64 concurrent handlers max). |
-| **No recv timeout on streams** | `cluster/leader_stream.go` | Hung nodes block the readLoop indefinitely. (TODO — requires heartbeat-based liveness) |
+| ~~**No recv timeout on streams**~~ | `cmd/hive/bootstrap.go` | **FIXED** — gRPC keepalive: ping every 30s, 10s timeout for hung node detection. |
 
 ### Testing Gaps
 
