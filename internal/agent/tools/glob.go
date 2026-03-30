@@ -19,8 +19,6 @@ import (
 //go:embed glob.md
 var globDescription string
 
-const maxGlobResults = 100
-
 type GlobParams struct {
 	Pattern string `json:"pattern"        description:"The glob pattern to match files against."`
 	Path    string `json:"path,omitempty"  description:"The directory to search in. Defaults to the working directory."`
@@ -92,10 +90,6 @@ func globFiles(ctx context.Context, pattern, searchPath string) ([]string, bool,
 
 	return globWalk(pattern, searchPath)
 }
-
-// maxRgStatEntries caps the number of files we stat for mod-time sorting
-// from ripgrep output, to avoid unbounded syscalls on large trees.
-const maxRgStatEntries = 1000
 
 // runRgGlob parses null-separated ripgrep --files output with streaming.
 func runRgGlob(cmd *exec.Cmd, searchRoot string) ([]string, error) {

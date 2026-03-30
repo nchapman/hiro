@@ -13,9 +13,6 @@ import (
 //go:embed read_file.md
 var readFileDescription string
 
-const maxFileReadLen = 64000
-const maxFileSize = 10 * 1024 * 1024 // 10MB — reject before reading into memory
-
 type ReadFileParams struct {
 	Path   string `json:"path"             description:"Absolute or relative path to the file to read."`
 	Offset int    `json:"offset,omitempty"  description:"Line number to start reading from (1-based). Defaults to 1."`

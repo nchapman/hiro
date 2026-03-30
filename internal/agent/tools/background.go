@@ -11,23 +11,6 @@ import (
 	"time"
 )
 
-const (
-	// MaxBackgroundJobs is the maximum number of concurrent background jobs.
-	MaxBackgroundJobs = 50
-
-	// completedJobRetention is how long completed jobs are kept before cleanup.
-	completedJobRetention = 8 * time.Hour
-
-	// maxBufferBytes is the maximum size of each stdout/stderr buffer (4MB).
-	maxBufferBytes = 4 << 20
-
-	// killTimeout bounds how long Kill waits for a job to exit.
-	killTimeout = 5 * time.Second
-
-	// waitDelay is how long to wait for pipe draining after process kill.
-	waitDelay = 2 * time.Second
-)
-
 // cappedBuffer is a thread-safe writer that drops data beyond a size limit.
 type cappedBuffer struct {
 	mu   sync.RWMutex

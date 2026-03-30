@@ -42,6 +42,46 @@ func (m *Manager) cleanupWorker(id string, h *WorkerHandle) {
 	}
 }
 
+// detachWorker captures the worker handle under inst.mu and nils out the
+// worker, handle, and loop fields. If status is non-empty, it is set
+// atomically with the field nils. The returned handle can be shut down
+// outside both locks without races; callers must not hold inst.mu when
+// calling shutdownHandle (it blocks on I/O).
+func (m *Manager) detachWorker(inst *instance, status InstanceStatus) *WorkerHandle {
+	inst.mu.Lock()
+	h := inst.handle
+	inst.worker = nil
+	inst.handle = nil
+	inst.loop = nil
+	if status != "" {
+		inst.info.Status = status
+	}
+	inst.mu.Unlock()
+	return h
+}
+
+// teardownOpts controls what teardownInstance does after the worker is detached.
+type teardownOpts struct {
+	graceful  bool           // call shutdownHandle (false when process already dead)
+	removeDir bool           // os.RemoveAll(instanceDir)
+	status    InstanceStatus // set instance status (e.g. InstanceStatusStopped), zero = skip
+}
+
+// teardownInstance performs post-detach cleanup: optional graceful shutdown,
+// worker resource cleanup, status persistence, and directory removal.
+func (m *Manager) teardownInstance(id string, h *WorkerHandle, opts teardownOpts) {
+	if opts.graceful && h != nil {
+		m.shutdownHandle(h)
+	}
+	m.cleanupWorker(id, h)
+	if opts.status != "" {
+		m.setInstanceStatus(id, string(opts.status))
+	}
+	if opts.removeDir {
+		os.RemoveAll(m.instanceDir(id))
+	}
+}
+
 // softStop gracefully shuts down a persistent instance's worker process
 // but keeps it in the registry with status "stopped".
 func (m *Manager) softStop(id string) {
@@ -54,21 +94,11 @@ func (m *Manager) softStop(id string) {
 		m.mu.Unlock()
 		return
 	}
-	inst.mu.Lock()
-	h := inst.handle
-	inst.worker = nil
-	inst.handle = nil
-	inst.loop = nil
-	inst.info.Status = InstanceStatusStopped
-	inst.mu.Unlock()
+	h := m.detachWorker(inst, InstanceStatusStopped)
 	m.mu.Unlock()
 
 	// Shutdown the captured handle outside the lock (blocks on I/O).
-	m.shutdownHandle(h)
-	m.cleanupWorker(id, h)
-
-	// Persist stopped state so it survives server restarts.
-	m.setInstanceStatus(id, "stopped")
+	m.teardownInstance(id, h, teardownOpts{graceful: true, status: InstanceStatusStopped})
 }
 
 // reregisterStopped puts an instance back into the registry as stopped.
@@ -120,33 +150,21 @@ func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
 
 		if deadInst.info.Mode.IsPersistent() {
 			m.mu.Lock()
-			deadInst.mu.Lock()
 			if deadInst.info.Status == InstanceStatusStopped {
-				deadInst.mu.Unlock()
 				m.mu.Unlock()
 				continue
 			}
-			h := deadInst.handle
-			deadInst.worker = nil
-			deadInst.handle = nil
-			deadInst.loop = nil
-			deadInst.info.Status = InstanceStatusStopped
-			deadInst.mu.Unlock()
+			h := m.detachWorker(deadInst, InstanceStatusStopped)
 			m.mu.Unlock()
 
-			m.cleanupWorker(id, h)
-			m.setInstanceStatus(id, "stopped")
+			m.teardownInstance(id, h, teardownOpts{status: InstanceStatusStopped})
 		} else {
 			m.mu.Lock()
-			h := deadInst.handle
-			deadInst.worker = nil
-			deadInst.handle = nil
-			deadInst.loop = nil
+			h := m.detachWorker(deadInst, "")
 			m.unregisterLocked(id, deadInst)
 			m.mu.Unlock()
 
-			m.cleanupWorker(id, h)
-			os.RemoveAll(m.instanceDir(id))
+			m.teardownInstance(id, h, teardownOpts{removeDir: true})
 		}
 	}
 }
@@ -158,12 +176,7 @@ func (m *Manager) removeInstance(id string) {
 	inst, ok := m.instances[id]
 	var h *WorkerHandle
 	if ok {
-		inst.mu.Lock()
-		h = inst.handle
-		inst.worker = nil
-		inst.handle = nil
-		inst.loop = nil
-		inst.mu.Unlock()
+		h = m.detachWorker(inst, "")
 	}
 	m.unregisterLocked(id, inst)
 	m.mu.Unlock()
@@ -172,10 +185,8 @@ func (m *Manager) removeInstance(id string) {
 		return
 	}
 
-	m.shutdownHandle(h)
-	m.cleanupWorker(id, h)
-
-	if !inst.info.Mode.IsPersistent() {
-		os.RemoveAll(m.instanceDir(id))
-	}
+	m.teardownInstance(id, h, teardownOpts{
+		graceful:  true,
+		removeDir: !inst.info.Mode.IsPersistent(),
+	})
 }

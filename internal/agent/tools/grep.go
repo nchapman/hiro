@@ -13,21 +13,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 )
 
 //go:embed grep.md
 var grepDescription string
-
-const (
-	maxGrepResults    = 100
-	maxGrepLineWidth  = 500
-	maxMatchesPerFile = 50
-	grepTimeout       = 30 * time.Second
-	maxRgOutputBytes  = 64 * 1024 * 1024 // 64 MB cap on ripgrep output
-)
 
 type GrepParams struct {
 	Pattern     string `json:"pattern"              description:"The regex pattern to search for in file contents."`

@@ -16,11 +16,6 @@ import (
 //go:embed fetch.md
 var fetchDescription string
 
-const (
-	fetchTimeout    = 30 * time.Second
-	maxResponseBody = 64000
-)
-
 type FetchParams struct {
 	URL string `json:"url" description:"The URL to fetch."`
 }

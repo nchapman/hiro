@@ -14,12 +14,6 @@ import (
 //go:embed bash.md
 var bashDescription string
 
-const (
-	bashTimeout         = 120 * time.Second
-	maxOutputLen        = 32000
-	autoBackgroundAfter = 60 * time.Second
-)
-
 type BashParams struct {
 	Command         string `json:"command"                    description:"The shell command to execute."`
 	WorkingDir      string `json:"working_dir,omitempty"      description:"Working directory for the command. Defaults to the agent's working directory."`
