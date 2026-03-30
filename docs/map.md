@@ -172,7 +172,11 @@ The newest major subsystem. Leader/worker topology over gRPC with mTLS.
 
 | File | LOC | Role |
 |------|-----|------|
-| `filesync.go` | 723 | Bidirectional file sync (atomic writes, streaming tar extraction) |
+| `filesync.go` | 82 | Core type, config, constructor, Stop |
+| `filesync_filter.go` | 71 | Constants, ignore rules, `shouldIgnore`, `sanitizeNodeID` |
+| `filesync_initial.go` | 148 | `CreateInitialSync`, `ApplyInitialSyncStream` (tar create/extract) |
+| `filesync_incremental.go` | 261 | `WatchAndSync`, `sendChange`, `ApplyFileUpdate`, echo suppression |
+| `filesync_util.go` | 207 | `Reconcile`, `addWatchRecursive`, `scanNewDir`, atomic write helpers |
 | `relay.go` | 399 | NAT traversal relay for workers behind firewalls |
 | `leader_service.go` | 351 | gRPC service: worker registration, heartbeats, tool dispatch |
 | `discovery.go` | 332 | Tracker-based discovery (register, discover, heartbeat) |
@@ -469,9 +473,9 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**NodeID/HomeNodeID duplicated**~~ | `ipc`, `cluster` | **DONE** — Canonical definitions in `ipc/host_manager.go`. Cluster re-exports from ipc. |
 | ~~**API Server setter injection**~~ | `api/server.go` | **DONE** — `NewServer` takes required deps (`cp`, `pdb`, `rootDir`) in constructor. Only truly late-bound setters remain (`SetManager`, `SetStartManager`, `SetWatcher`). `hasManager()` helper. |
 | ~~**main.go cluster setup inline**~~ | `cmd/hive/main.go` | **DONE** — Extracted to `bootstrap.go`: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator`. main.go reduced from 406 to ~340 LOC. |
-| **filesync.go does too much** (723 LOC) | `cluster/filesync.go` | Initial sync, incremental sync, conflict resolution, watcher management. Could split into modules. |
-| **Cleanup logic duplicated** | `agent/manager_worker.go` | Worker cleanup appears in `cleanupWorker()`, `softStop()`, `removeInstance()`, and `watchWorker()`. Now colocated in one file. |
-| **Resource limits scattered** | `agent/tools/*.go`, `inference/*.go` | File sizes, output caps, timeouts, token estimates spread across files as bare constants. Centralize into a config struct. |
+| ~~**filesync.go does too much**~~ (723 LOC) | `cluster/filesync*.go` | **DONE** — Split into 5 files: core (82), filter (71), initial sync (148), incremental (261), util (207). |
+| ~~**Cleanup logic duplicated**~~ | `agent/manager_worker.go` | **DONE** — 4 paths consolidated into `detachWorker` (atomic field nil + status under `inst.mu`) + `teardownInstance` (parameterized post-detach I/O). |
+| ~~**Resource limits scattered**~~ | `agent/tools/limits.go` | **DONE** — 18 constants from 7 files centralized into `limits.go`, organized by category (timeouts, output sizes, result limits). |
 
 ### Correctness
 
@@ -576,3 +580,4 @@ Completed items struck through. Next priorities:
 9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests). Remaining: rate limiter proxy support, setup CSRF hardening, password change session reissue.
 10. ~~**Architecture refactoring**~~ — **DONE** (6 changes: extract `internal/provider`, tool schema cleanup, `SecretEnvSetter` interface, `NodeID` canonicalization, API server constructor, `bootstrap.go` extraction).
 11. ~~**Error handling hardening**~~ — **DONE** (21 fixes across 18 files: infinite loop cycle detection, 2 race condition fixes with new mutexes, nil deref fix, 5 JSON marshal checks, spawn isolation errors, WalkDir errors, rand.Read check, RowsAffected checks, session query InstanceID fix, LatestSessionByInstance error surfacing, auth secret validation, config push timeout, history tool error responses, port parse check, restore config logging).
+12. ~~**Structural cleanup**~~ — **DONE** (3 changes: split filesync.go 736→5 files, consolidate 4 duplicated cleanup paths into `detachWorker`+`teardownInstance`, centralize 18 resource limit constants into `limits.go`).
