@@ -881,3 +881,116 @@ func TestHandleCommand_SaveWarning(t *testing.T) {
 	}
 }
 
+// --- Auth getter/setter tests ---
+
+func TestAuth_NeedsSetup(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	if !cp.NeedsSetup() {
+		t.Error("expected NeedsSetup=true initially")
+	}
+	cp.SetPasswordHash("$2a$10$hash")
+	if cp.NeedsSetup() {
+		t.Error("expected NeedsSetup=false after SetPasswordHash")
+	}
+}
+
+func TestAuth_PasswordHash(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	if cp.PasswordHash() != "" {
+		t.Error("expected empty hash initially")
+	}
+	cp.SetPasswordHash("$2a$10$testhash")
+	if cp.PasswordHash() != "$2a$10$testhash" {
+		t.Errorf("unexpected hash: %s", cp.PasswordHash())
+	}
+}
+
+func TestAuth_SetPasswordHash_InvalidatesSigner(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"aabbccdd\"\n"), 0600)
+
+	cp, _ := Load(path, testLogger())
+	signer1, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp.SetPasswordHash("$2a$10$changed")
+	signer2, err := cp.TokenSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer1 == signer2 {
+		t.Error("expected new signer after password change")
+	}
+}
+
+func TestPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cp, _ := Load(path, testLogger())
+	if cp.Path() != path {
+		t.Errorf("Path() = %s, want %s", cp.Path(), path)
+	}
+}
+
+// --- Cluster getter tests ---
+
+func TestClusterGetters(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(`cluster:
+  mode: worker
+  leader_addr: "leader:9090"
+  join_token: "tok123"
+  node_name: "node-1"
+  swarm_code: "swarm42"
+`), 0600)
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v := cp.ClusterLeaderAddr(); v != "leader:9090" {
+		t.Errorf("ClusterLeaderAddr() = %q", v)
+	}
+	if v := cp.ClusterJoinToken(); v != "tok123" {
+		t.Errorf("ClusterJoinToken() = %q", v)
+	}
+	if v := cp.ClusterNodeName(); v != "node-1" {
+		t.Errorf("ClusterNodeName() = %q", v)
+	}
+	if v := cp.ClusterSwarmCode(); v != "swarm42" {
+		t.Errorf("ClusterSwarmCode() = %q", v)
+	}
+}
+
+func TestClusterSwarmCode_EnvOverride(t *testing.T) {
+	t.Setenv("HIVE_SWARM_CODE", "env-swarm")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("cluster:\n  swarm_code: config-swarm\n"), 0600)
+
+	cp, _ := Load(path, testLogger())
+	if v := cp.ClusterSwarmCode(); v != "env-swarm" {
+		t.Errorf("expected env var to win, got %q", v)
+	}
+}
+
+// --- Provider getter tests ---
+
+func TestDefaultModel(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	if cp.DefaultModel() != "" {
+		t.Error("expected empty default model")
+	}
+	cp.SetDefaultModel("claude-3-opus")
+	if cp.DefaultModel() != "claude-3-opus" {
+		t.Errorf("unexpected: %s", cp.DefaultModel())
+	}
+}
+
