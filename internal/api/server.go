@@ -32,6 +32,7 @@ type Server struct {
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
 	watcher      *watcher.Watcher        // filesystem watcher for HIVE_ROOT (nil = no watching)
+	limiter      *loginLimiter           // login rate limiter (per-server for testability)
 	mux          *http.ServeMux
 	logger       *slog.Logger
 }
@@ -40,9 +41,10 @@ type Server struct {
 // will be served for any request that doesn't match an API route.
 func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
 	s := &Server{
-		webFS:  webFS,
-		mux:    http.NewServeMux(),
-		logger: logger,
+		webFS:   webFS,
+		limiter: defaultLimiter,
+		mux:     http.NewServeMux(),
+		logger:  logger,
 	}
 	s.routes()
 	return s

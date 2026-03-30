@@ -17,7 +17,8 @@ type loginLimiter struct {
 	attempts map[string][]time.Time
 }
 
-var limiter = &loginLimiter{attempts: make(map[string][]time.Time)}
+// defaultLimiter is the package-level login rate limiter.
+var defaultLimiter = &loginLimiter{attempts: make(map[string][]time.Time)}
 
 // allow returns true if the IP has not exceeded 5 attempts in the last minute.
 func (l *loginLimiter) allow(ip string) bool {
@@ -86,7 +87,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := r.RemoteAddr
-	if !limiter.allow(ip) {
+	if !s.limiter.allow(ip) {
 		http.Error(w, "too many login attempts, try again later", http.StatusTooManyRequests)
 		return
 	}
@@ -106,7 +107,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
-		limiter.record(ip)
+		s.limiter.record(ip)
 		http.Error(w, "invalid password", http.StatusUnauthorized)
 		return
 	}
