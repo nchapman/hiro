@@ -28,7 +28,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "setup already complete", http.StatusConflict)
 		return
 	}
-	if !isSameOrigin(r) {
+	if !isLoopbackOrigin(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -111,7 +111,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "setup already complete; use /api/settings/providers/{type}/test", http.StatusConflict)
 		return
 	}
-	if !isSameOrigin(r) {
+	if !isLoopbackOrigin(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

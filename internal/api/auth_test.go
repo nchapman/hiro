@@ -265,6 +265,17 @@ func TestChangePassword_Success(t *testing.T) {
 		t.Fatalf("status=%d, want 200. body=%s", rec.Code, rec.Body.String())
 	}
 
+	// Password change should issue a new session token in the response.
+	var newToken string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "hive_session" && c.Value != "" {
+			newToken = c.Value
+		}
+	}
+	if newToken == "" {
+		t.Fatal("password change response should include a new hive_session cookie")
+	}
+
 	// Old token should be invalidated (password change rotates session secret).
 	req2 := httptest.NewRequest("GET", "/api/instances", nil)
 	req2.AddCookie(&http.Cookie{Name: "hive_session", Value: token})
@@ -272,6 +283,15 @@ func TestChangePassword_Success(t *testing.T) {
 	srv.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusUnauthorized {
 		t.Error("old session token should be invalidated after password change")
+	}
+
+	// New token from password change response should work.
+	req2b := httptest.NewRequest("GET", "/api/instances", nil)
+	req2b.AddCookie(&http.Cookie{Name: "hive_session", Value: newToken})
+	rec2b := httptest.NewRecorder()
+	srv.ServeHTTP(rec2b, req2b)
+	if rec2b.Code == http.StatusUnauthorized {
+		t.Error("new session token from password change should be valid")
 	}
 
 	// New password should work.

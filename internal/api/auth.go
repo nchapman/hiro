@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -86,7 +87,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := r.RemoteAddr
+	ip := clientIP(r)
 	if !s.limiter.allow(ip) {
 		http.Error(w, "too many login attempts, try again later", http.StatusTooManyRequests)
 		return
@@ -182,6 +183,22 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after password change", "error", err)
 	}
+
+	// Issue a new session token so the requesting user stays logged in
+	// after the secret rotation invalidates all existing sessions.
+	signer := s.tokenSigner()
+	if signer != nil {
+		token := signer.Create()
+		http.SetCookie(w, &http.Cookie{
+			Name:     "hive_session",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   86400,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -208,6 +225,37 @@ func (s *Server) isAuthenticated(r *http.Request) bool {
 	}
 
 	return false
+}
+
+// clientIP extracts the client's IP address for rate limiting. Proxy
+// headers (X-Forwarded-For, X-Real-Ip) are only trusted when the direct
+// connection comes from a loopback or private address (i.e., a local
+// reverse proxy). This prevents external clients from spoofing their IP
+// to bypass the rate limiter. The port is stripped so reconnections from
+// different ephemeral ports are correctly grouped.
+func clientIP(r *http.Request) string {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+
+	// Only trust proxy headers when the direct peer is a local proxy.
+	ip := net.ParseIP(remoteHost)
+	trustedProxy := ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+
+	if trustedProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if first, _, ok := strings.Cut(xff, ","); ok {
+				return strings.TrimSpace(first)
+			}
+			return strings.TrimSpace(xff)
+		}
+		if xri := r.Header.Get("X-Real-Ip"); xri != "" {
+			return strings.TrimSpace(xri)
+		}
+	}
+
+	return remoteHost
 }
 
 // requireAuth is middleware that enforces authentication.

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/fantasy"
@@ -21,32 +22,46 @@ type FetchParams struct {
 }
 
 // ssrfTransport is an http.Transport that blocks connections to private,
-// loopback, and link-local addresses. This prevents agents from reaching
-// cloud metadata endpoints (169.254.169.254) or internal services.
+// loopback, and link-local addresses. DNS is resolved before dialing and
+// all resolved IPs are checked, preventing DNS rebinding attacks where a
+// name initially resolves to a public IP then switches to a private one.
 var ssrfTransport = &http.Transport{
 	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		conn, err := dialer.DialContext(ctx, network, addr)
+		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("fetch blocked: invalid address %s: %w", addr, err)
 		}
-		host, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-		ip := net.ParseIP(host)
-		if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
-			conn.Close()
-			return nil, fmt.Errorf("fetch blocked: %s resolves to non-public address %s", addr, host)
+
+		// Resolve DNS explicitly so we can check all IPs before connecting.
+		addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("fetch blocked: DNS resolution failed for %s: %w", host, err)
 		}
-		return conn, nil
+
+		for _, a := range addrs {
+			ip := net.ParseIP(a)
+			if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+				return nil, fmt.Errorf("fetch blocked: %s resolves to non-public address %s", host, a)
+			}
+		}
+
+		// Dial the first resolved address directly to avoid re-resolving.
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(addrs[0], port))
 	},
 }
 
-// ssrfEnabled controls whether SSRF protection is active. Set to true
-// when running under UID isolation. Tests run with this disabled.
-var ssrfEnabled bool
+// ssrfEnabled controls whether SSRF protection is active. Defaults to
+// true (secure by default). Tests that need localhost access disable it
+// explicitly via SetSSRFProtection(false). Uses atomic.Bool for
+// goroutine safety since the fetch tool runs concurrently.
+var ssrfEnabled atomic.Bool
+
+func init() { ssrfEnabled.Store(true) }
 
 // SetSSRFProtection enables or disables SSRF protection for the fetch tool.
 func SetSSRFProtection(enabled bool) {
-	ssrfEnabled = enabled
+	ssrfEnabled.Store(enabled)
 }
 
 // NewFetchTool creates a tool that fetches content from URLs.
@@ -65,7 +80,7 @@ func NewFetchTool() fantasy.AgentTool {
 			}
 
 			client := &http.Client{Timeout: fetchTimeout}
-			if ssrfEnabled {
+			if ssrfEnabled.Load() {
 				client.Transport = ssrfTransport
 			}
 			req, err := http.NewRequestWithContext(ctx, "GET", params.URL, nil)

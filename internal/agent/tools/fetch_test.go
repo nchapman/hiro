@@ -8,8 +8,8 @@ import (
 )
 
 func TestFetch_SSRFBlocked(t *testing.T) {
-	origEnabled := ssrfEnabled
-	defer func() { ssrfEnabled = origEnabled }()
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
 	SetSSRFProtection(true)
 
 	// Start a local server — it'll be on 127.0.0.1 which is loopback.
@@ -30,8 +30,8 @@ func TestFetch_SSRFBlocked(t *testing.T) {
 }
 
 func TestFetch_SSRFBlocksNonRoutable(t *testing.T) {
-	origEnabled := ssrfEnabled
-	defer func() { ssrfEnabled = origEnabled }()
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
 	SetSSRFProtection(true)
 
 	// Test that the transport itself rejects private IPs by checking
@@ -53,8 +53,8 @@ func TestFetch_SSRFBlocksNonRoutable(t *testing.T) {
 }
 
 func TestFetch_SSRFAllowedWhenDisabled(t *testing.T) {
-	origEnabled := ssrfEnabled
-	defer func() { ssrfEnabled = origEnabled }()
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
 	SetSSRFProtection(false)
 
 	// With SSRF disabled, localhost test servers work fine.
@@ -71,6 +71,10 @@ func TestFetch_SSRFAllowedWhenDisabled(t *testing.T) {
 }
 
 func TestFetch_BasicGet(t *testing.T) {
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
+	SetSSRFProtection(false)
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("hello from server"))
@@ -94,6 +98,10 @@ func TestFetch_BasicGet(t *testing.T) {
 }
 
 func TestFetch_JSON(t *testing.T) {
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
+	SetSSRFProtection(false)
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"key": "value"}`))
@@ -111,6 +119,10 @@ func TestFetch_JSON(t *testing.T) {
 }
 
 func TestFetch_404(t *testing.T) {
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
+	SetSSRFProtection(false)
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
@@ -149,6 +161,10 @@ func TestFetch_InvalidURL(t *testing.T) {
 }
 
 func TestFetch_UnreachableHost(t *testing.T) {
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
+	SetSSRFProtection(false)
+
 	// Use a closed server to fail fast instead of timing out
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	ts.Close() // immediately close so connection is refused
@@ -164,6 +180,10 @@ func TestFetch_UnreachableHost(t *testing.T) {
 }
 
 func TestFetch_LargeResponse(t *testing.T) {
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
+	SetSSRFProtection(false)
+
 	// Return more than maxResponseBody bytes
 	big := strings.Repeat("x", maxResponseBody+1000)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +202,10 @@ func TestFetch_LargeResponse(t *testing.T) {
 }
 
 func TestFetch_ChecksUserAgent(t *testing.T) {
+	origEnabled := ssrfEnabled.Load()
+	defer ssrfEnabled.Store(origEnabled)
+	SetSSRFProtection(false)
+
 	var gotUA string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")

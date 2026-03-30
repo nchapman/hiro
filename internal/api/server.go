@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 
@@ -354,6 +355,34 @@ func isSameOrigin(r *http.Request) bool {
 		}
 	}
 	return originHost == host
+}
+
+// isLoopbackOrigin hardens setup endpoints against DNS rebinding attacks.
+// If an Origin header is present (browser request), it must match the Host
+// header AND the host must be a loopback address. Without an Origin header
+// (non-browser clients like curl), the request is allowed since DNS
+// rebinding requires a browser.
+func isLoopbackOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// No Origin → not a browser cross-origin request → no DNS rebinding risk.
+		return true
+	}
+	if !isSameOrigin(r) {
+		return false
+	}
+	// Browser request with matching Origin/Host — verify the host is loopback.
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
