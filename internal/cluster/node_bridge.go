@@ -191,7 +191,13 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	socketPath := fmt.Sprintf("/tmp/hive-agent-%s.sock", cfg.SessionID)
+	// Create a private socket directory (0700) so the socket is inaccessible
+	// to other processes from the moment it's created (no TOCTOU window).
+	socketDir := fmt.Sprintf("/tmp/hive-%s", cfg.SessionID[:18])
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating socket dir: %w", err)
+	}
+	socketPath := socketDir + "/a.sock"
 	cfg.AgentSocket = socketPath
 
 	cmd := exec.CommandContext(ctx, self, "agent")
@@ -271,6 +277,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		close: func() {
 			conn.Close()
 			os.Remove(socketPath)
+			os.Remove(socketDir)
 		},
 		done: done,
 	}, nil

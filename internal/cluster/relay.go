@@ -2,16 +2,17 @@ package cluster
 
 import (
 	"context"
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"strings"
 	"sync"
 	"time"
 )
@@ -79,7 +80,8 @@ func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 			return
 		}
 
-		// Reset backoff after a healthy session; increase on immediate failures.
+		// Reset backoff after a healthy session; increase on immediate failures
+		// (e.g., conflict from stale entry that the relay hasn't cleaned up yet).
 		if wasConnected {
 			backoff = 5 * time.Second
 		} else if backoff < 120*time.Second {
@@ -118,6 +120,12 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 	}
 	if status == relayStatusConflict {
 		conn.Close()
+		// NOTE: Conflict is NOT a permanent error. The most common case is our
+		// previous control connection died but the relay hasn't cleaned it up yet
+		// (relay has a 5-minute read timeout on control connections). The Run()
+		// loop retries with exponential backoff until the stale entry expires.
+		// Do NOT treat this as fatal — it would prevent reconnection after any
+		// transient network issue.
 		return false, fmt.Errorf("relay: leader already registered for this swarm")
 	}
 	if status != relayStatusOK {
@@ -279,13 +287,21 @@ func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity
 }
 
 // SelfTestReachability checks if this node's gRPC server is reachable at the
-// given address by performing a TLS handshake. A bare TCP connect would give
-// false positives from captive portals or middleboxes.
+// given address by performing a TLS handshake and verifying the responding
+// server presents our own certificate. This prevents false positives from
+// captive portals, middleboxes, or other TLS services on the same port.
 func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
+	expectedDER := tlsCert.Certificate[0]
 	tlsCfg := &tls.Config{
 		Certificates:       []tls.Certificate{tlsCert},
-		InsecureSkipVerify: true, // we're dialing ourselves
+		InsecureSkipVerify: true,
 		NextProtos:         []string{"h2"},
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 || !bytes.Equal(rawCerts[0], expectedDER) {
+				return fmt.Errorf("responding server is not us")
+			}
+			return nil
+		},
 	}
 	conn, err := tls.DialWithDialer(
 		&net.Dialer{Timeout: 3 * time.Second},
@@ -306,10 +322,6 @@ func readRelayStatus(conn net.Conn) (byte, error) {
 	}
 	conn.SetReadDeadline(time.Time{})
 	return status[0], nil
-}
-
-func isConflictError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "already registered")
 }
 
 func relayStatusName(status byte) string {
@@ -367,10 +379,19 @@ func (l *ChannelListener) Accept() (net.Conn, error) {
 func (l *ChannelListener) Close() error {
 	select {
 	case <-l.done:
+		return nil // already closed
 	default:
 		close(l.done)
 	}
-	return nil
+	// Drain and close any buffered connections that gRPC will never accept.
+	for {
+		select {
+		case c := <-l.ch:
+			c.Close()
+		default:
+			return nil
+		}
+	}
 }
 
 func (l *ChannelListener) Addr() net.Addr {

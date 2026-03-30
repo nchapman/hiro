@@ -165,6 +165,7 @@ func run() error {
 	// Start tracker discovery announcements if configured.
 	discoveryCtx, discoveryCancel := context.WithCancel(ctx)
 	defer discoveryCancel()
+	var relayLis *cluster.ChannelListener // closed on shutdown if set
 	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
 		swarmCode := cp.ClusterSwarmCode()
 		if swarmCode == "" {
@@ -196,7 +197,7 @@ func run() error {
 
 		// Create a shared listener for relayed connections. gRPC's Serve()
 		// is called once and accepts connections as they arrive via Enqueue().
-		relayLis := cluster.NewChannelListener(clusterLis.Addr())
+		relayLis = cluster.NewChannelListener(clusterLis.Addr())
 		go clusterGRPC.Serve(relayLis)
 
 		// After first announce, check if we're reachable. If not, register
@@ -381,6 +382,9 @@ func run() error {
 
 	err = httpServer.Shutdown(shutdownCtx)
 	discoveryCancel()
+	if relayLis != nil {
+		relayLis.Close()
+	}
 	clusterGRPC.GracefulStop()
 	leaderSync.Stop()
 	if mgr != nil {
