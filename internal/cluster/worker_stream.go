@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"sync"
 
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
@@ -23,6 +24,7 @@ type WorkerStream struct {
 	joinToken  string
 	capacity   int32
 	tlsConfig  *tls.Config
+	dialFunc   func(ctx context.Context, addr string) (net.Conn, error)
 	logger     *slog.Logger
 
 	// Handlers for incoming commands from the leader.
@@ -45,7 +47,8 @@ type WorkerStreamConfig struct {
 	NodeName   string
 	JoinToken  string
 	Capacity   int32
-	TLSConfig  *tls.Config // if set, use mTLS; otherwise plaintext
+	TLSConfig  *tls.Config                                              // if set, use mTLS; otherwise plaintext
+	DialFunc   func(ctx context.Context, addr string) (net.Conn, error) // optional custom dialer (e.g. relay)
 	Logger     *slog.Logger
 }
 
@@ -57,6 +60,7 @@ func NewWorkerStream(cfg WorkerStreamConfig) *WorkerStream {
 		joinToken:  cfg.JoinToken,
 		capacity:   cfg.Capacity,
 		tlsConfig:  cfg.TLSConfig,
+		dialFunc:   cfg.DialFunc,
 		logger:     cfg.Logger,
 	}
 }
@@ -115,9 +119,12 @@ func (w *WorkerStream) Connect(ctx context.Context) error {
 		creds = insecure.NewCredentials()
 	}
 
-	conn, err := grpc.NewClient(w.leaderAddr,
-		grpc.WithTransportCredentials(creds),
-	)
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+	if w.dialFunc != nil {
+		opts = append(opts, grpc.WithContextDialer(w.dialFunc))
+	}
+
+	conn, err := grpc.NewClient(w.leaderAddr, opts...)
 	if err != nil {
 		return fmt.Errorf("dialing leader at %s: %w", w.leaderAddr, err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -168,7 +169,7 @@ func run() error {
 	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
 		swarmCode := cp.ClusterSwarmCode()
 		if swarmCode == "" {
-			return fmt.Errorf("HIVE_SWARM_CODE is required when tracker_url is set")
+			return fmt.Errorf("cluster.swarm_code (or HIVE_SWARM_CODE) is required when tracker_url is set")
 		}
 
 		// Parse gRPC port from cluster address.
@@ -193,6 +194,57 @@ func run() error {
 
 		go dc.Run(discoveryCtx)
 		logger.Info("tracker discovery started", "tracker", trackerURL, "role", "leader")
+
+		// After first announce, check if we're reachable. If not, register
+		// with the relay so workers can reach us through it.
+		go func() {
+			// Wait for the first announce to complete so we have yourIP and relayURL.
+			time.Sleep(3 * time.Second)
+			if dc.YourIP() == "" {
+				return
+			}
+
+			publicAddr := fmt.Sprintf("%s:%d", dc.YourIP(), grpcPort)
+			if cluster.SelfTestReachability(publicAddr) {
+				logger.Info("leader is publicly reachable", "addr", publicAddr)
+				return
+			}
+
+			relayURL := dc.RelayURL()
+			if relayURL == "" {
+				logger.Warn("leader is NOT publicly reachable and no relay is configured",
+					"addr", publicAddr)
+				return
+			}
+
+			logger.Info("leader is NOT publicly reachable, connecting to relay",
+				"addr", publicAddr, "relay", relayURL)
+
+			rc := cluster.NewRelayClient(cluster.RelayConfig{
+				RelayAddr: relayURL,
+				SwarmCode: swarmCode,
+				Identity:  identity,
+				Logger:    logger,
+			})
+
+			// Relayed connections feed into the same gRPC server.
+			rc.Run(discoveryCtx, func(conn net.Conn) {
+				// Wrap the relayed connection with TLS and feed it to the gRPC server.
+				// The gRPC server is already configured with ServerTLSConfig, but relayed
+				// connections arrive as raw TCP. We need to manually wrap them in TLS.
+				tlsConn := tls.Server(conn, serverTLS)
+				if err := tlsConn.Handshake(); err != nil {
+					logger.Warn("relay: mTLS handshake failed", "error", err)
+					conn.Close()
+					return
+				}
+				// Serve this single connection on the gRPC server.
+				// grpc.Server doesn't have a ServeConn method, so we create a
+				// single-connection listener.
+				lis := newSingleConnListener(tlsConn)
+				clusterGRPC.Serve(lis)
+			})
+		}()
 	}
 
 	// Shared state for the manager lifecycle — the manager can be started
@@ -348,5 +400,45 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// singleConnListener wraps a single net.Conn as a net.Listener.
+// Accept returns the connection once, then blocks until Close is called.
+type singleConnListener struct {
+	conn net.Conn
+	ch   chan net.Conn
+	done chan struct{}
+}
+
+func newSingleConnListener(conn net.Conn) net.Listener {
+	l := &singleConnListener{
+		conn: conn,
+		ch:   make(chan net.Conn, 1),
+		done: make(chan struct{}),
+	}
+	l.ch <- conn
+	return l
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.ch:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *singleConnListener) Close() error {
+	select {
+	case <-l.done:
+	default:
+		close(l.done)
+	}
+	return nil
+}
+
+func (l *singleConnListener) Addr() net.Addr {
+	return l.conn.LocalAddr()
 }
 

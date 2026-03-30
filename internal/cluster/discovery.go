@@ -43,8 +43,10 @@ type DiscoveryClient struct {
 	logger         *slog.Logger
 	client         *http.Client
 
-	mu    sync.RWMutex
-	peers []DiscoveredPeer
+	mu       sync.RWMutex
+	peers    []DiscoveredPeer
+	relayURL string // from tracker response
+	yourIP   string // our public IP as seen by tracker
 }
 
 // DiscoveredPeer is a peer returned by the tracker.
@@ -104,9 +106,10 @@ func sanitizeField(s string) string {
 }
 
 type announceResponse struct {
-	YourIP string         `json:"your_ip"`
-	NodeID string         `json:"node_id"`
-	Peers  []announceJSON `json:"peers"`
+	YourIP   string         `json:"your_ip"`
+	NodeID   string         `json:"node_id"`
+	Peers    []announceJSON `json:"peers"`
+	RelayURL string         `json:"relay_url,omitempty"`
 }
 
 type announceJSON struct {
@@ -199,6 +202,20 @@ func (d *DiscoveryClient) LeaderAddr() string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%d", leader.Endpoint, leader.GRPCPort)
+}
+
+// RelayURL returns the relay server address from the last tracker response.
+func (d *DiscoveryClient) RelayURL() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.relayURL
+}
+
+// YourIP returns this node's public IP as reported by the tracker.
+func (d *DiscoveryClient) YourIP() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.yourIP
 }
 
 // Announce triggers a single announce call to the tracker, updating the peer cache.
@@ -303,10 +320,13 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 
 	d.mu.Lock()
 	d.peers = peers
+	d.relayURL = announceResp.RelayURL
+	d.yourIP = announceResp.YourIP
 	d.mu.Unlock()
 
 	d.logger.Debug("tracker announce successful",
 		"peers", len(peers),
 		"your_ip", announceResp.YourIP,
+		"relay_url", announceResp.RelayURL,
 	)
 }

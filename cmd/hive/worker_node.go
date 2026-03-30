@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -114,12 +115,28 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	}
 	clientTLS := cluster.ClientTLSConfig(tlsCert, leaderPubKey)
 
+	// Determine relay URL for fallback connectivity.
+	var relayURL string
+	if discovery != nil {
+		relayURL = discovery.RelayURL()
+	}
+	swarmCode := cp.ClusterSwarmCode()
+
+	// Build the worker stream with happy eyeballs dialer when relay is available.
+	var dialFunc func(ctx context.Context, addr string) (net.Conn, error)
+	if relayURL != "" && swarmCode != "" {
+		dialFunc = func(ctx context.Context, addr string) (net.Conn, error) {
+			return happyEyeballs(ctx, addr, relayURL, swarmCode, identity, logger)
+		}
+	}
+
 	// Create the worker stream client.
 	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
 		LeaderAddr: leaderAddr,
 		NodeName:   nodeName,
 		JoinToken:  joinToken,
 		TLSConfig:  clientTLS,
+		DialFunc:   dialFunc,
 		Logger:     logger,
 	})
 
@@ -194,4 +211,58 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 
 	logger.Info("worker node shutting down")
 	return nil
+}
+
+// happyEyeballs tries a direct TCP connection first, then falls back to
+// the relay after a short delay. First successful connection wins.
+func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string, identity *cluster.NodeIdentity, logger *slog.Logger) (net.Conn, error) {
+	type result struct {
+		conn net.Conn
+		err  error
+		via  string
+	}
+	ch := make(chan result, 2)
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer dialCancel()
+
+	// Direct attempt — starts immediately.
+	go func() {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		conn, err := dialer.DialContext(dialCtx, "tcp", directAddr)
+		ch <- result{conn, err, "direct"}
+	}()
+
+	// Relay attempt — starts after 500ms delay to prefer direct.
+	go func() {
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-dialCtx.Done():
+			ch <- result{nil, dialCtx.Err(), "relay"}
+			return
+		}
+		conn, err := cluster.DialRelay(relayAddr, swarmCode, identity)
+		ch <- result{conn, err, "relay"}
+	}()
+
+	// Take first success.
+	var firstErr error
+	for i := 0; i < 2; i++ {
+		r := <-ch
+		if r.err == nil {
+			logger.Info("connected to leader", "via", r.via)
+			dialCancel()
+			// Drain and close any second successful connection.
+			go func() {
+				if r2 := <-ch; r2.err == nil {
+					r2.conn.Close()
+				}
+			}()
+			return r.conn, nil
+		}
+		if firstErr == nil {
+			firstErr = fmt.Errorf("%s: %w", r.via, r.err)
+		}
+	}
+	return nil, fmt.Errorf("all connection attempts failed: %w", firstErr)
 }
