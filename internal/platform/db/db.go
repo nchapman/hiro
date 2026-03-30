@@ -38,13 +38,16 @@ func Open(path string) (*DB, error) {
 	// Use _pragma DSN parameters so every pooled connection gets the same
 	// pragmas automatically. This allows multiple concurrent readers in WAL
 	// mode while a single writer holds busy_timeout for lock contention.
-	dsn := path + "?" + url.Values{
-		"_pragma": {
-			"journal_mode(WAL)",
-			"foreign_keys(1)",
-			"busy_timeout(10000)",
-		},
-	}.Encode()
+	dsn := (&url.URL{
+		Path: path,
+		RawQuery: url.Values{
+			"_pragma": {
+				"journal_mode(WAL)",   // persists in DB header; idempotent per connection
+				"foreign_keys(1)",     // connection-scoped; must be set per connection
+				"busy_timeout(10000)", // connection-scoped; must be set per connection
+			},
+		}.Encode(),
+	}).String()
 
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -54,6 +57,7 @@ func Open(path string) (*DB, error) {
 	// Allow concurrent readers in WAL mode. Writes still serialize via
 	// SQLite's internal lock, but reads proceed without blocking.
 	conn.SetMaxOpenConns(4)
+	conn.SetMaxIdleConns(4)
 
 	d := &DB{db: conn}
 	if err := d.migrate(); err != nil {
