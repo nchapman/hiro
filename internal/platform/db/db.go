@@ -39,7 +39,11 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
-	// Single writer; reads are concurrent in WAL mode.
+	// Single connection serializes all access. WAL mode supports concurrent
+	// readers, but database/sql requires per-connection pragma setup to use
+	// multiple connections safely (foreign_keys, busy_timeout). The single
+	// connection is sufficient for typical load; increase if analytics queries
+	// become a bottleneck.
 	conn.SetMaxOpenConns(1)
 
 	for _, pragma := range []string{
@@ -61,8 +65,13 @@ func Open(path string) (*DB, error) {
 	return d, nil
 }
 
-// Close closes the database connection.
+// Close runs optimizer maintenance and closes the database connection.
+// PRAGMA optimize runs ANALYZE on tables whose stats are stale, keeping
+// the query planner effective. WAL checkpoint truncates the write-ahead
+// log file to reclaim disk space.
 func (d *DB) Close() error {
+	_, _ = d.db.Exec("PRAGMA optimize")
+	_, _ = d.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return d.db.Close()
 }
 
