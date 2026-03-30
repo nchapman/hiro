@@ -127,7 +127,10 @@ func run() error {
 
 		// Parse gRPC port from cluster address.
 		_, portStr, _ := net.SplitHostPort(cs.listener.Addr().String())
-		grpcPort, _ := strconv.Atoi(portStr)
+		grpcPort, err := strconv.Atoi(portStr)
+		if err != nil {
+			return fmt.Errorf("parsing gRPC port %q: %w", portStr, err)
+		}
 
 		nodeName := cp.ClusterNodeName()
 		if nodeName == "" {

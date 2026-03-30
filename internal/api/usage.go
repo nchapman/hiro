@@ -40,14 +40,16 @@ func (s *Server) handleInstanceUsage(w http.ResponseWriter, r *http.Request) {
 
 	// Look up instance to get the model and verify it exists.
 	var model string
-	if s.manager != nil {
-		info, ok := s.manager.GetInstance(id)
-		if !ok {
-			http.Error(w, "instance not found", http.StatusNotFound)
-			return
-		}
-		model = info.Model
+	if s.manager == nil {
+		http.Error(w, "manager not available", http.StatusServiceUnavailable)
+		return
 	}
+	info, ok := s.manager.GetInstance(id)
+	if !ok {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	model = info.Model
 
 	// Use the active session for usage tracking.
 	sessionID := s.manager.ActiveSessionID(id)

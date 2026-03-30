@@ -79,6 +79,10 @@ func (cp *ControlPlane) TokenSigner() (*auth.TokenSigner, error) {
 		}
 	}
 
-	cp.signer = auth.NewTokenSigner(secret, sessionTTL)
+	signer, err := auth.NewTokenSigner(secret, sessionTTL)
+	if err != nil {
+		return nil, fmt.Errorf("creating token signer: %w", err)
+	}
+	cp.signer = signer
 	return cp.signer, nil
 }

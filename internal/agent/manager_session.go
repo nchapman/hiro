@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -113,7 +114,9 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	// Resume the latest session if one exists, otherwise create a new one.
 	var sessionID string
 	if m.pdb != nil {
-		if sess, ok := m.pdb.LatestSessionByInstance(instanceID); ok {
+		if sess, ok, sessErr := m.pdb.LatestSessionByInstance(instanceID); sessErr != nil {
+			m.logger.Warn("failed to query latest session", "instance", instanceID, "error", sessErr)
+		} else if ok {
 			sessionID = sess.ID
 		}
 	}
@@ -191,12 +194,14 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	// Chown session dir using the UID already held for this instance.
 	if inst.uid != 0 {
-		filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, walkErr error) error {
+		if err := filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
 			return os.Chown(path, int(inst.uid), int(inst.gid))
-		})
+		}); err != nil {
+			m.logger.Warn("failed to chown session dir", "session", newSessionID, "error", err)
+		}
 	}
 
 	// Reload agent config and resolve provider.
@@ -355,7 +360,6 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		id           string
 		parentID     string
 		mode         config.AgentMode
-		loop         *inference.Loop
 		currentModel string
 	}
 
@@ -363,7 +367,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	var targets []pushTarget
 	for id, inst := range m.instances {
 		if inst.info.Name == agentName && inst.info.Status == InstanceStatusRunning {
-			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode, loop: inst.loop, currentModel: inst.info.Model})
+			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode, currentModel: inst.info.Model})
 		}
 	}
 	m.mu.RUnlock()
@@ -381,7 +385,9 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		}
 		// Model switch requires a live loop; description is always updated.
 		if inst.loop != nil && model != inst.info.Model {
-			lm, err := provider.CreateLanguageModel(context.Background(), provider.Type(providerName), apiKey, baseURL, model)
+			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(providerName), apiKey, baseURL, model)
+			pushCancel()
 			if err != nil {
 				m.logger.Warn("failed to create language model for config push",
 					"agent", agentName, "model", model, "error", err)

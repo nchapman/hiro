@@ -76,10 +76,14 @@ type Loop struct {
 	provider        string // current provider type (e.g. "anthropic", "openrouter")
 
 	// Ephemeral message buffer (non-persistent sessions only).
+	// Protected by ephemeralMu.
 	ephemeralMsgs []fantasy.Message
+	ephemeralMu   sync.Mutex
 
 	// Shared skills cache for error retention.
+	// Protected by skillsMu.
 	lastShared []config.SkillConfig
+	skillsMu   sync.Mutex
 
 	// Compaction runs async after each turn.
 	compactMu sync.Mutex
@@ -189,11 +193,16 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 		// ensures Assemble sees a consistent pre- or post-compaction state.
 		assembled, err := Assemble(l.pdb, l.sessionID, cfg)
 		if err != nil {
-			l.logger.Warn("failed to assemble context, falling back to empty", "error", err)
+			l.logger.Error("failed to assemble context, proceeding with empty history", "error", err)
 		}
-		messages = assembled.Messages
+		if assembled.Messages != nil {
+			messages = assembled.Messages
+		}
 	} else {
-		messages = l.ephemeralMsgs
+		l.ephemeralMu.Lock()
+		messages = make([]fantasy.Message, len(l.ephemeralMsgs))
+		copy(messages, l.ephemeralMsgs)
+		l.ephemeralMu.Unlock()
 	}
 
 	emit := func(evt ipc.ChatEvent) error {
@@ -256,10 +265,12 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 	if l.mode.IsPersistent() && l.pdb != nil {
 		l.persistTurn(ctx, prompt, files, result, lm, agentModel, providerOpts)
 	} else {
+		l.ephemeralMu.Lock()
 		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
 		for _, step := range result.Steps {
 			l.ephemeralMsgs = append(l.ephemeralMsgs, step.Messages...)
 		}
+		l.ephemeralMu.Unlock()
 	}
 
 	// Record usage.
@@ -492,12 +503,16 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 			l.logger.Warn("could not reload agent skills", "error", err)
 		} else {
 			sharedSkills, sharedErr := config.LoadSkills(l.sharedSkillDir)
+
+			l.skillsMu.Lock()
 			if sharedErr != nil {
 				l.logger.Warn("could not reload shared skills", "error", sharedErr)
 				sharedSkills = l.lastShared
 			} else {
 				l.lastShared = sharedSkills
 			}
+			l.skillsMu.Unlock()
+
 			cfg.Skills = config.MergeSkills(agentSkills, sharedSkills)
 		}
 	}

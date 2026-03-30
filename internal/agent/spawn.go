@@ -37,9 +37,13 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		sessPrefix = sessPrefix[:18]
 	}
 	socketDir := fmt.Sprintf("/tmp/hive-%s", sessPrefix)
-	os.MkdirAll(socketDir, 0700)
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating socket dir: %w", err)
+	}
 	if cfg.UID != 0 {
-		os.Chown(socketDir, int(cfg.UID), int(cfg.GID))
+		if err := os.Chown(socketDir, int(cfg.UID), int(cfg.GID)); err != nil {
+			return nil, fmt.Errorf("chowning socket dir: %w", err)
+		}
 	}
 	socketPath := socketDir + "/a.sock"
 	cfg.AgentSocket = socketPath
@@ -155,8 +159,8 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		},
 		Close: func() {
 			conn.Close()
-			os.Remove(socketPath)
-			os.Remove(socketDir)
+			_ = os.Remove(socketPath) // best-effort cleanup
+			_ = os.Remove(socketDir)  // best-effort cleanup
 		},
 		Done: done,
 	}, nil

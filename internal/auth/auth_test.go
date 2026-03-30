@@ -10,7 +10,11 @@ func testSigner(ttl time.Duration) *TokenSigner {
 	for i := range secret {
 		secret[i] = byte(i)
 	}
-	return NewTokenSigner(secret, ttl)
+	ts, err := NewTokenSigner(secret, ttl)
+	if err != nil {
+		panic(err)
+	}
+	return ts
 }
 
 func TestCreateAndValidate(t *testing.T) {
@@ -70,7 +74,10 @@ func TestDifferentSecretRejects(t *testing.T) {
 	for i := range otherSecret {
 		otherSecret[i] = byte(i + 100)
 	}
-	ts2 := NewTokenSigner(otherSecret, time.Hour)
+	ts2, err := NewTokenSigner(otherSecret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if ts2.Valid(token) {
 		t.Error("token signed with different secret should be invalid")

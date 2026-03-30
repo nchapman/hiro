@@ -391,7 +391,7 @@ func TestReload_MissingFile(t *testing.T) {
 func TestReload_PreservesSignerOnSamePassword(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$test\"\n  session_secret: \"abcd1234\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$test\"\n  session_secret: \"0102030405060708091011121314151617181920212223242526272829303132\"\n"), 0600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -425,7 +425,7 @@ func TestReload_PreservesSignerOnSamePassword(t *testing.T) {
 func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"abcd1234\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234\"\n"), 0600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -440,7 +440,7 @@ func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
 	_ = signer
 
 	// Reload with different password hash.
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$changed\"\n  session_secret: \"abcd1234\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$changed\"\n  session_secret: \"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234\"\n"), 0600)
 	if err := cp.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +458,7 @@ func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
 func TestReload_InvalidatesSignerOnSecretRotation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"aabbccdd\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd\"\n"), 0600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -471,7 +471,7 @@ func TestReload_InvalidatesSignerOnSecretRotation(t *testing.T) {
 	}
 
 	// Rotate session_secret only (password hash unchanged).
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"11223344\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"11223344112233441122334411223344112233441122334411223344aabbccdd\"\n"), 0600)
 	if err := cp.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -910,7 +910,7 @@ func TestAuth_PasswordHash(t *testing.T) {
 func TestAuth_SetPasswordHash_InvalidatesSigner(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"aabbccdd\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd\"\n"), 0600)
 
 	cp, _ := Load(path, testLogger())
 	signer1, err := cp.TokenSigner()

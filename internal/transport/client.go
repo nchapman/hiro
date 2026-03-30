@@ -101,7 +101,10 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("expected registered message, got %q", env.Type)
 	}
 
-	payloadBytes, _ := json.Marshal(env.Payload)
+	payloadBytes, err := json.Marshal(env.Payload)
+	if err != nil {
+		return fmt.Errorf("marshaling registered payload: %w", err)
+	}
 	var reg RegisteredPayload
 	if err := json.Unmarshal(payloadBytes, &reg); err != nil {
 		return fmt.Errorf("parsing registered payload: %w", err)
@@ -153,7 +156,11 @@ func (c *Client) messageLoop(ctx context.Context) error {
 }
 
 func (c *Client) handleTask(ctx context.Context, env Envelope) {
-	payloadBytes, _ := json.Marshal(env.Payload)
+	payloadBytes, err := json.Marshal(env.Payload)
+	if err != nil {
+		c.logger.Error("failed to marshal task request payload", "error", err)
+		return
+	}
 	var req TaskRequestPayload
 	if err := json.Unmarshal(payloadBytes, &req); err != nil {
 		c.logger.Error("failed to parse task request", "error", err)

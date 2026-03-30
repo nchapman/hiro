@@ -75,15 +75,19 @@ func (d *DB) GetSession(id string) (Session, error) {
 	var parentID sql.NullString
 	var createdAt string
 	var stoppedAt sql.NullString
+	var instanceID sql.NullString
 	err := d.db.QueryRow(
-		`SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
 		 FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
+	).Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, fmt.Errorf("session %s: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return Session{}, err
+	}
+	if instanceID.Valid {
+		s.InstanceID = instanceID.String
 	}
 	if parentID.Valid {
 		s.ParentID = parentID.String
@@ -99,7 +103,7 @@ func (d *DB) GetSession(id string) (Session, error) {
 // ListSessions returns all sessions matching the given filters.
 // Pass empty strings to skip a filter.
 func (d *DB) ListSessions(parentID, status string) ([]Session, error) {
-	query := "SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at FROM sessions WHERE 1=1"
+	query := "SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at FROM sessions WHERE 1=1"
 	var args []any
 
 	if parentID != "" {
@@ -129,7 +133,7 @@ func (d *DB) ListChildSessions(parentID string) ([]Session, error) {
 // ListSessionsByInstance returns all sessions belonging to an instance.
 func (d *DB) ListSessionsByInstance(instanceID string) ([]Session, error) {
 	rows, err := d.db.Query(
-		`SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
 		 FROM sessions WHERE instance_id = ? ORDER BY created_at`, instanceID,
 	)
 	if err != nil {
@@ -140,18 +144,22 @@ func (d *DB) ListSessionsByInstance(instanceID string) ([]Session, error) {
 }
 
 // LatestSessionByInstance returns the most recently created session for an instance.
-// Returns the session and true if found, zero value and false otherwise.
-func (d *DB) LatestSessionByInstance(instanceID string) (Session, bool) {
+// Returns the session and true if found, zero value and false if not found.
+// Returns an error for database failures (distinct from "not found").
+func (d *DB) LatestSessionByInstance(instanceID string) (Session, bool, error) {
 	var s Session
 	var parentID sql.NullString
 	var createdAt string
 	var stoppedAt sql.NullString
 	err := d.db.QueryRow(
-		`SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
 		 FROM sessions WHERE instance_id = ? ORDER BY created_at DESC LIMIT 1`, instanceID,
-	).Scan(&s.ID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
+	).Scan(&s.ID, &s.InstanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, false, nil
+	}
 	if err != nil {
-		return Session{}, false
+		return Session{}, false, fmt.Errorf("querying latest session for instance %s: %w", instanceID, err)
 	}
 	if parentID.Valid {
 		s.ParentID = parentID.String
@@ -161,8 +169,7 @@ func (d *DB) LatestSessionByInstance(instanceID string) (Session, bool) {
 		t := parseTime(stoppedAt.String)
 		s.StoppedAt = &t
 	}
-	s.InstanceID = instanceID
-	return s, true
+	return s, true, nil
 }
 
 // UpdateSessionStatus sets the session status. If status is "stopped",
@@ -180,7 +187,10 @@ func (d *DB) UpdateSessionStatus(id, status string) error {
 	if err != nil {
 		return fmt.Errorf("updating session status: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("session %s not found", id)
 	}
@@ -193,7 +203,10 @@ func (d *DB) DeleteSession(id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting session: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("session %s not found", id)
 	}
@@ -204,11 +217,14 @@ func scanSessions(rows *sql.Rows) ([]Session, error) {
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		var parentID sql.NullString
+		var instanceID, parentID sql.NullString
 		var createdAt string
 		var stoppedAt sql.NullString
-		if err := rows.Scan(&s.ID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt); err != nil {
+		if err := rows.Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt); err != nil {
 			return nil, err
+		}
+		if instanceID.Valid {
+			s.InstanceID = instanceID.String
 		}
 		if parentID.Valid {
 			s.ParentID = parentID.String

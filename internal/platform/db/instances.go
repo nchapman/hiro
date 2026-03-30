@@ -110,7 +110,10 @@ func (d *DB) UpdateInstanceStatus(id, status string) error {
 	if err != nil {
 		return fmt.Errorf("updating instance status: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("instance %s not found", id)
 	}
@@ -123,7 +126,10 @@ func (d *DB) DeleteInstance(id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting instance: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("instance %s not found", id)
 	}
@@ -165,7 +171,10 @@ func (d *DB) UpdateInstanceConfig(instanceID string, cfg InstanceConfig) error {
 	if err != nil {
 		return fmt.Errorf("updating instance config: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("instance %s not found", instanceID)
 	}
@@ -173,23 +182,33 @@ func (d *DB) UpdateInstanceConfig(instanceID string, cfg InstanceConfig) error {
 }
 
 // IsInstanceDescendant returns true if targetID is a descendant of ancestorID
-// in the instance tree.
+// in the instance tree. Detects cycles and enforces a maximum traversal depth.
 func (d *DB) IsInstanceDescendant(targetID, ancestorID string) (bool, error) {
+	const maxDepth = 100
+	visited := make(map[string]bool, maxDepth)
 	current := targetID
-	for {
+	for range maxDepth {
+		if visited[current] {
+			return false, fmt.Errorf("cycle detected in instance tree at %s", current)
+		}
+		visited[current] = true
 		if current == ancestorID {
 			return true, nil
 		}
 		var parentID sql.NullString
 		err := d.db.QueryRow("SELECT parent_id FROM instances WHERE id = ?", current).Scan(&parentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil // node not in DB, therefore not a descendant
+		}
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("looking up parent of instance %s: %w", current, err)
 		}
 		if !parentID.Valid {
 			return false, nil
 		}
 		current = parentID.String
 	}
+	return false, fmt.Errorf("instance tree exceeds maximum depth (%d)", maxDepth)
 }
 
 func scanInstances(rows *sql.Rows) ([]Instance, error) {

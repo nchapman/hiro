@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"time"
 )
 
@@ -22,11 +23,14 @@ type TokenSigner struct {
 
 // NewTokenSigner creates a token signer with the given secret and TTL.
 // The secret must be at least 32 bytes.
-func NewTokenSigner(secret []byte, ttl time.Duration) *TokenSigner {
+func NewTokenSigner(secret []byte, ttl time.Duration) (*TokenSigner, error) {
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("token signing secret must be at least 32 bytes, got %d", len(secret))
+	}
 	return &TokenSigner{
 		secret: secret,
 		ttl:    ttl,
-	}
+	}, nil
 }
 
 // Secret returns the raw signing key. Used by the share token subsystem

@@ -75,20 +75,27 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 
 				if sum.Kind == "leaf" {
 					msgIDs, err := pdb.GetSummarySourceMessages(sum.ID)
-					if err == nil && len(msgIDs) > 0 {
+					if err != nil {
+						return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to load source messages: %v", err)), nil
+					}
+					if len(msgIDs) > 0 {
 						msgs, err := pdb.GetMessages(msgIDs)
-						if err == nil {
-							sb.WriteString("\n\n---\n### Source Messages\n\n")
-							for _, m := range msgs {
-								fmt.Fprintf(&sb, "[%s] **%s**: %s\n\n",
-									m.CreatedAt.Format("15:04:05"), m.Role,
-									truncateResult(m.Content))
-							}
+						if err != nil {
+							return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to load messages: %v", err)), nil
+						}
+						sb.WriteString("\n\n---\n### Source Messages\n\n")
+						for _, m := range msgs {
+							fmt.Fprintf(&sb, "[%s] **%s**: %s\n\n",
+								m.CreatedAt.Format("15:04:05"), m.Role,
+								truncateResult(m.Content))
 						}
 					}
 				} else {
 					childIDs, err := pdb.GetSummaryChildren(sum.ID)
-					if err == nil && len(childIDs) > 0 {
+					if err != nil {
+						return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to load child summaries: %v", err)), nil
+					}
+					if len(childIDs) > 0 {
 						sb.WriteString("\n\n---\n### Child Summaries\n\n")
 						for _, cid := range childIDs {
 							child, err := pdb.GetSummary(cid)

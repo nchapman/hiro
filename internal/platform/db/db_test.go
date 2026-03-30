@@ -130,7 +130,10 @@ func TestLatestSessionByInstance(t *testing.T) {
 	d.CreateInstance(Instance{ID: "inst-A", AgentName: "test", Mode: "persistent"})
 
 	// No sessions yet.
-	_, ok := d.LatestSessionByInstance("inst-A")
+	_, ok, err := d.LatestSessionByInstance("inst-A")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ok {
 		t.Fatal("expected no session for fresh instance")
 	}
@@ -142,7 +145,10 @@ func TestLatestSessionByInstance(t *testing.T) {
 		"sess-new", "inst-A", "test", "persistent", "running", "2026-01-02 00:00:00")
 
 	// Should return the newest one.
-	sess, ok := d.LatestSessionByInstance("inst-A")
+	sess, ok, err := d.LatestSessionByInstance("inst-A")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("expected to find a session")
 	}

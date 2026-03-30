@@ -157,9 +157,13 @@ func (s *FileSyncService) CreateInitialSync() ([]byte, error) {
 		}
 		err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil // skip errors
+				s.logger.Warn("initial sync: walk error", "path", path, "error", err)
+				return nil // skip inaccessible paths
 			}
-			relPath, _ := filepath.Rel(s.rootDir, path)
+			relPath, relErr := filepath.Rel(s.rootDir, path)
+			if relErr != nil {
+				return nil
+			}
 			if shouldIgnore(relPath) {
 				if d.IsDir() {
 					return filepath.SkipDir
@@ -168,11 +172,13 @@ func (s *FileSyncService) CreateInitialSync() ([]byte, error) {
 			}
 			info, err := d.Info()
 			if err != nil {
+				s.logger.Warn("initial sync: stat error", "path", relPath, "error", err)
 				return nil
 			}
 
 			header, err := tar.FileInfoHeader(info, "")
 			if err != nil {
+				s.logger.Warn("initial sync: header error", "path", relPath, "error", err)
 				return nil
 			}
 			header.Name = relPath
@@ -481,7 +487,9 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 	// Restore mtime and track it for conflict detection.
 	if update.MtimeUnixNanos > 0 {
 		mtime := time.Unix(0, update.MtimeUnixNanos)
-		os.Chtimes(absPath, mtime, mtime)
+		if err := os.Chtimes(absPath, mtime, mtime); err != nil {
+			s.logger.Warn("failed to restore mtime", "path", update.Path, "error", err)
+		}
 
 		s.receivedMu.Lock()
 		s.receivedMtime[update.Path] = update.MtimeUnixNanos
@@ -565,11 +573,13 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 	if knownFiles != nil {
 		for relPath := range knownFiles {
 			if !seen[relPath] {
-				s.sendFn(&pb.FileUpdate{
+				if err := s.sendFn(&pb.FileUpdate{
 					Path:       relPath,
 					Deleted:    true,
 					OriginNode: s.nodeID,
-				})
+				}); err != nil {
+					s.logger.Warn("reconcile: failed to send delete", "path", relPath, "error", err)
+				}
 			}
 		}
 	}

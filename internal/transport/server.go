@@ -224,7 +224,11 @@ func (s *Server) readLoop(ctx context.Context, wc *workerConn) {
 }
 
 func (s *Server) handleTaskResult(workerID string, env Envelope) {
-	payloadBytes, _ := json.Marshal(env.Payload)
+	payloadBytes, err := json.Marshal(env.Payload)
+	if err != nil {
+		s.logger.Error("failed to marshal task result payload", "error", err)
+		return
+	}
 	var result TaskResultPayload
 	if err := json.Unmarshal(payloadBytes, &result); err != nil {
 		s.logger.Error("failed to parse task result", "error", err)
@@ -263,7 +267,11 @@ func (s *Server) handleTaskResult(workerID string, env Envelope) {
 }
 
 func (s *Server) handleTaskError(workerID string, env Envelope) {
-	payloadBytes, _ := json.Marshal(env.Payload)
+	payloadBytes, err := json.Marshal(env.Payload)
+	if err != nil {
+		s.logger.Error("failed to marshal task error payload", "error", err)
+		return
+	}
 	var taskErr TaskErrorPayload
 	if err := json.Unmarshal(payloadBytes, &taskErr); err != nil {
 		s.logger.Error("failed to parse task error", "error", err)
@@ -297,7 +305,11 @@ func (s *Server) handleTaskError(workerID string, env Envelope) {
 }
 
 func (s *Server) handleTaskProgress(env Envelope) {
-	payloadBytes, _ := json.Marshal(env.Payload)
+	payloadBytes, err := json.Marshal(env.Payload)
+	if err != nil {
+		s.logger.Error("failed to marshal task progress payload", "error", err)
+		return
+	}
 	var progress TaskProgressPayload
 	if err := json.Unmarshal(payloadBytes, &progress); err != nil {
 		return

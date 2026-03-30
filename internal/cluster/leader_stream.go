@@ -88,7 +88,9 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	// Generate unique node ID with random suffix to prevent collisions
 	// on reconnect or duplicate names.
 	suffix := make([]byte, 4)
-	rand.Read(suffix)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Errorf("generating node ID: %w", err)
+	}
 	nodeID := NodeID(fmt.Sprintf("node-%s-%s", reg.NodeName, hex.EncodeToString(suffix)))
 	if err := s.registry.Register(nodeID, reg.NodeName, int(reg.Capacity)); err != nil {
 		return fmt.Errorf("registering node: %w", err)

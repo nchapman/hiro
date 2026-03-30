@@ -78,7 +78,12 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 
 		// Resume the latest session if one exists, otherwise create a new one.
 		var sessionID string
-		if sess, ok := m.pdb.LatestSessionByInstance(dbInst.ID); ok {
+		sess, ok, sessErr := m.pdb.LatestSessionByInstance(dbInst.ID)
+		if sessErr != nil {
+			m.logger.Warn("failed to query latest session, creating new one",
+				"instance", dbInst.ID, "error", sessErr)
+		}
+		if ok {
 			sessionID = sess.ID
 			m.logger.Info("resuming existing session",
 				"instance", dbInst.ID, "session", sessionID, "agent", dbInst.AgentName)
@@ -98,7 +103,10 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		if instCfg, cfgErr := m.pdb.GetInstanceConfig(dbInst.ID); cfgErr == nil {
 			if instCfg.ModelOverride != "" || instCfg.ReasoningEffort != "" {
 				effort := instCfg.ReasoningEffort
-				_ = m.UpdateInstanceConfig(ctx, dbInst.ID, instCfg.ModelOverride, &effort)
+				if err := m.UpdateInstanceConfig(ctx, dbInst.ID, instCfg.ModelOverride, &effort); err != nil {
+					m.logger.Warn("failed to restore instance config",
+						"instance", dbInst.ID, "error", err)
+				}
 			}
 		}
 	}
