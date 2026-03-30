@@ -60,6 +60,11 @@ func shouldIgnore(relPath string) bool {
 			return true
 		}
 	}
+	base := filepath.Base(relPath)
+	// Atomic write temp files (e.g. .hive-tmp-123456789).
+	if strings.HasPrefix(base, ".hive-tmp-") {
+		return true
+	}
 	ext := filepath.Ext(relPath)
 	if ignoredExtensions[ext] {
 		return true
@@ -210,9 +215,11 @@ func (s *FileSyncService) CreateInitialSync() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ApplyInitialSync extracts a zstd-compressed tar to the root directory.
-func (s *FileSyncService) ApplyInitialSync(data []byte) error {
-	zr, err := zstd.NewReader(bytes.NewReader(data))
+// ApplyInitialSyncStream extracts a zstd-compressed tar from a streaming
+// reader. This avoids buffering the entire archive in memory — extraction
+// happens on the fly as chunks arrive over the network.
+func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
+	zr, err := zstd.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("opening zstd: %w", err)
 	}
@@ -235,8 +242,11 @@ func (s *FileSyncService) ApplyInitialSync(data []byte) error {
 			continue
 		}
 
-		// Suppress echo for all extracted files.
-		s.suppressEcho(header.Name)
+		// Suppress echo — derive relPath from resolved target rather than
+		// trusting header.Name, so echo suppression works regardless of how
+		// the tar was produced.
+		relPath, _ := filepath.Rel(s.rootDir, target)
+		s.suppressEcho(relPath)
 
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -247,15 +257,9 @@ func (s *FileSyncService) ApplyInitialSync(data []byte) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode)&0666)
-			if err != nil {
-				return fmt.Errorf("creating file %s: %w", header.Name, err)
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
+			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&0666); err != nil {
 				return fmt.Errorf("writing file %s: %w", header.Name, err)
 			}
-			f.Close()
 		}
 	}
 
@@ -455,7 +459,8 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 		}
 	}
 
-	// Write the file.
+	// Write the file atomically (temp + rename) so concurrent readers
+	// never see partial content.
 	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		return fmt.Errorf("creating parent dir for %s: %w", update.Path, err)
 	}
@@ -467,7 +472,7 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 		mode = os.FileMode(update.Mode) & 0666
 	}
 
-	if err := os.WriteFile(absPath, update.Content, mode); err != nil {
+	if err := atomicWrite(absPath, update.Content, mode); err != nil {
 		return fmt.Errorf("writing %s: %w", update.Path, err)
 	}
 
@@ -644,6 +649,67 @@ func (s *FileSyncService) scanNewDir(dir string, mu *sync.Mutex, pending map[str
 		mu.Unlock()
 		return nil
 	})
+}
+
+// atomicWrite writes content to path via a temp file + rename so concurrent
+// readers never see partial content. The temp file uses a random suffix to
+// prevent corruption when multiple goroutines write the same path concurrently.
+// It is placed in the same directory to guarantee same-filesystem rename
+// (which is atomic on POSIX).
+func atomicWrite(path string, content []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".hive-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if err := f.Chmod(mode); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if _, err := f.Write(content); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// atomicWriteFromReader is like atomicWrite but reads from an io.Reader
+// (used during tar extraction where content is streamed).
+func atomicWriteFromReader(path string, r io.Reader, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".hive-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if err := f.Chmod(mode); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // sanitizeNodeID removes characters that are invalid in filenames.

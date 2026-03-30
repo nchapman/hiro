@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
@@ -67,8 +68,8 @@ func TestCreateAndApplyInitialSync(t *testing.T) {
 		NodeID:   "worker-1",
 	})
 
-	if err := dst.ApplyInitialSync(data); err != nil {
-		t.Fatalf("ApplyInitialSync: %v", err)
+	if err := dst.ApplyInitialSyncStream(bytes.NewReader(data)); err != nil {
+		t.Fatalf("ApplyInitialSyncStream: %v", err)
 	}
 
 	// Verify files exist.
@@ -379,6 +380,88 @@ func TestWatchAndSync_NewDirWithFile(t *testing.T) {
 	mu.Lock()
 	t.Errorf("expected file sync for %s, got: %v", wantPath, sent)
 	mu.Unlock()
+}
+
+func TestAtomicWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+
+	// Create file.
+	if err := atomicWrite(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("atomicWrite: %v", err)
+	}
+	content, _ := os.ReadFile(path)
+	if string(content) != "hello" {
+		t.Errorf("content = %q, want %q", string(content), "hello")
+	}
+
+	// Overwrite atomically.
+	if err := atomicWrite(path, []byte("world"), 0644); err != nil {
+		t.Fatalf("atomicWrite: %v", err)
+	}
+	content, _ = os.ReadFile(path)
+	if string(content) != "world" {
+		t.Errorf("content = %q, want %q", string(content), "world")
+	}
+
+	// No temp files should remain.
+	matches, _ := filepath.Glob(filepath.Join(dir, ".hive-tmp-*"))
+	if len(matches) != 0 {
+		t.Errorf("expected temp files to be cleaned up, found %v", matches)
+	}
+}
+
+func TestApplyInitialSyncStream(t *testing.T) {
+	// Set up a source directory.
+	srcDir := t.TempDir()
+	os.MkdirAll(filepath.Join(srcDir, "workspace"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "workspace", "file.go"), []byte("package main"), 0644)
+
+	src := NewFileSyncService(FileSyncConfig{
+		RootDir:  srcDir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "leader",
+	})
+
+	data, err := src.CreateInitialSync()
+	if err != nil {
+		t.Fatalf("CreateInitialSync: %v", err)
+	}
+
+	// Apply via streaming reader.
+	dstDir := t.TempDir()
+	dst := NewFileSyncService(FileSyncConfig{
+		RootDir:  dstDir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "worker-1",
+	})
+
+	if err := dst.ApplyInitialSyncStream(bytes.NewReader(data)); err != nil {
+		t.Fatalf("ApplyInitialSyncStream: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dstDir, "workspace", "file.go"))
+	if err != nil {
+		t.Fatalf("reading file: %v", err)
+	}
+	if string(content) != "package main" {
+		t.Errorf("content = %q, want %q", string(content), "package main")
+	}
+
+	// No temp files should remain.
+	matches, _ := filepath.Glob(filepath.Join(dstDir, "workspace", ".hive-tmp-*"))
+	if len(matches) != 0 {
+		t.Errorf("expected no temp files, found %v", matches)
+	}
+}
+
+func TestShouldIgnore_HiveTmp(t *testing.T) {
+	if !shouldIgnore("workspace/.hive-tmp-123456789") {
+		t.Error("expected .hive-tmp-* files to be ignored")
+	}
+	if shouldIgnore("workspace/hive-tmp-file.txt") {
+		t.Error("regular files with hive-tmp in name should not be ignored")
+	}
 }
 
 func TestSanitizeNodeID(t *testing.T) {

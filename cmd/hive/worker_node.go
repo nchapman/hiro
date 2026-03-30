@@ -5,10 +5,12 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -157,15 +159,52 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	})
 
 	// Wire up file sync handlers.
-	var initialSyncBuf []byte
+	// Uses io.Pipe so the tar is extracted on the fly as chunks arrive,
+	// avoiding unbounded memory usage for large workspaces.
+	var (
+		syncMu     sync.Mutex
+		syncPipeW  *io.PipeWriter
+		syncDoneCh chan error // signals when extraction goroutine finishes
+	)
 	ws.SetFileSyncHandler(func(_ context.Context, msg *pb.FileSyncData) {
-		initialSyncBuf = append(initialSyncBuf, msg.Data...)
-		if msg.Final {
-			if err := syncSvc.ApplyInitialSync(initialSyncBuf); err != nil {
+		syncMu.Lock()
+		defer syncMu.Unlock()
+
+		// Lazily create the pipe on the first chunk.
+		if syncPipeW == nil {
+			pr, pw := io.Pipe()
+			syncPipeW = pw
+			syncDoneCh = make(chan error, 1)
+			go func() {
+				syncDoneCh <- syncSvc.ApplyInitialSyncStream(pr)
+			}()
+		}
+
+		if len(msg.Data) > 0 && syncPipeW != nil {
+			if _, err := syncPipeW.Write(msg.Data); err != nil {
+				// Extraction failed (e.g. corrupt archive). Close the pipe
+				// and abandon this sync — the next reconnect will retry.
+				logger.Error("sync pipe broken, aborting initial sync", "error", err)
+				syncPipeW.CloseWithError(err)
+				syncPipeW = nil
+				syncDoneCh = nil
+				return
+			}
+		}
+
+		if msg.Final && syncPipeW != nil {
+			syncPipeW.Close()
+			if err := <-syncDoneCh; err != nil {
 				logger.Error("failed to apply initial sync", "error", err)
 			}
-			initialSyncBuf = nil
+			syncPipeW = nil
+			syncDoneCh = nil
 			logger.Info("initial file sync complete")
+
+			// Start the filesystem watcher AFTER initial sync is fully
+			// applied. Starting earlier would cause every extracted file
+			// to echo back as a "new change" to the leader.
+			go syncSvc.WatchAndSync()
 		}
 	})
 	ws.SetFileUpdateHandler(func(_ context.Context, msg *pb.FileUpdate) {
@@ -174,9 +213,9 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		}
 	})
 
-	// Start file watcher for sending local changes back to leader.
-	go syncSvc.WatchAndSync()
-	defer syncSvc.Stop()
+	// Use a closure so the defer always stops the current sync service,
+	// even after reconnect replaces it with a fresh instance.
+	defer func() { syncSvc.Stop() }()
 
 	// Connect to leader with reconnection.
 	for {
@@ -184,8 +223,30 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		// Clean up all local workers from the previous connection
 		// before retrying, to prevent goroutine/resource leaks.
 		bridge.ShutdownAll(context.Background())
-		// Reset initial sync buffer for clean reconnect.
-		initialSyncBuf = nil
+
+		// Stop the file watcher and reset sync pipe state for clean reconnect.
+		// The watcher will be restarted after the next initial sync completes.
+		syncSvc.Stop()
+		syncMu.Lock()
+		if syncPipeW != nil {
+			syncPipeW.CloseWithError(fmt.Errorf("disconnected"))
+			syncPipeW = nil
+			syncDoneCh = nil
+		}
+		syncMu.Unlock()
+
+		// Create a fresh sync service for the new connection (Stop is one-shot).
+		syncSvc = cluster.NewFileSyncService(cluster.FileSyncConfig{
+			RootDir:  rootDir,
+			SyncDirs: []string{"agents", "skills", "workspace"},
+			NodeID:   nodeName,
+			SendFn: func(update *pb.FileUpdate) error {
+				return ws.Send(&pb.NodeMessage{
+					Msg: &pb.NodeMessage_FileUpdate{FileUpdate: update},
+				})
+			},
+			Logger: logger,
+		})
 
 		if ctx.Err() != nil {
 			break
