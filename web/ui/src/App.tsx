@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "sonner"
 import { ThemeCtx, useThemeProvider } from "@/hooks/use-theme"
 import ActivityBar from "@/components/ActivityBar"
 import type { Activity } from "@/components/ActivityBar"
@@ -291,6 +292,7 @@ export default function App() {
           </Routes>
         )}
       </TooltipProvider>
+      <Toaster position="bottom-right" richColors closeButton theme={themeCtx.resolved} />
     </ThemeCtx.Provider>
   )
 }

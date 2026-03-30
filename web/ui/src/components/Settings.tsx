@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -158,9 +159,9 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       })
-      if (!res.ok) return
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setSavedSettings(settings)
-    } catch (e) { console.error("settings operation failed:", e) }
+    } catch { toast.error("Failed to save settings") }
   }
 
   // Filter add dialog to provider types not already configured
@@ -176,13 +177,13 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: addKey }),
       })
-      if (!res.ok) return
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setAddType("")
       setAddKey("")
       setAddOpen(false)
       fetchProviders()
       fetchSettings() // default_provider may have been auto-set
-    } catch (e) { console.error("settings operation failed:", e) }
+    } catch { toast.error("Failed to add provider") }
   }
 
   const handleDeleteProvider = async (type: string) => {
@@ -190,10 +191,10 @@ export default function SettingsPage() {
       const res = await fetch(`/api/settings/providers/${encodeURIComponent(type)}`, {
         method: "DELETE",
       })
-      if (!res.ok) return
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       fetchProviders()
       fetchSettings()
-    } catch (e) { console.error("settings operation failed:", e) }
+    } catch { toast.error("Failed to delete provider") }
   }
 
   const handleTestProvider = async (type: string) => {

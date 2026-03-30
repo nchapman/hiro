@@ -20,6 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useWebSocket } from "@/hooks/use-websocket"
 import type { ChatWireMessage, ChatAttachment, UsageInfo } from "@/hooks/use-websocket"
@@ -568,28 +569,37 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
   const handleStop = async () => {
     if (!session) return
-    const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}/stop`, {
-      method: "POST",
-    })
-    if (!res.ok) console.error("Failed to stop session:", res.status, await res.text())
+    try {
+      const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}/stop`, {
+        method: "POST",
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch { toast.error("Failed to stop session") }
     onSessionsChanged()
   }
 
   const handleStart = async () => {
     if (!session) return
-    const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}/start`, {
-      method: "POST",
-    })
-    if (!res.ok) console.error("Failed to start session:", res.status, await res.text())
+    try {
+      const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}/start`, {
+        method: "POST",
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch { toast.error("Failed to start session") }
     onSessionsChanged()
   }
 
   const handleDelete = async () => {
     if (!session) return
-    const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}`, {
-      method: "DELETE",
-    })
-    if (!res.ok) console.error("Failed to delete session:", res.status, await res.text())
+    try {
+      const res = await fetch(`/api/instances/${encodeURIComponent(session.id)}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch {
+      toast.error("Failed to delete session")
+      return
+    }
     onSessionsChanged()
   }
 
