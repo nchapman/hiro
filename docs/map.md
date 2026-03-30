@@ -509,11 +509,11 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**Auth secret accepted without validation**~~ | `auth/auth.go` | **FIXED** — `NewTokenSigner` returns error for secrets < 32 bytes. |
 | ~~**Spawn socket dir errors ignored**~~ | `agent/spawn.go` | **FIXED** — `os.MkdirAll` and `os.Chown` errors now returned, failing fast on broken isolation. |
 | ~~**rand.Read unchecked in node ID**~~ | `cluster/leader_stream.go` | **FIXED** — Error checked and propagated. |
-| **SSRF protection opt-in** | `agent/tools/fetch.go` | Low — Must call `SetSSRFProtection(true)` explicitly. Should default to true. |
+| ~~**SSRF protection opt-in**~~ | `agent/tools/fetch.go` | **FIXED** — Defaults to true (`atomic.Bool`). Pre-dial DNS resolution prevents rebinding. |
 | **Relay status bytes unauthenticated** | `cluster/relay.go` | Low — MITM could inject false status. Mitigated by mTLS on the data path. |
-| **Rate limiter ignores reverse proxy** | `api/auth.go` | Medium — Keys on `RemoteAddr`; behind a proxy, all clients share the same key. Needs trusted-proxy header extraction. |
-| **Setup CSRF vulnerable to DNS rebinding** | `api/server.go` | Medium — `isSameOrigin` accepts matching Origin/Host from any domain. Restrict to loopback during setup. |
-| **Password change silently logs out user** | `api/auth.go` | Medium — Session secret rotated but no new token issued in response. |
+| ~~**Rate limiter ignores reverse proxy**~~ | `api/auth.go` | **FIXED** — `clientIP()` trusts proxy headers only from loopback/private peers. Strips port. |
+| ~~**Setup CSRF vulnerable to DNS rebinding**~~ | `api/server.go` | **FIXED** — `isLoopbackOrigin()` requires loopback host when Origin header present. |
+| ~~**Password change silently logs out user**~~ | `api/auth.go` | **FIXED** — New session token issued in response after secret rotation. |
 
 ### Concurrency
 
