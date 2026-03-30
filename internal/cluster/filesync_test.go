@@ -493,6 +493,70 @@ func TestApplyInitialSyncStream(t *testing.T) {
 	}
 }
 
+func TestReconcile_CatchesDrift(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+	os.WriteFile(filepath.Join(dir, "workspace", "original.txt"), []byte("v1"), 0644)
+
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "leader",
+	})
+
+	// Take a snapshot (simulates CreateInitialSync).
+	snap, err := svc.CreateInitialSync()
+	if err != nil {
+		t.Fatalf("CreateInitialSync: %v", err)
+	}
+	_ = snap // The tar was created with "v1" content.
+
+	// Simulate drift: modify a file after the snapshot.
+	os.WriteFile(filepath.Join(dir, "workspace", "original.txt"), []byte("v2"), 0644)
+	// Also add a new file.
+	os.WriteFile(filepath.Join(dir, "workspace", "new.txt"), []byte("new"), 0644)
+
+	// Collect updates sent by Reconcile.
+	var sent []*pb.FileUpdate
+	svc.sendFn = func(u *pb.FileUpdate) error {
+		sent = append(sent, u)
+		return nil
+	}
+
+	if err := svc.Reconcile(nil); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// Both files should be sent (nil knownFiles = send everything).
+	if len(sent) < 2 {
+		t.Fatalf("expected at least 2 updates, got %d", len(sent))
+	}
+
+	// Verify the modified file has the new content.
+	foundModified := false
+	foundNew := false
+	for _, u := range sent {
+		if u.Path == "workspace/original.txt" {
+			foundModified = true
+			if string(u.Content) != "v2" {
+				t.Errorf("original.txt content = %q, want %q", string(u.Content), "v2")
+			}
+		}
+		if u.Path == "workspace/new.txt" {
+			foundNew = true
+			if string(u.Content) != "new" {
+				t.Errorf("new.txt content = %q, want %q", string(u.Content), "new")
+			}
+		}
+	}
+	if !foundModified {
+		t.Error("Reconcile did not send update for modified original.txt")
+	}
+	if !foundNew {
+		t.Error("Reconcile did not send update for new file new.txt")
+	}
+}
+
 func TestShouldIgnore_HiveTmp(t *testing.T) {
 	if !shouldIgnore("workspace/.hive-tmp-123456789") {
 		t.Error("expected .hive-tmp-* files to be ignored")

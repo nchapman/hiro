@@ -44,12 +44,13 @@ func ReadTodos(sessionDir string) ([]Todo, error) {
 }
 
 // WriteTodos writes the todo list to the session directory.
+// Uses atomic write (temp+rename) so concurrent readers never see partial content.
 func WriteTodos(sessionDir string, todos []Todo) error {
 	data, err := yaml.Marshal(todos)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(sessionDir, todosFileName), data, 0600)
+	return atomicWrite(filepath.Join(sessionDir, todosFileName), data, 0600)
 }
 
 // FormatTodos renders a todo list as markdown for system prompt injection.

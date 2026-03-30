@@ -281,6 +281,14 @@ func (s *LeaderService) sendInitialSync(nodeID NodeID) {
 	}
 
 	s.logger.Info("initial file sync sent", "node", nodeID, "size", len(data))
+
+	// Reconcile catches files that changed between CreateInitialSync() and
+	// the node finishing extraction. Updates are sent via the normal sendFn
+	// which broadcasts to all connected nodes — existing nodes ignore files
+	// they already have (echo suppression + mtime check).
+	if err := fs.Reconcile(nil); err != nil {
+		s.logger.Warn("reconciliation after initial sync failed", "node", nodeID, "error", err)
+	}
 }
 
 // getFileSync returns the file sync service, protected by the mutex.

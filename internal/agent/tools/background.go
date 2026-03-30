@@ -121,7 +121,7 @@ func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob
 		return nil, fmt.Errorf("maximum background jobs (%d) reached — terminate or wait for some to complete", MaxBackgroundJobs)
 	}
 
-	id := fmt.Sprintf("%03X", jobIDCounter.Add(1))
+	id := fmt.Sprintf("%06X", jobIDCounter.Add(1))
 
 	ctx, cancel := context.WithCancel(context.Background())
 

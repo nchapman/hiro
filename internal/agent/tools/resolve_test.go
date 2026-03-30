@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -145,5 +146,76 @@ func TestResolveAndConfine_MultipleRoots(t *testing.T) {
 	// Denied outside both.
 	if _, err := resolveAndConfine("/hive", "/etc/hosts"); err == nil {
 		t.Error("expected error for /etc/hosts")
+	}
+}
+
+func TestResolveAndConfine_SymlinkEscape(t *testing.T) {
+	origRoots := allowedRoots
+	defer func() { allowedRoots = origRoots }()
+
+	// Create a temp directory as the "allowed root" and a sibling as the "escape target".
+	root := t.TempDir()
+	escape := t.TempDir()
+
+	SetAllowedRoots([]string{root})
+
+	// Create a symlink inside the root that points to the escape directory.
+	link := filepath.Join(root, "escape_link")
+	if err := os.Symlink(escape, link); err != nil {
+		t.Skipf("cannot create symlinks: %v", err)
+	}
+
+	// Accessing the symlink should be rejected — it resolves outside the root.
+	_, err := resolveAndConfine(root, "escape_link")
+	if err == nil {
+		t.Fatal("expected error for symlink escaping allowed root")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected symlink error, got: %v", err)
+	}
+
+	// A regular file inside the root should still work.
+	realFile := filepath.Join(root, "legit.txt")
+	os.WriteFile(realFile, []byte("ok"), 0644)
+
+	resolved, err := resolveAndConfine(root, "legit.txt")
+	if err != nil {
+		t.Fatalf("unexpected error for legit file: %v", err)
+	}
+	if resolved != realFile {
+		t.Errorf("resolved = %q, want %q", resolved, realFile)
+	}
+}
+
+func TestAtomicWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+
+	// Write new file.
+	if err := atomicWriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "hello" {
+		t.Errorf("content = %q, want %q", string(data), "hello")
+	}
+	info, _ := os.Stat(path)
+	if perm := info.Mode().Perm(); perm != 0644 {
+		t.Errorf("permissions = %o, want 0644", perm)
+	}
+
+	// Overwrite existing file.
+	if err := atomicWriteFile(path, []byte("world"), 0644); err != nil {
+		t.Fatalf("atomicWriteFile overwrite: %v", err)
+	}
+	data, _ = os.ReadFile(path)
+	if string(data) != "world" {
+		t.Errorf("content after overwrite = %q, want %q", string(data), "world")
+	}
+
+	// No temp files should remain.
+	matches, _ := filepath.Glob(filepath.Join(dir, ".hive-tmp-*"))
+	if len(matches) != 0 {
+		t.Errorf("temp files not cleaned up: %v", matches)
 	}
 }

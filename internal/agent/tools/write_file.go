@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"os"
 
 	"charm.land/fantasy"
 )
@@ -38,7 +37,7 @@ func NewWriteFileTool(workingDir string) fantasy.AgentTool {
 					fmt.Sprintf("error creating directory: %v", err)), nil
 			}
 
-			if err := os.WriteFile(path, []byte(params.Content), 0666); err != nil {
+			if err := atomicWriteFile(path, []byte(params.Content), 0666); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error writing file: %v", err)), nil
 			}

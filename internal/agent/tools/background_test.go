@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,19 @@ func TestBackgroundJob_FailingCommand(t *testing.T) {
 	}
 	if execErr == nil {
 		t.Error("expected non-nil error for failing command")
+	}
+}
+
+func TestBackgroundJob_IDFormat(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+	job, err := mgr.Start(t.TempDir(), "true")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer mgr.Kill(job.ID)
+
+	matched, _ := regexp.MatchString(`^[0-9A-F]{1,6}$`, job.ID)
+	if !matched {
+		t.Errorf("job ID %q does not match expected hex format", job.ID)
 	}
 }

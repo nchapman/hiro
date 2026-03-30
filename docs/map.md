@@ -458,11 +458,11 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | Finding | Where | Severity |
 |---------|-------|----------|
 | ~~**Fresh tail can overflow context**~~ | `inference/assembly.go` | **FIXED** — Tail capped at 80% of budget; shrinks from oldest end with slog warning. |
-| **Multiedit partial failure** | `agent/tools/multiedit.go` | Medium — Later edits depend on earlier ones. Partial failure leaves file in inconsistent state with no rollback. |
-| **write_file not atomic** | `agent/tools/write_file.go` | Low — Uses `os.WriteFile()` which truncates then writes. Mid-flight failure = corrupted file. Should use temp+rename. |
-| **Memory/todos not atomic** | `config/memory.go`, `config/todos.go` | Low — Same temp+rename pattern missing. |
+| **Multiedit partial failure** | `agent/tools/multiedit.go` | Medium — By design: applies as many edits as possible, reports failures. No rollback. |
+| ~~**write_file not atomic**~~ | `agent/tools/write_file.go` | **FIXED** — Uses temp+rename via `atomicWriteFile()`. |
+| ~~**Memory/todos not atomic**~~ | `config/memory.go`, `config/todos.go` | **FIXED** — Both use `atomicWrite()` (temp+rename). |
 | ~~**Compaction depth unbounded**~~ | `inference/compaction.go` | **FIXED** — Added `MaxSummaryDepth` (scales 4–8 with context window). Condensation stops at limit. |
-| **Job ID collision** | `agent/tools/background.go` | Low — 12-bit hex ID space (4096 values) wraps. Long-running agents could collide. Use larger space. |
+| ~~**Job ID collision**~~ | `agent/tools/background.go` | **FIXED** — Widened from 12-bit (4K) to 24-bit (16M) hex ID space. |
 
 ### Security Surface
 
@@ -471,7 +471,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | **Path security is strong** | `api/files.go` | Positive — Defense-in-depth: lexical + symlink + TOCTOU checks. Well-tested. |
 | **mTLS + join tokens** | `cluster/tls.go`, `discovery.go` | Positive — Constant-time token comparison, Ed25519 identity, cert pinning. |
 | **Secret redaction** | `inference/redact.go` | Positive — Sorts by length desc, min 8-byte guard. |
-| **resolve.go doesn't EvalSymlinks** | `agent/tools/resolve.go` | Medium — Confinement check doesn't resolve symlinks first. A symlink chain could escape allowed roots. (TODO) |
+| ~~**resolve.go doesn't EvalSymlinks**~~ | `agent/tools/resolve.go` | **FIXED** — EvalSymlinks added; rejects paths that resolve outside roots via symlink. |
 | **SSRF protection opt-in** | `agent/tools/fetch.go` | Low — Must call `SetSSRFProtection(true)` explicitly. Should default to true. |
 | **Relay status bytes unauthenticated** | `cluster/relay.go` | Low — MITM could inject false status. Mitigated by mTLS on the data path. |
 
@@ -528,8 +528,8 @@ Completed items struck through. Next priorities:
 2. ~~**Inference correctness**~~ — **DONE** (fresh tail overflow fix, compaction depth cap).
 3. ~~**Split `local_tools.go`**~~ — **DONE** (5 files by tool category).
 4. ~~**Cluster hardening**~~ — **DONE** (path traversal fix, node bridge robustness, goroutine bounding). Remaining: recv timeouts, gRPC flow control.
-5. **File sync** — Complex, high-stakes. Directory watch races, unused `Reconcile()`.
-6. **Tool correctness** — Atomic writes, resolve.go symlinks, multiedit rollback.
+5. ~~**File sync**~~ — **DONE** (Reconcile wired into production after initial sync; watch race documented as sufficient).
+6. ~~**Tool correctness**~~ — **DONE** (atomic writes for write_file/memory/todos, resolve.go symlink protection, job ID space widened).
 7. **API test coverage** — Major gap. Add endpoint tests before making changes.
 8. **Web UI polish** — Toast system, error display, virtualization.
 9. **Control plane cleanup** — Reload error swallowing, provider validation, split concerns.
