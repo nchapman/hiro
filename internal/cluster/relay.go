@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -70,16 +71,27 @@ func NewRelayClient(cfg RelayConfig) *RelayClient {
 // is passed to onConnection for the caller to use (typically as a gRPC conn).
 // Blocks until ctx is done.
 func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
+	backoff := 5 * time.Second
 	for {
 		err := rc.connectAndServe(ctx, onConnection)
 		if ctx.Err() != nil {
 			return
 		}
-		rc.logger.Warn("relay control connection lost, reconnecting...", "error", err)
+
+		// If we were connected (not just a handshake failure), reset backoff.
+		if err != nil && !isConflictError(err) {
+			backoff = 5 * time.Second
+		}
+
+		rc.logger.Warn("relay control connection lost, reconnecting...", "error", err, "backoff", backoff)
 		select {
-		case <-time.After(5 * time.Second):
+		case <-time.After(backoff):
 		case <-ctx.Done():
 			return
+		}
+		// Exponential backoff when relay rejects us (stale entry not yet cleaned up).
+		if isConflictError(err) && backoff < 120*time.Second {
+			backoff = backoff * 2
 		}
 	}
 }
@@ -88,6 +100,11 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 	conn, err := net.DialTimeout("tcp", rc.relayAddr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("dialing relay: %w", err)
+	}
+	// Set TCP keepalive to detect dead connections at the OS level.
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetKeepAlive(true)
+		tc.SetKeepAlivePeriod(15 * time.Second)
 	}
 
 	// Send leader handshake.
@@ -122,9 +139,10 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 		conn.Close()
 	}()
 
-	// Send keepalive bytes every 30s to prevent the relay's 90s read timeout.
+	// Send keepalive bytes every 15s to prevent the relay's 90s read timeout
+	// and any intermediate NAT/proxy idle timeouts.
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -137,9 +155,11 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 				}
 				c.SetWriteDeadline(time.Now().Add(5 * time.Second))
 				if _, err := c.Write([]byte{0x00}); err != nil {
+					rc.logger.Warn("relay keepalive write failed", "error", err)
 					return // connection dead, read loop will handle cleanup
 				}
 				c.SetWriteDeadline(time.Time{})
+				rc.logger.Debug("relay keepalive sent")
 			case <-ctx.Done():
 				return
 			}
@@ -148,7 +168,9 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 
 	buf := make([]byte, 1)
 	for {
-		conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		// No read deadline — the keepalive goroutine detects dead connections
+		// via write failures. The read blocks until a 0xFF notification arrives
+		// or the connection is closed (by ctx cancel or keepalive failure).
 		_, err := conn.Read(buf)
 		if err != nil {
 			rc.mu.Lock()
@@ -269,6 +291,10 @@ func readRelayStatus(conn net.Conn) (byte, error) {
 	}
 	conn.SetReadDeadline(time.Time{})
 	return status[0], nil
+}
+
+func isConflictError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already registered")
 }
 
 func relayStatusName(status byte) string {
