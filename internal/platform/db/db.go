@@ -10,6 +10,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -34,28 +35,25 @@ func Open(path string) (*DB, error) {
 	}
 	f.Close()
 
-	conn, err := sql.Open("sqlite", path)
+	// Use _pragma DSN parameters so every pooled connection gets the same
+	// pragmas automatically. This allows multiple concurrent readers in WAL
+	// mode while a single writer holds busy_timeout for lock contention.
+	dsn := path + "?" + url.Values{
+		"_pragma": {
+			"journal_mode(WAL)",
+			"foreign_keys(1)",
+			"busy_timeout(10000)",
+		},
+	}.Encode()
+
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
-	// Single connection serializes all access. WAL mode supports concurrent
-	// readers, but database/sql requires per-connection pragma setup to use
-	// multiple connections safely (foreign_keys, busy_timeout). The single
-	// connection is sufficient for typical load; increase if analytics queries
-	// become a bottleneck.
-	conn.SetMaxOpenConns(1)
-
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=10000",
-	} {
-		if _, err := conn.Exec(pragma); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("setting %s: %w", pragma, err)
-		}
-	}
+	// Allow concurrent readers in WAL mode. Writes still serialize via
+	// SQLite's internal lock, but reads proceed without blocking.
+	conn.SetMaxOpenConns(4)
 
 	d := &DB{db: conn}
 	if err := d.migrate(); err != nil {
