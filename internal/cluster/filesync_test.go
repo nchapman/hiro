@@ -1,12 +1,15 @@
 package cluster
 
 import (
+	"archive/tar"
 	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 )
@@ -283,6 +286,41 @@ func TestApplyFileUpdate_PathTraversal(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for path traversal")
+	}
+}
+
+func TestApplyInitialSync_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "node-1",
+	})
+
+	// Create a zstd-compressed tar with a path-traversal entry.
+	var buf bytes.Buffer
+	zw, _ := zstd.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	tw.WriteHeader(&tar.Header{
+		Name:     "../../../etc/evil",
+		Mode:     0644,
+		Size:     6,
+		Typeflag: tar.TypeReg,
+	})
+	tw.Write([]byte("hacked"))
+	tw.Close()
+	zw.Close()
+
+	// Apply as a streaming sync — the traversal entry should be silently skipped.
+	r := bytes.NewReader(buf.Bytes())
+	err := svc.ApplyInitialSyncStream(r)
+	if err != nil {
+		t.Fatalf("ApplyInitialSyncStream: %v", err)
+	}
+
+	// Verify the file was NOT created outside the root.
+	if _, err := os.Stat(filepath.Join(dir, "..", "evil")); !os.IsNotExist(err) {
+		t.Fatal("path traversal was not rejected: file exists outside root")
 	}
 }
 

@@ -1,0 +1,181 @@
+package agent
+
+import (
+	"context"
+	"os"
+	"time"
+)
+
+// shutdownGrace is the deadline for a graceful worker shutdown before force-killing.
+const shutdownGrace = 5 * time.Second
+
+// shutdownHandle sends a graceful shutdown to a worker handle, waits for exit
+// under a deadline, and force-kills if necessary.
+func (m *Manager) shutdownHandle(h *WorkerHandle) {
+	if h == nil || h.Worker == nil {
+		return
+	}
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	h.Worker.Shutdown(shutCtx)
+
+	select {
+	case <-h.Done:
+		// Process exited cleanly.
+	case <-shutCtx.Done():
+		// Deadline expired — force-kill and wait.
+		if h.Kill != nil {
+			h.Kill()
+		}
+		<-h.Done
+	}
+}
+
+// cleanupWorker closes the worker handle and releases the UID.
+// The handle is captured under the lock to avoid races.
+func (m *Manager) cleanupWorker(id string, h *WorkerHandle) {
+	if h != nil {
+		h.Close()
+	}
+	if m.uidPool != nil {
+		m.uidPool.Release(id)
+	}
+}
+
+// softStop gracefully shuts down a persistent instance's worker process
+// but keeps it in the registry with status "stopped".
+func (m *Manager) softStop(id string) {
+	// Capture the handle under both locks and mark stopped atomically.
+	// Lock order: m.mu → inst.mu (no reverse path exists in the codebase).
+	// Both locks are needed: m.mu for watchWorker, inst.mu for SendMessage/UpdateConfig.
+	m.mu.Lock()
+	inst, ok := m.instances[id]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	inst.mu.Lock()
+	h := inst.handle
+	inst.worker = nil
+	inst.handle = nil
+	inst.loop = nil
+	inst.info.Status = InstanceStatusStopped
+	inst.mu.Unlock()
+	m.mu.Unlock()
+
+	// Shutdown the captured handle outside the lock (blocks on I/O).
+	m.shutdownHandle(h)
+	m.cleanupWorker(id, h)
+
+	// Persist stopped state so it survives server restarts.
+	m.setInstanceStatus(id, "stopped")
+}
+
+// reregisterStopped puts an instance back into the registry as stopped.
+// Used when StartInstance fails after unregistering.
+func (m *Manager) reregisterStopped(id string, inst *instance) {
+	m.mu.Lock()
+	inst.info.Status = InstanceStatusStopped
+	m.instances[id] = inst
+	if inst.info.ParentID != "" {
+		m.children[inst.info.ParentID] = append(m.children[inst.info.ParentID], id)
+	}
+	m.mu.Unlock()
+}
+
+// watchWorker monitors a worker's Done channel and handles unexpected exits.
+func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
+	<-done
+
+	m.mu.RLock()
+	inst, ok := m.instances[instanceID]
+	// Bail out if the instance was removed, stopped, or if the handle was
+	// cleared by NewSession (which nils handle before shutting down the old
+	// worker to prevent this goroutine from interfering with the new session).
+	stale := !ok || inst.info.Status == InstanceStatusStopped || inst.handle == nil
+	var name string
+	if ok {
+		name = inst.info.Name
+	}
+	m.mu.RUnlock()
+	if stale {
+		return
+	}
+
+	m.logger.Warn("instance process exited unexpectedly",
+		"id", instanceID,
+		"name", name,
+	)
+
+	// Handle the dead instance and its children.
+	descendants := m.collectDescendants(instanceID)
+	for i := len(descendants) - 1; i >= 0; i-- {
+		id := descendants[i]
+		m.mu.RLock()
+		deadInst, exists := m.instances[id]
+		m.mu.RUnlock()
+		if !exists || deadInst.info.Status == InstanceStatusStopped {
+			continue
+		}
+
+		if deadInst.info.Mode.IsPersistent() {
+			m.mu.Lock()
+			deadInst.mu.Lock()
+			if deadInst.info.Status == InstanceStatusStopped {
+				deadInst.mu.Unlock()
+				m.mu.Unlock()
+				continue
+			}
+			h := deadInst.handle
+			deadInst.worker = nil
+			deadInst.handle = nil
+			deadInst.loop = nil
+			deadInst.info.Status = InstanceStatusStopped
+			deadInst.mu.Unlock()
+			m.mu.Unlock()
+
+			m.cleanupWorker(id, h)
+			m.setInstanceStatus(id, "stopped")
+		} else {
+			m.mu.Lock()
+			h := deadInst.handle
+			deadInst.worker = nil
+			deadInst.handle = nil
+			deadInst.loop = nil
+			m.unregisterLocked(id, deadInst)
+			m.mu.Unlock()
+
+			m.cleanupWorker(id, h)
+			os.RemoveAll(m.instanceDir(id))
+		}
+	}
+}
+
+// removeInstance gracefully shuts down and removes an instance from the registry.
+// Ephemeral instance directories are cleaned up.
+func (m *Manager) removeInstance(id string) {
+	m.mu.Lock()
+	inst, ok := m.instances[id]
+	var h *WorkerHandle
+	if ok {
+		inst.mu.Lock()
+		h = inst.handle
+		inst.worker = nil
+		inst.handle = nil
+		inst.loop = nil
+		inst.mu.Unlock()
+	}
+	m.unregisterLocked(id, inst)
+	m.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	m.shutdownHandle(h)
+	m.cleanupWorker(id, h)
+
+	if !inst.info.Mode.IsPersistent() {
+		os.RemoveAll(m.instanceDir(id))
+	}
+}

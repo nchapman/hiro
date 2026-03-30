@@ -3,6 +3,7 @@ package inference
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"charm.land/fantasy"
 
@@ -50,6 +51,25 @@ func Assemble(pdb *platformdb.DB, sessionID string, cfg CompactionConfig) (Assem
 	tailTokens := 0
 	for _, r := range freshTail {
 		tailTokens += r.tokens
+	}
+
+	// Cap fresh tail to prevent budget overflow. Reserve at most 80% of the
+	// token budget for the tail; shrink from the oldest end if exceeded.
+	maxTailTokens := cfg.TokenBudget * 4 / 5
+	if tailTokens > maxTailTokens {
+		originalCount := len(freshTail)
+		for len(freshTail) > 1 && tailTokens > maxTailTokens {
+			tailTokens -= freshTail[0].tokens
+			freshTail = freshTail[1:]
+		}
+		tailStart = len(all) - len(freshTail)
+		evictable = all[:tailStart]
+		slog.Warn("fresh tail truncated to fit token budget",
+			"original_count", originalCount,
+			"kept_count", len(freshTail),
+			"tail_tokens", tailTokens,
+			"max_tail_tokens", maxTailTokens,
+		)
 	}
 
 	// Fill remaining budget from evictable, newest first.

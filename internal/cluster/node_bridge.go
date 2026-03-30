@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -193,7 +194,11 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 
 	// Create a private socket directory (0700) so the socket is inaccessible
 	// to other processes from the moment it's created (no TOCTOU window).
-	socketDir := fmt.Sprintf("/tmp/hive-%s", cfg.SessionID[:18])
+	sessPrefix := cfg.SessionID
+	if len(sessPrefix) > 18 {
+		sessPrefix = sessPrefix[:18]
+	}
+	socketDir := fmt.Sprintf("/tmp/hive-%s", sessPrefix)
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}
@@ -231,8 +236,13 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 			readyCh <- fmt.Errorf("reading ready signal: %w", err)
 			return
 		}
-		if string(buf[:n]) != "ready\n" && string(buf[:n]) != "ready" {
-			readyCh <- fmt.Errorf("unexpected ready signal: %q", string(buf[:n]))
+		if n == 0 {
+			readyCh <- fmt.Errorf("empty ready signal")
+			return
+		}
+		sig := strings.TrimSpace(string(buf[:n]))
+		if sig != "ready" {
+			readyCh <- fmt.Errorf("unexpected ready signal: %q", sig)
 			return
 		}
 		readyCh <- nil

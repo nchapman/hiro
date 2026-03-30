@@ -1,0 +1,415 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+
+	"github.com/google/uuid"
+
+	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hivebot/internal/inference"
+	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
+	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hivebot/internal/watcher"
+)
+
+var validEfforts = map[string]bool{
+	"": true, "on": true, "low": true, "medium": true, "high": true, "max": true,
+	"minimal": true, "xhigh": true, // OpenAI/OpenRouter levels
+}
+
+func validReasoningEffort(effort string) bool {
+	return validEfforts[effort]
+}
+
+// UpdateInstanceConfig changes the model and/or reasoning effort for a running instance.
+// Changes take effect on the next Chat() call.
+func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string) error {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return fmt.Errorf("instance %q not found", instanceID)
+	}
+
+	// Serialize with SendMessage to prevent concurrent access to instance state.
+	// Status and loop checks must be inside the lock to avoid races with softStop.
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+
+	if inst.info.Status == InstanceStatusStopped {
+		return fmt.Errorf("instance %q is stopped", instanceID)
+	}
+	if inst.loop == nil {
+		return fmt.Errorf("instance %q has no inference loop", instanceID)
+	}
+
+	if model != "" && model != inst.info.Model {
+		// Find which configured provider owns this model.
+		provider, apiKey, baseURL, err := m.resolveProviderForModel(model)
+		if err != nil {
+			return err
+		}
+
+		lm, err := CreateLanguageModel(ctx, ProviderType(provider), apiKey, baseURL, model)
+		if err != nil {
+			return fmt.Errorf("creating language model %q: %w", model, err)
+		}
+		inst.loop.UpdateModel(lm, model, provider)
+		inst.info.Model = model
+	}
+
+	if reasoningEffort != nil {
+		if !validReasoningEffort(*reasoningEffort) {
+			return fmt.Errorf("invalid reasoning effort %q", *reasoningEffort)
+		}
+		inst.loop.SetReasoningEffort(*reasoningEffort)
+	}
+
+	// Persist config to DB so it survives restarts.
+	if m.pdb != nil {
+		cfg := platformdb.InstanceConfig{
+			ModelOverride:   inst.info.Model,
+			ReasoningEffort: inst.loop.ReasoningEffort(),
+		}
+		if err := m.pdb.UpdateInstanceConfig(instanceID, cfg); err != nil {
+			m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// StartInstance restarts a stopped persistent instance, creating a new session.
+func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
+	m.mu.RLock()
+	inst, ok := m.instances[instanceID]
+	m.mu.RUnlock()
+	if !ok {
+		return ErrInstanceNotFound
+	}
+	if inst.info.Status != InstanceStatusStopped {
+		return ErrInstanceNotStopped
+	}
+
+	name := inst.info.Name
+	parentID := inst.info.ParentID
+	mode := inst.info.Mode
+
+	// Remove the stopped entry so startInstance can re-register it.
+	m.mu.Lock()
+	m.unregisterLocked(instanceID, inst)
+	m.mu.Unlock()
+
+	cfg, err := config.LoadAgentDir(m.agentDefDir(name))
+	if err != nil {
+		// Re-register as stopped so the instance remains visible.
+		m.reregisterStopped(instanceID, inst)
+		return fmt.Errorf("loading agent %q: %w", name, err)
+	}
+
+	// Resume the latest session if one exists, otherwise create a new one.
+	var sessionID string
+	if m.pdb != nil {
+		if sess, ok := m.pdb.LatestSessionByInstance(instanceID); ok {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" {
+		sessionID = uuid.Must(uuid.NewV7()).String()
+	}
+	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID); err != nil {
+		// Re-register as stopped so the instance remains visible.
+		m.reregisterStopped(instanceID, inst)
+		return err
+	}
+
+	// Clear the stopped flag so the instance starts on next server restart.
+	m.setInstanceStatus(instanceID, "running")
+	return nil
+}
+
+// NewSession ends the current session and starts a new one within the same instance.
+// This is the /clear handler — memory and identity persist, messages and todos reset.
+func (m *Manager) NewSession(instanceID string) (string, error) {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return "", ErrInstanceNotFound
+	}
+
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+
+	// Status check inside lock to avoid race with softStop/watchWorker.
+	if inst.info.Status == InstanceStatusStopped {
+		return "", fmt.Errorf("instance %q is stopped", instanceID)
+	}
+
+	// Capture and nil out handle before shutdown so the old watchWorker
+	// goroutine sees nil and bails out instead of tearing down the instance.
+	oldHandle := inst.handle
+	inst.worker = nil
+	inst.handle = nil
+	inst.loop = nil
+
+	// Shut down the old worker (blocks until exit).
+	m.shutdownHandle(oldHandle)
+	if oldHandle != nil {
+		oldHandle.Close()
+	}
+
+	// Mark the old session as stopped in DB.
+	if m.pdb != nil && inst.activeSession != "" {
+		m.pdb.UpdateSessionStatus(inst.activeSession, "stopped")
+	}
+
+	// Create new session directory.
+	newSessionID := uuid.Must(uuid.NewV7()).String()
+	sessDir := m.instanceSessionDir(instanceID, newSessionID)
+	if err := os.MkdirAll(sessDir, 0700); err != nil {
+		return "", fmt.Errorf("creating session dir: %w", err)
+	}
+	for _, sub := range []string{"scratch", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0700); err != nil {
+			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
+		}
+	}
+
+	// Register new session in DB.
+	if m.pdb != nil {
+		if err := m.pdb.CreateSession(platformdb.Session{
+			ID:         newSessionID,
+			InstanceID: instanceID,
+			AgentName:  inst.info.Name,
+			Mode:       string(inst.info.Mode),
+		}); err != nil {
+			return "", fmt.Errorf("creating session in db: %w", err)
+		}
+	}
+
+	// Chown session dir using the UID already held for this instance.
+	if inst.uid != 0 {
+		filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			return os.Chown(path, int(inst.uid), int(inst.gid))
+		})
+	}
+
+	// Reload agent config and resolve provider.
+	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.info.Name))
+	if err != nil {
+		return "", fmt.Errorf("loading agent %q: %w", inst.info.Name, err)
+	}
+
+	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
+	if err != nil {
+		return "", err
+	}
+	model := m.resolveModel(cfg)
+	cfg.Model = model
+
+	hasSkills := len(cfg.Skills) > 0
+	if !hasSkills {
+		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
+		if _, err := os.Stat(skillsDir); err == nil {
+			hasSkills = true
+		}
+	}
+	allowedTools := buildAllowedToolsMap(inst.effectiveTools, inst.info.Mode, hasSkills)
+
+	spawnCtx := m.ctx // persistent instances always use manager context
+
+	spawnCfg := ipc.SpawnConfig{
+		InstanceID:     instanceID,
+		SessionID:      newSessionID,
+		AgentName:      cfg.Name,
+		EffectiveTools: allowedTools,
+		WorkingDir:     m.opts.WorkingDir,
+		SessionDir:     sessDir,
+		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", newSessionID)),
+		UID:            inst.uid,
+		GID:            inst.gid,
+		Groups:         inst.groups,
+	}
+
+	// failStopped marks the instance as stopped on spawn/loop failure.
+	// The old worker is already dead, so there's nothing to recover to.
+	failStopped := func(err error) (string, error) {
+		inst.info.Status = InstanceStatusStopped
+		m.setInstanceStatus(instanceID, "stopped")
+		os.RemoveAll(sessDir)
+		if m.pdb != nil {
+			m.pdb.DeleteSession(newSessionID)
+		}
+		return "", err
+	}
+
+	handle, err := m.workerFactory(spawnCtx, spawnCfg)
+	if err != nil {
+		return failStopped(fmt.Errorf("spawning agent %q: %w", cfg.Name, err))
+	}
+	if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
+		wc.SetSecretEnvFn(m.SecretEnv)
+	}
+
+	// Create new inference loop.
+	var loop *inference.Loop
+	if provider != "" {
+		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, baseURL, model)
+		if err != nil {
+			handle.Kill()
+			return failStopped(fmt.Errorf("creating language model for %q: %w", cfg.Name, err))
+		}
+
+		loop, err = inference.NewLoop(inference.LoopConfig{
+			InstanceID:     instanceID,
+			SessionID:      newSessionID,
+			AgentConfig:    cfg,
+			Mode:           inst.info.Mode,
+			WorkingDir:     m.opts.WorkingDir,
+			InstanceDir:    m.instanceDir(instanceID),
+			SessionDir:     sessDir,
+			AgentDefDir:    m.agentDefDir(cfg.Name),
+			SharedSkillDir: m.sharedSkillsDir(),
+			LM:             lm,
+			Provider:       provider,
+			Executor:       handle.Worker,
+			PDB:            m.pdb,
+			AllowedTools:   allowedTools,
+			HasSkills:      hasSkills,
+			SecretNamesFn:  m.SecretNames,
+			SecretEnvFn:    m.SecretEnv,
+			Logger:         m.logger.With("instance", instanceID, "session", newSessionID, "agent", cfg.Name),
+			HostManager:    m,
+			CallerMode:     inst.info.Mode,
+		})
+		if err != nil {
+			handle.Kill()
+			return failStopped(fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err))
+		}
+	}
+
+	inst.activeSession = newSessionID
+	inst.worker = handle.Worker
+	inst.handle = handle
+	inst.loop = loop
+
+	go m.watchWorker(instanceID, handle.Done)
+
+	m.logger.Info("new session created",
+		"instance", instanceID,
+		"session", newSessionID,
+		"agent", inst.info.Name,
+	)
+
+	return newSessionID, nil
+}
+
+// WatchAgentDefinitions subscribes to agent.md changes via the filesystem
+// watcher and pushes resolved structural config to affected running instances.
+func (m *Manager) WatchAgentDefinitions(w *watcher.Watcher) {
+	w.Subscribe("agents/*/agent.md", func(events []watcher.Event) {
+		seen := make(map[string]bool)
+		for _, ev := range events {
+			name := extractAgentName(ev.Path)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			m.pushConfigUpdate(name)
+		}
+	})
+}
+
+// pushConfigUpdate reloads an agent definition from disk and pushes the
+// resolved config to all running instances of that agent.
+func (m *Manager) pushConfigUpdate(agentName string) {
+	cfg, err := config.LoadAgentDir(m.agentDefDir(agentName))
+	if err != nil {
+		m.logger.Warn("failed to load agent definition for config push",
+			"agent", agentName, "error", err)
+		return
+	}
+
+	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
+	if err != nil {
+		m.logger.Warn("failed to resolve provider for config push",
+			"agent", agentName, "error", err)
+		return
+	}
+	model := m.resolveModel(cfg)
+
+	hasSkills := len(cfg.Skills) > 0
+	if !hasSkills {
+		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
+		if _, err := os.Stat(skillsDir); err == nil {
+			hasSkills = true
+		}
+	}
+
+	type pushTarget struct {
+		id           string
+		parentID     string
+		mode         config.AgentMode
+		loop         *inference.Loop
+		currentModel string
+	}
+
+	m.mu.RLock()
+	var targets []pushTarget
+	for id, inst := range m.instances {
+		if inst.info.Name == agentName && inst.info.Status == InstanceStatusRunning {
+			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode, loop: inst.loop, currentModel: inst.info.Model})
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, t := range targets {
+		inst := m.getInstance(t.id)
+		if inst == nil {
+			continue // removed between snapshot and push
+		}
+
+		inst.mu.Lock()
+		if inst.info.Status == InstanceStatusStopped {
+			inst.mu.Unlock()
+			continue
+		}
+		// Model switch requires a live loop; description is always updated.
+		if inst.loop != nil && model != inst.info.Model {
+			lm, err := CreateLanguageModel(context.Background(), ProviderType(provider), apiKey, baseURL, model)
+			if err != nil {
+				m.logger.Warn("failed to create language model for config push",
+					"agent", agentName, "model", model, "error", err)
+			} else {
+				inst.loop.UpdateModel(lm, model, provider)
+				inst.info.Model = model
+			}
+		}
+		inst.info.Description = cfg.Description
+		inst.mu.Unlock()
+
+		m.logger.Info("pushed config update to instance",
+			"agent", agentName, "instance", t.id, "model", model)
+	}
+}
+
+// PushConfigUpdateAll recomputes and pushes config to all running instances.
+func (m *Manager) PushConfigUpdateAll() {
+	m.mu.RLock()
+	names := make(map[string]bool)
+	for _, inst := range m.instances {
+		if inst.info.Status == InstanceStatusRunning {
+			names[inst.info.Name] = true
+		}
+	}
+	m.mu.RUnlock()
+
+	for name := range names {
+		m.pushConfigUpdate(name)
+	}
+}

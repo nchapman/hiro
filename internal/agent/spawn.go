@@ -32,7 +32,11 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 	// agent UIDs from the moment it's created (no TOCTOU window). The directory
 	// is 0700, owned by the agent's UID. Short path to stay under the 104-byte
 	// Unix socket limit.
-	socketDir := fmt.Sprintf("/tmp/hive-%s", cfg.SessionID[:18])
+	sessPrefix := cfg.SessionID
+	if len(sessPrefix) > 18 {
+		sessPrefix = sessPrefix[:18]
+	}
+	socketDir := fmt.Sprintf("/tmp/hive-%s", sessPrefix)
 	os.MkdirAll(socketDir, 0700)
 	if cfg.UID != 0 {
 		os.Chown(socketDir, int(cfg.UID), int(cfg.GID))

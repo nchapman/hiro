@@ -76,6 +76,7 @@ type CompactionConfig struct {
 	CondenseTargetTokens int
 	LeafMinFanout        int
 	CondenseMinFanout    int
+	MaxSummaryDepth      int // condensation stops when output depth would exceed this
 }
 
 // SoftThresholdTokens returns the absolute token count for the soft threshold.
@@ -149,6 +150,7 @@ func compactionConfigForWindow(contextWindow int) CompactionConfig {
 		CondenseTargetTokens: clamp(400, contextWindow/25, 8_000),
 		LeafMinFanout:        4,
 		CondenseMinFanout:    clamp(3, contextWindow/100_000, 6),
+		MaxSummaryDepth:      clamp(4, contextWindow/50_000, 8),
 	}
 }
 
@@ -319,7 +321,12 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	for depth := 0; depth <= maxDepth; depth++ {
+	maxAllowedDepth := maxDepth
+	if c.config.MaxSummaryDepth > 0 && c.config.MaxSummaryDepth-1 < maxAllowedDepth {
+		maxAllowedDepth = c.config.MaxSummaryDepth - 1 // -1 because output is at depth+1
+	}
+
+	for depth := 0; depth <= maxAllowedDepth; depth++ {
 		items, sums, err := c.pdb.ContiguousSummariesAtDepth(c.sessionID, depth, c.config.CondenseMinFanout)
 		if err != nil {
 			return false, err

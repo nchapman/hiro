@@ -170,7 +170,12 @@ func (w *WorkerStream) Connect(ctx context.Context) error {
 }
 
 // readLoop processes incoming messages from the leader.
+// maxConcurrentHandlers limits the number of goroutines handling incoming
+// commands (spawn, execute, shutdown, kill) to prevent unbounded growth.
+const maxConcurrentHandlers = 64
+
 func (w *WorkerStream) readLoop(ctx context.Context, stream pb.Cluster_NodeStreamClient) error {
+	sem := make(chan struct{}, maxConcurrentHandlers)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -183,22 +188,38 @@ func (w *WorkerStream) readLoop(ctx context.Context, stream pb.Cluster_NodeStrea
 		switch m := msg.Msg.(type) {
 		case *pb.LeaderMessage_SpawnWorker:
 			if w.onSpawnWorker != nil {
-				go w.onSpawnWorker(ctx, m.SpawnWorker)
+				go func() {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					w.onSpawnWorker(ctx, m.SpawnWorker)
+				}()
 			}
 
 		case *pb.LeaderMessage_ExecuteTool:
 			if w.onExecuteTool != nil {
-				go w.onExecuteTool(ctx, m.ExecuteTool)
+				go func() {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					w.onExecuteTool(ctx, m.ExecuteTool)
+				}()
 			}
 
 		case *pb.LeaderMessage_ShutdownWorker:
 			if w.onShutdownWorker != nil {
-				go w.onShutdownWorker(ctx, m.ShutdownWorker)
+				go func() {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					w.onShutdownWorker(ctx, m.ShutdownWorker)
+				}()
 			}
 
 		case *pb.LeaderMessage_KillWorker:
 			if w.onKillWorker != nil {
-				go w.onKillWorker(ctx, m.KillWorker)
+				go func() {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					w.onKillWorker(ctx, m.KillWorker)
+				}()
 			}
 
 		case *pb.LeaderMessage_FileSync:

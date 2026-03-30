@@ -497,13 +497,14 @@ func TestCompactionConfigScaling(t *testing.T) {
 		wantSoft       int
 		wantHard       int
 		wantBudget     int
+		wantMaxDepth   int
 	}{
-		{32_000, 3_200, 640, 1_280, 20, 3, 19_200, 27_200, 28_800},          // small: linear scaling
-		{200_000, 20_000, 4_000, 8_000, 20, 3, 120_000, 170_000, 180_000},   // reference: caps equal linear
-		{340_000, 20_000, 4_000, 8_000, 34, 3, 200_000, 289_000, 306_000},   // transition: soft capped, hard still linear
-		{500_000, 20_000, 4_000, 8_000, 50, 5, 200_000, 300_000, 350_000},   // large: all caps active
-		{1_000_000, 20_000, 4_000, 8_000, 100, 6, 200_000, 300_000, 350_000}, // 1M: capped
-		{2_000_000, 20_000, 4_000, 8_000, 200, 6, 200_000, 300_000, 350_000}, // 2M: capped
+		{32_000, 3_200, 640, 1_280, 20, 3, 19_200, 27_200, 28_800, 4},          // small: linear scaling
+		{200_000, 20_000, 4_000, 8_000, 20, 3, 120_000, 170_000, 180_000, 4},   // reference: caps equal linear
+		{340_000, 20_000, 4_000, 8_000, 34, 3, 200_000, 289_000, 306_000, 6},   // transition: soft capped, hard still linear
+		{500_000, 20_000, 4_000, 8_000, 50, 5, 200_000, 300_000, 350_000, 8},   // large: all caps active
+		{1_000_000, 20_000, 4_000, 8_000, 100, 6, 200_000, 300_000, 350_000, 8}, // 1M: capped
+		{2_000_000, 20_000, 4_000, 8_000, 200, 6, 200_000, 300_000, 350_000, 8}, // 2M: capped
 	}
 	for _, tt := range tests {
 		cfg := compactionConfigForWindow(tt.window)
@@ -530,6 +531,9 @@ func TestCompactionConfigScaling(t *testing.T) {
 		}
 		if cfg.TokenBudget != tt.wantBudget {
 			t.Errorf("window=%d: TokenBudget=%d, want %d", tt.window, cfg.TokenBudget, tt.wantBudget)
+		}
+		if cfg.MaxSummaryDepth != tt.wantMaxDepth {
+			t.Errorf("window=%d: MaxSummaryDepth=%d, want %d", tt.window, cfg.MaxSummaryDepth, tt.wantMaxDepth)
 		}
 	}
 }

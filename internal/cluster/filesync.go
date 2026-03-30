@@ -238,7 +238,8 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 		target := filepath.Join(s.rootDir, header.Name)
 
 		// Prevent path traversal.
-		if !strings.HasPrefix(target, s.rootDir+string(filepath.Separator)) && target != s.rootDir {
+		rel, relErr := filepath.Rel(s.rootDir, filepath.Clean(target))
+		if relErr != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
 
@@ -408,7 +409,8 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 	absPath := filepath.Join(s.rootDir, update.Path)
 
 	// Prevent path traversal.
-	if !strings.HasPrefix(absPath, s.rootDir+string(filepath.Separator)) {
+	rel, relErr := filepath.Rel(s.rootDir, filepath.Clean(absPath))
+	if relErr != nil || strings.HasPrefix(rel, "..") {
 		return fmt.Errorf("path traversal rejected: %s", update.Path)
 	}
 
