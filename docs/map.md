@@ -7,8 +7,8 @@
 
 | Metric | Value |
 |--------|-------|
-| Go source (non-test) | ~19.7k LOC across 90 files |
-| Go test code | ~17.5k LOC across 64 test files |
+| Go source (non-test) | ~17.9k LOC across 92 files |
+| Go test code | ~18.6k LOC across 69 test files |
 | Frontend (TS/TSX) | ~6.6k LOC across 44 files |
 | Internal packages | 15 |
 | Top-level commands | 3 (`main.go`, `agent.go`, `worker_node.go`) |
@@ -344,8 +344,8 @@ shadcn/ui components: badge, button, card, dialog, dropdown-menu, input, label, 
 | `inference/` | 9 files | Assembly, compaction, context, prompt, tools, redaction |
 | `cluster/` | 8 files | Discovery, filesync, identity, registry, streams, TLS |
 | `agent/` | 5 files | Manager, spawn, isolation (3 Docker-only) |
-| `platform/db/` | 1 file | Schema, CRUD, FTS, cascades, usage |
-| `api/` | 6 files | Auth, instances, settings, usage, files, server (85 tests) |
+| `platform/db/` | 2 files | Schema, CRUD, FTS, cascades, usage, instance lifecycle |
+| `api/` | 9 files | Auth, instances, settings, usage, files, server, setup, origin, share (101 tests) |
 | `tests/e2e/` | 8 files | Full-stack: agents, chat, history, memory, todos, lifecycle |
 | `tests/e2e_cluster/` | 1 file | Cluster integration |
 | Other | 11 files | Config, controlplane, transport, hub, auth, etc. |
@@ -394,12 +394,12 @@ Each row is a reviewable unit. Tackle them in any order.
 | 9 | **Relay** | `cluster/relay.go` | 399 | (manual) | NAT traversal relay server. |
 | 10 | **Discovery** | `cluster/discovery.go` | 332 | `discovery_test.go` | Tracker registration, heartbeat, node lookup. |
 | 11 | **Transport** | `transport/server.go`, `client.go`, `protocol.go` | ~765 | `transport_test.go` | WebSocket wire protocol, reconnect, auth. |
-| 12 | **Control Plane** | `controlplane/*.go` (7 files) | ~918 | `controlplane_test.go` (46 tests) | Split into 7 focused files. Auth, providers, secrets, policies, cluster, commands. |
-| 13 | **HTTP API** | `api/server.go`, `chat.go` | ~667 | 6 test files (85 tests) | REST routes, WebSocket chat, middleware, auth, settings, usage. |
+| 12 | **Control Plane** | `controlplane/*.go` (7 files) | ~918 | `controlplane_test.go` (53 tests) | Split into 7 focused files. Auth, providers, secrets, policies, cluster, commands. |
+| 13 | **HTTP API** | `api/server.go`, `chat.go` | ~667 | 9 test files (101 tests) | REST routes, WebSocket chat, middleware, auth, settings, usage, setup, share. |
 | 14 | **File Browser API** | `api/files.go` | 490 | `files_test.go` | List/read/write/rename/delete files. |
 | 15 | **Terminal** | `api/terminal.go` | ~80 | — | PTY WebSocket. |
 | 16 | **Auth** | `api/auth.go`, `auth/auth.go` | ~230 | `auth_test.go` (12 tests) | Token auth, sessions, rate limiter, password change. |
-| 17 | **Database** | `platform/db/*.go` | ~1500 | `db_test.go` | Schema, messages, instances, sessions, usage, FTS. |
+| 17 | **Database** | `platform/db/*.go` | ~1500 | 2 test files (18 tests) | Schema, messages, instances, sessions, usage, FTS. |
 | 18 | **Config Parsing** | `config/markdown.go` | 394 | `markdown_test.go` | YAML frontmatter + markdown, agent/skill loading. |
 | 19 | **Worker Spawn** | `agent/spawn.go` | ~180 | `spawn_test.go` | Process exec, UID switching, stdin pipe. |
 | 20 | **IPC/gRPC** | `ipc/`, `ipc/grpcipc/` | ~750 | `grpcipc_test.go` | Interfaces, proto, gRPC adapters (bufconn tests). |
@@ -415,8 +415,8 @@ Each row is a reviewable unit. Tackle them in any order.
 | 30 | **Web UI: Hooks** | `hooks/*`, `lib/*` | ~800 | — | WebSocket, file watch, chat parsing, state. |
 | 31 | **E2E Tests** | `tests/e2e/*.go` | ~1000 | — | Full-stack integration tests in Docker. |
 | 32 | **Cluster E2E** | `tests/e2e_cluster/` | ~200 | — | Multi-node cluster tests. |
-| 33 | **Sharing** | `api/share.go` | 236 | — | Conversation export/import. |
-| 34 | **Setup/Onboarding** | `api/setup.go`, `components/Setup.tsx` | ~200 | — | First-run flow. |
+| 33 | **Sharing** | `api/share.go` | 236 | `share_test.go` | Conversation export/import. Encrypt/decrypt roundtrip, create, access. |
+| 34 | **Setup/Onboarding** | `api/setup.go`, `components/Setup.tsx` | ~200 | `setup_test.go` | First-run flow. Validation, CSRF, already-complete guard. |
 | 35 | **Settings** | `api/settings.go`, `components/Settings.tsx` | ~240 | — | User preferences. |
 | 36 | **Usage Tracking** | `api/usage.go`, `platform/db/usage.go` | ~314 | `db_test.go` | Token/cost aggregation. |
 
@@ -508,8 +508,8 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 
 | Gap | Where | Recommendation |
 |-----|-------|----------------|
-| ~~**API endpoints largely untested**~~ | `api/` | **DONE** — 85 tests across 6 files covering auth, instances, settings, usage, files. Remaining gaps: chat WebSocket, terminal WebSocket, setup flow, share endpoints. |
-| ~~**Control plane providers/cluster untested**~~ | `controlplane/` | **DONE** — 25 → 46 tests. Added coverage for providers (10), cluster commands (5), cluster config (6), error paths (1), env overrides (2). |
+| ~~**API endpoints largely untested**~~ | `api/` | **DONE** — 101 tests across 9 files covering auth, instances, settings, usage, files, setup, share, origin. Remaining gaps: chat WebSocket, terminal WebSocket. |
+| ~~**Control plane providers/cluster untested**~~ | `controlplane/` | **DONE** — 25 → 53 tests. Providers, cluster commands/config, auth getters, env overrides, error paths. |
 | **No CI/CD pipeline** | Project-wide | All testing is manual via Makefile. Add GitHub Actions. |
 | **No integration tests for manager lifecycle** | `agent/manager_test.go` | Mock worker is simplistic. Test full create→send→stop→restore flow. |
 | **No concurrency stress tests for inference** | `inference/` | Model switch during Chat(), concurrent SendMessage. |
@@ -549,6 +549,6 @@ Completed items struck through. Next priorities:
 4. ~~**Cluster hardening**~~ — **DONE** (path traversal fix, node bridge robustness, goroutine bounding). Remaining: recv timeouts, gRPC flow control.
 5. ~~**File sync**~~ — **DONE** (Reconcile wired into production after initial sync; watch race documented as sufficient).
 6. ~~**Tool correctness**~~ — **DONE** (atomic writes for write_file/memory/todos, resolve.go symlink protection, job ID space widened).
-7. ~~**API test coverage**~~ — **DONE** (2 → 85 tests: auth, instances, settings, usage, files). Remaining: chat/terminal WebSocket, setup flow, share endpoints.
+7. ~~**API test coverage**~~ — **DONE** (2 → 101 tests across 9 files: auth, instances, settings, usage, files, setup, share, origin). Remaining: chat/terminal WebSocket.
 8. **Web UI polish** — Toast system, error display, virtualization.
-9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 46 tests). Remaining: rate limiter proxy support, setup CSRF hardening, password change session reissue.
+9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests). Remaining: rate limiter proxy support, setup CSRF hardening, password change session reissue.
