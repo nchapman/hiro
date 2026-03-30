@@ -12,8 +12,8 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hivebot/internal/provider"
 	"github.com/nchapman/hivebot/internal/watcher"
 )
 
@@ -48,16 +48,16 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 
 	if model != "" && model != inst.info.Model {
 		// Find which configured provider owns this model.
-		provider, apiKey, baseURL, err := m.resolveProviderForModel(model)
+		providerName, apiKey, baseURL, err := m.resolveProviderForModel(model)
 		if err != nil {
 			return err
 		}
 
-		lm, err := CreateLanguageModel(ctx, ProviderType(provider), apiKey, baseURL, model)
+		lm, err := provider.CreateLanguageModel(ctx, provider.Type(providerName), apiKey, baseURL, model)
 		if err != nil {
 			return fmt.Errorf("creating language model %q: %w", model, err)
 		}
-		inst.loop.UpdateModel(lm, model, provider)
+		inst.loop.UpdateModel(lm, model, providerName)
 		inst.info.Model = model
 	}
 
@@ -205,7 +205,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		return "", fmt.Errorf("loading agent %q: %w", inst.info.Name, err)
 	}
 
-	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
 	if err != nil {
 		return "", err
 	}
@@ -252,14 +252,14 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	if err != nil {
 		return failStopped(fmt.Errorf("spawning agent %q: %w", cfg.Name, err))
 	}
-	if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
-		wc.SetSecretEnvFn(m.SecretEnv)
+	if s, ok := handle.Worker.(ipc.SecretEnvSetter); ok {
+		s.SetSecretEnvFn(m.SecretEnv)
 	}
 
 	// Create new inference loop.
 	var loop *inference.Loop
-	if provider != "" {
-		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, baseURL, model)
+	if providerName != "" {
+		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(providerName), apiKey, baseURL, model)
 		if err != nil {
 			handle.Kill()
 			return failStopped(fmt.Errorf("creating language model for %q: %w", cfg.Name, err))
@@ -276,7 +276,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
-			Provider:       provider,
+			Provider:       providerName,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
@@ -335,7 +335,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		return
 	}
 
-	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
 	if err != nil {
 		m.logger.Warn("failed to resolve provider for config push",
 			"agent", agentName, "error", err)
@@ -381,12 +381,12 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		}
 		// Model switch requires a live loop; description is always updated.
 		if inst.loop != nil && model != inst.info.Model {
-			lm, err := CreateLanguageModel(context.Background(), ProviderType(provider), apiKey, baseURL, model)
+			lm, err := provider.CreateLanguageModel(context.Background(), provider.Type(providerName), apiKey, baseURL, model)
 			if err != nil {
 				m.logger.Warn("failed to create language model for config push",
 					"agent", agentName, "model", model, "error", err)
 			} else {
-				inst.loop.UpdateModel(lm, model, provider)
+				inst.loop.UpdateModel(lm, model, providerName)
 				inst.info.Model = model
 			}
 		}

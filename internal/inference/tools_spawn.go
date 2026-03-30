@@ -7,7 +7,6 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
 )
@@ -56,7 +55,7 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.Ag
 			// Extract caller ID from context for parent lineage.
 			callerID := callerIDFromContext(ctx)
 
-			nodeID := cluster.NodeID(input.Node)
+			nodeID := ipc.NodeID(input.Node)
 
 			switch config.AgentMode(mode) {
 			case config.ModeEphemeral:

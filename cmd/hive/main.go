@@ -15,14 +15,11 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/api"
 	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/controlplane"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"github.com/nchapman/hivebot/internal/platform"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 	"github.com/nchapman/hivebot/internal/uidpool"
@@ -102,65 +99,21 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := api.NewServer(logger, webFS)
-	srv.SetRootDir(absRootDir)
-	srv.SetControlPlane(cp)
-	srv.SetDB(pdb)
+	srv := api.NewServer(logger, webFS, cp, pdb, absRootDir)
 	srv.SetWatcher(fsWatcher)
 
-	// Load or create node identity for mTLS and tracker announcements.
-	identity, err := cluster.LoadOrCreateIdentity(absRootDir)
+	// Set up node identity (Ed25519 keypair + mTLS certificate).
+	identity, tlsCert, err := setupNodeIdentity(absRootDir, logger)
 	if err != nil {
-		return fmt.Errorf("loading node identity: %w", err)
-	}
-	logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
-
-	tlsCert, err := cluster.TLSCertFromIdentity(identity)
-	if err != nil {
-		return fmt.Errorf("generating TLS certificate: %w", err)
-	}
-	logger.Info("cluster mTLS enabled", "fingerprint", cluster.TLSFingerprint(tlsCert)[:16]+"...")
-
-	// Start cluster gRPC server for worker node connections (mTLS).
-	clusterAddr := envOr("HIVE_CLUSTER_ADDR", ":8081")
-	registry := cluster.NewNodeRegistry()
-	registry.RegisterHome(envOr("HOSTNAME", "leader"))
-
-	leaderStream := cluster.NewLeaderStream(registry, func(token string) string {
-		return cp.ValidateJoinToken(token)
-	}, logger)
-
-	serverTLS := cluster.ServerTLSConfig(tlsCert)
-	clusterGRPC := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
-	leaderStream.Register(clusterGRPC)
-
-	clusterLis, err := net.Listen("tcp", clusterAddr)
-	if err != nil {
-		return fmt.Errorf("listening on cluster addr %s: %w", clusterAddr, err)
+		return err
 	}
 
-	clusterSvc := cluster.NewLeaderService(leaderStream, registry, logger)
-
-	// Set up file sync: leader watches workspace/agents/skills and pushes to nodes.
-	leaderSync := cluster.NewFileSyncService(cluster.FileSyncConfig{
-		RootDir:  absRootDir,
-		SyncDirs: []string{"agents", "skills", "workspace"},
-		NodeID:   "leader",
-		SendFn: func(update *pb.FileUpdate) error {
-			clusterSvc.BroadcastFileUpdate(update)
-			return nil
-		},
-		Logger: logger,
-	})
-	clusterSvc.SetFileSync(leaderSync)
-	go leaderSync.WatchAndSync()
-
-	go func() {
-		logger.Info("cluster gRPC server starting", "addr", clusterAddr)
-		if err := clusterGRPC.Serve(clusterLis); err != nil {
-			logger.Error("cluster gRPC error", "error", err)
-		}
-	}()
+	// Start cluster gRPC server for worker node connections.
+	cs, err := setupClusterServer(absRootDir, tlsCert, cp, logger)
+	if err != nil {
+		return err
+	}
+	clusterSvc := cs.service
 
 	// Start tracker discovery announcements if configured.
 	discoveryCtx, discoveryCancel := context.WithCancel(ctx)
@@ -173,7 +126,7 @@ func run() error {
 		}
 
 		// Parse gRPC port from cluster address.
-		_, portStr, _ := net.SplitHostPort(clusterAddr)
+		_, portStr, _ := net.SplitHostPort(cs.listener.Addr().String())
 		grpcPort, _ := strconv.Atoi(portStr)
 
 		nodeName := cp.ClusterNodeName()
@@ -197,8 +150,8 @@ func run() error {
 
 		// Create a shared listener for relayed connections. gRPC's Serve()
 		// is called once and accepts connections as they arrive via Enqueue().
-		relayLis = cluster.NewChannelListener(clusterLis.Addr())
-		go clusterGRPC.Serve(relayLis)
+		relayLis = cluster.NewChannelListener(cs.listener.Addr())
+		go cs.grpcServer.Serve(relayLis)
 
 		// After first announce, check if we're reachable. If not, register
 		// with the relay so workers can reach us through it.
@@ -306,32 +259,10 @@ func run() error {
 			logger.Warn("failed to restore some agent instances", "error", err)
 		}
 
-		// Start coordinator if not already restored from a previous run.
-		// If a stopped coordinator exists, restart it rather than creating a duplicate.
-		leaderID, alreadyRunning := mgr.InstanceByAgentName("coordinator")
-		if alreadyRunning {
-			// Already running from RestoreInstances — nothing to do.
-		} else if leaderID != "" {
-			// Stopped coordinator found — restart it.
-			if err := mgr.StartInstance(ctx, leaderID); err != nil {
-				if os.IsNotExist(err) {
-					logger.Info("coordinator agent definition missing, skipping restart")
-					leaderID = ""
-				} else {
-					return fmt.Errorf("restarting coordinator: %w", err)
-				}
-			}
-		} else {
-			// No coordinator at all — create one.
-			var err error
-			leaderID, err = mgr.CreateInstance(ctx, "coordinator", "", "coordinator", "")
-			if err != nil {
-				if os.IsNotExist(err) {
-					logger.Info("no coordinator agent defined, skipping")
-				} else {
-					return fmt.Errorf("starting leader agent: %w", err)
-				}
-			}
+		// Ensure the coordinator agent is running.
+		leaderID, err := bootstrapCoordinator(ctx, mgr, logger)
+		if err != nil {
+			return err
 		}
 		if leaderID != "" {
 			providerType, _, _, _ := cp.ProviderInfo()
@@ -365,7 +296,7 @@ func run() error {
 	}
 
 	go func() {
-		logger.Info("hive starting", "addr", listenAddr, "cluster", clusterAddr)
+		logger.Info("hive starting", "addr", listenAddr, "cluster", cs.listener.Addr())
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "error", err)
 			cancel()
@@ -385,8 +316,8 @@ func run() error {
 	if relayLis != nil {
 		relayLis.Close()
 	}
-	clusterGRPC.GracefulStop()
-	leaderSync.Stop()
+	cs.grpcServer.GracefulStop()
+	cs.fileSync.Stop()
 	if mgr != nil {
 		mgr.Shutdown()
 	}

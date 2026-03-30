@@ -11,12 +11,7 @@ import (
 )
 
 // RemoteTools are tools that execute in the worker process via ExecuteTool gRPC.
-var RemoteTools = map[string]bool{
-	"bash": true, "read_file": true, "write_file": true,
-	"edit_file": true, "multiedit_file": true, "list_files": true,
-	"glob": true, "grep": true, "fetch": true,
-	"job_output": true, "job_kill": true,
-}
+var RemoteTools = tools.RemoteToolNames
 
 // proxyTool wraps a remote tool, forwarding execution to the worker via gRPC.
 // Fantasy sees it as a normal AgentTool; the execution happens in the worker.
@@ -47,36 +42,16 @@ func (t *proxyTool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.T
 }
 
 // buildProxyTools creates proxy tools that forward to the worker.
-// The real tool objects are created only to extract their schema (ToolInfo);
-// execution is dispatched to the worker via executor.
+// Tool schemas are obtained from the tools package; execution is dispatched
+// to the worker via executor.
 func buildProxyTools(workingDir string, executor ipc.ToolExecutor, allowed map[string]bool, redactor *Redactor) []fantasy.AgentTool {
-	// Create real tool objects for schema extraction only.
-	bgMgr := tools.NewBackgroundJobManager(nil)
-	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(workingDir, bgMgr),
-		tools.NewReadFileTool(workingDir),
-		tools.NewEditTool(workingDir),
-		tools.NewMultiEditTool(workingDir),
-		tools.NewWriteFileTool(workingDir),
-		tools.NewListFilesTool(workingDir),
-		tools.NewGlobTool(workingDir),
-		tools.NewGrepTool(workingDir),
-		tools.NewFetchTool(),
-		tools.NewJobOutputTool(bgMgr),
-		tools.NewJobKillTool(bgMgr),
-	}
-
 	var proxies []fantasy.AgentTool
-	for _, t := range allTools {
-		name := t.Info().Name
-		if !RemoteTools[name] {
-			continue
-		}
-		if allowed != nil && !allowed[name] {
+	for _, info := range tools.RemoteToolInfos(workingDir) {
+		if allowed != nil && !allowed[info.Name] {
 			continue
 		}
 		proxies = append(proxies, &proxyTool{
-			info:     t.Info(),
+			info:     info,
 			executor: executor,
 			redactor: redactor,
 		})

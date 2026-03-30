@@ -8,14 +8,16 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/nchapman/hivebot/internal/ipc"
 )
 
-// NodeID uniquely identifies a node in the cluster. This is a type alias
-// for string to stay compatible with ipc.NodeID.
-type NodeID = string
+// NodeID is re-exported from ipc for use within the cluster package.
+type NodeID = ipc.NodeID
 
 // HomeNodeID is the well-known ID for the leader's local node.
-const HomeNodeID = "home"
+// Canonical definition lives in ipc.HomeNodeID.
+const HomeNodeID = ipc.HomeNodeID
 
 // NodeStatus represents the connection state of a node.
 type NodeStatus string

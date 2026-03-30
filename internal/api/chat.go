@@ -13,7 +13,6 @@ import (
 
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/watcher"
 )
@@ -53,21 +52,10 @@ func (s *Server) SetManager(m *agent.Manager, leaderID string) {
 	s.leaderID = leaderID
 }
 
-// SetControlPlane sets the control plane for auth and slash commands.
-func (s *Server) SetControlPlane(cp *controlplane.ControlPlane) {
-	s.cp = cp
-	s.cmdHandler = cp
-}
-
 // SetStartManager sets the callback to start the agent manager.
 // Used by the setup endpoint to boot the manager after initial config.
 func (s *Server) SetStartManager(fn func() error) {
 	s.startManager = fn
-}
-
-// SetRootDir sets the platform root directory (used as the terminal working dir).
-func (s *Server) SetRootDir(dir string) {
-	s.rootDir = dir
 }
 
 // SetWatcher sets the filesystem watcher for pushing live updates.
@@ -82,7 +70,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.manager == nil || s.leaderID == "" {
+	if !s.hasManager() || s.leaderID == "" {
 		http.Error(w, "no agent configured", http.StatusServiceUnavailable)
 		return
 	}

@@ -14,8 +14,8 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hivebot/internal/provider"
 )
 
 // CreateInstance loads an agent definition by name and starts an instance in the
@@ -24,7 +24,7 @@ import (
 // parentInstanceID tracks lineage; pass "" for top-level instances.
 // mode is a string to satisfy the ipc.HostManager interface boundary; it must
 // be one of "persistent", "ephemeral", or "coordinator".
-func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID cluster.NodeID) (string, error) {
+func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID ipc.NodeID) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
 	}
@@ -52,7 +52,7 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 // ephemeral mode — the caller controls the lifecycle.
 // parentInstanceID identifies the spawning instance (empty for top-level spawns).
 // onEvent receives streaming events during execution (may be nil).
-func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, nodeID cluster.NodeID, onEvent func(ipc.ChatEvent) error) (string, error) {
+func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentInstanceID string, nodeID ipc.NodeID, onEvent func(ipc.ChatEvent) error) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -195,7 +195,7 @@ func (m *Manager) Shutdown() {
 // startInstance creates instance and session directories, spawns a worker process,
 // and registers the instance in the manager. nodeID targets a specific cluster
 // node ("" or "home" for local execution).
-func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID cluster.NodeID) (string, error) {
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID) (string, error) {
 	// Create instance directory with instance-level state.
 	instDir := m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
@@ -291,7 +291,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	}
 
 	// Resolve provider and model from control plane config.
-	provider, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
 	if err != nil {
 		return "", err
 	}
@@ -323,7 +323,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	}
 
 	// Spawn the worker — either locally or on a remote node.
-	isRemote := nodeID != "" && nodeID != cluster.HomeNodeID && m.clusterService != nil
+	isRemote := nodeID != "" && nodeID != ipc.HomeNodeID && m.clusterService != nil
 	var handle *WorkerHandle
 
 	if isRemote {
@@ -339,9 +339,6 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			cleanup()
 			return "", fmt.Errorf("spawning agent %q on node %s: %w", cfg.Name, nodeID, err)
 		}
-		if rw, ok := rh.Worker.(*cluster.RemoteWorker); ok {
-			rw.SetSecretEnvFn(m.SecretEnv)
-		}
 		handle = &WorkerHandle{
 			Worker: rh.Worker,
 			Kill:   rh.Kill,
@@ -355,16 +352,17 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			cleanup()
 			return "", fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
 		}
-		// Inject secret env provider so bash commands in the worker can access secrets.
-		if wc, ok := handle.Worker.(*grpcipc.WorkerClient); ok {
-			wc.SetSecretEnvFn(m.SecretEnv)
-		}
+	}
+
+	// Inject secret env provider so bash commands in the worker can access secrets.
+	if s, ok := handle.Worker.(ipc.SecretEnvSetter); ok {
+		s.SetSecretEnvFn(m.SecretEnv)
 	}
 
 	// Create the inference loop (skipped if no provider — test mode).
 	var loop *inference.Loop
-	if provider != "" {
-		lm, err := CreateLanguageModel(spawnCtx, ProviderType(provider), apiKey, baseURL, model)
+	if providerName != "" {
+		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(providerName), apiKey, baseURL, model)
 		if err != nil {
 			handle.Kill()
 			cleanup()
@@ -382,7 +380,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
-			Provider:       provider,
+			Provider:       providerName,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
@@ -402,7 +400,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	resolvedNodeID := nodeID
 	if resolvedNodeID == "" {
-		resolvedNodeID = cluster.HomeNodeID
+		resolvedNodeID = ipc.HomeNodeID
 	}
 
 	inst := &instance{

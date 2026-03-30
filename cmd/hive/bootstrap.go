@@ -1,0 +1,132 @@
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
+	"github.com/nchapman/hivebot/internal/agent"
+	"github.com/nchapman/hivebot/internal/cluster"
+	"github.com/nchapman/hivebot/internal/controlplane"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+)
+
+// clusterState bundles all cluster infrastructure created at startup.
+type clusterState struct {
+	grpcServer *grpc.Server
+	service    *cluster.LeaderService
+	fileSync   *cluster.FileSyncService
+	listener   net.Listener
+	registry   *cluster.NodeRegistry
+}
+
+// setupNodeIdentity loads or creates the node's Ed25519 keypair and derives
+// a TLS certificate for mTLS.
+func setupNodeIdentity(rootDir string, logger *slog.Logger) (*cluster.NodeIdentity, tls.Certificate, error) {
+	identity, err := cluster.LoadOrCreateIdentity(rootDir)
+	if err != nil {
+		return nil, tls.Certificate{}, fmt.Errorf("loading node identity: %w", err)
+	}
+	logger.Info("node identity loaded", "node_id", identity.NodeID[:16]+"...")
+
+	tlsCert, err := cluster.TLSCertFromIdentity(identity)
+	if err != nil {
+		return nil, tls.Certificate{}, fmt.Errorf("generating TLS certificate: %w", err)
+	}
+	logger.Info("cluster mTLS enabled", "fingerprint", cluster.TLSFingerprint(tlsCert)[:16]+"...")
+
+	return identity, tlsCert, nil
+}
+
+// setupClusterServer creates and starts the gRPC cluster server that accepts
+// worker node connections, and the file sync service for pushing workspace
+// changes to workers.
+func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplane.ControlPlane, logger *slog.Logger) (clusterState, error) {
+	clusterAddr := envOr("HIVE_CLUSTER_ADDR", ":8081")
+
+	registry := cluster.NewNodeRegistry()
+	registry.RegisterHome(envOr("HOSTNAME", "leader"))
+
+	leaderStream := cluster.NewLeaderStream(registry, func(token string) string {
+		return cp.ValidateJoinToken(token)
+	}, logger)
+
+	serverTLS := cluster.ServerTLSConfig(tlsCert)
+	grpcSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
+	leaderStream.Register(grpcSrv)
+
+	lis, err := net.Listen("tcp", clusterAddr)
+	if err != nil {
+		return clusterState{}, fmt.Errorf("listening on cluster addr %s: %w", clusterAddr, err)
+	}
+
+	svc := cluster.NewLeaderService(leaderStream, registry, logger)
+
+	// File sync: leader watches workspace/agents/skills and pushes to nodes.
+	fileSync := cluster.NewFileSyncService(cluster.FileSyncConfig{
+		RootDir:  rootDir,
+		SyncDirs: []string{"agents", "skills", "workspace"},
+		NodeID:   "leader",
+		SendFn: func(update *pb.FileUpdate) error {
+			svc.BroadcastFileUpdate(update)
+			return nil
+		},
+		Logger: logger,
+	})
+	svc.SetFileSync(fileSync)
+	go fileSync.WatchAndSync()
+
+	go func() {
+		logger.Info("cluster gRPC server starting", "addr", clusterAddr)
+		if err := grpcSrv.Serve(lis); err != nil {
+			logger.Error("cluster gRPC error", "error", err)
+		}
+	}()
+
+	return clusterState{
+		grpcServer: grpcSrv,
+		service:    svc,
+		fileSync:   fileSync,
+		listener:   lis,
+		registry:   registry,
+	}, nil
+}
+
+// bootstrapCoordinator ensures the coordinator agent is running. It handles
+// three cases: already running (no-op), stopped (restart), or missing (create).
+// Returns the leader instance ID (empty if no coordinator is defined).
+func bootstrapCoordinator(ctx context.Context, mgr *agent.Manager, logger *slog.Logger) (string, error) {
+	leaderID, alreadyRunning := mgr.InstanceByAgentName("coordinator")
+	if alreadyRunning {
+		return leaderID, nil
+	}
+
+	if leaderID != "" {
+		// Stopped coordinator found — restart it.
+		if err := mgr.StartInstance(ctx, leaderID); err != nil {
+			if os.IsNotExist(err) {
+				logger.Warn("coordinator agent definition missing, skipping restart")
+				return "", nil
+			}
+			return "", fmt.Errorf("restarting coordinator: %w", err)
+		}
+		return leaderID, nil
+	}
+
+	// No coordinator at all — create one.
+	leaderID, err := mgr.CreateInstance(ctx, "coordinator", "", "coordinator", "")
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Info("no coordinator agent defined, skipping")
+			return "", nil
+		}
+		return "", fmt.Errorf("starting leader agent: %w", err)
+	}
+	return leaderID, nil
+}

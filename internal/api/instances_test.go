@@ -76,9 +76,8 @@ func newInstanceTestServer(t *testing.T) (*Server, *agent.Manager, string) {
 	)
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	srv := NewServer(logger, nil)
+	srv := NewServer(logger, nil, nil, pdb, "")
 	srv.manager = mgr
-	srv.SetDB(pdb)
 	return srv, mgr, "test-agent"
 }
 

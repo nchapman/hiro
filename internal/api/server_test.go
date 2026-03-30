@@ -10,7 +10,7 @@ import (
 
 func newTestServer() *Server {
 	logger := slog.Default()
-	return NewServer(logger, nil)
+	return NewServer(logger, nil, nil, nil, "")
 }
 
 func TestHealthEndpoint(t *testing.T) {

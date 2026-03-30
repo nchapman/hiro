@@ -7,10 +7,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Go source (non-test) | ~17.9k LOC across 92 files |
+| Go source (non-test) | ~18.2k LOC across 96 files |
 | Go test code | ~18.6k LOC across 69 test files |
 | Frontend (TS/TSX) | ~6.6k LOC across 44 files |
-| Internal packages | 15 |
+| Internal packages | 16 |
 | Top-level commands | 3 (`main.go`, `agent.go`, `worker_node.go`) |
 
 ---
@@ -19,11 +19,12 @@
 
 | File | LOC | Role |
 |------|-----|------|
-| `main.go` | 406 | CLI parsing, `run()` starts control plane (HTTP, manager, DB), `runAgent()` is worker entry |
+| `main.go` | ~340 | CLI parsing, `run()` starts control plane (HTTP, manager, DB) |
+| `bootstrap.go` | ~130 | Cluster setup helpers: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator` |
 | `agent.go` | ~150 | Agent worker subprocess — reads SpawnConfig from stdin, serves gRPC |
 | `worker_node.go` | 329 | Worker node for cluster mode — connects to leader, bridges remote tool calls |
 
-**Bootstrap flow**: parse flags → load `.env` → open DB → create Manager → restore persistent instances → start coordinator → start HTTP server.
+**Bootstrap flow**: parse flags → load `.env` → open DB → `setupNodeIdentity` → `setupClusterServer` → create Manager → `bootstrapCoordinator` → start HTTP server.
 
 ---
 
@@ -41,7 +42,7 @@ The core of instance lifecycle management. Split into focused files (was 1,742 L
 | `manager_resolve.go` | 159 | computeEffectiveTools, buildAllowedToolsMap, resolveProvider/Model |
 | `manager_helpers.go` | 147 | SendMessage, SecretNames/Env, path helpers, validateAgentName |
 | `manager_restore.go` | 106 | RestoreInstances (startup recovery from DB) |
-| `agent.go` | ~180 | Agent struct, LoadAgentDir, agent definition types |
+| `agent.go` | ~10 | Options struct (provider code extracted to `internal/provider`) |
 | `spawn.go` | ~180 | Worker process spawning (exec, UID switching, stdin pipe) |
 | `tool_executor.go` | ~120 | ToolExecutor bridges inference loop → worker gRPC for remote tool calls |
 
@@ -63,6 +64,7 @@ All run in **worker processes**, dispatched via gRPC.
 | `fetch.go` | ~100 | HTTP fetch, 64KB response cap |
 | `job_output.go` | ~80 | Background job stdout/stderr |
 | `job_kill.go` | ~50 | Terminate background job |
+| `schema.go` | ~40 | `RemoteToolNames` registry + `RemoteToolInfos()` for schema extraction |
 | `resolve.go` | ~120 | Path resolution, sandboxing, symlink confinement, atomicWriteFile |
 | `rg.go` | ~60 | Ripgrep detection helper |
 
@@ -86,7 +88,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 | `assembly.go` | 152 | Message assembly within token budget (now with fresh tail overflow protection) |
 | `context.go` | ~180 | Context item management (system prompt sections) |
 | `prompt.go` | ~200 | System prompt builder (soul + identity + memory + todos + agent.md + tools.md + skills) |
-| `tools.go` | ~180 | Tool proxy — routes calls to local or remote (worker) execution |
+| `tools.go` | ~60 | Tool proxy — wraps remote tool schemas (from `tools.RemoteToolInfos`) with gRPC dispatch |
 | `helpers.go` | ~120 | Token counting, message utilities |
 | `redact.go` | ~80 | Secret redaction in tool outputs |
 
@@ -145,8 +147,8 @@ Interfaces and types for control plane ↔ worker communication.
 
 | File | LOC | Role |
 |------|-----|------|
-| `worker.go` | ~80 | `AgentWorker` interface (ExecuteTool + Shutdown) |
-| `host_manager.go` | ~80 | `HostManager` interface (inference→manager callbacks) |
+| `worker.go` | ~80 | `AgentWorker` interface (ExecuteTool + Shutdown), `SecretEnvSetter` optional interface |
+| `host_manager.go` | ~80 | `HostManager` interface (inference→manager callbacks), `NodeID` type, `HomeNodeID` constant |
 | `types.go` | ~100 | SpawnConfig, ToolCall, ToolResult types |
 | `tool_executor.go` | ~80 | ToolExecutor interface |
 | `event.go` | ~60 | Event types for streaming |
@@ -204,8 +206,8 @@ Wire protocol for leader ↔ worker WebSocket communication.
 
 | File | LOC | Role |
 |------|-----|------|
-| `server.go` | 363 | Router setup, middleware, static file serving, CORS |
-| `chat.go` | 304 | WebSocket chat handler — message relay to/from coordinator |
+| `server.go` | ~365 | Router setup, middleware, static file serving; `NewServer(logger, webFS, cp, pdb, rootDir)` |
+| `chat.go` | ~290 | WebSocket chat handler — message relay to/from coordinator; `SetManager`, `SetStartManager`, `SetWatcher` |
 | `files.go` | 490 | File browser API (list, read, write, rename, delete) |
 | `share.go` | 236 | Conversation sharing (export/import) |
 | `settings.go` | ~120 | Settings API (theme, model preferences) |
@@ -263,6 +265,7 @@ Operator-level config management — auth, providers, secrets, tool policies, cl
 
 | Package | File | LOC | Purpose |
 |---------|------|-----|---------|
+| `provider` | `provider.go` | ~180 | LLM provider construction (`CreateLanguageModel`, `TestConnection`, `AvailableProviders`). Imports all fantasy provider SDKs. |
 | `auth` | `auth.go` | ~100 | Token-based auth, session management |
 | `hub` | `hub.go` | ~120 | Swarm worker tracking, skill-based dispatch |
 | `uidpool` | `pool.go` | ~120 | Pre-allocated UID pool for process isolation |
@@ -419,6 +422,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 34 | **Setup/Onboarding** | `api/setup.go`, `components/Setup.tsx` | ~200 | `setup_test.go` | First-run flow. Validation, CSRF, already-complete guard. |
 | 35 | **Settings** | `api/settings.go`, `components/Settings.tsx` | ~240 | — | User preferences. |
 | 36 | **Usage Tracking** | `api/usage.go`, `platform/db/usage.go` | ~314 | `db_test.go` | Token/cost aggregation. |
+| 37 | **LLM Providers** | `provider/provider.go` | ~180 | — | Provider construction, connection testing, available provider listing. Isolates 9 SDK imports. |
 
 ---
 
@@ -436,7 +440,7 @@ Files over 500 LOC or with high cyclomatic complexity deserve the most attention
 | `agent/manager_lifecycle.go` | 449 | Instance creation, spawning, shutdown — largest agent file post-split |
 | `transport/server.go` | 415 | WebSocket lifecycle, auth, routing |
 | `agent/manager_session.go` | 415 | Session management, config push |
-| `cmd/hive/main.go` | 406 | Bootstrap — could be cleaner |
+| `cmd/hive/main.go` | ~340 | Bootstrap — cluster setup extracted to `bootstrap.go` |
 | `cluster/relay.go` | 399 | NAT traversal — network complexity |
 | `config/markdown.go` | 394 | Parser — correctness matters |
 | `agent/tools/grep.go` | 368 | Ripgrep + fallback — two code paths |
@@ -459,6 +463,12 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**manager.go is a god object**~~ | `agent/manager*.go` | **DONE** — Split into 8 focused files (155 LOC core + 7 modules). |
 | ~~**local_tools.go packs 15+ tools**~~ | `inference/tools_*.go` | **DONE** — Split into 5 files by tool category. |
 | ~~**controlplane.go mixes concerns**~~ | `controlplane/*.go` | **DONE** — Split into 7 focused files (211 LOC core + 6 modules). |
+| ~~**agent.go imports 9 provider SDKs**~~ | `agent/agent.go` | **DONE** — Provider construction extracted to `internal/provider`. `agent.go` is now ~10 LOC (Options struct only). |
+| ~~**inference→agent/tools schema coupling**~~ | `inference/tools.go` | **DONE** — Tool schemas extracted to `tools/schema.go` (`RemoteToolInfos`). Inference calls a clean schema function instead of constructing 11 dummy tool objects inline. |
+| ~~**Type assertions on concrete worker types**~~ | `agent/manager_lifecycle.go` | **DONE** — `SecretEnvSetter` interface added to `ipc`. Single interface check replaces assertions on `*grpcipc.WorkerClient` and `*cluster.RemoteWorker`. |
+| ~~**NodeID/HomeNodeID duplicated**~~ | `ipc`, `cluster` | **DONE** — Canonical definitions in `ipc/host_manager.go`. Cluster re-exports from ipc. |
+| ~~**API Server setter injection**~~ | `api/server.go` | **DONE** — `NewServer` takes required deps (`cp`, `pdb`, `rootDir`) in constructor. Only truly late-bound setters remain (`SetManager`, `SetStartManager`, `SetWatcher`). `hasManager()` helper. |
+| ~~**main.go cluster setup inline**~~ | `cmd/hive/main.go` | **DONE** — Extracted to `bootstrap.go`: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator`. main.go reduced from 406 to ~340 LOC. |
 | **filesync.go does too much** (723 LOC) | `cluster/filesync.go` | Initial sync, incremental sync, conflict resolution, watcher management. Could split into modules. |
 | **Cleanup logic duplicated** | `agent/manager_worker.go` | Worker cleanup appears in `cleanupWorker()`, `softStop()`, `removeInstance()`, and `watchWorker()`. Now colocated in one file. |
 | **Resource limits scattered** | `agent/tools/*.go`, `inference/*.go` | File sizes, output caps, timeouts, token estimates spread across files as bare constants. Centralize into a config struct. |
@@ -552,3 +562,4 @@ Completed items struck through. Next priorities:
 7. ~~**API test coverage**~~ — **DONE** (2 → 101 tests across 9 files: auth, instances, settings, usage, files, setup, share, origin). Remaining: chat/terminal WebSocket.
 8. **Web UI polish** — Toast system, error display, virtualization.
 9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests). Remaining: rate limiter proxy support, setup CSRF hardening, password change session reissue.
+10. ~~**Architecture refactoring**~~ — **DONE** (6 changes: extract `internal/provider`, tool schema cleanup, `SecretEnvSetter` interface, `NodeID` canonicalization, API server constructor, `bootstrap.go` extraction).

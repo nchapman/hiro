@@ -11,3 +11,9 @@ type AgentWorker interface {
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(ctx context.Context) error
 }
+
+// SecretEnvSetter is an optional interface for AgentWorker implementations
+// that support injecting secret environment variables for bash command execution.
+type SecretEnvSetter interface {
+	SetSecretEnvFn(fn func() []string)
+}

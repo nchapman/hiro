@@ -6,6 +6,9 @@ import "context"
 // Empty string or "home" represents the local leader node.
 type NodeID = string
 
+// HomeNodeID is the well-known ID for the leader's local node.
+const HomeNodeID = "home"
+
 // NodeInfo describes a node in the cluster for external consumers.
 type NodeInfo struct {
 	ID          string `json:"id"`

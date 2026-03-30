@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hivebot/internal/ipc"
 )
 
 // RestoreInstances reads persistent/coordinator instances from the platform
@@ -87,7 +87,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			m.logger.Info("creating new session (no previous session found)",
 				"instance", dbInst.ID, "session", sessionID, "agent", dbInst.AgentName)
 		}
-		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode, cluster.HomeNodeID)
+		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode, ipc.HomeNodeID)
 		if err != nil {
 			m.logger.Warn("failed to restore instance",
 				"id", dbInst.ID, "agent", dbInst.AgentName, "error", err)

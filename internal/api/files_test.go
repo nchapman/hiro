@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,8 +17,7 @@ import (
 func newFilesTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	root := t.TempDir()
-	srv := newTestServer()
-	srv.SetRootDir(root)
+	srv := NewServer(slog.Default(), nil, nil, nil, root)
 	return srv, root
 }
 

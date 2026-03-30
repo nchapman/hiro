@@ -34,8 +34,7 @@ func newAuthTestServer(t *testing.T) (*Server, *controlplane.ControlPlane) {
 	cp.SetPasswordHash(string(hash))
 	cp.Save()
 
-	srv := NewServer(logger, nil)
-	srv.cp = cp
+	srv := NewServer(logger, nil, cp, nil, "")
 	srv.limiter = &loginLimiter{attempts: make(map[string][]time.Time)}
 	return srv, cp
 }
@@ -82,8 +81,7 @@ func TestAuthStatus_NeedsSetup(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cp, _ := controlplane.Load(filepath.Join(dir, "config.yaml"), logger)
 
-	srv := NewServer(logger, nil)
-	srv.cp = cp
+	srv := NewServer(logger, nil, cp, nil, "")
 
 	req := httptest.NewRequest("GET", "/api/auth/status", nil)
 	rec := httptest.NewRecorder()
@@ -237,8 +235,7 @@ func TestRequireAuth_SkipsDuringSetup(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cp, _ := controlplane.Load(filepath.Join(dir, "config.yaml"), logger)
 
-	srv := NewServer(logger, nil)
-	srv.cp = cp
+	srv := NewServer(logger, nil, cp, nil, "")
 
 	req := httptest.NewRequest("GET", "/api/instances", nil)
 	rec := httptest.NewRecorder()

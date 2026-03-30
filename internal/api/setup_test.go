@@ -24,8 +24,7 @@ func newSetupServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(logger, nil)
-	srv.cp = cp
+	srv := NewServer(logger, nil, cp, nil, "")
 	srv.limiter = &loginLimiter{attempts: make(map[string][]time.Time)}
 	return srv
 }

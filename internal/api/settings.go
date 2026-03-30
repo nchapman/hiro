@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/models"
+	"github.com/nchapman/hivebot/internal/provider"
 )
 
 type settingsResponse struct {
@@ -141,13 +141,13 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 		return
 	}
 	providerType := r.PathValue("type")
-	provider, ok := s.cp.GetProvider(providerType)
+	prov, ok := s.cp.GetProvider(providerType)
 	if !ok {
 		http.Error(w, "provider not found", http.StatusNotFound)
 		return
 	}
 
-	model := agent.TestModelForProvider(providerType)
+	model := provider.TestModelForProvider(providerType)
 	if model == "" {
 		http.Error(w, "unsupported provider type", http.StatusBadRequest)
 		return
@@ -156,7 +156,7 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if err := agent.TestProviderConnection(ctx, agent.ProviderType(providerType), provider.APIKey, provider.BaseURL, model); err != nil {
+	if err := provider.TestConnection(ctx, provider.Type(providerType), prov.APIKey, prov.BaseURL, model); err != nil {
 		msg := err.Error()
 		if ctx.Err() != nil {
 			msg = "provider did not respond within 30s"
@@ -189,5 +189,5 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListProviderTypes(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, agent.AvailableProviders())
+	writeJSON(w, http.StatusOK, provider.AvailableProviders())
 }

@@ -14,7 +14,7 @@ func TestTotalUsage(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 	pdb, _ := platformdb.Open(filepath.Join(t.TempDir(), "test.db"))
 	t.Cleanup(func() { pdb.Close() })
-	srv.SetDB(pdb)
+	srv.pdb = pdb
 
 	req := authedRequest(t, srv, "GET", "/api/usage", nil)
 	rec := httptest.NewRecorder()
@@ -35,7 +35,7 @@ func TestUsageByModel(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 	pdb, _ := platformdb.Open(filepath.Join(t.TempDir(), "test.db"))
 	t.Cleanup(func() { pdb.Close() })
-	srv.SetDB(pdb)
+	srv.pdb = pdb
 
 	req := authedRequest(t, srv, "GET", "/api/usage/models", nil)
 	rec := httptest.NewRecorder()
@@ -50,7 +50,7 @@ func TestUsageByDay(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 	pdb, _ := platformdb.Open(filepath.Join(t.TempDir(), "test.db"))
 	t.Cleanup(func() { pdb.Close() })
-	srv.SetDB(pdb)
+	srv.pdb = pdb
 
 	req := authedRequest(t, srv, "GET", "/api/usage/daily?limit=7", nil)
 	rec := httptest.NewRecorder()

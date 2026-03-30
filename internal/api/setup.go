@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hivebot/internal/provider"
 )
 
 type setupRequest struct {
@@ -133,7 +133,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 
 	model := req.Model
 	if model == "" {
-		model = agent.TestModelForProvider(req.Type)
+		model = provider.TestModelForProvider(req.Type)
 		if model == "" {
 			http.Error(w, "unsupported provider type", http.StatusBadRequest)
 			return
@@ -143,7 +143,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := agent.TestProviderConnection(ctx, agent.ProviderType(req.Type), req.APIKey, "", model); err != nil {
+	if err := provider.TestConnection(ctx, provider.Type(req.Type), req.APIKey, "", model); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": false,
 			"error": err.Error(),

@@ -37,23 +37,26 @@ type Server struct {
 	logger       *slog.Logger
 }
 
-// NewServer creates a new API server. If webFS is non-nil, the web UI
-// will be served for any request that doesn't match an API route.
-func NewServer(logger *slog.Logger, webFS fs.FS) *Server {
+// NewServer creates a new API server with its required dependencies.
+// cp and pdb may be nil for tests that don't need them.
+// webFS controls whether the web UI is served for non-API requests.
+func NewServer(logger *slog.Logger, webFS fs.FS, cp *controlplane.ControlPlane, pdb *platformdb.DB, rootDir string) *Server {
 	s := &Server{
-		webFS:   webFS,
-		limiter: defaultLimiter,
-		mux:     http.NewServeMux(),
-		logger:  logger,
+		webFS:      webFS,
+		cp:         cp,
+		cmdHandler: cp, // ControlPlane implements CommandHandler
+		pdb:        pdb,
+		rootDir:    rootDir,
+		limiter:    defaultLimiter,
+		mux:        http.NewServeMux(),
+		logger:     logger,
 	}
 	s.routes()
 	return s
 }
 
-// SetDB sets the platform database for usage tracking endpoints.
-func (s *Server) SetDB(pdb *platformdb.DB) {
-	s.pdb = pdb
-}
+// hasManager reports whether the agent manager has been initialized.
+func (s *Server) hasManager() bool { return s.manager != nil }
 
 func (s *Server) routes() {
 	// Auth routes (unauthenticated)
@@ -156,7 +159,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
@@ -190,7 +193,7 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleInstanceMessages(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
@@ -209,7 +212,7 @@ func (s *Server) handleInstanceMessages(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
@@ -224,7 +227,7 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
@@ -250,7 +253,7 @@ func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
@@ -281,7 +284,7 @@ func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClearInstance(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
@@ -301,7 +304,7 @@ func (s *Server) handleClearInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
-	if s.manager == nil {
+	if !s.hasManager() {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}

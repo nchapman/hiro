@@ -30,7 +30,7 @@ type InstanceInfo struct {
 	ParentID    string         // empty for top-level instances
 	Status      InstanceStatus
 	Model       string         // resolved model ID
-	NodeID      cluster.NodeID // which node this instance runs on
+	NodeID      ipc.NodeID // which node this instance runs on
 }
 
 // WorkerHandle represents a running agent worker (process or mock).
@@ -62,7 +62,7 @@ type instance struct {
 	uid            uint32             // isolated UID (0 = no isolation)
 	gid            uint32             // isolated GID
 	groups         []uint32           // supplementary groups (includes hive-coordinators for coordinators)
-	nodeID         cluster.NodeID     // which node this instance runs on ("home" for local)
+	nodeID         ipc.NodeID         // which node this instance runs on ("home" for local)
 }
 
 // Manager supervises agent instance lifecycles on a single node.
