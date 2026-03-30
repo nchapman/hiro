@@ -7,8 +7,8 @@
 
 | Metric | Value |
 |--------|-------|
-| Go source (non-test) | ~19.4k LOC across 75 files |
-| Go test code | ~16.5k LOC across 59 test files |
+| Go source (non-test) | ~19.7k LOC across 90 files |
+| Go test code | ~17.5k LOC across 64 test files |
 | Frontend (TS/TSX) | ~6.6k LOC across 44 files |
 | Internal packages | 15 |
 | Top-level commands | 3 (`main.go`, `agent.go`, `worker_node.go`) |
@@ -58,12 +58,12 @@ All run in **worker processes**, dispatched via gRPC.
 | `edit.go` | ~180 | Surgical find-and-replace |
 | `multiedit.go` | ~150 | Batch edits to one file |
 | `read_file.go` | ~120 | Read with offset/limit, 64KB cap |
-| `write_file.go` | ~100 | Full file write, auto-mkdir |
+| `write_file.go` | ~100 | Atomic file write (temp+rename), auto-mkdir |
 | `list_files.go` | ~120 | Directory listing with glob filter |
 | `fetch.go` | ~100 | HTTP fetch, 64KB response cap |
 | `job_output.go` | ~80 | Background job stdout/stderr |
 | `job_kill.go` | ~50 | Terminate background job |
-| `resolve.go` | ~80 | Path resolution and sandboxing |
+| `resolve.go` | ~120 | Path resolution, sandboxing, symlink confinement, atomicWriteFile |
 | `rg.go` | ~60 | Ripgrep detection helper |
 
 **Tests**: Every tool has a corresponding `*_test.go`. Tests run real file/process ops in temp dirs.
@@ -132,8 +132,8 @@ Unified SQLite database (`db/hive.db`). Single writer, WAL mode, FTS5 for search
 | File | LOC | Role |
 |------|-----|------|
 | `markdown.go` | 394 | YAML frontmatter + markdown parser, agent/skill config loading |
-| `memory.go` | ~100 | Memory.md read/write helpers |
-| `todos.go` | ~100 | Todos YAML read/write helpers |
+| `memory.go` | ~140 | Memory.md read/write helpers (atomic write) |
+| `todos.go` | ~100 | Todos YAML read/write helpers (atomic write) |
 
 **Tests**: `markdown_test.go`, `memory_test.go`, `todos_test.go`.
 
@@ -216,23 +216,28 @@ Wire protocol for leader ↔ worker WebSocket communication.
 
 ### REST Endpoints
 
-| Route | Handler | Purpose |
-|-------|---------|---------|
-| `GET /api/health` | server | Health check |
-| `GET /api/agents` | server | List agent definitions |
-| `GET /api/instances` | server | List running instances |
-| `GET /api/instances/{id}/messages` | server | Get conversation history |
-| `POST /api/instances` | server | Create instance |
-| `DELETE /api/instances/{id}` | server | Stop instance |
-| `WS /ws/chat` | chat | WebSocket chat to coordinator |
-| `WS /ws/terminal` | terminal | WebSocket PTY terminal |
-| `GET/POST/DELETE /api/files/*` | files | File browser CRUD |
-| `GET /api/usage` | usage | Token/cost usage |
-| `POST /api/setup` | setup | First-run config |
-| `GET/POST /api/settings` | settings | User preferences |
-| `POST /api/share` | share | Export conversation |
+| Route | Auth | Purpose |
+|-------|------|---------|
+| `GET /api/health` | No | Health check |
+| `GET /api/auth/status` | No | Auth state (needsSetup, authRequired, authenticated) |
+| `POST /api/auth/login` | No | Login (rate-limited, bcrypt, sets cookie) |
+| `POST /api/auth/logout` | Yes | Logout (clears cookie) |
+| `POST /api/auth/password` | Yes | Change password (invalidates sessions) |
+| `POST /api/setup` | No | First-run setup (CSRF-protected) |
+| `GET/PUT /api/settings` | Yes | Default provider/model |
+| `GET/PUT/DELETE /api/settings/providers/{type}` | Yes | Provider CRUD |
+| `GET /api/instances` | Yes | List instances (optional mode filter) |
+| `GET /api/instances/{id}/messages` | Yes | Conversation history |
+| `POST /api/instances/{id}/start\|stop\|clear` | Yes | Instance lifecycle (root-protected) |
+| `DELETE /api/instances/{id}` | Yes | Delete instance (root-protected) |
+| `GET /api/usage[/models\|/daily]` | Yes | Token/cost analytics |
+| `GET/PUT/DELETE /api/files/*` | Yes | File browser CRUD |
+| `POST /api/files/share` | Yes | Create share token |
+| `GET /api/shared/{token}[/raw]` | No | View shared file (token auth) |
+| `WS /ws/chat` | Cond. | WebSocket chat to coordinator |
+| `WS /ws/terminal` | Yes | WebSocket PTY terminal |
 
-**Tests**: `server_test.go`, `files_test.go`.
+**Tests**: `server_test.go` (health, 404), `auth_test.go` (12 tests: login, logout, rate limiter, bearer token, password change, middleware), `files_test.go` (~40 subtests: tree, read, write, mkdir, delete, rename, path traversal), `instances_test.go` (8 tests: list, filter, root protection, messages), `settings_test.go` (5 tests: CRUD, singleton prevention), `usage_test.go` (5 tests: total, model, daily, no-DB, auth).
 
 ---
 
@@ -335,7 +340,7 @@ shadcn/ui components: badge, button, card, dialog, dropdown-menu, input, label, 
 | `cluster/` | 8 files | Discovery, filesync, identity, registry, streams, TLS |
 | `agent/` | 5 files | Manager, spawn, isolation (3 Docker-only) |
 | `platform/db/` | 1 file | Schema, CRUD, FTS, cascades, usage |
-| `api/` | 2 files | Server routes, file operations |
+| `api/` | 6 files | Auth, instances, settings, usage, files, server (85 tests) |
 | `tests/e2e/` | 8 files | Full-stack: agents, chat, history, memory, todos, lifecycle |
 | `tests/e2e_cluster/` | 1 file | Cluster integration |
 | Other | 11 files | Config, controlplane, transport, hub, auth, etc. |
@@ -373,10 +378,10 @@ Each row is a reviewable unit. Tackle them in any order.
 
 | # | Capability | Key Files | LOC | Tests | Notes |
 |---|-----------|-----------|-----|-------|-------|
-| 1 | **Agent Manager** | `agent/manager.go` | 1742 | `manager_test.go` | Largest file. Instance lifecycle, worker spawn, restore. |
+| 1 | **Agent Manager** | `agent/manager*.go` | ~1820 (8 files) | `manager_test.go` | Split into 8 focused files. Lifecycle, session, query, worker, resolve, restore. |
 | 2 | **Inference Loop** | `inference/loop.go` | 564 | (integration) | Core agentic loop, streaming, tool dispatch. |
 | 3 | **Compaction** | `inference/compaction.go` | 675 | `compaction_test.go` | LLM-driven summarization. Complex async logic. |
-| 4 | **Local Tools** | `inference/local_tools.go` | 572 | `tools_test.go` | Spawn, coordinator, memory, todos, history, skills. |
+| 4 | **Local Tools** | `inference/tools_*.go` | ~606 (5 files) | `tools_test.go` | Split: spawn, memory, todos, history, skills. |
 | 5 | **System Prompt** | `inference/prompt.go`, `assembly.go`, `context.go` | ~580 | 3 test files | Prompt assembly, token budgeting, context management. |
 | 6 | **File Sync** | `cluster/filesync.go` | 723 | 2 test files | Bidirectional sync, atomic writes, streaming tar. |
 | 7 | **Cluster Leader** | `cluster/leader_service.go`, `leader_stream.go` | ~500 | `stream_test.go` | gRPC service, worker registration, tool dispatch. |
@@ -385,10 +390,10 @@ Each row is a reviewable unit. Tackle them in any order.
 | 10 | **Discovery** | `cluster/discovery.go` | 332 | `discovery_test.go` | Tracker registration, heartbeat, node lookup. |
 | 11 | **Transport** | `transport/server.go`, `client.go`, `protocol.go` | ~765 | `transport_test.go` | WebSocket wire protocol, reconnect, auth. |
 | 12 | **Control Plane** | `controlplane/controlplane.go`, `commands.go` | ~887 | `controlplane_test.go` | Secrets, tool policies, slash commands. |
-| 13 | **HTTP API** | `api/server.go`, `chat.go` | ~667 | `server_test.go` | REST routes, WebSocket chat, middleware. |
+| 13 | **HTTP API** | `api/server.go`, `chat.go` | ~667 | 6 test files (85 tests) | REST routes, WebSocket chat, middleware, auth, settings, usage. |
 | 14 | **File Browser API** | `api/files.go` | 490 | `files_test.go` | List/read/write/rename/delete files. |
 | 15 | **Terminal** | `api/terminal.go` | ~80 | — | PTY WebSocket. |
-| 16 | **Auth** | `api/auth.go`, `auth/auth.go` | ~180 | `auth_test.go` | Token auth, sessions. |
+| 16 | **Auth** | `api/auth.go`, `auth/auth.go` | ~230 | `auth_test.go` (12 tests) | Token auth, sessions, rate limiter, password change. |
 | 17 | **Database** | `platform/db/*.go` | ~1500 | `db_test.go` | Schema, messages, instances, sessions, usage, FTS. |
 | 18 | **Config Parsing** | `config/markdown.go` | 394 | `markdown_test.go` | YAML frontmatter + markdown, agent/skill loading. |
 | 19 | **Worker Spawn** | `agent/spawn.go` | ~180 | `spawn_test.go` | Process exec, UID switching, stdin pipe. |
@@ -490,7 +495,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 
 | Gap | Where | Recommendation |
 |-----|-------|----------------|
-| **API endpoints largely untested** | `api/` | Only health + 404 tested. Add endpoint tests for instances, chat, files, auth. |
+| ~~**API endpoints largely untested**~~ | `api/` | **DONE** — 85 tests across 6 files covering auth, instances, settings, usage, files. Remaining gaps: chat WebSocket, terminal WebSocket, setup flow, share endpoints. |
 | **No CI/CD pipeline** | Project-wide | All testing is manual via Makefile. Add GitHub Actions. |
 | **No integration tests for manager lifecycle** | `agent/manager_test.go` | Mock worker is simplistic. Test full create→send→stop→restore flow. |
 | **No concurrency stress tests for inference** | `inference/` | Model switch during Chat(), concurrent SendMessage. |
@@ -530,6 +535,6 @@ Completed items struck through. Next priorities:
 4. ~~**Cluster hardening**~~ — **DONE** (path traversal fix, node bridge robustness, goroutine bounding). Remaining: recv timeouts, gRPC flow control.
 5. ~~**File sync**~~ — **DONE** (Reconcile wired into production after initial sync; watch race documented as sufficient).
 6. ~~**Tool correctness**~~ — **DONE** (atomic writes for write_file/memory/todos, resolve.go symlink protection, job ID space widened).
-7. **API test coverage** — Major gap. Add endpoint tests before making changes.
+7. ~~**API test coverage**~~ — **DONE** (2 → 85 tests: auth, instances, settings, usage, files). Remaining: chat/terminal WebSocket, setup flow, share endpoints.
 8. **Web UI polish** — Toast system, error display, virtualization.
 9. **Control plane cleanup** — Reload error swallowing, provider validation, split concerns.
