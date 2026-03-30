@@ -486,6 +486,12 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**HandleCommand swallows save errors**~~ | `controlplane/commands.go` | **FIXED** — Appends warning to result string when Save() fails. |
 | ~~**hasContent misses JoinTokens**~~ | `controlplane/controlplane.go` | **FIXED** — Join tokens now included in hasContent(); were silently not persisted. |
 | ~~**SetProvider lacks validation**~~ | `controlplane/controlplane_providers.go` | **FIXED** — Returns error for empty provider type or API key. Callers updated. |
+| ~~**IsInstanceDescendant infinite loop**~~ | `platform/db/instances.go` | **FIXED** — Cycle detection via visited set + max depth (100). Handles `sql.ErrNoRows` gracefully. |
+| ~~**Missing InstanceID in session queries**~~ | `platform/db/sessions.go` | **FIXED** — All queries (`GetSession`, `ListSessions`, `ListSessionsByInstance`, `LatestSessionByInstance`, `scanSessions`) now select and populate `instance_id`. |
+| ~~**LatestSessionByInstance swallows errors**~~ | `platform/db/sessions.go` | **FIXED** — Returns `(Session, bool, error)` to distinguish "not found" from DB failure. |
+| ~~**RowsAffected errors ignored**~~ | `platform/db/instances.go`, `sessions.go` | **FIXED** — All 5 locations now check `RowsAffected()` error. |
+| ~~**Assembly error swallowed**~~ | `inference/loop.go` | **FIXED** — Logged at Error level; nil guard prevents using zero-value messages. |
+| ~~**History tool errors leaked into content**~~ | `inference/tools_history.go` | **FIXED** — DB errors now return `NewTextErrorResponse` instead of embedding in output. |
 
 ### Security Surface
 
@@ -496,6 +502,9 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | **Secret redaction** | `inference/redact.go` | Positive — Sorts by length desc, min 8-byte guard. |
 | ~~**resolve.go doesn't EvalSymlinks**~~ | `agent/tools/resolve.go` | **FIXED** — EvalSymlinks added; rejects paths that resolve outside roots via symlink. |
 | ~~**API key masking revealed short keys**~~ | `controlplane/controlplane_providers.go` | **FIXED** — Raised threshold so keys ≤10 chars are fully masked. |
+| ~~**Auth secret accepted without validation**~~ | `auth/auth.go` | **FIXED** — `NewTokenSigner` returns error for secrets < 32 bytes. |
+| ~~**Spawn socket dir errors ignored**~~ | `agent/spawn.go` | **FIXED** — `os.MkdirAll` and `os.Chown` errors now returned, failing fast on broken isolation. |
+| ~~**rand.Read unchecked in node ID**~~ | `cluster/leader_stream.go` | **FIXED** — Error checked and propagated. |
 | **SSRF protection opt-in** | `agent/tools/fetch.go` | Low — Must call `SetSSRFProtection(true)` explicitly. Should default to true. |
 | **Relay status bytes unauthenticated** | `cluster/relay.go` | Low — MITM could inject false status. Mitigated by mTLS on the data path. |
 | **Rate limiter ignores reverse proxy** | `api/auth.go` | Medium — Keys on `RemoteAddr`; behind a proxy, all clients share the same key. Needs trusted-proxy header extraction. |
@@ -509,6 +518,9 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | **Lock hierarchy well-documented** | `agent/manager.go` | `m.mu → inst.mu` ordering prevents deadlocks. |
 | **Dual compaction locks** | `inference/loop.go` | `updateMu` (fast config) + `compactMu` (slow DB) — good design. |
 | ~~**TokenSigner write-locks on hot path**~~ | `controlplane/controlplane_auth.go` | **FIXED** — Read-lock fast path with double-checked write-lock upgrade. |
+| ~~**Race on ephemeralMsgs**~~ | `inference/loop.go` | **FIXED** — New `ephemeralMu` mutex with copy-on-read pattern. |
+| ~~**Race on lastShared skills cache**~~ | `inference/loop.go` | **FIXED** — New `skillsMu` mutex. Lock ordering: `updateMu` → `skillsMu`. |
+| ~~**Config push uses unbounded context**~~ | `agent/manager_session.go` | **FIXED** — 10s `context.WithTimeout` for `CreateLanguageModel` in config push. |
 | **allowedRoots is a global** | `agent/tools/resolve.go` | Set once, never guarded. Should be immutable or mutex-protected. |
 | **No gRPC flow control** | `cluster/leader_stream.go` | Can queue unlimited messages before receiver drains. No `MaxConcurrentStreams` set. (TODO) |
 | ~~**Unbounded handler goroutines**~~ | `cluster/worker_stream.go` | **FIXED** — Added semaphore (64 concurrent handlers max). |
@@ -563,3 +575,4 @@ Completed items struck through. Next priorities:
 8. **Web UI polish** — Toast system, error display, virtualization.
 9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests). Remaining: rate limiter proxy support, setup CSRF hardening, password change session reissue.
 10. ~~**Architecture refactoring**~~ — **DONE** (6 changes: extract `internal/provider`, tool schema cleanup, `SecretEnvSetter` interface, `NodeID` canonicalization, API server constructor, `bootstrap.go` extraction).
+11. ~~**Error handling hardening**~~ — **DONE** (21 fixes across 18 files: infinite loop cycle detection, 2 race condition fixes with new mutexes, nil deref fix, 5 JSON marshal checks, spawn isolation errors, WalkDir errors, rand.Read check, RowsAffected checks, session query InstanceID fix, LatestSessionByInstance error surfacing, auth secret validation, config push timeout, history tool error responses, port parse check, restore config logging).
