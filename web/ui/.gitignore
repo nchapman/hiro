@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# AI agent directories
+.agents/
+.claude/
+.crush/
+.qwen/
+.vibe/
+
+# Skills
+skills/
+skills-lock.json
