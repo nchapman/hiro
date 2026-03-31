@@ -214,10 +214,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	if dirIsNew {
 		for _, name := range []string{"persona.md", "memory.md"} {
 			path := filepath.Join(instDir, name)
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				if err := os.WriteFile(path, nil, 0600); err != nil {
-					return "", fmt.Errorf("creating %s: %w", name, err)
-				}
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				return "", fmt.Errorf("creating %s: %w", name, err)
 			}
 		}
 	}

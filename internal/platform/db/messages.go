@@ -18,6 +18,7 @@ type Message struct {
 	Content   string
 	RawJSON   string
 	Tokens    int
+	Meta      bool // Meta messages are visible to the model but hidden from the user's transcript.
 	CreatedAt time.Time
 }
 
@@ -57,7 +58,9 @@ type SearchResult struct {
 // --- Messages ---
 
 // AppendMessage stores a new message and adds it to the context items.
-func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int) (int64, error) {
+// If meta is true, the message is visible to the model but hidden from the user's transcript.
+func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int, meta ...bool) (int64, error) {
+	isMeta := len(meta) > 0 && meta[0]
 	tx, err := d.db.Begin()
 	if err != nil {
 		return 0, err
@@ -74,9 +77,13 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int)
 		seq = int(maxSeq.Int64) + 1
 	}
 
+	metaInt := 0
+	if isMeta {
+		metaInt = 1
+	}
 	result, err := tx.Exec(
-		"INSERT INTO messages (session_id, seq, role, content, raw_json, tokens) VALUES (?, ?, ?, ?, ?, ?)",
-		sessionID, seq, role, content, rawJSON, tokens,
+		"INSERT INTO messages (session_id, seq, role, content, raw_json, tokens, meta) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		sessionID, seq, role, content, rawJSON, tokens, metaInt,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("inserting message: %w", err)
@@ -119,8 +126,8 @@ func (d *DB) GetMessage(id int64) (Message, error) {
 	var m Message
 	var createdAt string
 	err := d.db.QueryRow(
-		"SELECT id, session_id, seq, role, content, raw_json, tokens, created_at FROM messages WHERE id = ?", id,
-	).Scan(&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &createdAt)
+		"SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at FROM messages WHERE id = ?", id,
+	).Scan(&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &m.Meta, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, fmt.Errorf("message %d: %w", id, ErrNotFound)
 	}
@@ -143,7 +150,7 @@ func (d *DB) GetMessages(ids []int64) ([]Message, error) {
 		args[i] = id
 	}
 	query := fmt.Sprintf(
-		"SELECT id, session_id, seq, role, content, raw_json, tokens, created_at FROM messages WHERE id IN (%s) ORDER BY seq",
+		"SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at FROM messages WHERE id IN (%s) ORDER BY seq",
 		strings.Join(placeholders, ","),
 	)
 	rows, err := d.db.Query(query, args...)
@@ -157,7 +164,7 @@ func (d *DB) GetMessages(ids []int64) ([]Message, error) {
 // RecentMessages returns the most recent N messages for a session, oldest first.
 func (d *DB) RecentMessages(sessionID string, limit int) ([]Message, error) {
 	rows, err := d.db.Query(
-		`SELECT id, session_id, seq, role, content, raw_json, tokens, created_at
+		`SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at
 		 FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?`,
 		sessionID, limit,
 	)
@@ -380,7 +387,7 @@ func (d *DB) MessageTokensOutsideTail(sessionID string, tailSize int) (int, erro
 func (d *DB) OldestMessageContextItems(sessionID string, tailSize, maxTokens int) ([]ContextItem, []Message, error) {
 	rows, err := d.db.Query(`
 		SELECT ci.session_id, ci.ordinal, ci.item_type, ci.message_id, ci.summary_id,
-		       m.id, m.session_id, m.seq, m.role, m.content, m.raw_json, m.tokens, m.created_at
+		       m.id, m.session_id, m.seq, m.role, m.content, m.raw_json, m.tokens, m.meta, m.created_at
 		FROM context_items ci
 		JOIN messages m ON ci.message_id = m.id
 		WHERE ci.session_id = ? AND ci.item_type = 'message'
@@ -404,7 +411,7 @@ func (d *DB) OldestMessageContextItems(sessionID string, tailSize, maxTokens int
 		var createdAt string
 		if err := rows.Scan(
 			&ci.SessionID, &ci.Ordinal, &ci.ItemType, &ci.MessageID, &ci.SummaryID,
-			&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &createdAt,
+			&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &m.Meta, &createdAt,
 		); err != nil {
 			return nil, nil, err
 		}
@@ -590,7 +597,7 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 	for rows.Next() {
 		var m Message
 		var createdAt string
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &createdAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &m.Meta, &createdAt); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = parseTime(createdAt)

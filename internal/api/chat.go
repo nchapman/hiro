@@ -39,6 +39,7 @@ type ChatMessage struct {
 	Input           string           `json:"input,omitempty"`
 	Output          string           `json:"output,omitempty"`
 	IsError         bool             `json:"is_error,omitempty"`
+	IsMeta          bool             `json:"is_meta,omitempty"`
 	Status          string           `json:"status,omitempty"`
 	Usage           *UsageInfo       `json:"usage,omitempty"`
 	Model           string           `json:"model,omitempty"`
@@ -175,6 +176,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				Input:      evt.Input,
 				Output:     evt.Output,
 				IsError:    evt.IsError,
+				IsMeta:     evt.IsMeta,
 				Status:     evt.Status,
 			}
 			b, err := json.Marshal(wireMsg)

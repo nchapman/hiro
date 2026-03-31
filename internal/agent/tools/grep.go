@@ -371,7 +371,7 @@ func grepCount(ctx context.Context, pattern, searchPath, workingDir string, para
 	fmt.Fprintf(&sb, "Found %d matches across %d files\n\n", totalMatches, len(output))
 	sb.WriteString(strings.Join(sliced, "\n"))
 	if truncated {
-		fmt.Fprintf(&sb, "\n\n(Results truncated at %d entries. Use head_limit and offset for pagination.)", limit)
+		fmt.Fprintf(&sb, "\n\n(Showing %d of %d files. Use head_limit and offset for pagination.)", len(sliced), len(output))
 	}
 	return fantasy.NewTextResponse(sb.String()), nil
 }
@@ -411,7 +411,7 @@ func grepCountFallback(ctx context.Context, pattern, searchPath, workingDir stri
 	fmt.Fprintf(&sb, "Found %d matches across %d files\n\n", totalMatches, len(output))
 	sb.WriteString(strings.Join(sliced, "\n"))
 	if truncated {
-		fmt.Fprintf(&sb, "\n\n(Results truncated at %d entries. Use head_limit and offset for pagination.)", limit)
+		fmt.Fprintf(&sb, "\n\n(Showing %d of %d files. Use head_limit and offset for pagination.)", len(sliced), len(output))
 	}
 	return fantasy.NewTextResponse(sb.String()), nil
 }

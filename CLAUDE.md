@@ -228,7 +228,7 @@ Defined in `internal/inference/tools_todos.go`, `tools_history.go`. Run in the c
 
 - **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
 - **Persistent instances:** 9 built-in + 1 spawn + 1 todos + 2 history = 13 tools (+ 1 if skills)
-- **Coordinator instances:** 9 built-in + 1 spawn + 5 coordinator + 1 todos + 2 history = 18 tools (+ 1 if skills)
+- **Coordinator instances:** 9 built-in + 1 spawn + 6 coordinator + 1 todos + 2 history = 19 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
@@ -241,7 +241,7 @@ The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started 
 4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
 5. If not running, `CreateInstance(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
 
-Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`, `DeleteInstance`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `SpawnInstance` which supports all modes (non-coordinators are restricted to ephemeral).
+Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `SpawnInstance` which supports all modes (non-coordinators are restricted to ephemeral).
 
 ## Control Plane
 

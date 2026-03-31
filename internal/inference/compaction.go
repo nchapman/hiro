@@ -626,6 +626,11 @@ Format: terse bullet points. Include a short timeline of major milestones with d
 func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
+		// Skip meta messages — they're internal signals (task notifications, etc.)
+		// and shouldn't appear in conversation summaries.
+		if m.Meta {
+			continue
+		}
 		fmt.Fprintf(&b, "[%s] %s: %s\n\n",
 			m.CreatedAt.Format("2006-01-02 15:04:05"),
 			m.Role,
