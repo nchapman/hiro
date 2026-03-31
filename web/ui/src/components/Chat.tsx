@@ -1,18 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
-  ArrowUp,
-  Wrench,
-  ChevronRight,
-  ChevronDown,
-  MoreHorizontal,
-  Square,
-  Play,
-  Trash2,
-  Paperclip,
-  X,
-  FileText,
-} from "lucide-react"
+  IconArrowUp,
+  IconTool,
+  IconChevronRight,
+  IconChevronDown,
+  IconDots,
+  IconSquare,
+  IconPlayerPlay,
+  IconTrash,
+  IconPaperclip,
+  IconX,
+  IconFileText,
+} from "@tabler/icons-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -97,13 +97,13 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
           hasDetails && "cursor-pointer hover:bg-muted/50"
         )}
       >
-        <Wrench className="h-3 w-3 shrink-0" />
+        <IconTool className="h-3 w-3 shrink-0" />
         {toolCall.status || toolCall.name}
         <span className="flex-1" />
         {hasDetails && (
           expanded
-            ? <ChevronDown className="h-3 w-3 shrink-0" />
-            : <ChevronRight className="h-3 w-3 shrink-0" />
+            ? <IconChevronDown className="h-3 w-3 shrink-0" />
+            : <IconChevronRight className="h-3 w-3 shrink-0" />
         )}
       </button>
 
@@ -168,7 +168,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?
         {isStreaming ? (
           <Loader variant="typing" size="sm" />
         ) : (
-          <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+          <IconChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
         )}
         <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
       </button>
@@ -614,12 +614,12 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-2">
+      <div className="flex h-12 items-center justify-between border-b px-4">
         <div className="flex items-center gap-2">
           <span
             className={cn("h-2 w-2 shrink-0 rounded-full", statusDotColor(session))}
           />
-          <span className="font-medium">{session.name}</span>
+          <span className="font-heading text-sm font-medium">{session.name}</span>
           {!isStopped && !streaming && models.length > 0 && currentModel && (
             <ModelSelector
               models={models}
@@ -638,18 +638,18 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           {!isRoot && (
           <DropdownMenu>
             <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground">
-              <MoreHorizontal className="h-4 w-4" />
+              <IconDots className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {!isStopped && (
                 <DropdownMenuItem onClick={handleStop}>
-                  <Square className="mr-2 h-4 w-4" />
+                  <IconSquare className="mr-2 h-4 w-4" />
                   Stop
                 </DropdownMenuItem>
               )}
               {isStopped && (
                 <DropdownMenuItem onClick={handleStart}>
-                  <Play className="mr-2 h-4 w-4" />
+                  <IconPlayerPlay className="mr-2 h-4 w-4" />
                   Start
                 </DropdownMenuItem>
               )}
@@ -658,7 +658,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                 onClick={handleDelete}
                 variant="destructive"
               >
-                <Trash2 className="mr-2 h-4 w-4" />
+                <IconTrash className="mr-2 h-4 w-4" />
                 Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -674,7 +674,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         </div>
       ) : messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2">
-          <p className="text-lg font-medium text-foreground">
+          <p className="font-heading text-base font-medium text-foreground">
             {session.name}
           </p>
           {session.description && (
@@ -684,7 +684,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           )}
           {isStopped && (
             <Button variant="outline" size="sm" onClick={handleStart}>
-              <Play className="mr-2 h-4 w-4" />
+              <IconPlayerPlay className="mr-2 h-4 w-4" />
               Start session
             </Button>
           )}
@@ -709,7 +709,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                               />
                             ) : (
                               <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                                <FileText className="h-3 w-3" />
+                                <IconFileText className="h-3 w-3" />
                                 {att.filename}
                               </div>
                             )
@@ -761,7 +761,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           <div className="flex items-center justify-center gap-3 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
             Session is stopped.
             <Button variant="outline" size="sm" onClick={handleStart}>
-              <Play className="mr-2 h-4 w-4" />
+              <IconPlayerPlay className="mr-2 h-4 w-4" />
               Start
             </Button>
           </div>
@@ -790,7 +790,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                       {att.preview ? (
                         <img src={att.preview} alt={att.file.name} className="h-8 w-8 rounded object-cover" />
                       ) : (
-                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <IconFileText className="h-4 w-4 text-muted-foreground" />
                       )}
                       <span className="max-w-[120px] truncate">{att.file.name}</span>
                       <button
@@ -798,7 +798,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                         onClick={() => removeAttachment(att.id)}
                         className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
                       >
-                        <X className="h-3 w-3" />
+                        <IconX className="h-3 w-3" />
                       </button>
                     </div>
                   ))}
@@ -831,7 +831,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={streaming || !connected}
                   >
-                    <Paperclip className="h-4 w-4" />
+                    <IconPaperclip className="h-4 w-4" />
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
@@ -848,7 +848,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                     onClick={handleSend}
                     disabled={streaming || !connected || (!input.trim() && attachments.length === 0)}
                   >
-                    <ArrowUp className="h-4 w-4" />
+                    <IconArrowUp className="h-4 w-4" />
                   </Button>
                 </div>
               </div>

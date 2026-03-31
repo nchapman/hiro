@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { useParams } from "react-router-dom"
-import { Copy, Check } from "lucide-react"
+import { IconCopy, IconCheck } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { Markdown } from "@/components/prompt-kit/markdown"
@@ -175,9 +175,9 @@ function Header({ name, size, content }: { name: string; size: number; content?:
                     className="h-7 w-7"
                   >
                     {copied ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <IconCheck className="h-3.5 w-3.5 text-emerald-500" />
                     ) : (
-                      <Copy className="h-3.5 w-3.5" />
+                      <IconCopy className="h-3.5 w-3.5" />
                     )}
                   </Button>
                 }

@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { IconCircleCheck, IconLoader2, IconCircleX } from "@tabler/icons-react"
 
 import type { ModelInfo } from "@/lib/chat-types"
 
@@ -286,7 +286,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     className="flex-1"
                   >
                     {testStatus === "testing" && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                     )}
                     Test Connection
                   </Button>
@@ -295,7 +295,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       variant="outline"
                       className="gap-1 border-green-500 text-green-500"
                     >
-                      <CheckCircle2 className="h-3 w-3" />
+                      <IconCircleCheck className="h-3 w-3" />
                       Connected
                     </Badge>
                   )}
@@ -304,7 +304,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       variant="outline"
                       className="gap-1 border-destructive text-destructive"
                     >
-                      <XCircle className="h-3 w-3" />
+                      <IconCircleX className="h-3 w-3" />
                       Failed
                     </Badge>
                   )}
@@ -330,7 +330,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     className="flex-1"
                   >
                     {submitting ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : null}
                     Complete Setup
                   </Button>
@@ -344,7 +344,7 @@ export default function Setup({ onComplete }: SetupProps) {
           <>
             <CardHeader className="text-center">
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
-                <CheckCircle2 className="h-6 w-6 text-green-500" />
+                <IconCircleCheck className="h-6 w-6 text-green-500" />
               </div>
               <CardTitle>You're all set!</CardTitle>
               <CardDescription>

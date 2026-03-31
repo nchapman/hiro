@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { X, Circle } from "lucide-react"
+import { IconX, IconCircle } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import FileTree from "@/components/FileTree"
 import type { FileTreeHandle } from "@/components/FileTree"
@@ -155,13 +154,10 @@ export default function FilesPage() {
   return (
     <div className="flex h-full flex-1 overflow-hidden">
       {/* File tree sidebar */}
-      <aside className="flex h-full w-60 min-w-60 flex-col border-r bg-card">
-        <div className="flex items-center px-4 py-4">
-          <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Files
-          </span>
+      <aside className="flex h-full w-56 min-w-56 flex-col border-r bg-card">
+        <div className="flex h-12 items-center border-b px-4">
+          <span className="font-heading text-sm font-medium">Files</span>
         </div>
-        <Separator />
         <ScrollArea className="flex-1">
           <FileTree
             ref={treeRef}
@@ -196,7 +192,7 @@ export default function FilesPage() {
                   {/* Left gap — dirty indicator */}
                   <div className="flex w-7 items-center justify-center shrink-0">
                     {tab.dirty && (
-                      <Circle className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+                      <IconCircle className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
                     )}
                   </div>
                   <span className="truncate max-w-40 py-1.5">{name}</span>
@@ -209,7 +205,7 @@ export default function FilesPage() {
                       }}
                       className="inline-flex h-5 w-5 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
                     >
-                      <X className="h-3 w-3" />
+                      <IconX className="h-3 w-3" />
                     </button>
                   </div>
                 </div>

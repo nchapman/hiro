@@ -27,15 +27,14 @@ import {
   DialogClose,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { useTheme } from "@/hooks/use-theme"
 import {
-  Plus,
-  Trash2,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-} from "lucide-react"
+  IconPlus,
+  IconTrash,
+  IconCircleCheck,
+  IconCircleX,
+  IconLoader2,
+} from "@tabler/icons-react"
 
 import type { ModelInfo } from "@/lib/chat-types"
 
@@ -253,9 +252,12 @@ export default function SettingsPage() {
   const configuredTypes = Object.keys(providers)
 
   return (
-    <ScrollArea className="flex-1">
-      <div className="mx-auto max-w-2xl space-y-6 p-6">
-        <h1 className="text-2xl font-bold">Settings</h1>
+    <div className="flex h-full flex-1 flex-col">
+      <div className="flex h-12 shrink-0 items-center border-b px-4">
+        <span className="font-heading text-sm font-medium">Settings</span>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-2xl space-y-6 p-6">
 
         {/* Providers */}
         <Card>
@@ -271,7 +273,7 @@ export default function SettingsPage() {
                 <Dialog open={addOpen} onOpenChange={setAddOpen}>
                   <DialogTrigger>
                     <Button size="sm" className="gap-1">
-                      <Plus className="h-4 w-4" />
+                      <IconPlus className="h-4 w-4" />
                       Add
                     </Button>
                   </DialogTrigger>
@@ -345,10 +347,10 @@ export default function SettingsPage() {
                       </Label>
                       <div className="flex items-center gap-1">
                         {testStatus[type_] === "success" && (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          <IconCircleCheck className="h-4 w-4 text-green-500" />
                         )}
                         {testStatus[type_] === "error" && (
-                          <XCircle className="h-4 w-4 text-destructive" />
+                          <IconCircleX className="h-4 w-4 text-destructive" />
                         )}
                         <Button
                           variant="ghost"
@@ -357,7 +359,7 @@ export default function SettingsPage() {
                           disabled={testStatus[type_] === "testing"}
                         >
                           {testStatus[type_] === "testing" ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <IconLoader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             "Test"
                           )}
@@ -369,7 +371,7 @@ export default function SettingsPage() {
                             className="h-8 w-8 text-destructive"
                             onClick={() => handleDeleteProvider(type_)}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <IconTrash className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
@@ -539,7 +541,8 @@ export default function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+        </div>
       </div>
-    </ScrollArea>
+    </div>
   )
 }

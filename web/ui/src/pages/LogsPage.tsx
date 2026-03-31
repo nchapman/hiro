@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import {
-  Search,
-  Pause,
-  Play,
-  Trash2,
-  ArrowDown,
-  ChevronRight,
-  ChevronDown,
-} from "lucide-react"
+  IconSearch,
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconTrash,
+  IconArrowDown,
+  IconChevronRight,
+  IconChevronDown,
+} from "@tabler/icons-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -195,9 +195,9 @@ export default function LogsPage() {
   })
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden">
+    <div className="relative flex h-full flex-1 flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b px-4 py-2">
+      <div className="flex h-12 items-center gap-2 border-b px-4">
         <Select value={level} onValueChange={(v) => v && setLevel(v)}>
           <SelectTrigger size="sm">
             <SelectValue placeholder="Level" />
@@ -226,7 +226,7 @@ export default function LogsPage() {
         </Select>
 
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <IconSearch className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search logs..."
             value={search}
@@ -243,9 +243,9 @@ export default function LogsPage() {
             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
             {paused ? (
-              <Play className="h-3.5 w-3.5" />
+              <IconPlayerPlay className="h-3.5 w-3.5" />
             ) : (
-              <Pause className="h-3.5 w-3.5" />
+              <IconPlayerPause className="h-3.5 w-3.5" />
             )}
           </TooltipTrigger>
           <TooltipContent>{paused ? "Resume" : "Pause"}</TooltipContent>
@@ -260,7 +260,7 @@ export default function LogsPage() {
             }}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <IconTrash className="h-3.5 w-3.5" />
           </TooltipTrigger>
           <TooltipContent>Clear</TooltipContent>
         </Tooltip>
@@ -306,9 +306,9 @@ export default function LogsPage() {
                   <span className="mt-0.5 w-3.5 shrink-0 text-muted-foreground">
                     {hasAttrs &&
                       (expanded ? (
-                        <ChevronDown className="h-3.5 w-3.5" />
+                        <IconChevronDown className="h-3.5 w-3.5" />
                       ) : (
-                        <ChevronRight className="h-3.5 w-3.5" />
+                        <IconChevronRight className="h-3.5 w-3.5" />
                       ))}
                   </span>
 
@@ -377,7 +377,7 @@ export default function LogsPage() {
           }}
           className="absolute bottom-4 right-6 z-10 flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-opacity hover:bg-primary/90"
         >
-          <ArrowDown className="h-3 w-3" />
+          <IconArrowDown className="h-3 w-3" />
           Jump to bottom
         </button>
       )}

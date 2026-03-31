@@ -4,16 +4,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
-  MessageSquare,
-  FolderOpen,
-  ScrollText,
-  Settings,
-  Sun,
-  Moon,
-  Monitor,
-  LogOut,
-  TerminalSquare,
-} from "lucide-react"
+  IconMessage,
+  IconFolderOpen,
+  IconNotes,
+  IconSettings,
+  IconSun,
+  IconMoon,
+  IconDeviceDesktop,
+  IconLogout,
+  IconTerminal2,
+} from "@tabler/icons-react"
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 
@@ -26,18 +26,18 @@ interface ActivityBarProps {
 }
 
 const themeIcons = {
-  light: Sun,
-  dark: Moon,
-  system: Monitor,
+  light: IconSun,
+  dark: IconMoon,
+  system: IconDeviceDesktop,
 } as const
 
 const themeOrder = ["system", "light", "dark"] as const
 
-const activities: { id: Activity; icon: typeof MessageSquare; label: string }[] = [
-  { id: "chat", icon: MessageSquare, label: "Chat" },
-  { id: "files", icon: FolderOpen, label: "Files" },
-  { id: "logs", icon: ScrollText, label: "Logs" },
-  { id: "settings", icon: Settings, label: "Settings" },
+const activities: { id: Activity; icon: typeof IconMessage; label: string }[] = [
+  { id: "chat", icon: IconMessage, label: "Chat" },
+  { id: "files", icon: IconFolderOpen, label: "Files" },
+  { id: "logs", icon: IconNotes, label: "Logs" },
+  { id: "settings", icon: IconSettings, label: "Settings" },
 ]
 
 export default function ActivityBar({
@@ -90,7 +90,7 @@ export default function ActivityBar({
             }
             className="inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <TerminalSquare className="h-5 w-5" />
+            <IconTerminal2 className="h-5 w-5" />
           </TooltipTrigger>
           <TooltipContent side="right">Terminal</TooltipContent>
         </Tooltip>
@@ -108,7 +108,7 @@ export default function ActivityBar({
             onClick={onLogout}
             className="inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <LogOut className="h-5 w-5" />
+            <IconLogout className="h-5 w-5" />
           </TooltipTrigger>
           <TooltipContent side="right">Log out</TooltipContent>
         </Tooltip>

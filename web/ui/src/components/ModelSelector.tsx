@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react"
-import { ChevronDown } from "lucide-react"
+import { IconChevronDown } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { formatTokenCount } from "@/lib/format"
 import type { ModelInfo } from "@/lib/chat-types"
@@ -61,7 +61,7 @@ export default function ModelSelector({
         className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
       >
         <span>{currentName}</span>
-        <ChevronDown className="h-3 w-3" />
+        <IconChevronDown className="h-3 w-3" />
       </button>
 
       {open && (
