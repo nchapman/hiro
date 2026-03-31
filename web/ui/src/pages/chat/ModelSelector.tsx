@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from "react"
 import { IconChevronDown } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { formatTokenCount } from "@/lib/format"
 import type { ModelInfo } from "@/lib/chat-types"
 
@@ -54,77 +57,77 @@ export default function ModelSelector({
     })
   }, [open, search])
 
+  // Reset search when closing.
+  useEffect(() => {
+    if (!open) setSearch("")
+  }, [open])
+
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button variant="outline" size="sm" className="h-6 gap-1 rounded-md px-2 text-xs text-muted-foreground" />
+        }
       >
         <span>{currentName}</span>
         <IconChevronDown className="h-3 w-3" />
-      </button>
+      </PopoverTrigger>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-1 w-80 rounded-lg border bg-popover shadow-md">
-            {models.length > 10 && (
-              <div className="border-b p-2">
-                <input
-                  type="text"
-                  className="w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none placeholder:text-muted-foreground"
-                  placeholder="Search models..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            )}
-            <div ref={listRef} className="max-h-80 overflow-y-auto p-1">
-              {grouped.map(({ provider, models: groupModels }) => (
-                <div key={provider}>
-                  {multiProvider && provider && (
-                    <div className="sticky -top-1 -mx-1 bg-popover px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {provider}
-                    </div>
-                  )}
-                  {groupModels.map((m) => (
-                    <button
-                      key={`${m.provider}:${m.id}`}
-                      data-selected={m.id === currentModel ? "" : undefined}
-                      onClick={() => {
-                        onSelect(m.id)
-                        setOpen(false)
-                        setSearch("")
-                      }}
-                      className={cn(
-                        "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent cursor-pointer",
-                        m.id === currentModel && "bg-accent"
-                      )}
-                    >
-                      <div className="flex flex-col">
-                        <span className="font-medium">{m.name || m.id}</span>
-                        {m.name && m.name !== m.id && (
-                          <span className="text-[10px] text-muted-foreground">{m.id}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                        {m.can_reason && <span className="rounded bg-muted px-1">reason</span>}
-                        <span>{formatTokenCount(m.context_window)}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ))}
-              {filtered.length === 0 && (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  No models found
+      <PopoverContent align="start" className="w-80 p-0">
+        {models.length > 10 && (
+          <div className="border-b p-2">
+            <input
+              type="text"
+              className="w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none placeholder:text-muted-foreground"
+              placeholder="Search models..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              autoFocus
+            />
+          </div>
+        )}
+        <div ref={listRef} className="max-h-80 overflow-y-auto p-1">
+          {grouped.map(({ provider, models: groupModels }) => (
+            <div key={provider}>
+              {multiProvider && provider && (
+                <div className="sticky -top-1 -mx-1 bg-popover px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {provider}
                 </div>
               )}
+              {groupModels.map((m) => (
+                <button
+                  key={`${m.provider}:${m.id}`}
+                  data-selected={m.id === currentModel ? "" : undefined}
+                  onClick={() => {
+                    onSelect(m.id)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent cursor-pointer",
+                    m.id === currentModel && "bg-accent"
+                  )}
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium">{m.name || m.id}</span>
+                    {m.name && m.name !== m.id && (
+                      <span className="text-[10px] text-muted-foreground">{m.id}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    {m.can_reason && <Badge variant="secondary">reason</Badge>}
+                    <span>{formatTokenCount(m.context_window)}</span>
+                  </div>
+                </button>
+              ))}
             </div>
-          </div>
-        </>
-      )}
-    </div>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+              No models found
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

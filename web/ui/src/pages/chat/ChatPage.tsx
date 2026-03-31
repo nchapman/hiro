@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, memo } from "react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   IconArrowUp,
   IconTool,
   IconChevronRight,
-  IconChevronDown,
   IconDots,
   IconSquare,
   IconPlayerPlay,
@@ -86,14 +88,12 @@ async function processFiles(files: FileList | File[]): Promise<PendingAttachment
 // --- Tool call UI ---
 
 const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
-  const [expanded, setExpanded] = useState(false)
   const hasDetails = toolCall.input || toolCall.output
 
   return (
-    <div className="rounded-lg border">
-      <button
-        type="button"
-        onClick={() => hasDetails && setExpanded(!expanded)}
+    <Collapsible className="rounded-lg border">
+      <CollapsibleTrigger
+        disabled={!hasDetails}
         className={cn(
           "flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
           hasDetails && "cursor-pointer hover:bg-muted/50"
@@ -103,14 +103,12 @@ const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: Tool
         {toolCall.status || toolCall.name}
         <span className="flex-1" />
         {hasDetails && (
-          expanded
-            ? <IconChevronDown className="h-3 w-3 shrink-0" />
-            : <IconChevronRight className="h-3 w-3 shrink-0" />
+          <IconChevronRight className="h-3 w-3 shrink-0 transition-transform [[data-panel-open]_&]:rotate-90" />
         )}
-      </button>
+      </CollapsibleTrigger>
 
-      {expanded && (
-        <>
+      {hasDetails && (
+        <CollapsibleContent>
           {toolCall.input && (
             <div className="border-t bg-muted/20 px-3 py-2 text-xs">
               <Markdown className={markdownClassName}>
@@ -128,9 +126,9 @@ const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: Tool
               </Markdown>
             </div>
           )}
-        </>
+        </CollapsibleContent>
       )}
-    </div>
+    </Collapsible>
   )
 })
 
@@ -159,27 +157,22 @@ const markdownClassName = cn(
 )
 
 function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-  const [expanded, setExpanded] = useState(false)
-
   return (
-    <div className="rounded-lg border border-dashed border-muted-foreground/30">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground cursor-pointer hover:bg-accent/50 rounded-lg"
-      >
+    <Collapsible defaultOpen={isStreaming} className="rounded-lg border border-dashed border-muted-foreground/30">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground cursor-pointer hover:bg-accent/50 rounded-lg [[data-panel-open]_&]:rounded-b-none">
         {isStreaming ? (
           <Loader variant="typing" size="sm" />
         ) : (
-          <IconChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+          <IconChevronRight className="h-3 w-3 transition-transform [[data-panel-open]_&]:rotate-90" />
         )}
         <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
-      </button>
-      {(expanded || isStreaming) && (
+      </CollapsibleTrigger>
+      <CollapsibleContent>
         <div className="border-t border-dashed border-muted-foreground/30 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap max-h-64 overflow-y-auto">
           {content}
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -188,12 +181,12 @@ const AssistantMessage = memo(function AssistantMessage({ message }: { message: 
   const content = message.content
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {message.thinking && (
         <ThinkingBlock content={message.thinking} isStreaming={message.isThinking} />
       )}
       {toolCalls.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="flex flex-col gap-1.5">
           {toolCalls.map((tc) => (
             <ToolCallBlock key={tc.id} toolCall={tc} />
           ))}
@@ -213,7 +206,7 @@ const AssistantMessage = memo(function AssistantMessage({ message }: { message: 
 const UserMessage = memo(function UserMessage({ message }: { message: Message }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] space-y-2">
+      <div className="flex max-w-[85%] flex-col gap-2">
         {message.attachments && message.attachments.length > 0 && (
           <div className="flex flex-wrap justify-end gap-2">
             {message.attachments.map((att, i) =>
@@ -258,38 +251,49 @@ function ReasoningControl({
 
   const levels = model.reasoning_levels
 
-  if (levels && levels.length > 0) {
+  const options = [{ value: "", label: "Fast" }, ...((levels ?? []).map((l) => ({ value: l, label: `Think: ${l}` })))]
+
+  if (options.length > 2) {
     return (
-      <select
-        value={effort || ""}
-        onChange={(e) => onChange(e.target.value)}
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-        className="rounded-full border bg-transparent px-2 py-0.5 text-xs text-muted-foreground outline-none cursor-pointer"
-      >
-        <option value="">Fast</option>
-        {levels.map((l) => (
-          <option key={l} value={l}>
-            Think: {l}
-          </option>
-        ))}
-      </select>
+      <Popover>
+        <PopoverTrigger
+          render={
+            <Button variant="outline" size="sm" className="h-6 gap-1 rounded-full px-2 text-xs text-muted-foreground" />
+          }
+        >
+          {options.find((o) => o.value === effort)?.label ?? "Fast"}
+          <IconChevronRight className="h-3 w-3" />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-36 p-1">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              onClick={() => onChange(o.value)}
+              className={cn(
+                "flex w-full rounded-md px-2 py-1.5 text-xs cursor-pointer hover:bg-accent",
+                o.value === effort && "bg-accent"
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
     )
   }
 
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onChange(effort ? "" : "on") }}
-      onMouseDown={(e) => e.stopPropagation()}
+    <Button
+      variant={effort ? "outline" : "ghost"}
+      size="sm"
       className={cn(
-        "rounded-full border px-2 py-0.5 text-xs cursor-pointer",
-        effort
-          ? "border-green-500/50 bg-green-500/10 text-green-600"
-          : "text-muted-foreground hover:bg-accent"
+        "h-6 rounded-full px-2 text-xs",
+        effort && "border-primary/50 bg-primary/10 text-primary"
       )}
+      onClick={(e) => { e.stopPropagation(); onChange(effort ? "" : "on") }}
     >
       {effort ? "Thinking" : "Fast"}
-    </button>
+    </Button>
   )
 }
 
@@ -742,9 +746,9 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             />
           )}
           {isStopped && (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+            <Badge variant="secondary" className="uppercase">
               stopped
-            </span>
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -783,13 +787,13 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
       {/* Messages */}
       {loadingHistory ? (
-        <div className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-4">
+        <div className="mx-auto w-full max-w-3xl flex-1 flex flex-col gap-4 px-4 py-4">
           {/* User message skeleton */}
           <div className="flex justify-end">
             <Skeleton className="h-10 w-48 rounded-2xl" />
           </div>
           {/* Assistant message skeletons */}
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Skeleton className="h-4 w-full rounded" />
             <Skeleton className="h-4 w-4/5 rounded" />
             <Skeleton className="h-4 w-3/5 rounded" />
@@ -797,7 +801,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           <div className="flex justify-end">
             <Skeleton className="h-10 w-36 rounded-2xl" />
           </div>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Skeleton className="h-4 w-full rounded" />
             <Skeleton className="h-4 w-2/3 rounded" />
           </div>
@@ -821,16 +825,16 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         </div>
       ) : (
         <ChatContainerRoot ref={chatContainerRef} className="relative flex-1">
-          <ChatContainerContent className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
+          <ChatContainerContent className="mx-auto w-full max-w-3xl flex flex-col gap-4 px-4 py-4">
             {messages.map((msg) => (
               <div key={msg.id}>
                 {msg.role === "user" && <UserMessage message={msg} />}
                 {msg.role === "assistant" && <AssistantMessage message={msg} />}
                 {msg.role === "system" && (
                   <div className="flex justify-center">
-                    <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
+                    <Badge variant="outline">
                       {msg.content}
-                    </span>
+                    </Badge>
                   </div>
                 )}
               </div>

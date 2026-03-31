@@ -29,7 +29,7 @@ function TypingLoader({
   return (
     <div
       className={cn(
-        "flex items-center space-x-1",
+        "flex items-center gap-1",
         containerSizes[size],
         className
       )}
