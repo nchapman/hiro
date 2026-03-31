@@ -1,20 +1,12 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, memo } from "react"
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  ArrowUp01Icon,
-  Wrench01Icon,
-  ArrowRight01Icon,
   MoreHorizontalIcon,
   StopIcon,
   PlayIcon,
   Delete01Icon,
-  Attachment01Icon,
-  Cancel01Icon,
-  File02Icon,
 } from "@hugeicons/core-free-icons"
 import {
   DropdownMenu,
@@ -27,7 +19,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWebSocket } from "@/hooks/use-websocket"
-import type { ChatWireMessage, ChatAttachment, UsageInfo } from "@/hooks/use-websocket"
+import type { ChatWireMessage, UsageInfo } from "@/hooks/use-websocket"
 import type { SessionInfo } from "@/App"
 import {
   ChatContainerRoot,
@@ -35,268 +27,15 @@ import {
   type ChatContainerHandle,
 } from "@/components/prompt-kit/chat-container"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
-import { Markdown } from "@/components/prompt-kit/markdown"
 import { Loader } from "@/components/prompt-kit/loader"
-import {
-  PromptInput,
-  PromptInputTextarea,
-} from "@/components/prompt-kit/prompt-input"
-import type { ModelInfo, ToolCall, Message, MessageAttachment, PendingAttachment, HistoryMessage } from "@/lib/chat-types"
+import type { ModelInfo, ToolCall, Message, MessageAttachment } from "@/lib/chat-types"
+import type { ChatAttachment } from "@/hooks/use-websocket"
 import { mergeHistoryMessages } from "@/lib/chat-parser"
 import { statusDotColor } from "@/lib/session-utils"
 import ModelSelector from "@/pages/chat/ModelSelector"
 import TokenCounter from "@/pages/chat/TokenCounter"
-
-const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
-const MAX_ATTACHMENTS = 10
-
-function isImageType(type: string): boolean {
-  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(type)
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result as string
-      const base64 = result.split(",")[1] || ""
-      resolve(base64)
-    }
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-async function processFiles(files: FileList | File[]): Promise<PendingAttachment[]> {
-  const result: PendingAttachment[] = []
-  for (const file of Array.from(files)) {
-    if (file.size > MAX_ATTACHMENT_SIZE) continue
-    const dataBase64 = await fileToBase64(file)
-    const att: PendingAttachment = {
-      id: crypto.randomUUID(),
-      file,
-      dataBase64,
-      mediaType: file.type || "application/octet-stream",
-    }
-    if (isImageType(file.type)) {
-      att.preview = `data:${file.type};base64,${dataBase64}`
-    }
-    result.push(att)
-  }
-  return result
-}
-
-// --- Tool call UI ---
-
-const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
-  const hasDetails = toolCall.input || toolCall.output
-
-  return (
-    <Collapsible className="rounded-lg border">
-      <CollapsibleTrigger
-        disabled={!hasDetails}
-        className={cn(
-          "flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
-          hasDetails && "cursor-pointer hover:bg-muted/50"
-        )}
-      >
-        <HugeiconsIcon icon={Wrench01Icon} className="h-3 w-3 shrink-0" />
-        {toolCall.status || toolCall.name}
-        <span className="flex-1" />
-        {hasDetails && (
-          <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3 shrink-0 transition-transform [[data-panel-open]_&]:rotate-90" />
-        )}
-      </CollapsibleTrigger>
-
-      {hasDetails && (
-        <CollapsibleContent>
-          {toolCall.input && (
-            <div className="border-t bg-muted/20 px-3 py-2 text-xs">
-              <Markdown className={markdownClassName}>
-                {"```json\n" + formatJSON(toolCall.input) + "\n```"}
-              </Markdown>
-            </div>
-          )}
-          {toolCall.output && (
-            <div className="border-t bg-muted/20 px-3 py-2 text-xs">
-              {toolCall.isError && (
-                <div className="mb-1 font-medium text-destructive">Error</div>
-              )}
-              <Markdown className={markdownClassName}>
-                {formatAsCodeBlock(toolCall.output)}
-              </Markdown>
-            </div>
-          )}
-        </CollapsibleContent>
-      )}
-    </Collapsible>
-  )
-})
-
-function formatJSON(input: string): string {
-  try {
-    return JSON.stringify(JSON.parse(input), null, 2)
-  } catch {
-    return input
-  }
-}
-
-function formatAsCodeBlock(output: string): string {
-  try {
-    const parsed = JSON.parse(output)
-    return "```json\n" + JSON.stringify(parsed, null, 2) + "\n```"
-  } catch {
-    return "```\n" + output + "\n```"
-  }
-}
-
-// --- Message rendering ---
-
-const markdownClassName = cn(
-  "prose prose-sm dark:prose-invert max-w-none",
-  "prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none"
-)
-
-function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-  return (
-    <Collapsible defaultOpen={isStreaming} className="rounded-lg border border-dashed border-muted-foreground/30">
-      <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground cursor-pointer hover:bg-accent/50 rounded-lg [[data-panel-open]_&]:rounded-b-none">
-        {isStreaming ? (
-          <Loader variant="typing" size="sm" />
-        ) : (
-          <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3 transition-transform [[data-panel-open]_&]:rotate-90" />
-        )}
-        <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="border-t border-dashed border-muted-foreground/30 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap max-h-64 overflow-y-auto">
-          {content}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-const AssistantMessage = memo(function AssistantMessage({ message }: { message: Message }) {
-  const toolCalls = message.toolCalls ?? []
-  const content = message.content
-
-  return (
-    <div className="flex flex-col gap-2">
-      {message.thinking && (
-        <ThinkingBlock content={message.thinking} isStreaming={message.isThinking} />
-      )}
-      {toolCalls.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {toolCalls.map((tc) => (
-            <ToolCallBlock key={tc.id} toolCall={tc} />
-          ))}
-        </div>
-      )}
-      {content && (
-        <Markdown className={markdownClassName}>
-          {content}
-        </Markdown>
-      )}
-    </div>
-  )
-})
-
-// --- User message ---
-
-const UserMessage = memo(function UserMessage({ message }: { message: Message }) {
-  return (
-    <div className="flex justify-end">
-      <div className="flex max-w-[85%] flex-col gap-2">
-        {message.attachments && message.attachments.length > 0 && (
-          <div className="flex flex-wrap justify-end gap-2">
-            {message.attachments.map((att, i) =>
-              isImageType(att.media_type) && att.data ? (
-                <img
-                  key={i}
-                  src={`data:${att.media_type};base64,${att.data}`}
-                  alt={att.filename}
-                  className="max-h-48 max-w-full rounded-lg object-contain"
-                />
-              ) : (
-                <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                  <HugeiconsIcon icon={File02Icon} className="h-3 w-3" />
-                  {att.filename}
-                </div>
-              )
-            )}
-          </div>
-        )}
-        {message.content && (
-          <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm">
-            {message.content}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-})
-
-// --- Reasoning control ---
-
-function ReasoningControl({
-  model,
-  effort,
-  onChange,
-}: {
-  model: ModelInfo | undefined
-  effort: string
-  onChange: (effort: string) => void
-}) {
-  if (!model?.can_reason) return null
-
-  const levels = model.reasoning_levels
-
-  const options = [{ value: "", label: "Fast" }, ...((levels ?? []).map((l) => ({ value: l, label: `Think: ${l}` })))]
-
-  if (options.length > 2) {
-    return (
-      <Popover>
-        <PopoverTrigger
-          render={
-            <Button variant="outline" size="sm" className="h-6 gap-1 rounded-full px-2 text-xs text-muted-foreground" />
-          }
-        >
-          {options.find((o) => o.value === effort)?.label ?? "Fast"}
-          <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3" />
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-36 p-1">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              onClick={() => onChange(o.value)}
-              className={cn(
-                "flex w-full rounded-md px-2 py-1.5 text-xs cursor-pointer hover:bg-accent",
-                o.value === effort && "bg-accent"
-              )}
-            >
-              {o.label}
-            </button>
-          ))}
-        </PopoverContent>
-      </Popover>
-    )
-  }
-
-  return (
-    <Button
-      variant={effort ? "outline" : "ghost"}
-      size="sm"
-      className={cn(
-        "h-6 rounded-full px-2 text-xs",
-        effort && "border-primary/50 bg-primary/10 text-primary"
-      )}
-      onClick={(e) => { e.stopPropagation(); onChange(effort ? "" : "on") }}
-    >
-      {effort ? "Thinking" : "Fast"}
-    </Button>
-  )
-}
+import { AssistantMessage, UserMessage } from "@/pages/chat/ChatMessages"
+import ChatInputArea from "@/pages/chat/ChatInput"
 
 // --- Session cache ---
 
@@ -327,14 +66,11 @@ interface ChatProps {
 
 export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState("")
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [streaming, setStreaming] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [reasoningEffort, setReasoningEffort] = useState("")
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
   const chatContainerRef = useRef<ChatContainerHandle>(null)
@@ -466,7 +202,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           return res.json()
         })
-        .then((history: HistoryMessage[]) => {
+        .then((history: import("@/lib/chat-types").HistoryMessage[]) => {
           if (sessionGeneration.current !== gen) return
           setMessages(mergeHistoryMessages(history))
         })
@@ -616,74 +352,22 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     return () => ac.abort()
   }, [session?.id, setOnMessage])
 
-  const addAttachments = useCallback(async (files: FileList | File[]) => {
-    const processed = await processFiles(files)
-    setAttachments((prev) => {
-      const combined = [...prev, ...processed]
-      return combined.slice(0, MAX_ATTACHMENTS)
-    })
-  }, [])
-
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id))
-  }, [])
-
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const files = e.clipboardData?.files
-    if (files && files.length > 0) {
-      const hasFiles = Array.from(files).some((f) => f.type.startsWith("image/"))
-      if (hasFiles) {
-        e.preventDefault()
-        addAttachments(files)
-      }
-    }
-  }, [addAttachments])
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    if (e.dataTransfer.files.length > 0) {
-      addAttachments(e.dataTransfer.files)
-    }
-  }, [addAttachments])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-  }, [])
-
-  const handleSend = () => {
-    const text = input.trim()
-    const hasAttachments = attachments.length > 0
-    if ((!text && !hasAttachments) || streaming || !connected || isStopped) return
-
-    const msgAttachments: MessageAttachment[] = attachments.map((a) => ({
-      filename: a.file.name,
-      media_type: a.mediaType,
-      data: a.preview ? a.dataBase64 : undefined,
-    }))
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: text,
-        attachments: msgAttachments.length > 0 ? msgAttachments : undefined,
-      },
-    ])
-
-    const wireAttachments: ChatAttachment[] | undefined = hasAttachments
-      ? attachments.map((a) => ({
-          filename: a.file.name,
-          data: a.dataBase64,
-          media_type: a.mediaType,
-        }))
-      : undefined
-
-    setInput("")
-    setAttachments([])
-    setStreaming(true)
-    send({ type: "message", content: text, attachments: wireAttachments })
-  }
+  const handleSend = useCallback(
+    (text: string, wireAttachments: ChatAttachment[] | undefined, displayAttachments: MessageAttachment[]) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: text,
+          attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
+        },
+      ])
+      setStreaming(true)
+      send({ type: "message", content: text, attachments: wireAttachments })
+    },
+    [send]
+  )
 
   const handleStop = async () => {
     if (!session) return
@@ -869,99 +553,15 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           </div>
         </div>
       ) : (
-        <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2">
-          <div
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-          >
-            <PromptInput
-              value={input}
-              onValueChange={setInput}
-              onSubmit={handleSend}
-              isLoading={streaming}
-              disabled={!connected}
-            >
-              {attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2 px-3 pt-3">
-                  {attachments.map((att) => (
-                    <div
-                      key={att.id}
-                      className="group relative flex items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 text-xs"
-                    >
-                      {att.preview ? (
-                        <img src={att.preview} alt={att.file.name} className="h-8 w-8 rounded object-cover" />
-                      ) : (
-                        <HugeiconsIcon icon={File02Icon} className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <span className="max-w-[120px] truncate">{att.file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(att.id)}
-                        className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
-                      >
-                        <HugeiconsIcon icon={Cancel01Icon} className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <PromptInputTextarea
-                placeholder={
-                  connected ? `Message ${session.name}...` : "Connecting..."
-                }
-                autoFocus
-                onPaste={handlePaste}
-              />
-              <div className="flex items-center justify-between px-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept="image/*,text/*,application/json,application/xml,application/yaml,application/x-yaml,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files) addAttachments(e.target.files)
-                      e.target.value = ""
-                    }}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={streaming || !connected}
-                  >
-                    <HugeiconsIcon icon={Attachment01Icon} className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex items-center gap-2">
-                  {currentModelInfo?.can_reason && (
-                    <ReasoningControl
-                      model={currentModelInfo}
-                      effort={reasoningEffort}
-                      onChange={handleReasoningChange}
-                    />
-                  )}
-                  <Button
-                    size="icon"
-                    className="h-8 w-8 rounded-full"
-                    onClick={handleSend}
-                    disabled={streaming || !connected || (!input.trim() && attachments.length === 0)}
-                  >
-                    <HugeiconsIcon icon={ArrowUp01Icon} className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </PromptInput>
-          </div>
-
-          {!connected && (
-            <p className="mt-2 text-center text-xs text-muted-foreground">
-              Connecting to {session.name}...
-            </p>
-          )}
-        </div>
+        <ChatInputArea
+          sessionName={session.name}
+          connected={connected}
+          streaming={streaming}
+          currentModelInfo={currentModelInfo}
+          reasoningEffort={reasoningEffort}
+          onReasoningChange={handleReasoningChange}
+          onSend={handleSend}
+        />
       )}
     </div>
   )
