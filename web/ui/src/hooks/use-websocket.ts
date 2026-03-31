@@ -59,6 +59,8 @@ export function useWebSocket(sessionId: string | null) {
     setConnected(false)
   }, [])
 
+  const connectWsRef = useRef<(id: string) => void>(() => {})
+
   const connectWs = useCallback(
     (id: string) => {
       cleanup()
@@ -75,7 +77,7 @@ export function useWebSocket(sessionId: string | null) {
         setConnected(false)
         if (currentSessionId.current === id) {
           reconnectTimer.current = window.setTimeout(
-            () => connectWs(id),
+            () => connectWsRef.current(id),
             3000
           )
         }
@@ -92,6 +94,8 @@ export function useWebSocket(sessionId: string | null) {
     },
     [cleanup]
   )
+
+  useEffect(() => { connectWsRef.current = connectWs })
 
   useEffect(() => {
     if (sessionId) {

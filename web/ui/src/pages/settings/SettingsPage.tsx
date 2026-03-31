@@ -233,19 +233,24 @@ export default function SettingsPage() {
       return
     }
 
-    const res = await fetch("/api/auth/password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ current: currentPassword, new: newPassword }),
-    })
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current: currentPassword, new: newPassword }),
+      })
 
-    if (res.ok) {
-      setPasswordMsg("Password changed successfully")
-      setCurrentPassword("")
-      setNewPassword("")
-      setConfirmPassword("")
-    } else {
-      setPasswordMsg("Current password is incorrect")
+      if (res.ok) {
+        setPasswordMsg("Password changed successfully")
+        setCurrentPassword("")
+        setNewPassword("")
+        setConfirmPassword("")
+      } else {
+        setPasswordMsg("Current password is incorrect")
+        setPasswordError(true)
+      }
+    } catch {
+      setPasswordMsg("Unable to connect to the server")
       setPasswordError(true)
     }
   }

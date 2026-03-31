@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect } from "vitest"
 import { getFileExt, getPreviewType } from "./file-utils"
 
 // Only test the pure sync helpers here. The async API functions

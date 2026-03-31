@@ -18,7 +18,7 @@ interface FileChangeBatch {
  */
 export function useFileWatch(onEvents: (events: FileChangeEvent[]) => void) {
   const ref = useRef(onEvents)
-  ref.current = onEvents
+  useEffect(() => { ref.current = onEvents })
 
   useEffect(() => {
     const es = new EventSource("/api/files/events")

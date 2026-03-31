@@ -7,6 +7,8 @@ import ActivityBar from "@/components/ActivityBar"
 import type { Activity } from "@/components/ActivityBar"
 import Login from "@/components/Login"
 import Setup from "@/components/Setup"
+import ErrorBoundary from "@/components/ErrorBoundary"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -30,6 +32,7 @@ export interface SessionInfo {
 
 type AppState =
   | { kind: "loading" }
+  | { kind: "error" }
   | { kind: "setup" }
   | { kind: "login" }
   | { kind: "ready" }
@@ -174,7 +177,7 @@ export default function App() {
         setAppState({ kind: "ready" })
       }
     } catch {
-      setAppState({ kind: "loading" })
+      setAppState({ kind: "error" })
     }
   }, [])
 
@@ -306,6 +309,24 @@ export default function App() {
           </div>
         )}
 
+        {appState.kind === "error" && (
+          <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background text-foreground">
+            <p className="text-sm text-muted-foreground">
+              Unable to connect to the server.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setAppState({ kind: "loading" })
+                checkAuth()
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+
         {appState.kind === "setup" && (
           <Setup onComplete={() => setAppState({ kind: "ready" })} />
         )}
@@ -330,25 +351,31 @@ export default function App() {
                   onSelect={handleSelect}
                 />
                 <main className="flex flex-1 flex-col overflow-hidden">
-                  <Chat session={selectedSession} onSessionsChanged={fetchSessions} />
+                  <ErrorBoundary section="Chat">
+                    <Chat session={selectedSession} onSessionsChanged={fetchSessions} />
+                  </ErrorBoundary>
                 </main>
               </div>
 
               {/* Files — mounted on first visit, stays alive */}
               {visited.has("files") && (
                 <div className={cn("flex flex-1 overflow-hidden", activity !== "files" && "hidden")}>
-                  <Suspense fallback={filesSkeleton}>
-                    <FilesPage />
-                  </Suspense>
+                  <ErrorBoundary section="Files">
+                    <Suspense fallback={filesSkeleton}>
+                      <FilesPage />
+                    </Suspense>
+                  </ErrorBoundary>
                 </div>
               )}
 
               {/* Logs — mounted on first visit, stays alive */}
               {visited.has("logs") && (
                 <div className={cn("flex flex-1 overflow-hidden", activity !== "logs" && "hidden")}>
-                  <Suspense fallback={logsSkeleton}>
-                    <LogsPage />
-                  </Suspense>
+                  <ErrorBoundary section="Logs">
+                    <Suspense fallback={logsSkeleton}>
+                      <LogsPage />
+                    </Suspense>
+                  </ErrorBoundary>
                 </div>
               )}
 
@@ -356,9 +383,11 @@ export default function App() {
               {visited.has("settings") && (
                 <div className={cn("flex flex-1 overflow-hidden", activity !== "settings" && "hidden")}>
                   <main className="flex flex-1 flex-col overflow-hidden">
-                    <Suspense fallback={settingsSkeleton}>
-                      <SettingsPage />
-                    </Suspense>
+                    <ErrorBoundary section="Settings">
+                      <Suspense fallback={settingsSkeleton}>
+                        <SettingsPage />
+                      </Suspense>
+                    </ErrorBoundary>
                   </main>
                 </div>
               )}

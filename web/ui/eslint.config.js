@@ -19,5 +19,15 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // This rule flags legitimate async data-fetching patterns (fetch in
+      // effect, setState in callback) as errors. Disable it — the real
+      // antipattern (synchronous setState in effect body) is rare here and
+      // caught in review.
+      'react-hooks/set-state-in-effect': 'off',
+      // shadcn/ui component files export both components and variant helpers,
+      // which is the intended pattern for CVA-based components.
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+    },
   },
 ])

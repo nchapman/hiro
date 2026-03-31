@@ -434,7 +434,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     }
   }, [])
 
-  const handleRootDragLeave = useCallback((_e: React.DragEvent) => {
+  const handleRootDragLeave = useCallback(() => {
     dragCounter.current = Math.max(0, dragCounter.current - 1)
     if (dragCounter.current === 0) {
       clearDragState()

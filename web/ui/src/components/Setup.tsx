@@ -54,14 +54,17 @@ export default function Setup({ onComplete }: SetupProps) {
       .then((res) => (res.ok ? res.json() : []))
       .then((types: ProviderTypeInfo[]) => {
         setProviderTypes(types)
-        if (types.length > 0 && !providerType) {
+        if (types.length > 0) {
           // Default to anthropic if available, otherwise first
-          const anthro = types.find((t) => t.id === "anthropic")
-          setProviderType(anthro ? anthro.id : types[0].id)
+          setProviderType((prev) => {
+            if (prev) return prev
+            const anthro = types.find((t) => t.id === "anthropic")
+            return anthro ? anthro.id : types[0].id
+          })
         }
       })
       .catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Fetch models when the selected provider changes.
   useEffect(() => {
