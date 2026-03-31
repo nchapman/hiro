@@ -51,7 +51,13 @@ type BackgroundJob struct {
 	stderr      *cappedBuffer
 	done        chan struct{}
 	exitErr     error
-	completedAt int64 // unix timestamp, 0 if still running
+	completedAt int64       // unix timestamp, 0 if still running
+	notified    atomic.Bool // true once completion notification has been sent/suppressed
+}
+
+// ExitErr returns the exit error from the completed job, or nil if still running or succeeded.
+func (j *BackgroundJob) ExitErr() error {
+	return j.exitErr
 }
 
 // GetOutput returns the current stdout, stderr, completion status, and exit error.
@@ -76,9 +82,10 @@ func (j *BackgroundJob) Wait(ctx context.Context) bool {
 
 // BackgroundJobManager tracks running background jobs.
 type BackgroundJobManager struct {
-	mu    sync.RWMutex
-	jobs  map[string]*BackgroundJob
-	envFn func() []string // extra env vars injected into every command (e.g. secrets)
+	mu         sync.RWMutex
+	jobs       map[string]*BackgroundJob
+	envFn      func() []string         // extra env vars injected into every command (e.g. secrets)
+	OnComplete func(job *BackgroundJob) // called when a backgrounded job completes
 }
 
 var jobIDCounter atomic.Uint64
@@ -94,7 +101,9 @@ func NewBackgroundJobManager(envFn func() []string) *BackgroundJobManager {
 	}
 }
 
-// Start creates and starts a new background job.
+// Start creates and starts a new background job. The job runs immediately
+// but does NOT trigger OnComplete by default. Call NotifyOnComplete to
+// opt in to completion notifications for jobs that are truly backgrounded.
 func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -152,6 +161,29 @@ func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob
 	return job, nil
 }
 
+// NotifyOnComplete starts a goroutine that waits for the job to complete
+// and fires OnComplete. Called by the bash tool when a job is truly
+// backgrounded (explicit or auto-background). Jobs consumed synchronously
+// never call this, so they never generate notifications. Kill suppresses
+// the notification via the notified flag.
+func (m *BackgroundJobManager) NotifyOnComplete(id string) {
+	if m.OnComplete == nil {
+		return
+	}
+	m.mu.RLock()
+	job, ok := m.jobs[id]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	go func() {
+		<-job.done
+		if job.notified.CompareAndSwap(false, true) {
+			m.OnComplete(job)
+		}
+	}()
+}
+
 // Get retrieves a job by ID.
 func (m *BackgroundJobManager) Get(id string) (*BackgroundJob, bool) {
 	m.mu.RLock()
@@ -162,6 +194,7 @@ func (m *BackgroundJobManager) Get(id string) (*BackgroundJob, bool) {
 
 // Kill terminates a job and removes it. Returns an error if the job is not
 // found or does not exit within a reasonable timeout.
+// Suppresses the OnComplete callback.
 func (m *BackgroundJobManager) Kill(id string) error {
 	m.mu.Lock()
 	j, ok := m.jobs[id]
@@ -172,6 +205,7 @@ func (m *BackgroundJobManager) Kill(id string) error {
 	delete(m.jobs, id)
 	m.mu.Unlock()
 
+	j.notified.Store(true) // suppress callback BEFORE cancel
 	j.cancel()
 	select {
 	case <-j.done:
@@ -192,6 +226,7 @@ func (m *BackgroundJobManager) KillAll() {
 	m.mu.Unlock()
 
 	for _, j := range jobs {
+		j.notified.Store(true)
 		j.cancel()
 	}
 	// Wait for all to finish with a bounded timeout.

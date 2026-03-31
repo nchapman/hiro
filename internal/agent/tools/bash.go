@@ -22,7 +22,7 @@ type BashParams struct {
 	WorkingDir      string `json:"working_dir,omitempty"      description:"Working directory for the command. Defaults to the agent's working directory."`
 	Timeout         int    `json:"timeout,omitempty"          description:"Optional timeout in milliseconds (max 600000). Overrides the default timeout."`
 	Description     string `json:"description,omitempty"      description:"Clear, concise description of what this command does."`
-	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in a background job. Use BashOutput to read output later."`
+	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in the background. Use TaskOutput to read output later."`
 }
 
 // NewBashTool creates a tool that executes shell commands with background job support.
@@ -67,8 +67,10 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 				case <-time.After(100 * time.Millisecond):
 				}
 
+				// Truly backgrounded — enable completion notification.
+				bgMgr.NotifyOnComplete(job.ID)
 				return fantasy.NewTextResponse(
-					fmt.Sprintf("Background job started with ID: %s\n\nUse BashOutput to view output or TaskStop to terminate.", job.ID)), nil
+					fmt.Sprintf("Background task started with ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
 			}
 
 			// Synchronous execution with auto-background on timeout.
@@ -97,8 +99,10 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 						bgMgr.Remove(job.ID)
 						return formatBashResult(stdout, stderr, execErr)
 					}
+					// Auto-backgrounded — enable completion notification.
+					bgMgr.NotifyOnComplete(job.ID)
 					return fantasy.NewTextResponse(
-						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground job ID: %s\n\nUse BashOutput to view output or TaskStop to terminate.", job.ID)), nil
+						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground task ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
 				case <-ctx.Done():
 					_ = bgMgr.Kill(job.ID)
 					return fantasy.NewTextErrorResponse("command cancelled"), nil

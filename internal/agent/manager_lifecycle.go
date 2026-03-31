@@ -458,6 +458,10 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	// Start death-watcher goroutine for unexpected process exits.
 	go m.watchWorker(instanceID, handle.Done)
 
+	// Start background job completion watcher to push notifications
+	// when background bash tasks finish on this worker.
+	go m.watchJobCompletions(spawnCtx, handle.Worker, notifications)
+
 	m.logger.Info("instance started",
 		"id", instanceID,
 		"session", sessionID,

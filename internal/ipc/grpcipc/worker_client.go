@@ -2,6 +2,8 @@ package grpcipc
 
 import (
 	"context"
+	"io"
+	"log/slog"
 
 	"github.com/nchapman/hivebot/internal/ipc"
 	pb "github.com/nchapman/hivebot/internal/ipc/proto"
@@ -48,4 +50,35 @@ func (c *WorkerClient) ExecuteTool(ctx context.Context, callID, name, input stri
 func (c *WorkerClient) Shutdown(ctx context.Context) error {
 	_, err := c.client.Shutdown(ctx, &pb.ShutdownRequest{})
 	return err
+}
+
+// WatchJobs opens a streaming RPC to receive background job completion events.
+// Returns a channel that receives completions. The channel is closed when the
+// stream ends (worker shutdown, disconnect, or context cancellation).
+// This is a concrete method on WorkerClient, not part of the AgentWorker interface.
+func (c *WorkerClient) WatchJobs(ctx context.Context, logger *slog.Logger) <-chan *pb.JobCompletion {
+	ch := make(chan *pb.JobCompletion, 64)
+	go func() {
+		defer close(ch)
+		stream, err := c.client.WatchJobs(ctx, &pb.WatchJobsRequest{})
+		if err != nil {
+			logger.Debug("failed to open WatchJobs stream", "error", err)
+			return
+		}
+		for {
+			completion, err := stream.Recv()
+			if err != nil {
+				if err != io.EOF && ctx.Err() == nil {
+					logger.Debug("WatchJobs stream ended", "error", err)
+				}
+				return
+			}
+			select {
+			case ch <- completion:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch
 }

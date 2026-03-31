@@ -12,6 +12,20 @@ service AgentWorker {
 
   // Shutdown gracefully stops the agent worker process.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+
+  // WatchJobs streams background job completion events from the worker.
+  // The control plane uses this to push notifications into the inference loop.
+  rpc WatchJobs(WatchJobsRequest) returns (stream JobCompletion);
+}
+
+message WatchJobsRequest {}
+
+message JobCompletion {
+  string task_id = 1;
+  string command = 2;
+  string description = 3;
+  int32 exit_code = 4;
+  bool failed = 5;
 }
 
 message ExecuteToolRequest {
@@ -54,7 +68,17 @@ message NodeMessage {
     WorkerExited worker_exited = 5;
     FileUpdate file_update = 6;       // worker → leader: file changed on this node
     FileSyncAck file_sync_ack = 7;    // worker → leader: initial sync received
+    JobCompletionNotify job_completion = 8; // worker → leader: background task completed
   }
+}
+
+message JobCompletionNotify {
+  string session_id = 1;
+  string task_id = 2;
+  string command = 3;
+  string description = 4;
+  int32 exit_code = 5;
+  bool failed = 6;
 }
 
 message FileSyncAck {}

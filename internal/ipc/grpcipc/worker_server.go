@@ -14,7 +14,8 @@ import (
 type WorkerServer struct {
 	pb.UnimplementedAgentWorkerServer
 	worker      ipc.AgentWorker
-	onSecretEnv func([]string) // called when secret env vars arrive with a tool call
+	onSecretEnv func([]string)            // called when secret env vars arrive with a tool call
+	completions <-chan *pb.JobCompletion   // background job completion events
 }
 
 // NewWorkerServer creates a gRPC server that delegates to the given AgentWorker.
@@ -26,6 +27,11 @@ func NewWorkerServer(worker ipc.AgentWorker) *WorkerServer {
 // with a tool call. The worker uses this to inject secrets into bash commands.
 func (s *WorkerServer) SetSecretEnvCallback(fn func([]string)) {
 	s.onSecretEnv = fn
+}
+
+// SetCompletionChannel sets the channel from which WatchJobs reads completion events.
+func (s *WorkerServer) SetCompletionChannel(ch <-chan *pb.JobCompletion) {
+	s.completions = ch
 }
 
 // Register registers this server with a gRPC service registrar.
@@ -56,4 +62,26 @@ func (s *WorkerServer) Shutdown(ctx context.Context, req *pb.ShutdownRequest) (*
 		return nil, err
 	}
 	return &pb.ShutdownResponse{}, nil
+}
+
+// WatchJobs streams background job completion events to the control plane.
+func (s *WorkerServer) WatchJobs(_ *pb.WatchJobsRequest, stream pb.AgentWorker_WatchJobsServer) error {
+	if s.completions == nil {
+		// Block until context is cancelled — no completions channel configured.
+		<-stream.Context().Done()
+		return nil
+	}
+	for {
+		select {
+		case c, ok := <-s.completions:
+			if !ok {
+				return nil // channel closed
+			}
+			if err := stream.Send(c); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		}
+	}
 }

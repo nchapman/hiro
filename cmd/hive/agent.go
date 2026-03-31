@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/nchapman/hivebot/internal/agent/tools"
 	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
 )
 
@@ -67,6 +69,31 @@ func runAgent() error {
 		defer secretEnvMu.Unlock()
 		return secretEnv
 	})
+
+	// Wire background job completion events to a channel for the gRPC stream.
+	completions := make(chan *pb.JobCompletion, 64)
+	bgMgr.OnComplete = func(job *tools.BackgroundJob) {
+		exitCode := int32(0)
+		failed := false
+		if job.ExitErr() != nil {
+			failed = true
+			if e, ok := job.ExitErr().(*exec.ExitError); ok {
+				exitCode = int32(e.ExitCode())
+			}
+		}
+		select {
+		case completions <- &pb.JobCompletion{
+			TaskId:      job.ID,
+			Command:     job.Command,
+			Description: job.Description,
+			ExitCode:    exitCode,
+			Failed:      failed,
+		}:
+		default:
+			logger.Warn("job completion dropped (channel full)", "task_id", job.ID)
+		}
+	}
+
 	toolSet := buildWorkerTools(cfg.WorkingDir, bgMgr, cfg.EffectiveTools)
 
 	executor := agent.ToolExecutorFromTools(toolSet)
@@ -96,6 +123,7 @@ func runAgent() error {
 		secretEnv = env
 		secretEnvMu.Unlock()
 	})
+	ws.SetCompletionChannel(completions)
 	ws.Register(srv)
 
 	go func() {
@@ -143,7 +171,7 @@ func buildWorkerTools(workingDir string, bgMgr *tools.BackgroundJobManager, allo
 		tools.NewGlobTool(workingDir),
 		tools.NewGrepTool(workingDir),
 		tools.NewWebFetchTool(),
-		tools.NewBashOutputTool(bgMgr),
+		tools.NewTaskOutputTool(bgMgr),
 		tools.NewTaskStopTool(bgMgr),
 	}
 

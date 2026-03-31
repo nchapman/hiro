@@ -7,7 +7,7 @@ import "charm.land/fantasy"
 var RemoteToolNames = map[string]bool{
 	"Bash": true, "Read": true, "Write": true,
 	"Edit": true, "Glob": true, "Grep": true,
-	"WebFetch": true, "BashOutput": true, "TaskStop": true,
+	"WebFetch": true, "TaskOutput": true, "TaskStop": true,
 }
 
 // RemoteToolInfos returns the schema (ToolInfo) for all remote tools.
@@ -24,7 +24,7 @@ func RemoteToolInfos(workingDir string) []fantasy.ToolInfo {
 		NewGlobTool(workingDir),
 		NewGrepTool(workingDir),
 		NewWebFetchTool(),
-		NewBashOutputTool(bgMgr),
+		NewTaskOutputTool(bgMgr),
 		NewTaskStopTool(bgMgr),
 	}
 

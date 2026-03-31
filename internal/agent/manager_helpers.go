@@ -12,6 +12,7 @@ import (
 	"github.com/nchapman/hivebot/internal/cluster"
 	"github.com/nchapman/hivebot/internal/inference"
 	"github.com/nchapman/hivebot/internal/ipc"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 )
 
 // SendMessage sends a message to a running instance and streams the response.
@@ -109,6 +110,21 @@ func (m *Manager) SecretEnv() []string {
 // Must be called before any remote spawns. If nil, all spawns are local.
 func (m *Manager) SetClusterService(svc *cluster.LeaderService) {
 	m.clusterService = svc
+
+	// Wire up background job completion notifications from remote workers.
+	svc.SetJobCompletionHandler(func(sessionID string, completion *pb.JobCompletionNotify) {
+		inst := m.instanceBySession(sessionID)
+		if inst == nil {
+			return
+		}
+		inst.notifications.Push(formatJobNotification(&pb.JobCompletion{
+			TaskId:      completion.TaskId,
+			Command:     completion.Command,
+			Description: completion.Description,
+			ExitCode:    completion.ExitCode,
+			Failed:      completion.Failed,
+		}))
+	})
 }
 
 // ListNodes returns all nodes in the cluster registry. Returns nil if
@@ -167,6 +183,19 @@ func (m *Manager) setInstanceStatus(id, status string) {
 	if err := m.pdb.UpdateInstanceStatus(id, status); err != nil {
 		m.logger.Warn("failed to update instance status in db", "id", id, "status", status, "error", err)
 	}
+}
+
+// instanceBySession finds the instance that owns the given session ID.
+// Returns nil if no match is found.
+func (m *Manager) instanceBySession(sessionID string) *instance {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, inst := range m.instances {
+		if inst.activeSession == sessionID {
+			return inst
+		}
+	}
+	return nil
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

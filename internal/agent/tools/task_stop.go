@@ -13,24 +13,24 @@ import (
 var taskStopDescription string
 
 type TaskStopParams struct {
-	JobID string `json:"job_id" description:"The ID of the background job to terminate."`
+	TaskID string `json:"task_id" description:"The ID of the background task to stop."`
 }
 
-// NewTaskStopTool creates a tool that terminates background jobs.
+// NewTaskStopTool creates a tool that terminates background tasks.
 func NewTaskStopTool(bgMgr *BackgroundJobManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"TaskStop",
 		taskStopDescription,
 		func(ctx context.Context, params TaskStopParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.JobID == "" {
-				return fantasy.NewTextErrorResponse("job_id is required"), nil
+			if params.TaskID == "" {
+				return fantasy.NewTextErrorResponse("task_id is required"), nil
 			}
 
-			if err := bgMgr.Kill(params.JobID); err != nil {
+			if err := bgMgr.Kill(params.TaskID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			return fantasy.NewTextResponse(fmt.Sprintf("Background job %s terminated.", params.JobID)), nil
+			return fantasy.NewTextResponse(fmt.Sprintf("Successfully stopped task: %s", params.TaskID)), nil
 		},
 	)
 }

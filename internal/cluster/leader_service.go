@@ -26,6 +26,8 @@ type LeaderService struct {
 	spawnChans map[string]chan string   // request ID → spawn result channel
 
 	fileSync *FileSyncService // for sending file updates to nodes; nil if not configured
+
+	onJobCompletion func(sessionID string, completion *pb.JobCompletionNotify) // called on background task completion
 }
 
 // NewLeaderService creates a new cluster leader service.
@@ -83,6 +85,11 @@ func (s *LeaderService) WireNodeHandlers(nodeID NodeID) {
 		},
 		OnFileUpdate: func(fromNode NodeID, msg *pb.FileUpdate) {
 			s.handleFileUpdate(fromNode, msg)
+		},
+		OnJobCompletion: func(_ NodeID, msg *pb.JobCompletionNotify) {
+			if s.onJobCompletion != nil {
+				s.onJobCompletion(msg.SessionId, msg)
+			}
 		},
 	})
 }
@@ -218,6 +225,15 @@ func (s *LeaderService) cleanupSpawn(sessionID, requestID string) {
 	s.mu.Lock()
 	delete(s.workers, sessionID)
 	delete(s.spawnChans, requestID)
+	s.mu.Unlock()
+}
+
+// SetJobCompletionHandler sets the callback invoked when a remote worker
+// reports a background task completion. The manager uses this to push
+// notifications into the correct instance's notification queue.
+func (s *LeaderService) SetJobCompletionHandler(fn func(sessionID string, completion *pb.JobCompletionNotify)) {
+	s.mu.Lock()
+	s.onJobCompletion = fn
 	s.mu.Unlock()
 }
 
