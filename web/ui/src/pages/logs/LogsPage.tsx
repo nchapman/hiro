@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  Search,
-  Pause,
-  Play,
-  Trash2,
-  ArrowDown,
-  ChevronRight,
-  ChevronDown,
-} from "lucide-react"
+  Search01Icon,
+  PauseIcon,
+  PlayIcon,
+  Delete01Icon,
+  ArrowDown02Icon,
+  ArrowRight01Icon,
+  ArrowDown01Icon,
+} from "@hugeicons/core-free-icons"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -78,6 +80,7 @@ export default function LogsPage() {
   const [paused, setPaused] = useState(false)
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
   const [autoScroll, setAutoScroll] = useState(true)
+  const [initialLoad, setInitialLoad] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -115,6 +118,7 @@ export default function LogsPage() {
           reversed.length > 0 ? reversed[0].id : null
       })
       .catch(() => {})
+      .finally(() => setInitialLoad(false))
   }, [level, component, debouncedSearch])
 
   // Real-time log stream — client-side filtering for SSE entries.
@@ -195,9 +199,9 @@ export default function LogsPage() {
   })
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden">
+    <div className="relative flex h-full flex-1 flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b px-4 py-2">
+      <div className="flex h-12 items-center gap-2 border-b px-4">
         <Select value={level} onValueChange={(v) => v && setLevel(v)}>
           <SelectTrigger size="sm">
             <SelectValue placeholder="Level" />
@@ -226,7 +230,7 @@ export default function LogsPage() {
         </Select>
 
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <HugeiconsIcon icon={Search01Icon} className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search logs..."
             value={search}
@@ -243,9 +247,9 @@ export default function LogsPage() {
             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
             {paused ? (
-              <Play className="h-3.5 w-3.5" />
+              <HugeiconsIcon icon={PlayIcon} className="h-3.5 w-3.5" />
             ) : (
-              <Pause className="h-3.5 w-3.5" />
+              <HugeiconsIcon icon={PauseIcon} className="h-3.5 w-3.5" />
             )}
           </TooltipTrigger>
           <TooltipContent>{paused ? "Resume" : "Pause"}</TooltipContent>
@@ -260,7 +264,7 @@ export default function LogsPage() {
             }}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <HugeiconsIcon icon={Delete01Icon} className="h-3.5 w-3.5" />
           </TooltipTrigger>
           <TooltipContent>Clear</TooltipContent>
         </Tooltip>
@@ -282,7 +286,18 @@ export default function LogsPage() {
           </button>
         )}
 
-        {filtered.length === 0 ? (
+        {initialLoad ? (
+          <div className="flex flex-col">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2 border-b border-border/40 px-4 py-1.5">
+                <Skeleton className="h-3.5 w-20 rounded" />
+                <Skeleton className="h-3.5 w-10 rounded" />
+                <Skeleton className="h-3.5 w-16 rounded" />
+                <Skeleton className="h-3.5 rounded" style={{ width: `${120 + ((i * 47) % 200)}px` }} />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
             {logs.length === 0 ? "No logs yet" : "No matching logs"}
           </div>
@@ -306,9 +321,9 @@ export default function LogsPage() {
                   <span className="mt-0.5 w-3.5 shrink-0 text-muted-foreground">
                     {hasAttrs &&
                       (expanded ? (
-                        <ChevronDown className="h-3.5 w-3.5" />
+                        <HugeiconsIcon icon={ArrowDown01Icon} className="h-3.5 w-3.5" />
                       ) : (
-                        <ChevronRight className="h-3.5 w-3.5" />
+                        <HugeiconsIcon icon={ArrowRight01Icon} className="h-3.5 w-3.5" />
                       ))}
                   </span>
 
@@ -377,7 +392,7 @@ export default function LogsPage() {
           }}
           className="absolute bottom-4 right-6 z-10 flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-opacity hover:bg-primary/90"
         >
-          <ArrowDown className="h-3 w-3" />
+          <HugeiconsIcon icon={ArrowDown02Icon} className="h-3 w-3" />
           Jump to bottom
         </button>
       )}

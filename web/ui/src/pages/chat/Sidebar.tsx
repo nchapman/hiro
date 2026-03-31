@@ -1,4 +1,3 @@
-import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Tooltip,
@@ -22,19 +21,18 @@ export default function Sidebar({
 }: SidebarProps) {
   return (
     <aside className="flex h-full w-56 min-w-56 flex-col border-r bg-card">
-      <div className="px-4 py-4">
-        <span className="text-xl font-bold tracking-tight text-primary">
+      <div className="flex h-12 items-center border-b px-4">
+        <span className="font-heading text-sm font-medium">
           hive
         </span>
       </div>
-      <Separator />
-      <div className="px-4 pt-4 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Sessions
+      <div className="px-4 pt-3 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        Agents
       </div>
       <ScrollArea className="flex-1 px-2">
         {sessions.length === 0 ? (
           <p className="px-2 py-2 text-sm italic text-muted-foreground">
-            No sessions
+            No agents
           </p>
         ) : (
           <div className="flex flex-col gap-0.5">

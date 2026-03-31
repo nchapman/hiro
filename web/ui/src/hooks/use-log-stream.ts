@@ -20,7 +20,7 @@ export function useLogStream(
   enabled: boolean = true,
 ) {
   const ref = useRef(onLog)
-  ref.current = onLog
+  useEffect(() => { ref.current = onLog }, [onLog])
 
   useEffect(() => {
     if (!enabled) return

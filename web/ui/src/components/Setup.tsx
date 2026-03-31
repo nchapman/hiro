@@ -17,7 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { CheckmarkCircle01Icon, Loading02Icon, CancelCircleIcon } from "@hugeicons/core-free-icons"
 
 import type { ModelInfo } from "@/lib/chat-types"
 
@@ -53,14 +54,17 @@ export default function Setup({ onComplete }: SetupProps) {
       .then((res) => (res.ok ? res.json() : []))
       .then((types: ProviderTypeInfo[]) => {
         setProviderTypes(types)
-        if (types.length > 0 && !providerType) {
+        if (types.length > 0) {
           // Default to anthropic if available, otherwise first
-          const anthro = types.find((t) => t.id === "anthropic")
-          setProviderType(anthro ? anthro.id : types[0].id)
+          setProviderType((prev) => {
+            if (prev) return prev
+            const anthro = types.find((t) => t.id === "anthropic")
+            return anthro ? anthro.id : types[0].id
+          })
         }
       })
       .catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Fetch models when the selected provider changes.
   useEffect(() => {
@@ -286,7 +290,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     className="flex-1"
                   >
                     {testStatus === "testing" && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <HugeiconsIcon icon={Loading02Icon} className="mr-2 h-4 w-4 animate-spin" />
                     )}
                     Test Connection
                   </Button>
@@ -295,7 +299,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       variant="outline"
                       className="gap-1 border-green-500 text-green-500"
                     >
-                      <CheckCircle2 className="h-3 w-3" />
+                      <HugeiconsIcon icon={CheckmarkCircle01Icon} className="h-3 w-3" />
                       Connected
                     </Badge>
                   )}
@@ -304,7 +308,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       variant="outline"
                       className="gap-1 border-destructive text-destructive"
                     >
-                      <XCircle className="h-3 w-3" />
+                      <HugeiconsIcon icon={CancelCircleIcon} className="h-3 w-3" />
                       Failed
                     </Badge>
                   )}
@@ -330,7 +334,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     className="flex-1"
                   >
                     {submitting ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <HugeiconsIcon icon={Loading02Icon} className="mr-2 h-4 w-4 animate-spin" />
                     ) : null}
                     Complete Setup
                   </Button>
@@ -344,7 +348,7 @@ export default function Setup({ onComplete }: SetupProps) {
           <>
             <CardHeader className="text-center">
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
-                <CheckCircle2 className="h-6 w-6 text-green-500" />
+                <HugeiconsIcon icon={CheckmarkCircle01Icon} className="h-6 w-6 text-green-500" />
               </div>
               <CardTitle>You're all set!</CardTitle>
               <CardDescription>

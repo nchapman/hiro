@@ -13,3 +13,7 @@ export function getFileExt(path: string): string {
 export function getPreviewType(path: string): "image" | "video" | "audio" | "pdf" | null {
   return previewableExtensions[getFileExt(path)] ?? null
 }
+
+export function isImageType(type: string): boolean {
+  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(type)
+}

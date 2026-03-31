@@ -11,7 +11,8 @@ import { yaml } from "@codemirror/lang-yaml"
 import { keymap } from "@codemirror/view"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
-import { Save, Share2, Check, Loader2, X } from "lucide-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { FloppyDiskIcon, Share01Icon, Tick02Icon, Loading02Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { readFile, writeFile, shareFile } from "@/hooks/use-files"
@@ -215,13 +216,13 @@ export default function FileEditor({
             className="h-7 w-7"
           >
             {shareState === "copied" ? (
-              <Check className="h-3.5 w-3.5 text-emerald-500" />
+              <HugeiconsIcon icon={Tick02Icon} className="h-3.5 w-3.5 text-emerald-500" />
             ) : shareState === "error" ? (
-              <X className="h-3.5 w-3.5 text-destructive" />
+              <HugeiconsIcon icon={Cancel01Icon} className="h-3.5 w-3.5 text-destructive" />
             ) : shareState === "sharing" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <HugeiconsIcon icon={Loading02Icon} className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <Share2 className="h-3.5 w-3.5" />
+              <HugeiconsIcon icon={Share01Icon} className="h-3.5 w-3.5" />
             )}
           </Button>
         }
@@ -253,7 +254,7 @@ export default function FileEditor({
     const fileUrl = `/api/files/file?path=${encodeURIComponent(path)}`
 
     const binaryHeader = (
-      <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+      <div className="flex h-12 items-center gap-2 border-b px-4 text-sm">
         <span className="truncate font-mono text-muted-foreground">{path}</span>
         <div className="flex-1" />
         {shareButton}
@@ -316,7 +317,7 @@ export default function FileEditor({
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header bar */}
-      <div className="flex items-center gap-2 border-b px-4 py-2 text-sm">
+      <div className="flex h-12 items-center gap-2 border-b px-4 text-sm">
         <span className="truncate font-mono text-muted-foreground">
           {path}
         </span>
@@ -339,9 +340,9 @@ export default function FileEditor({
                 className="h-7 w-7"
               >
                 {saving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <HugeiconsIcon icon={Loading02Icon} className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Save className="h-3.5 w-3.5" />
+                  <HugeiconsIcon icon={FloppyDiskIcon} className="h-3.5 w-3.5" />
                 )}
               </Button>
             }

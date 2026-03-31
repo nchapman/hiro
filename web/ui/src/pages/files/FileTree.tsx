@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from "react"
-import { Folder, FolderOpen, File, ChevronRight, ChevronDown, FilePlus, FolderPlus, Pencil, Trash2, TerminalSquare, Upload } from "lucide-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Folder01Icon, FolderOpenIcon, File01Icon, ArrowRight01Icon, ArrowDown01Icon, FilePlusIcon, FolderAddIcon, PencilEdit01Icon, Delete01Icon, TerminalIcon, Upload01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { listDir, writeFile, mkdir, deleteEntry, renameEntry, uploadFile } from "@/hooks/use-files"
 import type { FileEntry } from "@/hooks/use-files"
 
@@ -432,7 +434,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     }
   }, [])
 
-  const handleRootDragLeave = useCallback((_e: React.DragEvent) => {
+  const handleRootDragLeave = useCallback(() => {
     dragCounter.current = Math.max(0, dragCounter.current - 1)
     if (dragCounter.current === 0) {
       clearDragState()
@@ -450,7 +452,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     const items: { label: string; icon: React.ReactNode; onClick: () => void; variant?: "destructive" }[] = [
       {
         label: "New File",
-        icon: <FilePlus className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={FilePlusIcon} className="h-4 w-4" />,
         onClick: () => {
           if (entry?.type === "dir") {
             setExpanded((prev) => new Set(prev).add(entry.path))
@@ -466,7 +468,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       },
       {
         label: "New Folder",
-        icon: <FolderPlus className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={FolderAddIcon} className="h-4 w-4" />,
         onClick: () => {
           if (entry?.type === "dir") {
             setExpanded((prev) => new Set(prev).add(entry.path))
@@ -486,7 +488,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     if (!entry || entry.type === "dir") {
       items.push({
         label: "Open Terminal",
-        icon: <TerminalSquare className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={TerminalIcon} className="h-4 w-4" />,
         onClick: () => {
           const dir = entry?.type === "dir" ? entry.path : ""
           const params = dir ? `?dir=${encodeURIComponent(dir)}` : ""
@@ -498,7 +500,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     if (entry && !protectedPaths.has(entry.path)) {
       items.push({
         label: "Rename",
-        icon: <Pencil className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={PencilEdit01Icon} className="h-4 w-4" />,
         onClick: () => {
           const depth = entry.path.split("/").length - 1
           setInlineAction({ type: "rename", entry, depth })
@@ -506,7 +508,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       })
       items.push({
         label: "Delete",
-        icon: <Trash2 className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={Delete01Icon} className="h-4 w-4" />,
         variant: "destructive" as const,
         onClick: () => handleDelete(entry, parentPath),
       })
@@ -536,9 +538,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
             depth={depth}
             icon={
               isDir ? (
-                <Folder className="h-4 w-4 shrink-0 text-amber-500" />
+                <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
               ) : (
-                <File className="h-4 w-4 shrink-0" />
+                <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
               )
             }
           />
@@ -579,20 +581,20 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
             {isDir ? (
               <>
                 {isExpanded ? (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  <HugeiconsIcon icon={ArrowDown01Icon} className="h-3.5 w-3.5 shrink-0" />
                 ) : (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                  <HugeiconsIcon icon={ArrowRight01Icon} className="h-3.5 w-3.5 shrink-0" />
                 )}
                 {isExpanded ? (
-                  <FolderOpen className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={FolderOpenIcon} className="h-4 w-4 shrink-0 text-amber-500" />
                 ) : (
-                  <Folder className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
                 )}
               </>
             ) : (
               <>
                 <span className="w-3.5 shrink-0" />
-                <File className="h-4 w-4 shrink-0" />
+                <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
               </>
             )}
             <span className="truncate">{entry.name}</span>
@@ -614,9 +616,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
                     depth={depth + 1}
                     icon={
                       inlineAction.type === "new-folder" ? (
-                        <Folder className="h-4 w-4 shrink-0 text-amber-500" />
+                        <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
                       ) : (
-                        <File className="h-4 w-4 shrink-0" />
+                        <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
                       )
                     }
                   />
@@ -632,7 +634,14 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
   const rootEntries = children[""]
   if (!rootEntries) {
     return (
-      <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+      <div className="flex flex-col gap-1 py-2 px-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-2 px-2 py-1">
+            <Skeleton className="h-3.5 w-3.5 shrink-0 rounded" />
+            <Skeleton className="h-3.5 shrink-0 rounded" style={{ width: `${50 + ((i * 37) % 60)}px` }} />
+          </div>
+        ))}
+      </div>
     )
   }
 
@@ -654,7 +663,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       >
         {isRootDropTarget ? (
           <span className="flex items-center gap-1.5">
-            <Upload className="h-4 w-4" /> Drop files to upload
+            <HugeiconsIcon icon={Upload01Icon} className="h-4 w-4" /> Drop files to upload
           </span>
         ) : (
           "No files"
@@ -706,9 +715,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
               depth={0}
               icon={
                 inlineAction.type === "new-folder" ? (
-                  <Folder className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
                 ) : (
-                  <File className="h-4 w-4 shrink-0" />
+                  <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
                 )
               }
             />
