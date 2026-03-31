@@ -18,13 +18,11 @@ Users see instances as "agents" — the thing they talk to. The definition is th
 
 ## Definitions
 
-An agent definition is a markdown file with YAML frontmatter. It declares the agent's name, model, tools, persona, and instructions. Definitions are templates — they carry no runtime state.
+An agent definition is a markdown file with YAML frontmatter. It declares the agent's name, model, tools, and instructions. Definitions are templates — they carry no runtime state.
 
 ```
 agents/researcher/
   agent.md          # Required. Capabilities, instructions, tool declarations.
-  soul.md           # Optional. Persona, tone, behavioral boundaries.
-  tools.md          # Optional. Tool usage guidelines.
   skills/           # Optional. Activatable skill definitions.
 ```
 
@@ -40,8 +38,8 @@ Instance-level state lives on disk, organized by instance ID:
 
 ```
 instances/<instance-id>/
+  persona.md                    # Who this instance is (identity, tone, behavioral traits)
   memory.md                     # What the agent has learned over time
-  identity.md                   # Who the agent is in this context
   sessions/
     <session-id>/
       todos.yaml                # Task list for this session
@@ -49,7 +47,7 @@ instances/<instance-id>/
       tmp/                      # Ephemeral files
 ```
 
-Instance-level state (memory, identity) survives session boundaries. When a user clears a session, the instance — and its memory — persists.
+Instance-level state (persona, memory) survives session boundaries. When a user clears a session, the instance — and its persona and memory — persists.
 
 Session directories are kept on disk as long as the session exists in the database. This allows resuming a previous session with its working files intact. Directories are cleaned up when the session is deleted from the database.
 
@@ -100,7 +98,7 @@ Session state is split between **database** and **filesystem** based on how it's
 
 **DB for structured data that needs querying.** Messages and summaries live in the database because they need full-text search, cross-session queries, compaction, and token counting. The DB also enables cutting across sessions or even across instances — for example, searching all conversations a user has had with any agent.
 
-**Filesystem for working state the agent touches directly.** Todos, scratch files, and temp files are read and written by the agent as regular files. This is consistent with how instance-level state (memory.md, identity.md) works — simple files that the agent and tools can access naturally.
+**Filesystem for working state the agent touches directly.** Todos, scratch files, and temp files are read and written by the agent as regular files. This is consistent with how instance-level state (persona.md, memory.md) works — simple files that the agent and tools can access naturally.
 
 ### Session Lifecycle
 
@@ -122,11 +120,11 @@ Long-lived work that needs to survive session boundaries (scheduled jobs, monito
 
 Each turn, the system prompt is assembled from all three layers:
 
-1. **From the definition:** agent.md body, soul.md, tools.md, skills listing (capabilities)
-2. **From the instance:** identity.md, memory.md (durable context)
+1. **From the definition:** agent.md body, skills listing (capabilities)
+2. **From the instance:** persona.md, memory.md (durable context)
 3. **From the session:** todos, messages, summaries (task context)
 
-The agent always knows who it is (instance) and what it's currently working on (session).
+The agent always knows who it is (persona) and what it's currently working on (session).
 
 ## History Search
 

@@ -10,9 +10,7 @@ You can create new agents at runtime. An agent is a directory under `agents/` wi
 1. Choose a short, descriptive kebab-case name for the agent (e.g. `code-reviewer`, `data-fetcher`).
 2. Create the agent definition directory and required file:
    - `agents/<name>/agent.md` — **required**. Contains YAML frontmatter and a markdown body.
-3. Optionally create supporting files:
-   - `agents/<name>/soul.md` — persona, tone, and behavioral boundaries (no frontmatter needed, plain markdown)
-   - `agents/<name>/tools.md` — tool usage guidelines (no frontmatter needed, plain markdown)
+3. Optionally create skills:
    - `agents/<name>/skills/<skill-name>.md` — flat skill file (requires frontmatter with `name` and `description`)
    - `agents/<name>/skills/<skill-name>/SKILL.md` — directory skill with optional `scripts/`, `references/`, `assets/` subdirs
 
@@ -41,26 +39,16 @@ Write this as direct instructions to the agent about what it is and how it shoul
 
 ### Mode guidance
 
-- **persistent**: The agent keeps memory, todos, and conversation history across interactions. Use for agents that build up context over time or need to be long-running.
+- **persistent**: The agent keeps persona, memory, todos, and conversation history across interactions. Use for agents that build up context over time or need to be long-running.
+- **coordinator**: A superset of persistent — also gets agent management tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`) and write access to `agents/` and `skills/` directories. Use for agents that need to manage other agents.
 - **ephemeral**: The agent runs a single task and is cleaned up. Use for stateless, one-shot tasks. `spawn_instance` always forces ephemeral mode regardless of the config.
 
-## skill file format
+## Instance-level files
 
-```markdown
----
-name: skill-name
-description: What this skill does and when to use it.
-license: MIT
-compatibility: Requires python 3.8+
-metadata:
-  author: your-name
-  version: "1.0"
----
+These files live in the instance directory, not the agent definition. The agent manages them at runtime:
 
-Instructions for this skill. The agent reads this file on demand when a task matches the description.
-```
-
-Required: `name` (lowercase kebab-case, max 64 chars) and `description` (max 1024 chars). Optional: `license`, `compatibility` (max 500 chars), `metadata` (key-value pairs).
+- **`persona.md`** — who this instance is. Identity, tone, behavioral traits. Seeded by the operator or written by the agent via `persona_write`. Appears in the system prompt under `## Persona`.
+- **`memory.md`** — what this instance knows. Facts, context, decisions. Written by the agent via `memory_write`. Appears in the system prompt under `## Memories`.
 
 ## After creating an agent
 

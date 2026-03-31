@@ -135,7 +135,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 }
 
 // NewSession ends the current session and starts a new one within the same instance.
-// This is the /clear handler — memory and identity persist, messages and todos reset.
+// This is the /clear handler — persona and memory persist, messages and todos reset.
 func (m *Manager) NewSession(instanceID string) (string, error) {
 	inst := m.getInstance(instanceID)
 	if inst == nil {

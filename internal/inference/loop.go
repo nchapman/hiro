@@ -28,7 +28,7 @@ type LoopConfig struct {
 	AgentConfig    config.AgentConfig
 	Mode           config.AgentMode
 	WorkingDir     string
-	InstanceDir    string // instance-level state: memory.md, identity.md
+	InstanceDir    string // instance-level state: persona.md, memory.md
 	SessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	AgentDefDir    string
 	SharedSkillDir string
@@ -58,7 +58,7 @@ type Loop struct {
 	instanceID     string
 	sessionID      string
 	mode           config.AgentMode
-	instanceDir    string // instance-level state: memory.md, identity.md
+	instanceDir    string // instance-level state: persona.md, memory.md
 	sessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	agentDefDir    string
 	sharedSkillDir string
@@ -485,15 +485,15 @@ func (l *Loop) currentSystemPrompt() string {
 // config snapshot. Does not acquire updateMu — safe to call from UpdateModel
 // which already holds the lock.
 func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
-	identity := ""
+	persona := ""
 	memory := ""
 	todos := ""
-	// Identity and memory are instance-level state.
+	// Persona and memory are instance-level state.
 	if l.instanceDir != "" {
-		if id, err := config.ReadOptionalFile(filepath.Join(l.instanceDir, "identity.md")); err != nil {
-			l.logger.Warn("could not read identity.md", "error", err)
+		if p, err := config.ReadPersonaFile(l.instanceDir); err != nil {
+			l.logger.Warn("could not read persona.md", "error", err)
 		} else {
-			identity = id
+			persona = p
 		}
 		if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
 			l.logger.Warn("could not read memory.md", "error", err)
@@ -511,13 +511,11 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 	}
 
 	if l.agentDefDir != "" {
-		prompt, soul, toolNotes, err := config.ReloadAgentTexts(l.agentDefDir)
+		prompt, err := config.ReloadAgentTexts(l.agentDefDir)
 		if err != nil {
 			l.logger.Warn("could not reload agent texts", "error", err)
 		} else {
 			cfg.Prompt = prompt
-			cfg.Soul = soul
-			cfg.Tools = toolNotes
 		}
 	}
 
@@ -546,7 +544,7 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		secretNames = l.secretNamesFn()
 	}
 
-	return buildSystemPrompt(cfg, identity, memory, todos, secretNames)
+	return buildSystemPrompt(cfg, persona, memory, todos, secretNames)
 }
 
 // buildLocalTools creates tools that run in the control plane process.
@@ -554,6 +552,7 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	var localTools []fantasy.AgentTool
 
 	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
+		localTools = append(localTools, buildPersonaTools(cfg.InstanceDir)...)
 		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
 	}
 	if cfg.Mode.IsPersistent() && cfg.SessionDir != "" {

@@ -18,7 +18,7 @@ func TestBuildSystemPrompt_MinimalConfig(t *testing.T) {
 		t.Error("expected security section")
 	}
 	// Sections that should NOT appear without data.
-	for _, section := range []string{"## Identity", "## Memories", "## Current Tasks", "## Available Secrets", "## Tool Notes", "## Skills"} {
+	for _, section := range []string{"## Persona", "## Memories", "## Current Tasks", "## Available Secrets", "## Skills"} {
 		if strings.Contains(got, section) {
 			t.Errorf("unexpected section %q in minimal prompt", section)
 		}
@@ -28,22 +28,18 @@ func TestBuildSystemPrompt_MinimalConfig(t *testing.T) {
 func TestBuildSystemPrompt_AllSections(t *testing.T) {
 	cfg := config.AgentConfig{
 		Prompt: "Main instructions.",
-		Soul:   "Be kind.",
-		Tools:  "Use bash carefully.",
 		Skills: []config.SkillConfig{
 			{Name: "deploy", Description: "Deploy to production."},
 		},
 	}
-	got := buildSystemPrompt(cfg, "Agent Alpha", "Remember X.", "- [ ] Do Y", []string{"API_KEY", "DB_PASS"})
+	got := buildSystemPrompt(cfg, "Friendly and precise.", "Remember X.", "- [ ] Do Y", []string{"API_KEY", "DB_PASS"})
 
 	for _, want := range []string{
-		"Be kind.",
-		"## Identity", "Agent Alpha",
+		"## Persona", "Friendly and precise.",
 		"## Memories", "Remember X.",
 		"## Current Tasks", "Do Y",
 		"## Available Secrets", "`API_KEY`", "`DB_PASS`",
 		"Main instructions.",
-		"## Tool Notes", "Use bash carefully.",
 		"## Skills", "**deploy**", "Deploy to production.",
 		"## Security",
 	} {
@@ -56,21 +52,17 @@ func TestBuildSystemPrompt_AllSections(t *testing.T) {
 func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 	cfg := config.AgentConfig{
 		Prompt: "MAIN_INSTRUCTIONS",
-		Soul:   "SOUL_CONTENT",
-		Tools:  "TOOL_NOTES",
 		Skills: []config.SkillConfig{{Name: "s", Description: "d"}},
 	}
-	got := buildSystemPrompt(cfg, "IDENTITY", "MEMORIES", "TODOS", []string{"SECRET"})
+	got := buildSystemPrompt(cfg, "PERSONA", "MEMORIES", "TODOS", []string{"SECRET"})
 
-	// Verify ordering: soul < identity < memories < todos < secrets < instructions < tools < skills < security.
+	// Verify ordering: memories < todos < secrets < instructions < persona < skills < security.
 	order := []string{
-		"SOUL_CONTENT",
-		"IDENTITY",
 		"MEMORIES",
 		"TODOS",
 		"SECRET",
 		"MAIN_INSTRUCTIONS",
-		"TOOL_NOTES",
+		"PERSONA",
 		"## Skills",
 		"## Security",
 	}

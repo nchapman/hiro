@@ -142,7 +142,7 @@ type resumeInstanceInput struct {
 
 func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("resume_instance",
-		"Resume a stopped instance. Creates a new session within it. Picks up where it left off with its memory and identity.",
+		"Resume a stopped instance. Creates a new session within it. Picks up where it left off with its persona and memory.",
 		func(ctx context.Context, input resumeInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil

@@ -9,20 +9,9 @@ import (
 
 // buildSystemPrompt assembles the system prompt from the agent's config
 // and dynamic content.
-// Order: soul → identity → memories → todos → secrets → instructions → tools → skills.
-func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string, secretNames []string) string {
+// Order: memories → todos → secrets → instructions → persona → skills.
+func buildSystemPrompt(cfg config.AgentConfig, persona, memory, todos string, secretNames []string) string {
 	var p strings.Builder
-
-	if cfg.Soul != "" {
-		p.WriteString(cfg.Soul)
-		p.WriteString("\n\n")
-	}
-
-	if identity != "" {
-		p.WriteString("## Identity\n\n")
-		p.WriteString(identity)
-		p.WriteString("\n\n")
-	}
 
 	if memory != "" {
 		p.WriteString("## Memories\n\n")
@@ -53,9 +42,11 @@ func buildSystemPrompt(cfg config.AgentConfig, identity, memory, todos string, s
 
 	p.WriteString(cfg.Prompt)
 
-	if cfg.Tools != "" {
-		p.WriteString("\n\n## Tool Notes\n\n")
-		p.WriteString(cfg.Tools)
+	if persona != "" {
+		p.WriteString("\n\n## Persona\n\n")
+		p.WriteString("Your identity, tone, and behavioral traits — refines the instructions above. " +
+			"Use persona_write to update. Changes appear in your system prompt from the next turn onward.\n\n")
+		p.WriteString(persona)
 	}
 
 	if len(cfg.Skills) > 0 {

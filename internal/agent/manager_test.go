@@ -1381,7 +1381,7 @@ func TestExtractAgentName(t *testing.T) {
 	}{
 		{"agents/foo/agent.md", "foo"},
 		{"agents/my-agent/agent.md", "my-agent"},
-		{"agents/bar/soul.md", "bar"},
+		{"agents/bar/skills/review.md", "bar"},
 		{"other/foo/agent.md", ""},
 		{"agents", ""},
 		{"", ""},

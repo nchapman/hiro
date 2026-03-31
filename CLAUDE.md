@@ -87,8 +87,8 @@ Agent Worker Process (hive agent)
 agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inference Loop + spawns worker
                                                                        ↓
                                                               instances/<uuid>/
+                                                                persona.md
                                                                 memory.md
-                                                                identity.md
                                                                 sessions/<session-id>/
                                                                   todos.yaml
                                                                   scratch/
@@ -96,12 +96,12 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
                                                               db/hive.db (shared, all instances)
 ```
 
-- **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
-- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `memory.md` and `identity.md`. Persistent and coordinator instances survive restarts via `RestoreInstances()`.
+- **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
+- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Persistent and coordinator instances survive restarts via `RestoreInstances()`.
 - **Sessions** are task-scoped work within an instance. Session-level state includes `todos.yaml`, `scratch/`, and `tmp/`. A new session is created on `/clear`.
 - **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `spawn_instance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
-- **Persistent instances** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
+- **Persistent instances** get extra tools: `persona_read/write`, `memory_read/write`, `todos`, `history_search/recall`.
 - **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
 
 ### Agent Definition Structure
@@ -109,8 +109,6 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 ```
 agents/<name>/
   agent.md          # Required. YAML frontmatter (name, model, description, tools) + markdown body (system prompt)
-  soul.md           # Optional. Persona, tone, boundaries — prepended to system prompt
-  tools.md          # Optional. Tool usage guidelines — appended as "## Tool Notes"
   skills/
     flat-skill.md           # Flat file skill
     dir-skill/
@@ -146,16 +144,14 @@ Validation: name must match `^[a-z0-9]+(-[a-z0-9]+)*$`. For directory skills, na
 
 Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
 
-1. `soul.md` content (if present)
-2. `## Identity` + `identity.md` (persistent agents only)
-3. `## Memories` + `memory.md` (persistent agents only)
-4. `## Current Tasks` + formatted todos (persistent agents only)
-5. `## Available Secrets` + secret names (if any)
-6. `agent.md` body (main instructions)
-7. `## Tool Notes` + `tools.md` (if present)
-8. `## Skills` + skill name/description listing (if present)
+1. `## Memories` + `memory.md` from instance dir (persistent agents only)
+2. `## Current Tasks` + formatted todos (persistent agents only)
+3. `## Available Secrets` + secret names (if any)
+4. `agent.md` body (main instructions)
+5. `## Persona` + `persona.md` from instance dir (refines instructions above)
+6. `## Skills` + skill name/description listing (if present)
 
-Skills are re-scanned from disk each turn (like memory and identity), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `read_file`.
+Skills are re-scanned from disk each turn (like persona and memory), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `use_skill`.
 
 ### Key Packages
 
@@ -216,10 +212,12 @@ Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mo
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
-Defined in `internal/inference/local_tools.go`. Run in the control plane process (not in workers).
+Defined in `internal/inference/tools_persona.go`, `tools_memory.go`, `tools_todos.go`, `tools_history.go`. Run in the control plane process (not in workers).
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
+| `persona_read` | Read `persona.md` from instance dir | *(none)* | Returns empty if no persona defined yet |
+| `persona_write` | Overwrite `persona.md` | `content` | Full replacement; 0600 perms; visible in system prompt next turn |
 | `memory_read` | Read `memory.md` from instance dir | *(none)* | Returns empty if no memories yet |
 | `memory_write` | Overwrite `memory.md` | `content` | Full replacement — read first to avoid data loss; 0600 perms; visible in system prompt next turn |
 | `todos` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
@@ -235,8 +233,8 @@ Defined in `internal/inference/local_tools.go`. Run in the control plane process
 ### Tool Totals by Agent Type
 
 - **Ephemeral instances:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
-- **Persistent instances:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
-- **Coordinator instances:** 11 built-in + 1 spawn + 5 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
+- **Persistent instances:** 11 built-in + 1 spawn + 2 persona + 2 memory + 1 todos + 2 history = 19 tools (+ 1 if skills)
+- **Coordinator instances:** 11 built-in + 1 spawn + 5 coordinator + 2 persona + 2 memory + 1 todos + 2 history = 24 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
@@ -287,7 +285,7 @@ agents:
 ## Creating Agents at Runtime
 
 Agents can create new agent definitions at runtime using their file tools:
-1. Use `write_file` / `edit_file` to create `agents/<name>/agent.md` (and optionally `soul.md`, `tools.md`, `skills/*.md`)
+1. Use `write_file` / `edit_file` to create `agents/<name>/agent.md` (and optionally `skills/*.md`)
 2. Use `spawn_instance` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 

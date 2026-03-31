@@ -87,7 +87,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 | `compaction.go` | 682 | LLM-driven conversation summarization (now with MaxSummaryDepth cap) |
 | `assembly.go` | 152 | Message assembly within token budget (now with fresh tail overflow protection) |
 | `context.go` | ~180 | Context item management (system prompt sections) |
-| `prompt.go` | ~200 | System prompt builder (soul + identity + memory + todos + agent.md + tools.md + skills) |
+| `prompt.go` | ~200 | System prompt builder (persona + memory + todos + agent.md + skills) |
 | `tools.go` | ~60 | Tool proxy — wraps remote tool schemas (from `tools.RemoteToolInfos`) with gRPC dispatch |
 | `helpers.go` | ~120 | Token counting, message utilities |
 | `redact.go` | ~80 | Secret redaction in tool outputs |
