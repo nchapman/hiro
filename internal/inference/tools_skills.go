@@ -23,8 +23,6 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.
 				return fantasy.NewTextErrorResponse("skill name is required"), nil
 			}
 
-			logger.Info("tool call", "tool", "use_skill", "skill", input.Name)
-
 			var skill *config.SkillConfig
 			for i := range cfg.Skills {
 				if cfg.Skills[i].Name == input.Name {
@@ -50,8 +48,11 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.
 					fmt.Sprintf("skill %q path is outside allowed directories", input.Name)), nil
 			}
 
+			logger.Info("tool call", "tool", "use_skill", "skill", input.Name)
+
 			parsed, err := config.ParseMarkdownFile(realPath)
 			if err != nil {
+				logger.Warn("use_skill read failed", "skill", input.Name, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading skill file: %v", err)), nil
 			}
 

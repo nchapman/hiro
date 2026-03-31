@@ -63,20 +63,28 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *sl
 				if input.Prompt == "" {
 					return fantasy.NewTextErrorResponse("prompt is required for ephemeral mode"), nil
 				}
-				logger.Info("tool call", "tool", "spawn_instance", "agent", input.Agent, "mode", mode)
-				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
-				if err != nil {
-					logger.Warn("spawn_instance failed", "agent", input.Agent, "error", err)
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
-				}
-				return fantasy.NewTextResponse(truncateResult(result)), nil
-
 			case config.ModePersistent, config.ModeCoordinator:
 				if callerMode != config.ModeCoordinator {
 					return fantasy.NewTextErrorResponse(
 						fmt.Sprintf("only coordinator agents can spawn %s instances", mode)), nil
 				}
-				logger.Info("tool call", "tool", "spawn_instance", "agent", input.Agent, "mode", mode)
+			default:
+				return fantasy.NewTextErrorResponse(
+					fmt.Sprintf("invalid mode %q: must be ephemeral, persistent, or coordinator", mode)), nil
+			}
+
+			logger.Info("tool call", "tool", "spawn_instance", "agent", input.Agent, "mode", mode)
+
+			switch config.AgentMode(mode) {
+			case config.ModeEphemeral:
+				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
+				if err != nil {
+					logger.Warn("spawn_instance failed", "agent", input.Agent, "mode", mode, "error", err)
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
+				}
+				return fantasy.NewTextResponse(truncateResult(result)), nil
+
+			default: // persistent or coordinator
 				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID)
 				if err != nil {
 					logger.Warn("spawn_instance failed", "agent", input.Agent, "mode", mode, "error", err)
@@ -84,10 +92,6 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *sl
 				}
 				return fantasy.NewTextResponse(
 					fmt.Sprintf("Instance created from %q with ID: %s (mode: %s)", input.Agent, id, mode)), nil
-
-			default:
-				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("invalid mode %q: must be ephemeral, persistent, or coordinator", mode)), nil
 			}
 		},
 	)
@@ -98,18 +102,19 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *sl
 func buildCoordinatorTools(mgr ipc.HostManager, logger *slog.Logger) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		buildResumeInstance(mgr, logger),
-		buildListInstances(mgr),
-		buildListNodes(mgr),
+		buildListInstances(mgr, logger),
+		buildListNodes(mgr, logger),
 		buildSendMessage(mgr, logger),
 		buildStopInstance(mgr, logger),
 		buildDeleteInstance(mgr, logger),
 	}
 }
 
-func buildListNodes(mgr ipc.HostManager) fantasy.AgentTool {
+func buildListNodes(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("list_nodes",
 		"List all nodes in the cluster. Shows each node's name, status, capacity, and active worker count. Use node names with spawn_instance to run agents on specific machines.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			logger.Debug("tool call", "tool", "list_nodes")
 			nodes := mgr.ListNodes()
 			if len(nodes) == 0 {
 				return fantasy.NewTextResponse("No cluster nodes configured. All agents run locally."), nil
@@ -157,10 +162,11 @@ func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.Agent
 	)
 }
 
-func buildListInstances(mgr ipc.HostManager) fantasy.AgentTool {
+func buildListInstances(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("list_instances",
 		"List your direct child instances with their name, mode, and status.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			logger.Debug("tool call", "tool", "list_instances")
 			callerID := callerIDFromContext(ctx)
 			instances := mgr.ListChildInstances(callerID)
 			if len(instances) == 0 {
