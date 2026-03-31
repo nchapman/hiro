@@ -135,11 +135,9 @@ export default function ProvidersCard({
           </div>
           {availableTypes.length > 0 && (
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
-              <DialogTrigger>
-                <Button size="sm" className="gap-1">
-                  <HugeiconsIcon icon={Add01Icon} className="h-4 w-4" />
-                  Add
-                </Button>
+              <DialogTrigger render={<Button size="sm" className="gap-1" />}>
+                <HugeiconsIcon icon={Add01Icon} className="h-4 w-4" />
+                Add
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
@@ -180,8 +178,8 @@ export default function ProvidersCard({
                     />
                   </div>
                   <div className="flex justify-end gap-2">
-                    <DialogClose>
-                      <Button variant="outline">Cancel</Button>
+                    <DialogClose render={<Button variant="outline" />}>
+                      Cancel
                     </DialogClose>
                     <Button
                       onClick={handleAddProvider}
@@ -251,6 +249,7 @@ export default function ProvidersCard({
                   </div>
                 </div>
                 <Input
+                  type="password"
                   value={providers[type_]?.api_key ?? ""}
                   readOnly
                   className="font-mono text-xs"

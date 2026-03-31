@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { getFileExt, getPreviewType } from "./file-utils"
+import { getFileExt, getPreviewType, isImageType } from "./file-utils"
 
 // Only test the pure sync helpers here. The async API functions
 // (listDir, readFile, etc.) are integration-level — they hit fetch
@@ -64,5 +64,27 @@ describe("getPreviewType", () => {
     expect(getPreviewType("code.ts")).toBeNull()
     expect(getPreviewType("readme.md")).toBeNull()
     expect(getPreviewType("data.json")).toBeNull()
+  })
+})
+
+describe("isImageType", () => {
+  it("returns true for supported image MIME types", () => {
+    expect(isImageType("image/jpeg")).toBe(true)
+    expect(isImageType("image/png")).toBe(true)
+    expect(isImageType("image/gif")).toBe(true)
+    expect(isImageType("image/webp")).toBe(true)
+  })
+
+  it("returns false for non-image MIME types", () => {
+    expect(isImageType("text/plain")).toBe(false)
+    expect(isImageType("application/json")).toBe(false)
+    expect(isImageType("application/pdf")).toBe(false)
+    expect(isImageType("")).toBe(false)
+  })
+
+  it("returns false for unsupported image MIME types", () => {
+    expect(isImageType("image/svg+xml")).toBe(false)
+    expect(isImageType("image/tiff")).toBe(false)
+    expect(isImageType("image/bmp")).toBe(false)
   })
 })

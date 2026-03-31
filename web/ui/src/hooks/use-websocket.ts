@@ -95,7 +95,7 @@ export function useWebSocket(sessionId: string | null) {
     [cleanup]
   )
 
-  useEffect(() => { connectWsRef.current = connectWs })
+  useEffect(() => { connectWsRef.current = connectWs }, [connectWs])
 
   useEffect(() => {
     if (sessionId) {
