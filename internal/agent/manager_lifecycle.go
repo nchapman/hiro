@@ -374,6 +374,11 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		s.SetSecretEnvFn(m.SecretEnv)
 	}
 
+	// Create the notification queue (instance-level, survives loop recreation).
+	notifications := inference.NewNotificationQueue(
+		m.logger.With("component", "notifications", "instance_id", instanceID),
+	)
+
 	// Create the inference loop (skipped if no provider — test mode).
 	var loop *inference.Loop
 	if providerName != "" {
@@ -403,6 +408,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
+			Notifications:  notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 			HostManager:    m,
 			CallerMode:     mode,
@@ -434,6 +440,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		worker:         handle.Worker,
 		handle:         handle,
 		loop:           loop,
+		notifications:  notifications,
 		effectiveTools: effectiveTools,
 		uid:            uid,
 		gid:            gid,

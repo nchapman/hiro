@@ -46,6 +46,10 @@ type LoopConfig struct {
 	// Provider is the resolved provider type (e.g. "anthropic", "openrouter").
 	Provider string
 
+	// Notification queue for this instance. Owned by the instance, passed
+	// to the Loop so it can expose Notify(). Must not be nil.
+	Notifications *NotificationQueue
+
 	// For building local tools — the Loop needs access to the Manager
 	// for coordinator/spawn tools. This avoids a circular dependency
 	// by using the HostManager interface.
@@ -57,7 +61,7 @@ type LoopConfig struct {
 type Loop struct {
 	agent          fantasy.Agent
 	instanceID     string
-	sessionID      string
+	sessionID      string // immutable after construction; safe to read without lock
 	mode           config.AgentMode
 	instanceDir    string // instance-level state: persona.md, memory.md
 	sessionDir     string // session-level state: todos.yaml, scratch/, tmp/
@@ -76,6 +80,12 @@ type Loop struct {
 	model           string // resolved model ID (e.g. "claude-sonnet-4-20250514")
 	reasoningEffort string // "" = off, "low"/"medium"/"high"/"max"/"on" = enabled
 	provider        string // current provider type (e.g. "anthropic", "openrouter")
+
+	// Notification queue for injecting meta messages (background task
+	// completions, cron triggers, webhooks, etc.). Producers call Notify
+	// from any goroutine; the session driver (WebSocket handler, etc.)
+	// watches Notifications().Ready() and triggers turns via ChatMeta.
+	notifications *NotificationQueue
 
 	// Ephemeral message buffer (non-persistent sessions only).
 	// Protected by ephemeralMu.
@@ -127,6 +137,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		lm:             cfg.LM,
 		pdb:            cfg.PDB,
 		secretNamesFn:  cfg.SecretNamesFn,
+		notifications:  cfg.Notifications,
 		logger:         cfg.Logger.With("component", "inference", "instance_id", cfg.InstanceID),
 	}
 
@@ -154,9 +165,36 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	return l, nil
 }
 
+// Notify pushes a notification into the queue. The session driver (WebSocket
+// handler, etc.) will drain it and trigger a ChatMeta turn. Safe to call from
+// any goroutine. SessionID is automatically set to the loop's current session.
+func (l *Loop) Notify(n Notification) {
+	if n.SessionID == "" {
+		n.SessionID = l.sessionID
+	}
+	l.notifications.Push(n)
+	l.logger.Info("notification queued", "source", n.Source, "length", l.notifications.Len())
+}
+
+// Notifications returns the queue so callers can watch Ready() and Drain().
+func (l *Loop) Notifications() *NotificationQueue {
+	return l.notifications
+}
+
 // Chat runs one turn of the inference loop: assembles context, calls the LLM,
 // dispatches tools, persists results. Files are optional image attachments for vision.
 func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return l.chat(ctx, prompt, files, false, onEvent)
+}
+
+// ChatMeta runs an inference turn where the user message is stored as a meta
+// message — visible to the model but hidden from the user's transcript. Used
+// for notification-triggered turns (background task completions, cron, webhooks).
+func (l *Loop) ChatMeta(ctx context.Context, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return l.chat(ctx, prompt, nil, true, onEvent)
+}
+
+func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, onEvent func(ipc.ChatEvent) error) (string, error) {
 	var messages []fantasy.Message
 
 	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
@@ -271,7 +309,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	// Persist results.
 	if l.mode.IsPersistent() && l.pdb != nil {
-		l.persistTurn(ctx, prompt, files, result, lm, agentModel, providerOpts)
+		l.persistTurn(ctx, prompt, files, meta, result, lm, agentModel, providerOpts)
 	} else {
 		l.ephemeralMu.Lock()
 		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
@@ -292,10 +330,10 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 // persistTurn stores the user message and all step messages in the platform DB,
 // then kicks off async compaction. lm, model, and providerOpts are snapshots
 // captured at the start of the turn to avoid racing with UpdateModel.
-func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
+func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
 	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
-	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens); err != nil {
+	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens, meta); err != nil {
 		l.logger.Warn("failed to ingest user message", "error", err)
 	}
 

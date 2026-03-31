@@ -24,33 +24,69 @@ func (m *Manager) SendMessage(ctx context.Context, instanceID, message string, o
 // SendMessageWithFiles is like SendMessage but includes file attachments
 // (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
 func (m *Manager) SendMessageWithFiles(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
-	// Cycle detection: prevent re-entrant deadlocks when coordinator tools
-	// send messages in a loop (A → SendMessage(B) → B sends back to A).
-	if inference.IsInCallChain(ctx, instanceID) {
-		return "", fmt.Errorf("circular message dependency: instance %s is already awaiting a response in this call chain", instanceID)
+	inst, ctx, err := m.acquireInstance(ctx, instanceID)
+	if err != nil {
+		return "", err
 	}
-
-	inst := m.getInstance(instanceID)
-	if inst == nil {
-		return "", fmt.Errorf("instance %q not found", instanceID)
-	}
-
-	inst.mu.Lock()
 	defer inst.mu.Unlock()
-
-	// Status check inside lock to avoid race with softStop/watchWorker.
-	if inst.info.Status == InstanceStatusStopped {
-		return "", fmt.Errorf("instance %q is stopped", instanceID)
-	}
-
-	// Add this instance to the call chain and set the caller ID for tool scoping.
-	ctx = inference.ContextWithCallChain(ctx, instanceID)
-	ctx = inference.ContextWithCallerID(ctx, instanceID)
 
 	if inst.loop != nil {
 		return inst.loop.Chat(ctx, message, files, onEvent)
 	}
 	return "", fmt.Errorf("instance %q has no inference loop", instanceID)
+}
+
+// SendMetaMessage runs an inference turn triggered by a notification (not a
+// user message). The prompt is stored as a meta message — visible to the model
+// but hidden from the user's transcript. Uses the same per-instance lock as
+// SendMessage to prevent concurrent Chat calls.
+func (m *Manager) SendMetaMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	inst, ctx, err := m.acquireInstance(ctx, instanceID)
+	if err != nil {
+		return "", err
+	}
+	defer inst.mu.Unlock()
+
+	if inst.loop != nil {
+		return inst.loop.ChatMeta(ctx, message, onEvent)
+	}
+	return "", fmt.Errorf("instance %q has no inference loop", instanceID)
+}
+
+// acquireInstance performs cycle detection, finds the instance, acquires its
+// lock, and validates it is running with an inference loop. Returns the locked
+// instance and an updated context with call chain info. The caller must unlock.
+func (m *Manager) acquireInstance(ctx context.Context, instanceID string) (*instance, context.Context, error) {
+	if inference.IsInCallChain(ctx, instanceID) {
+		return nil, ctx, fmt.Errorf("circular message dependency: instance %s is already awaiting a response in this call chain", instanceID)
+	}
+
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return nil, ctx, fmt.Errorf("%w: %s", ErrInstanceNotFound, instanceID)
+	}
+
+	inst.mu.Lock()
+
+	if inst.info.Status == InstanceStatusStopped {
+		inst.mu.Unlock()
+		return nil, ctx, fmt.Errorf("instance %q is stopped", instanceID)
+	}
+
+	ctx = inference.ContextWithCallChain(ctx, instanceID)
+	ctx = inference.ContextWithCallerID(ctx, instanceID)
+
+	return inst, ctx, nil
+}
+
+// InstanceNotifications returns the notification queue for an instance.
+// Returns nil if the instance is not found.
+func (m *Manager) InstanceNotifications(instanceID string) *inference.NotificationQueue {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return nil
+	}
+	return inst.notifications
 }
 
 // SecretNames returns the names of available secrets from the control plane.

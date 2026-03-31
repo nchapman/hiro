@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -110,106 +112,183 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	for {
-		// Read user message
-		var msg ChatMessage
-		if err := wsjson.Read(ctx, conn, &msg); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			s.logger.Debug("chat connection closed", "error", err)
-			return
+	// onEvent streams inference events to the WebSocket. Shared between
+	// user-triggered and notification-triggered turns.
+	onEvent := func(evt ipc.ChatEvent) error {
+		wireMsg := ChatMessage{
+			Type:       evt.Type,
+			Role:       "assistant",
+			Content:    evt.Content,
+			ToolCallID: evt.ToolCallID,
+			ToolName:   evt.ToolName,
+			Input:      evt.Input,
+			Output:     evt.Output,
+			IsError:    evt.IsError,
+			IsMeta:     evt.IsMeta,
+			Status:     evt.Status,
 		}
-
-		// Handle config changes (model switch, reasoning toggle).
-		if msg.Type == "config" {
-			if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
-				s.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
-				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
-			} else {
-				s.logger.Info("config updated", "instance_id", instanceID, "model", msg.Model)
-				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
-			}
-			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
-			if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
-				return
-			}
-			continue
+		b, err := json.Marshal(wireMsg)
+		if err != nil {
+			return err
 		}
+		return conn.Write(ctx, websocket.MessageText, b)
+	}
 
-		if msg.Type != "message" || (msg.Content == "" && len(msg.Attachments) == 0) {
-			continue
-		}
-
-		// Intercept slash commands before processing attachments.
-		if s.cmdHandler != nil && strings.HasPrefix(msg.Content, "/") {
-			result, err := s.cmdHandler.HandleCommand(msg.Content)
-			if err == nil {
-				// Recognized command — send result directly, don't forward to agent.
-				resp := ChatMessage{Type: "system", Content: result}
-				if writeErr := wsjson.Write(ctx, conn, resp); writeErr != nil {
-					return
-				}
-				done := ChatMessage{Type: "done"}
-				if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
-					return
-				}
-				continue
-			}
-			// Unrecognized command — fall through to agent as normal message.
-		}
-
-		// Decode attachments into fantasy.FileParts.
-		files, attErr := processAttachments(msg.Attachments)
-		if attErr != nil {
-			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: attErr.Error()})
-			continue
-		}
-
-		onEvent := func(evt ipc.ChatEvent) error {
-			wireMsg := ChatMessage{
-				Type:       evt.Type,
-				Role:       "assistant",
-				Content:    evt.Content,
-				ToolCallID: evt.ToolCallID,
-				ToolName:   evt.ToolName,
-				Input:      evt.Input,
-				Output:     evt.Output,
-				IsError:    evt.IsError,
-				IsMeta:     evt.IsMeta,
-				Status:     evt.Status,
-			}
-			b, err := json.Marshal(wireMsg)
-			if err != nil {
-				return err
-			}
-			return conn.Write(ctx, websocket.MessageText, b)
-		}
-
-		// Stream response — agent process owns the conversation.
-		_, streamErr := s.manager.SendMessageWithFiles(ctx, instanceID, msg.Content, files, onEvent)
-
-		if streamErr != nil {
-			s.logger.Warn("chat message failed", "instance_id", instanceID, "error", streamErr)
-			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}
-			if writeErr := wsjson.Write(ctx, conn, errMsg); writeErr != nil {
-				return
-			}
-			// Still send done so the frontend exits streaming state.
-			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
-			if writeErr := wsjson.Write(ctx, conn, done); writeErr != nil {
-				return
-			}
-			continue
-		}
-
-		// Signal end of response with usage data.
+	// sendDone writes the end-of-turn marker with usage data.
+	sendDone := func() error {
 		done := ChatMessage{Type: "done", Role: "assistant"}
 		done.Usage = s.buildUsageInfo(instanceID)
-		if err := wsjson.Write(ctx, conn, done); err != nil {
+		return wsjson.Write(ctx, conn, done)
+	}
+
+	// Read user messages in a goroutine so we can select on both user
+	// input and notification signals.
+	type readResult struct {
+		msg ChatMessage
+		err error
+	}
+	userMsgs := make(chan readResult, 1)
+	go func() {
+		for {
+			var msg ChatMessage
+			err := wsjson.Read(ctx, conn, &msg)
+			userMsgs <- readResult{msg, err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Get the notification queue for this instance (may be nil if no loop).
+	var notifyReady <-chan struct{}
+	if q := s.manager.InstanceNotifications(instanceID); q != nil {
+		notifyReady = q.Ready()
+	}
+
+	for {
+		select {
+		case res := <-userMsgs:
+			if res.err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				s.logger.Debug("chat connection closed", "error", res.err)
+				return
+			}
+			if err := s.handleUserMessage(ctx, conn, instanceID, res.msg, onEvent, sendDone); err != nil {
+				return
+			}
+
+		case <-notifyReady:
+			if err := s.drainNotifications(ctx, instanceID, onEvent, sendDone); err != nil {
+				return
+			}
+
+		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// handleUserMessage processes a single user message from the WebSocket.
+// Returns a non-nil error if the connection should be closed.
+func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, instanceID string, msg ChatMessage, onEvent func(ipc.ChatEvent) error, sendDone func() error) error {
+	// Handle config changes (model switch, reasoning toggle).
+	if msg.Type == "config" {
+		if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
+			s.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
+			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
+		} else {
+			s.logger.Info("config updated", "instance_id", instanceID, "model", msg.Model)
+			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
+		}
+		done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
+		return wsjson.Write(ctx, conn, done)
+	}
+
+	if msg.Type != "message" || (msg.Content == "" && len(msg.Attachments) == 0) {
+		return nil
+	}
+
+	// Intercept slash commands before processing attachments.
+	if s.cmdHandler != nil && strings.HasPrefix(msg.Content, "/") {
+		result, err := s.cmdHandler.HandleCommand(msg.Content)
+		if err == nil {
+			// Recognized command — send result directly, don't forward to agent.
+			if writeErr := wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: result}); writeErr != nil {
+				return writeErr
+			}
+			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+		}
+		// Unrecognized command — fall through to agent as normal message.
+	}
+
+	// Decode attachments into fantasy.FileParts.
+	files, attErr := processAttachments(msg.Attachments)
+	if attErr != nil {
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: attErr.Error()})
+		return nil
+	}
+
+	// Stream response — agent process owns the conversation.
+	_, streamErr := s.manager.SendMessageWithFiles(ctx, instanceID, msg.Content, files, onEvent)
+	if streamErr != nil {
+		s.logger.Warn("chat message failed", "instance_id", instanceID, "error", streamErr)
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: streamErr.Error()})
+	}
+	return sendDone()
+}
+
+// drainNotifications processes all pending notifications for an instance,
+// triggering a meta inference turn for each. Session-scoped notifications are
+// discarded if they don't match the active session. Returns a non-nil error
+// if the connection should be closed.
+func (s *Server) drainNotifications(ctx context.Context, instanceID string, onEvent func(ipc.ChatEvent) error, sendDone func() error) error {
+	q := s.manager.InstanceNotifications(instanceID)
+	if q == nil {
+		return nil
+	}
+
+	activeSession := s.manager.ActiveSessionID(instanceID)
+	// Drain takes a snapshot. Notifications pushed during a meta turn (e.g. by
+	// a tool call) are deferred to the next select cycle — intentional to
+	// prevent unbounded recursive notification processing.
+	notifications := q.Drain()
+
+	for _, n := range notifications {
+		// Discard session-scoped notifications that don't match the active session.
+		if n.SessionID != "" && n.SessionID != activeSession {
+			s.logger.Info("discarding stale notification",
+				"instance_id", instanceID,
+				"source", n.Source,
+				"notification_session", n.SessionID,
+				"active_session", activeSession,
+			)
+			continue
+		}
+
+		s.logger.Info("processing notification",
+			"instance_id", instanceID,
+			"source", n.Source,
+			"content_length", len(n.Content),
+		)
+		_, turnErr := s.manager.SendMetaMessage(ctx, instanceID, n.Content, onEvent)
+		if turnErr != nil {
+			s.logger.Warn("notification turn failed", "instance_id", instanceID, "error", turnErr)
+		}
+
+		// Always send done so the frontend exits streaming state.
+		if err := sendDone(); err != nil {
+			return err
+		}
+
+		// Terminal errors (instance stopped/gone) — stop draining.
+		if turnErr != nil && (errors.Is(turnErr, agent.ErrInstanceNotFound) ||
+			strings.Contains(turnErr.Error(), "is stopped")) {
+			return nil
+		}
+	}
+	return nil
 }
 
 // buildUsageInfo queries the platform DB for instance usage and returns it

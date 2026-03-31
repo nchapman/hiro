@@ -288,6 +288,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
+			Notifications:  inst.notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", newSessionID, "agent", cfg.Name),
 			HostManager:    m,
 			CallerMode:     inst.info.Mode,

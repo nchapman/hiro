@@ -58,6 +58,7 @@ type instance struct {
 	worker         ipc.AgentWorker
 	handle         *WorkerHandle
 	loop           *inference.Loop    // inference loop (runs in control plane)
+	notifications  *inference.NotificationQueue // instance-level; survives loop recreation
 	effectiveTools map[string]bool    // built-in tools this instance is allowed; nil = unrestricted
 	uid            uint32             // isolated UID (0 = no isolation)
 	gid            uint32             // isolated GID
