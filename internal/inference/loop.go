@@ -125,7 +125,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		lm:             cfg.LM,
 		pdb:            cfg.PDB,
 		secretNamesFn:  cfg.SecretNamesFn,
-		logger:         cfg.Logger,
+		logger:         cfg.Logger.With("component", "inference", "instance_id", cfg.InstanceID),
 	}
 
 	// Build tool set: remote proxy tools + local tools.
@@ -212,6 +212,8 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 		return nil
 	}
 
+	l.logger.Info("inference turn started", "model", agentModel, "provider", agentProvider, "history_messages", len(messages))
+
 	call := fantasy.AgentStreamCall{
 		Prompt:          prompt,
 		Files:           files,
@@ -258,8 +260,11 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	result, err := agent.Stream(ctx, call)
 	if err != nil {
+		l.logger.Error("inference turn failed", "error", err)
 		return "", fmt.Errorf("agent stream: %w", err)
 	}
+
+	l.logger.Info("inference turn completed", "steps", len(result.Steps))
 
 	// Persist results.
 	if l.mode.IsPersistent() && l.pdb != nil {

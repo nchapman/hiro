@@ -93,7 +93,7 @@ func New(root string, logger *slog.Logger, opts ...Option) (*Watcher, error) {
 	w := &Watcher{
 		root:     absRoot,
 		fsw:      fsw,
-		logger:   logger,
+		logger:   logger.With("component", "watcher"),
 		debounce: 100 * time.Millisecond,
 		subs:     make(map[uint64]subscription),
 		done:     make(chan struct{}),

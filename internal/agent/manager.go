@@ -110,7 +110,7 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 		rootDir:       rootDir,
 		opts:          opts,
 		cp:            cp,
-		logger:        logger,
+		logger:        logger.With("component", "agent"),
 		workerFactory: wf,
 		uidPool:       pool,
 		pdb:           pdb,

@@ -22,6 +22,7 @@ import (
 	"github.com/nchapman/hivebot/internal/controlplane"
 	"github.com/nchapman/hivebot/internal/platform"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hivebot/internal/platform/loghandler"
 	"github.com/nchapman/hivebot/internal/uidpool"
 	"github.com/nchapman/hivebot/internal/watcher"
 	"github.com/nchapman/hivebot/web"
@@ -47,8 +48,17 @@ func run() error {
 	// Load .env file if present (does not override existing env vars)
 	godotenv.Load()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+	// Parse log level from environment (default INFO).
+	logLevel := slog.LevelInfo
+	if lvl := os.Getenv("HIVE_LOG_LEVEL"); lvl != "" {
+		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
+			return fmt.Errorf("invalid HIVE_LOG_LEVEL %q: %w", lvl, err)
+		}
+	}
+
+	// Temporary stdout-only logger for pre-DB initialization.
+	bootLogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
 	}))
 
 	listenAddr := envOr("HIVE_ADDR", ":8080")
@@ -60,8 +70,8 @@ func run() error {
 	}
 	cpPath := filepath.Join(absRootDir, "config.yaml")
 
-	// Initialize platform directory structure and seed defaults
-	if err := platform.Init(rootDir, logger); err != nil {
+	// Initialize platform directory structure and seed defaults.
+	if err := platform.Init(rootDir, bootLogger); err != nil {
 		return fmt.Errorf("initializing platform: %w", err)
 	}
 
@@ -71,6 +81,11 @@ func run() error {
 		return fmt.Errorf("opening platform database: %w", err)
 	}
 	defer pdb.Close()
+
+	// Create the log handler that tees to stdout + SQLite, then build the logger.
+	lh := loghandler.New(pdb, os.Stdout, logLevel)
+	defer lh.Close()
+	logger := slog.New(lh)
 
 	// Load control plane config (secrets, tool policies, providers).
 	cp, err := controlplane.Load(cpPath, logger)
@@ -82,6 +97,26 @@ func run() error {
 	if cp.ClusterMode() == "worker" {
 		return runWorkerNode(absRootDir, cp, logger)
 	}
+
+	// Prune old logs periodically (every hour, 7-day retention).
+	// Only runs on leader nodes — workers don't serve the log UI.
+	pruneCtx, pruneCancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pruneCtx.Done():
+				return
+			case <-ticker.C:
+				if n, err := pdb.PruneLogs(7 * 24 * time.Hour); err != nil {
+					logger.Warn("failed to prune logs", "error", err)
+				} else if n > 0 {
+					logger.Info("pruned old logs", "count", n)
+				}
+			}
+		}
+	}()
 
 	webFS, err := web.DistFS()
 	if err != nil {
@@ -101,6 +136,7 @@ func run() error {
 
 	srv := api.NewServer(logger, webFS, cp, pdb, absRootDir)
 	srv.SetWatcher(fsWatcher)
+	srv.SetLogHandler(lh)
 
 	// Set up node identity (Ed25519 keypair + mTLS certificate).
 	identity, tlsCert, err := setupNodeIdentity(absRootDir, logger)
@@ -307,6 +343,7 @@ func run() error {
 	}()
 
 	<-ctx.Done()
+	pruneCancel()
 	logger.Info("shutting down...")
 
 	// Drain HTTP connections first so in-flight agent calls complete,

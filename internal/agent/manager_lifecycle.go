@@ -44,7 +44,12 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
-	return m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID)
+	m.logger.Info("creating instance", "instance_id", instanceID, "agent", name, "mode", mode)
+	id, err2 := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID)
+	if err2 != nil {
+		m.logger.Error("instance creation failed", "instance_id", instanceID, "agent", name, "error", err2)
+	}
+	return id, err2
 }
 
 // SpawnEphemeral starts an ephemeral instance that runs the given prompt and returns
@@ -64,6 +69,7 @@ func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentI
 
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
+	m.logger.Info("spawning ephemeral", "instance_id", instanceID, "agent", agentName)
 	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID)
 	if err != nil {
 		return "", err
@@ -108,7 +114,7 @@ func (m *Manager) StopInstance(instanceID string) (ipc.InstanceInfo, error) {
 		} else {
 			m.removeInstance(id)
 		}
-		m.logger.Info("instance stopped", "id", id)
+		m.logger.Info("instance stopped", "instance_id", id)
 	}
 
 	// Re-read info after stop (status may have changed)

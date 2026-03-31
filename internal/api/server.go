@@ -14,6 +14,7 @@ import (
 	"github.com/nchapman/hivebot/internal/agent"
 	"github.com/nchapman/hivebot/internal/controlplane"
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hivebot/internal/platform/loghandler"
 	"github.com/nchapman/hivebot/internal/watcher"
 )
 
@@ -33,6 +34,7 @@ type Server struct {
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
 	watcher      *watcher.Watcher        // filesystem watcher for HIVE_ROOT (nil = no watching)
+	logHandler   *loghandler.Handler     // log handler for real-time streaming (nil = no log SSE)
 	limiter      *loginLimiter           // login rate limiter (per-server for testability)
 	mux          *http.ServeMux
 	logger       *slog.Logger
@@ -50,7 +52,7 @@ func NewServer(logger *slog.Logger, webFS fs.FS, cp *controlplane.ControlPlane, 
 		rootDir:    rootDir,
 		limiter:    defaultLimiter,
 		mux:        http.NewServeMux(),
-		logger:     logger,
+		logger:     logger.With("component", "api"),
 	}
 	s.routes()
 	return s
@@ -101,6 +103,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/usage", s.requireAuth(s.handleTotalUsage))
 	s.mux.HandleFunc("GET /api/usage/models", s.requireAuth(s.handleUsageByModel))
 	s.mux.HandleFunc("GET /api/usage/daily", s.requireAuth(s.handleUsageByDay))
+
+	// Logs API routes (strict auth — never accessible during setup)
+	s.mux.HandleFunc("GET /api/logs", s.requireStrictAuth(s.handleQueryLogs))
+	s.mux.HandleFunc("GET /api/logs/stream", s.requireStrictAuth(s.handleLogStream))
+	s.mux.HandleFunc("GET /api/logs/sources", s.requireStrictAuth(s.handleLogSources))
 
 	// File browser (authenticated)
 	s.mux.HandleFunc("GET /api/files/tree", s.requireAuth(s.handleFilesTree))

@@ -33,7 +33,7 @@ func NewLeaderService(stream *LeaderStream, registry *NodeRegistry, logger *slog
 	svc := &LeaderService{
 		stream:     stream,
 		registry:   registry,
-		logger:     logger,
+		logger:     logger.With("component", "cluster"),
 		workers:    make(map[string]*RemoteWorker),
 		spawnChans: make(map[string]chan string),
 	}

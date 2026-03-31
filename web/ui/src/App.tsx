@@ -13,6 +13,7 @@ import SettingsPage from "@/components/Settings"
 
 const TerminalPage = lazy(() => import("@/pages/TerminalPage"))
 const FilesPage = lazy(() => import("@/pages/FilesPage"))
+const LogsPage = lazy(() => import("@/pages/LogsPage"))
 const SharedFilePage = lazy(() => import("@/pages/SharedFilePage"))
 
 export interface SessionInfo {
@@ -39,6 +40,7 @@ const suspenseFallback = (
 /** Derives the current activity from the URL pathname. */
 function activityFromPath(pathname: string): Activity {
   if (pathname.startsWith("/files")) return "files"
+  if (pathname.startsWith("/logs")) return "logs"
   if (pathname.startsWith("/settings")) return "settings"
   return "chat"
 }
@@ -269,6 +271,14 @@ export default function App() {
                         element={
                           <Suspense fallback={suspenseFallback}>
                             <FilesPage />
+                          </Suspense>
+                        }
+                      />
+                      <Route
+                        path="/logs"
+                        element={
+                          <Suspense fallback={suspenseFallback}>
+                            <LogsPage />
                           </Suspense>
                         }
                       />

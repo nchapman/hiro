@@ -6,6 +6,7 @@ import {
 import {
   MessageSquare,
   FolderOpen,
+  ScrollText,
   Settings,
   Sun,
   Moon,
@@ -16,7 +17,7 @@ import {
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 
-export type Activity = "chat" | "files" | "settings"
+export type Activity = "chat" | "files" | "logs" | "settings"
 
 interface ActivityBarProps {
   activity: Activity
@@ -35,6 +36,7 @@ const themeOrder = ["system", "light", "dark"] as const
 const activities: { id: Activity; icon: typeof MessageSquare; label: string }[] = [
   { id: "chat", icon: MessageSquare, label: "Chat" },
   { id: "files", icon: FolderOpen, label: "Files" },
+  { id: "logs", icon: ScrollText, label: "Logs" },
   { id: "settings", icon: Settings, label: "Settings" },
 ]
 

@@ -109,6 +109,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
 		s.limiter.record(ip)
+		s.logger.Warn("login failed", "reason", "invalid_password")
 		http.Error(w, "invalid password", http.StatusUnauthorized)
 		return
 	}
@@ -129,6 +130,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   86400, // 24 hours
 	})
 
+	s.logger.Info("login succeeded")
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -259,11 +261,32 @@ func clientIP(r *http.Request) string {
 }
 
 // requireAuth is middleware that enforces authentication.
+// During setup (no password set), requests are passed through unauthenticated
+// so the setup UI can function.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth if no password is set (setup not complete)
 		if s.cp == nil || s.cp.NeedsSetup() {
 			next(w, r)
+			return
+		}
+
+		if !s.isAuthenticated(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+// requireStrictAuth is middleware that enforces authentication even during setup.
+// Use this for endpoints that should never be accessible without authentication
+// (e.g., logs which may contain sensitive operational data).
+func (s *Server) requireStrictAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cp == nil || s.cp.NeedsSetup() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "setup not complete"})
 			return
 		}
 
