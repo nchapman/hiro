@@ -102,6 +102,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
+	s.logger.Info("chat connected", "instance_id", instanceID)
+
 	// Allow large messages for file attachments (default 32KB is too small).
 	conn.SetReadLimit(10 * 1024 * 1024) // 10 MB
 
@@ -121,8 +123,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		// Handle config changes (model switch, reasoning toggle).
 		if msg.Type == "config" {
 			if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
+				s.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
 				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
 			} else {
+				s.logger.Info("config updated", "instance_id", instanceID, "model", msg.Model)
 				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
 			}
 			done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
@@ -184,6 +188,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		_, streamErr := s.manager.SendMessageWithFiles(ctx, instanceID, msg.Content, files, onEvent)
 
 		if streamErr != nil {
+			s.logger.Warn("chat message failed", "instance_id", instanceID, "error", streamErr)
 			errMsg := ChatMessage{Type: "error", Content: streamErr.Error()}
 			if writeErr := wsjson.Write(ctx, conn, errMsg); writeErr != nil {
 				return

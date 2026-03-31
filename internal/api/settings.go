@@ -41,6 +41,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	s.cp.SetDefaultProvider(req.DefaultProvider)
 	s.cp.SetDefaultModel(req.DefaultModel)
+	s.logger.Info("settings updated", "default_provider", req.DefaultProvider, "default_model", req.DefaultModel)
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after settings update", "error", err)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": "saved in memory but failed to persist to disk"})
@@ -99,6 +100,7 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.logger.Info("provider configured", "provider", providerType)
 
 	// If this is the only provider, make it the default.
 	if len(s.cp.ConfiguredProviderTypes()) == 1 {
@@ -129,6 +131,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cp.DeleteProvider(providerType)
+	s.logger.Info("provider deleted", "provider", providerType)
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after provider delete", "error", err)
 	}

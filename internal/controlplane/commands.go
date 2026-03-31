@@ -43,8 +43,9 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 		return result, err
 	}
 
-	// Save to disk after any mutation so config.yaml stays in sync.
+	// Log and save to disk after any mutation so config.yaml stays in sync.
 	if mutated {
+		cp.logger.Info("config changed via command", "command", noun, "verb", verb)
 		if saveErr := cp.Save(); saveErr != nil {
 			cp.logger.Warn("failed to save config after command", "error", saveErr)
 			// Intentionally use a static message — do not include saveErr, which

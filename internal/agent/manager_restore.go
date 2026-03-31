@@ -23,12 +23,14 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		return fmt.Errorf("listing instances from db: %w", err)
 	}
 
+	var restored, cleaned int
 	for _, dbInst := range instances {
 		mode := config.AgentMode(dbInst.Mode)
 		if !mode.IsPersistent() {
 			// Clean up stale ephemeral instances from db and disk.
 			m.pdb.DeleteInstance(dbInst.ID)
 			os.RemoveAll(m.instanceDir(dbInst.ID))
+			cleaned++
 			continue
 		}
 
@@ -65,6 +67,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			m.mu.Unlock()
 			m.logger.Info("restored stopped instance",
 				"id", dbInst.ID, "name", cfg.Name)
+			restored++
 			continue
 		}
 
@@ -109,6 +112,11 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 				}
 			}
 		}
+		restored++
+	}
+
+	if restored > 0 || cleaned > 0 {
+		m.logger.Info("instance restore complete", "restored", restored, "ephemeral_cleaned", cleaned)
 	}
 	return nil
 }

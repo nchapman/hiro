@@ -88,7 +88,7 @@ type ControlPlane struct {
 func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 	cp := &ControlPlane{
 		path:   path,
-		logger: logger,
+		logger: logger.With("component", "controlplane"),
 		config: Config{
 			Providers: make(map[string]ProviderConfig),
 			Secrets:   make(map[string]string),
