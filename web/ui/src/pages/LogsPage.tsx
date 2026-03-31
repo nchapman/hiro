@@ -198,7 +198,7 @@ export default function LogsPage() {
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b px-4 py-2">
-        <Select value={level} onValueChange={setLevel}>
+        <Select value={level} onValueChange={(v) => v && setLevel(v)}>
           <SelectTrigger size="sm">
             <SelectValue placeholder="Level" />
           </SelectTrigger>
@@ -211,7 +211,7 @@ export default function LogsPage() {
           </SelectContent>
         </Select>
 
-        <Select value={component} onValueChange={setComponent}>
+        <Select value={component} onValueChange={(v) => v && setComponent(v)}>
           <SelectTrigger size="sm">
             <SelectValue placeholder="Component" />
           </SelectTrigger>
