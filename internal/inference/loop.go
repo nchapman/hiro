@@ -63,6 +63,7 @@ type Loop struct {
 	instanceID     string
 	sessionID      string // immutable after construction; safe to read without lock
 	mode           config.AgentMode
+	workingDir     string // platform root (e.g. /hive)
 	instanceDir    string // instance-level state: persona.md, memory.md
 	sessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	agentDefDir    string
@@ -129,6 +130,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		instanceID:     cfg.InstanceID,
 		sessionID:      cfg.SessionID,
 		mode:           cfg.Mode,
+		workingDir:     cfg.WorkingDir,
 		instanceDir:    cfg.InstanceDir,
 		sessionDir:     cfg.SessionDir,
 		agentDefDir:    cfg.AgentDefDir,
@@ -584,7 +586,13 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		secretNames = l.secretNamesFn()
 	}
 
-	return buildSystemPrompt(cfg, persona, memory, todos, secretNames)
+	env := EnvInfo{
+		WorkingDir:  l.workingDir,
+		InstanceDir: l.instanceDir,
+		SessionDir:  l.sessionDir,
+		Mode:        l.mode,
+	}
+	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames)
 }
 
 // buildLocalTools creates tools that run in the control plane process.

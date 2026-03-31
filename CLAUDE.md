@@ -144,12 +144,13 @@ Validation: name must match `^[a-z0-9]+(-[a-z0-9]+)*$`. For directory skills, na
 
 Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
 
-1. `## Memories` + `memory.md` from instance dir (persistent agents only)
-2. `## Current Tasks` + formatted todos (persistent agents only)
-3. `## Secrets` + secret names (if any)
-4. `agent.md` body (main instructions)
-5. `## Persona` + `persona.md` from instance dir (refines instructions above)
-6. `## Skills` + skill name/description listing (if present)
+1. `## Environment` + directory tree with instance/session paths (always present)
+2. `## Memories` + `memory.md` from instance dir (persistent agents only)
+3. `## Current Tasks` + formatted todos (persistent agents only)
+4. `## Secrets` + secret names (if any)
+5. `agent.md` body (main instructions)
+6. `## Persona` + `persona.md` from instance dir (refines instructions above)
+7. `## Skills` + skill name/description listing (if present)
 
 Skills are re-scanned from disk each turn (like persona and memory), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `Skill`.
 
