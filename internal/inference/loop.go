@@ -130,7 +130,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	// Build tool set: remote proxy tools + local tools.
 	redactor := NewRedactor(cfg.SecretEnvFn)
-	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, redactor)
+	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, redactor, l.logger)
 
 	// Local tools: memory, todos, history, spawn, coordinator, use_skill.
 	localTools := l.buildLocalTools(cfg)
@@ -546,9 +546,9 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	}
 
 	if cfg.HostManager != nil {
-		localTools = append(localTools, buildSpawnTool(cfg.HostManager, cfg.CallerMode))
+		localTools = append(localTools, buildSpawnTool(cfg.HostManager, cfg.CallerMode, l.logger))
 		if cfg.CallerMode == config.ModeCoordinator {
-			localTools = append(localTools, buildCoordinatorTools(cfg.HostManager)...)
+			localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 		}
 	}
 
@@ -562,7 +562,7 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 		if cfg.SharedSkillDir != "" {
 			allowedDirs = append(allowedDirs, cfg.SharedSkillDir)
 		}
-		localTools = append(localTools, buildSkillTool(&cfg.AgentConfig, allowedDirs))
+		localTools = append(localTools, buildSkillTool(&cfg.AgentConfig, allowedDirs, l.logger))
 	}
 
 	// Filter by allowed set.

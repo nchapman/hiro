@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
@@ -39,7 +40,7 @@ type spawnInstanceInput struct {
 	Node   string `json:"node"   description:"Target node to run on. Omit or use 'home' for the local machine. Use list_nodes to see available nodes."`
 }
 
-func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.AgentTool {
+func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("spawn_instance",
 		"Spawn a new instance from an agent definition. In ephemeral mode (default), runs a prompt and returns the result. In persistent or coordinator mode, creates a long-lived instance and returns its ID.",
 		func(ctx context.Context, input spawnInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -62,8 +63,10 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.Ag
 				if input.Prompt == "" {
 					return fantasy.NewTextErrorResponse("prompt is required for ephemeral mode"), nil
 				}
+				logger.Info("tool call", "tool", "spawn_instance", "agent", input.Agent, "mode", mode)
 				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
 				if err != nil {
+					logger.Warn("spawn_instance failed", "agent", input.Agent, "error", err)
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
 				}
 				return fantasy.NewTextResponse(truncateResult(result)), nil
@@ -73,8 +76,10 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.Ag
 					return fantasy.NewTextErrorResponse(
 						fmt.Sprintf("only coordinator agents can spawn %s instances", mode)), nil
 				}
+				logger.Info("tool call", "tool", "spawn_instance", "agent", input.Agent, "mode", mode)
 				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID)
 				if err != nil {
+					logger.Warn("spawn_instance failed", "agent", input.Agent, "mode", mode, "error", err)
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create instance: %v", err)), nil
 				}
 				return fantasy.NewTextResponse(
@@ -90,14 +95,14 @@ func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode) fantasy.Ag
 
 // --- Coordinator tools ---
 
-func buildCoordinatorTools(mgr ipc.HostManager) []fantasy.AgentTool {
+func buildCoordinatorTools(mgr ipc.HostManager, logger *slog.Logger) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		buildResumeInstance(mgr),
+		buildResumeInstance(mgr, logger),
 		buildListInstances(mgr),
 		buildListNodes(mgr),
-		buildSendMessage(mgr),
-		buildStopInstance(mgr),
-		buildDeleteInstance(mgr),
+		buildSendMessage(mgr, logger),
+		buildStopInstance(mgr, logger),
+		buildDeleteInstance(mgr, logger),
 	}
 }
 
@@ -130,7 +135,7 @@ type resumeInstanceInput struct {
 	InstanceID string `json:"instance_id" description:"The ID of a stopped instance to resume."`
 }
 
-func buildResumeInstance(mgr ipc.HostManager) fantasy.AgentTool {
+func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("resume_instance",
 		"Resume a stopped instance. Creates a new session within it. Picks up where it left off with its memory and identity.",
 		func(ctx context.Context, input resumeInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -142,7 +147,9 @@ func buildResumeInstance(mgr ipc.HostManager) fantasy.AgentTool {
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			logger.Info("tool call", "tool", "resume_instance", "target_instance", input.InstanceID)
 			if err := mgr.StartInstance(ctx, input.InstanceID); err != nil {
+				logger.Warn("resume_instance failed", "target_instance", input.InstanceID, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to resume instance: %v", err)), nil
 			}
 			return fantasy.NewTextResponse(fmt.Sprintf("Instance %s resumed.", input.InstanceID)), nil
@@ -177,7 +184,7 @@ type sendMessageInput struct {
 	Message    string `json:"message"     description:"The message to send to the instance."`
 }
 
-func buildSendMessage(mgr ipc.HostManager) fantasy.AgentTool {
+func buildSendMessage(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("send_message",
 		"Send a message to a running child instance and get its response. Blocks until the instance replies.",
 		func(ctx context.Context, input sendMessageInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -192,8 +199,10 @@ func buildSendMessage(mgr ipc.HostManager) fantasy.AgentTool {
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			logger.Info("tool call", "tool", "send_message", "target_instance", input.InstanceID)
 			result, err := mgr.SendMessage(ctx, input.InstanceID, input.Message, nil)
 			if err != nil {
+				logger.Warn("send_message failed", "target_instance", input.InstanceID, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("send_message failed: %v", err)), nil
 			}
 			return fantasy.NewTextResponse(truncateResult(result)), nil
@@ -205,7 +214,7 @@ type stopInstanceInput struct {
 	InstanceID string `json:"instance_id" description:"The ID of the instance to stop. Must be one of your child instances."`
 }
 
-func buildStopInstance(mgr ipc.HostManager) fantasy.AgentTool {
+func buildStopInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("stop_instance",
 		"Stop an instance and its descendants. Data is preserved — use resume_instance to restart, or delete_instance to remove permanently.",
 		func(ctx context.Context, input stopInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -217,7 +226,9 @@ func buildStopInstance(mgr ipc.HostManager) fantasy.AgentTool {
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			logger.Info("tool call", "tool", "stop_instance", "target_instance", input.InstanceID)
 			if _, err := mgr.StopInstance(input.InstanceID); err != nil {
+				logger.Warn("stop_instance failed", "target_instance", input.InstanceID, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to stop instance: %v", err)), nil
 			}
 			return fantasy.NewTextResponse(fmt.Sprintf("Instance %s stopped.", input.InstanceID)), nil
@@ -229,7 +240,7 @@ type deleteInstanceInput struct {
 	InstanceID string `json:"instance_id" description:"The ID of the instance to delete. Must be one of your child instances."`
 }
 
-func buildDeleteInstance(mgr ipc.HostManager) fantasy.AgentTool {
+func buildDeleteInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("delete_instance",
 		"Permanently delete an instance and its descendants, removing all data. Stops it first if running. Cannot be undone.",
 		func(ctx context.Context, input deleteInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -241,7 +252,9 @@ func buildDeleteInstance(mgr ipc.HostManager) fantasy.AgentTool {
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			logger.Info("tool call", "tool", "delete_instance", "target_instance", input.InstanceID)
 			if err := mgr.DeleteInstance(input.InstanceID); err != nil {
+				logger.Warn("delete_instance failed", "target_instance", input.InstanceID, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to delete instance: %v", err)), nil
 			}
 			return fantasy.NewTextResponse(fmt.Sprintf("Instance %s deleted.", input.InstanceID)), nil

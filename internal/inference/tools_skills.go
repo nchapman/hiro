@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 )
 
-func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string) fantasy.AgentTool {
+func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("use_skill",
 		"Activate a skill to get its full instructions and required formats. You MUST call this before performing any task that matches a skill.",
 		func(ctx context.Context, input struct {
@@ -21,6 +22,8 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string) fantasy.Agent
 			if input.Name == "" {
 				return fantasy.NewTextErrorResponse("skill name is required"), nil
 			}
+
+			logger.Info("tool call", "tool", "use_skill", "skill", input.Name)
 
 			var skill *config.SkillConfig
 			for i := range cfg.Skills {

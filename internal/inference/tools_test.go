@@ -2,12 +2,16 @@ package inference
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/nchapman/hivebot/internal/ipc"
 
 	"charm.land/fantasy"
 )
+
+var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // fakeExecutor records tool calls and returns a fixed result.
 type fakeExecutor struct {
@@ -30,6 +34,7 @@ func TestProxyTool_ForwardsToExecutor(t *testing.T) {
 	pt := &proxyTool{
 		info:     fantasy.ToolInfo{Name: "read_file"},
 		executor: exec,
+		logger:   testLogger,
 	}
 
 	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
@@ -63,6 +68,7 @@ func TestProxyTool_ErrorResult(t *testing.T) {
 	pt := &proxyTool{
 		info:     fantasy.ToolInfo{Name: "read_file"},
 		executor: exec,
+		logger:   testLogger,
 	}
 
 	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
@@ -89,6 +95,7 @@ func TestProxyTool_RedactsSecrets(t *testing.T) {
 		info:     fantasy.ToolInfo{Name: "bash"},
 		executor: exec,
 		redactor: redactor,
+		logger:   testLogger,
 	}
 
 	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
@@ -106,7 +113,7 @@ func TestProxyTool_RedactsSecrets(t *testing.T) {
 func TestBuildProxyTools_RespectsAllowlist(t *testing.T) {
 	exec := &fakeExecutor{}
 	allowed := map[string]bool{"bash": true, "read_file": true}
-	proxies := buildProxyTools("/tmp", exec, allowed, nil)
+	proxies := buildProxyTools("/tmp", exec, allowed, nil, testLogger)
 
 	names := make(map[string]bool)
 	for _, p := range proxies {
@@ -125,7 +132,7 @@ func TestBuildProxyTools_RespectsAllowlist(t *testing.T) {
 
 func TestBuildProxyTools_NilAllowlist(t *testing.T) {
 	exec := &fakeExecutor{}
-	proxies := buildProxyTools("/tmp", exec, nil, nil)
+	proxies := buildProxyTools("/tmp", exec, nil, nil, testLogger)
 
 	if len(proxies) != len(RemoteTools) {
 		t.Errorf("nil allowlist should include all %d remote tools, got %d", len(RemoteTools), len(proxies))
