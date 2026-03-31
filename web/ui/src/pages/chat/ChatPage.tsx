@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useWebSocket } from "@/hooks/use-websocket"
 import type { ChatWireMessage, ChatAttachment, UsageInfo } from "@/hooks/use-websocket"
 import type { SessionInfo } from "@/App"
@@ -39,8 +40,8 @@ import {
 import type { ModelInfo, ToolCall, Message, MessageAttachment, PendingAttachment, HistoryMessage } from "@/lib/chat-types"
 import { mergeHistoryMessages } from "@/lib/chat-parser"
 import { statusDotColor } from "@/lib/session-utils"
-import ModelSelector from "@/components/ModelSelector"
-import TokenCounter from "@/components/TokenCounter"
+import ModelSelector from "@/pages/chat/ModelSelector"
+import TokenCounter from "@/pages/chat/TokenCounter"
 
 const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
 const MAX_ATTACHMENTS = 10
@@ -320,6 +321,8 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   // Load message history when agent changes
   useEffect(() => {
     const gen = ++sessionGeneration.current
+
+    setOnMessage(() => {}) // clear stale handler immediately
 
     if (!session) {
       setMessages([])
@@ -669,8 +672,24 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
       {/* Messages */}
       {loadingHistory ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Loading history...
+        <div className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-4">
+          {/* User message skeleton */}
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-48 rounded-2xl" />
+          </div>
+          {/* Assistant message skeletons */}
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-full rounded" />
+            <Skeleton className="h-4 w-4/5 rounded" />
+            <Skeleton className="h-4 w-3/5 rounded" />
+          </div>
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-36 rounded-2xl" />
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-full rounded" />
+            <Skeleton className="h-4 w-2/3 rounded" />
+          </div>
         </div>
       ) : messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2">

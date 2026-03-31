@@ -8,6 +8,7 @@ import {
   IconChevronRight,
   IconChevronDown,
 } from "@tabler/icons-react"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -78,6 +79,7 @@ export default function LogsPage() {
   const [paused, setPaused] = useState(false)
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
   const [autoScroll, setAutoScroll] = useState(true)
+  const [initialLoad, setInitialLoad] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -115,6 +117,7 @@ export default function LogsPage() {
           reversed.length > 0 ? reversed[0].id : null
       })
       .catch(() => {})
+      .finally(() => setInitialLoad(false))
   }, [level, component, debouncedSearch])
 
   // Real-time log stream — client-side filtering for SSE entries.
@@ -282,7 +285,18 @@ export default function LogsPage() {
           </button>
         )}
 
-        {filtered.length === 0 ? (
+        {initialLoad ? (
+          <div className="flex flex-col">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2 border-b border-border/40 px-4 py-1.5">
+                <Skeleton className="h-3.5 w-20 rounded" />
+                <Skeleton className="h-3.5 w-10 rounded" />
+                <Skeleton className="h-3.5 w-16 rounded" />
+                <Skeleton className="h-3.5 rounded" style={{ width: `${120 + ((i * 47) % 200)}px` }} />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
             {logs.length === 0 ? "No logs yet" : "No matching logs"}
           </div>

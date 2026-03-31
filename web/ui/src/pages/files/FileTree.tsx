@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from "react"
 import { IconFolder, IconFolderOpen, IconFile, IconChevronRight, IconChevronDown, IconFilePlus, IconFolderPlus, IconPencil, IconTrash, IconTerminal2, IconUpload } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { listDir, writeFile, mkdir, deleteEntry, renameEntry, uploadFile } from "@/hooks/use-files"
 import type { FileEntry } from "@/hooks/use-files"
 
@@ -632,7 +633,14 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
   const rootEntries = children[""]
   if (!rootEntries) {
     return (
-      <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+      <div className="flex flex-col gap-1 py-2 px-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-2 px-2 py-1">
+            <Skeleton className="h-3.5 w-3.5 shrink-0 rounded" />
+            <Skeleton className="h-3.5 shrink-0 rounded" style={{ width: `${50 + ((i * 37) % 60)}px` }} />
+          </div>
+        ))}
+      </div>
     )
   }
 
