@@ -15,10 +15,10 @@ service AgentWorker {
 }
 
 message ExecuteToolRequest {
-  string name = 1;              // tool name (bash, read_file, etc.)
+  string name = 1;              // tool name (Bash, Read, etc.)
   string input = 2;             // JSON-encoded tool arguments
   string call_id = 3;           // tool call ID from the LLM
-  repeated string secret_env = 4; // secret env vars for bash (KEY=VALUE pairs)
+  repeated string secret_env = 4; // secret env vars for Bash (KEY=VALUE pairs)
 }
 
 message ExecuteToolResponse {

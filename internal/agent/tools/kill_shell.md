@@ -1,0 +1,1 @@
+Terminates a running background job and all its child processes.

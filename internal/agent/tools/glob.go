@@ -27,7 +27,7 @@ type GlobParams struct {
 // NewGlobTool creates a tool that finds files matching a glob pattern.
 func NewGlobTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"glob",
+		"Glob",
 		globDescription,
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {

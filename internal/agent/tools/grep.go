@@ -23,7 +23,7 @@ var grepDescription string
 type GrepParams struct {
 	Pattern     string `json:"pattern"              description:"The regex pattern to search for in file contents."`
 	Path        string `json:"path,omitempty"        description:"The directory to search in. Defaults to the working directory."`
-	Include     string `json:"include,omitempty"     description:"File glob pattern to filter by (e.g. '*.go', '*.{ts,tsx}')."`
+	Glob        string `json:"glob,omitempty"        description:"Glob pattern to filter files (e.g. '*.go', '*.{ts,tsx}')."`
 	LiteralText bool   `json:"literal_text,omitempty" description:"If true, escape special regex characters to search for exact text. Default false."`
 }
 
@@ -38,7 +38,7 @@ type grepMatch struct {
 // NewGrepTool creates a tool that searches file contents with regex.
 func NewGrepTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"grep",
+		"Grep",
 		grepDescription,
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
@@ -58,7 +58,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 			searchCtx, cancel := context.WithTimeout(ctx, grepTimeout)
 			defer cancel()
 
-			matches, truncated, err := grepSearch(searchCtx, searchPattern, searchPath, params.Include)
+			matches, truncated, err := grepSearch(searchCtx, searchPattern, searchPath, params.Glob)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error searching files: %v", err)), nil

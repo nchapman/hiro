@@ -12,7 +12,7 @@ func TestJobOutput_CompletedJob(t *testing.T) {
 	job, _ := mgr.Start(t.TempDir(), "echo hello")
 	job.Wait(context.Background())
 
-	tool := NewJobOutputTool(mgr)
+	tool := NewBashOutputTool(mgr)
 	content, isErr := runTool(t, tool, fmt.Sprintf(`{"job_id": "%s"}`, job.ID))
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -30,7 +30,7 @@ func TestJobOutput_RunningJob(t *testing.T) {
 	job, _ := mgr.Start(t.TempDir(), "sleep 60")
 	defer mgr.Kill(job.ID)
 
-	tool := NewJobOutputTool(mgr)
+	tool := NewBashOutputTool(mgr)
 	content, isErr := runTool(t, tool, fmt.Sprintf(`{"job_id": "%s"}`, job.ID))
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -42,7 +42,7 @@ func TestJobOutput_RunningJob(t *testing.T) {
 
 func TestJobOutput_NotFound(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
-	tool := NewJobOutputTool(mgr)
+	tool := NewBashOutputTool(mgr)
 	content, isErr := runTool(t, tool, `{"job_id": "NOPE"}`)
 	if !isErr {
 		t.Fatal("expected error for nonexistent job")
@@ -54,7 +54,7 @@ func TestJobOutput_NotFound(t *testing.T) {
 
 func TestJobOutput_MissingID(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
-	tool := NewJobOutputTool(mgr)
+	tool := NewBashOutputTool(mgr)
 	_, isErr := runTool(t, tool, `{"job_id": ""}`)
 	if !isErr {
 		t.Fatal("expected error for empty job_id")
@@ -66,7 +66,7 @@ func TestJobOutput_FailedCommand(t *testing.T) {
 	job, _ := mgr.Start(t.TempDir(), "echo oops >&2; exit 7")
 	job.Wait(context.Background())
 
-	tool := NewJobOutputTool(mgr)
+	tool := NewBashOutputTool(mgr)
 	content, isErr := runTool(t, tool, fmt.Sprintf(`{"job_id": "%s"}`, job.ID))
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)

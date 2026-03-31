@@ -9,20 +9,20 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed job_output.md
-var jobOutputDescription string
+//go:embed bash_output.md
+var bashOutputDescription string
 
-type JobOutputParams struct {
+type BashOutputParams struct {
 	JobID string `json:"job_id" description:"The ID of the background job to retrieve output from."`
 	Wait  bool   `json:"wait,omitempty" description:"If true, block until the job completes before returning output."`
 }
 
-// NewJobOutputTool creates a tool that retrieves output from background jobs.
-func NewJobOutputTool(bgMgr *BackgroundJobManager) fantasy.AgentTool {
+// NewBashOutputTool creates a tool that retrieves output from background jobs.
+func NewBashOutputTool(bgMgr *BackgroundJobManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"job_output",
-		jobOutputDescription,
-		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		"BashOutput",
+		bashOutputDescription,
+		func(ctx context.Context, params BashOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.JobID == "" {
 				return fantasy.NewTextErrorResponse("job_id is required"), nil
 			}

@@ -10,13 +10,13 @@ description: Delegate work to instances. Use when a task should be handled by a 
 - It would take longer to explain to an instance than to do it
 - The work requires iterating on a conversation with the user
 
-**Use `spawn_instance`** when:
+**Use `SpawnInstance`** when:
 - The task is self-contained with a clear deliverable
 - The work benefits from a clean, focused context (no history baggage)
 - You don't need the agent to persist after the task
 - You want to break large work into independent chunks, each with a focused scope
 
-**Use `spawn_instance` (persistent) + `send_message`** when:
+**Use `SpawnInstance` (persistent) + `SendMessage`** when:
 - You need to send multiple messages to the same agent over time
 - You want a long-running collaborator (e.g., a monitor, a researcher)
 - The agent benefits from building up its own context across interactions
@@ -35,7 +35,7 @@ Good: "Review the changes in `internal/api/server.go` for security issues. Focus
 
 ## Batching independent work
 
-Each `spawn_instance` call blocks until the instance finishes. For large tasks, break the work into independent chunks and spawn one agent per chunk:
+Each `SpawnInstance` call blocks until the instance finishes. For large tasks, break the work into independent chunks and spawn one agent per chunk:
 
 - Each chunk should be self-contained with its own clear scope
 - Spawn sequentially, then synthesize all results at the end
@@ -59,6 +59,6 @@ When you get results back from instances:
 
 ## Managing running instances
 
-- Use `list_instances` to see your direct child agents before starting duplicates. (It doesn't show grandchildren — instances started by your children.)
+- Use `ListInstances` to see your direct child agents before starting duplicates. (It doesn't show grandchildren — instances started by your children.)
 - Stop instances you no longer need — they consume resources.
 - Persistent instances survive restarts. Check for restored instances before creating new ones.

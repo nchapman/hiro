@@ -12,7 +12,7 @@ import (
 
 func buildTodoTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		fantasy.NewAgentTool("todos",
+		fantasy.NewAgentTool("TodoWrite",
 			"Replace your task list. Send the complete list each time — omitted items are removed.",
 			func(ctx context.Context, input struct {
 				Todos []struct {

@@ -14,7 +14,7 @@ import (
 )
 
 func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.Logger) fantasy.AgentTool {
-	return fantasy.NewAgentTool("use_skill",
+	return fantasy.NewAgentTool("Skill",
 		"Load a skill's full instructions. Call before performing a skill-matched task.",
 		func(ctx context.Context, input struct {
 			Name string `json:"name" description:"The name of the skill to activate."`
@@ -48,11 +48,11 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.
 					fmt.Sprintf("skill %q path is outside allowed directories", input.Name)), nil
 			}
 
-			logger.Info("tool call", "tool", "use_skill", "skill", input.Name)
+			logger.Info("tool call", "tool", "Skill", "skill", input.Name)
 
 			parsed, err := config.ParseMarkdownFile(realPath)
 			if err != nil {
-				logger.Warn("use_skill read failed", "skill", input.Name, "error", err)
+				logger.Warn("Skill read failed", "skill", input.Name, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading skill file: %v", err)), nil
 			}
 

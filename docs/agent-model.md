@@ -80,7 +80,7 @@ A new session is created when:
 - An instance starts for the first time
 - A client connects to an instance (web UI, Telegram, API)
 - A user explicitly clears the current session ("/clear")
-- A parent agent spawns a task via `send_message`
+- A parent agent spawns a task via `SendMessage`
 
 An instance can have **multiple concurrent sessions**. Each client connection gets its own session. This prevents cross-channel interference — clearing a web session does not affect a Telegram session on the same instance.
 
@@ -141,7 +141,7 @@ For ephemeral agents, the instance and session are the same thing. There is no d
 
 ## Parent-Child Relationships
 
-Instances form a tree. The coordinator is the root. When a coordinator spawns a child, the parent-child relationship is tracked at the **instance level**. Coordinator tools (send_message, stop_instance, etc.) are scoped to descendants — an instance cannot manage siblings or ancestors.
+Instances form a tree. The coordinator is the root. When a coordinator spawns a child, the parent-child relationship is tracked at the **instance level**. Coordinator tools (SendMessage, StopInstance, etc.) are scoped to descendants — an instance cannot manage siblings or ancestors.
 
 ```
 coordinator (coordinator mode)

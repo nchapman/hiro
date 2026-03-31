@@ -125,12 +125,12 @@ func TestResolveStatusMessage(t *testing.T) {
 	}{
 		{
 			name: "simple template",
-			tool: "read_file", input: `{"path":"main.go"}`,
+			tool: "Read", input: `{"file_path":"main.go"}`,
 			want: "Reading main.go",
 		},
 		{
 			name: "no template params",
-			tool: "bash", input: `{"command":"ls"}`,
+			tool: "Bash", input: `{"command":"ls"}`,
 			want: "Running command",
 		},
 		{
@@ -140,22 +140,22 @@ func TestResolveStatusMessage(t *testing.T) {
 		},
 		{
 			name: "missing required param",
-			tool: "read_file", input: `{}`,
+			tool: "Read", input: `{}`,
 			want: "", // unresolved placeholder → empty
 		},
 		{
 			name: "empty input JSON",
-			tool: "read_file", input: "",
+			tool: "Read", input: "",
 			want: "",
 		},
 		{
 			name: "glob with pattern",
-			tool: "glob", input: `{"pattern":"**/*.go"}`,
+			tool: "Glob", input: `{"pattern":"**/*.go"}`,
 			want: "Searching for **/*.go",
 		},
 		{
 			name: "non-string param value",
-			tool: "read_file", input: `{"path": 42}`,
+			tool: "Read", input: `{"file_path": 42}`,
 			want: "", // placeholder not substituted → empty
 		},
 	}

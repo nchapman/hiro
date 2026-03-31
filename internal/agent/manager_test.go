@@ -1109,76 +1109,76 @@ func TestManager_EffectiveTools(t *testing.T) {
 name: tooled
 model: fake-model
 tools:
-  - bash
-  - read_file
-  - write_file
+  - Bash
+  - Read
+  - Write
 ---
 Agent with tools.`)
 
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("tooled"))
 	effective := mgr.computeEffectiveTools(cfg, "")
 
-	if !effective["bash"] || !effective["read_file"] || !effective["write_file"] {
+	if !effective["Bash"] || !effective["Read"] || !effective["Write"] {
 		t.Errorf("effective tools should include all declared tools, got %v", effective)
 	}
-	if effective["glob"] {
-		t.Error("glob should not be in effective tools (not declared)")
+	if effective["Glob"] {
+		t.Error("Glob should not be in effective tools (not declared)")
 	}
 }
 
 func TestBuildAllowedToolsMap_EphemeralMode(t *testing.T) {
-	effective := map[string]bool{"bash": true, "read_file": true}
+	effective := map[string]bool{"Bash": true, "Read": true}
 	allowed := buildAllowedToolsMap(effective, config.ModeEphemeral, false)
 
-	// Ephemeral agents get spawn_agent but NOT coordinator or persistent tools.
-	if !allowed["spawn_instance"] {
-		t.Error("ephemeral agents should get spawn_instance")
+	// Ephemeral agents get SpawnInstance but NOT coordinator or persistent tools.
+	if !allowed["SpawnInstance"] {
+		t.Error("ephemeral agents should get SpawnInstance")
 	}
-	if allowed["create_instance"] || allowed["resume_instance"] || allowed["stop_instance"] || allowed["delete_instance"] || allowed["send_message"] || allowed["list_instances"] {
+	if allowed["ResumeInstance"] || allowed["StopInstance"] || allowed["DeleteInstance"] || allowed["SendMessage"] || allowed["ListInstances"] {
 		t.Error("ephemeral agents should not get coordinator tools")
 	}
-	if allowed["memory_read"] || allowed["memory_write"] || allowed["todos"] {
+	if allowed["TodoWrite"] {
 		t.Error("ephemeral agents should not get persistent tools")
 	}
 }
 
 func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
-	effective := map[string]bool{"bash": true}
+	effective := map[string]bool{"Bash": true}
 	allowed := buildAllowedToolsMap(effective, config.ModePersistent, false)
 
-	// Persistent agents get spawn_agent + persistent tools, but NOT coordinator tools.
-	if !allowed["spawn_instance"] {
-		t.Error("persistent agents should get spawn_instance")
+	// Persistent agents get SpawnInstance + persistent tools, but NOT coordinator tools.
+	if !allowed["SpawnInstance"] {
+		t.Error("persistent agents should get SpawnInstance")
 	}
-	if !allowed["todos"] || !allowed["history_search"] || !allowed["history_recall"] {
+	if !allowed["TodoWrite"] || !allowed["HistorySearch"] || !allowed["HistoryRecall"] {
 		t.Error("persistent agents should get persistent tools")
 	}
-	if allowed["resume_instance"] || allowed["stop_instance"] || allowed["send_message"] || allowed["list_instances"] {
+	if allowed["ResumeInstance"] || allowed["StopInstance"] || allowed["SendMessage"] || allowed["ListInstances"] {
 		t.Error("persistent agents should not get coordinator tools")
 	}
 }
 
 func TestBuildAllowedToolsMap_CoordinatorMode(t *testing.T) {
-	effective := map[string]bool{"bash": true}
+	effective := map[string]bool{"Bash": true}
 	allowed := buildAllowedToolsMap(effective, config.ModeCoordinator, false)
 
 	// Coordinator agents get everything: spawn + coordinator + persistent tools.
-	if !allowed["spawn_instance"] {
-		t.Error("coordinators should get spawn_instance")
+	if !allowed["SpawnInstance"] {
+		t.Error("coordinators should get SpawnInstance")
 	}
-	if !allowed["resume_instance"] || !allowed["stop_instance"] || !allowed["delete_instance"] || !allowed["send_message"] || !allowed["list_instances"] {
+	if !allowed["ResumeInstance"] || !allowed["StopInstance"] || !allowed["DeleteInstance"] || !allowed["SendMessage"] || !allowed["ListInstances"] {
 		t.Error("coordinators should get coordinator tools")
 	}
-	if !allowed["todos"] || !allowed["history_search"] || !allowed["history_recall"] {
+	if !allowed["TodoWrite"] || !allowed["HistorySearch"] || !allowed["HistoryRecall"] {
 		t.Error("coordinators should get persistent tools")
 	}
 }
 
 func TestBuildAllowedToolsMap_WithSkills(t *testing.T) {
-	effective := map[string]bool{"bash": true}
+	effective := map[string]bool{"Bash": true}
 	allowed := buildAllowedToolsMap(effective, config.ModeEphemeral, true)
-	if !allowed["use_skill"] {
-		t.Error("use_skill should be included when hasSkills is true")
+	if !allowed["Skill"] {
+		t.Error("Skill should be included when hasSkills is true")
 	}
 }
 
@@ -1239,7 +1239,7 @@ func TestManager_CoordinatorTools_InSpawnConfig(t *testing.T) {
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
-tools: [bash]
+tools: [Bash]
 ---
 Coordinator.`)
 
@@ -1250,14 +1250,14 @@ Coordinator.`)
 
 	cfg := (*configs)[0]
 	// Coordinator should have coordinator tools in effective tools
-	if !cfg.EffectiveTools["delete_instance"] {
-		t.Error("coordinator should have delete_instance in effective tools")
+	if !cfg.EffectiveTools["DeleteInstance"] {
+		t.Error("coordinator should have DeleteInstance in effective tools")
 	}
-	if !cfg.EffectiveTools["spawn_instance"] {
-		t.Error("coordinator should have spawn_instance in effective tools")
+	if !cfg.EffectiveTools["SpawnInstance"] {
+		t.Error("coordinator should have SpawnInstance in effective tools")
 	}
-	if !cfg.EffectiveTools["todos"] {
-		t.Error("coordinator should have todos in effective tools")
+	if !cfg.EffectiveTools["TodoWrite"] {
+		t.Error("coordinator should have TodoWrite in effective tools")
 	}
 }
 
@@ -1268,7 +1268,7 @@ func TestManager_CoordinatorGroups_InSpawnConfig(t *testing.T) {
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
-tools: [bash]
+tools: [Bash]
 ---
 Coordinator.`)
 
@@ -1301,7 +1301,7 @@ func TestManager_CoordinatorMode_NoGroupConfigured(t *testing.T) {
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
-tools: [bash]
+tools: [Bash]
 ---
 Coordinator.`)
 
@@ -1327,7 +1327,7 @@ func TestManager_NonCoordinator_NoCoordinatorGroup(t *testing.T) {
 	writeAgentMD(t, dir, "worker", `---
 name: worker
 model: fake-model
-tools: [bash]
+tools: [Bash]
 ---
 Worker.`)
 
@@ -1352,7 +1352,7 @@ func TestManager_EphemeralAgent_NoCoordinatorTools(t *testing.T) {
 	writeAgentMD(t, dir, "worker", `---
 name: worker
 model: fake-model
-tools: [bash]
+tools: [Bash]
 ---
 Worker.`)
 
@@ -1361,11 +1361,11 @@ Worker.`)
 	mgr.startInstance(t.Context(), "test-eph-id", "test-eph-sess-id", cfg, "", config.ModeEphemeral, "")
 
 	spawnCfg := (*configs)[0]
-	if !spawnCfg.EffectiveTools["spawn_instance"] {
-		t.Error("ephemeral agent should have spawn_instance")
+	if !spawnCfg.EffectiveTools["SpawnInstance"] {
+		t.Error("ephemeral agent should have SpawnInstance")
 	}
-	if spawnCfg.EffectiveTools["memory_read"] {
-		t.Error("ephemeral should NOT have memory_read")
+	if spawnCfg.EffectiveTools["TodoWrite"] {
+		t.Error("ephemeral should NOT have TodoWrite")
 	}
 }
 
@@ -1395,7 +1395,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 
 	agentDir := filepath.Join(dir, "agents", "worker")
 	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\ntools: [bash, read_file]\n---\nWork."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\ntools: [Bash, Read]\n---\nWork."), 0644)
 
 	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "")
 	if err != nil {
@@ -1403,7 +1403,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	}
 
 	// Update agent.md
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\ntools: [bash, read_file, grep]\n---\nUpdated work."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\ntools: [Bash, Read, Grep]\n---\nUpdated work."), 0644)
 	mgr.pushConfigUpdate("worker")
 
 	// Verify the description was updated in-memory.
@@ -1476,7 +1476,7 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 		agentDir := filepath.Join(dir, "agents", name)
 		os.MkdirAll(agentDir, 0755)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ndescription: old\ntools: [bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: old\ntools: [Bash]\n---\nDo stuff."), 0644)
 	}
 
 	idA, err := mgr.CreateInstance(t.Context(), "alpha", "", "persistent", "")
@@ -1492,7 +1492,7 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 	for _, name := range []string{"alpha", "beta"} {
 		agentDir := filepath.Join(dir, "agents", name)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ndescription: updated\ntools: [bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: updated\ntools: [Bash]\n---\nDo stuff."), 0644)
 	}
 
 	mgr.PushConfigUpdateAll()

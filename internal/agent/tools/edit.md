@@ -1,3 +1,7 @@
-Edit a file by replacing exact text matches. Edits are applied sequentially.
+Performs exact string replacements in files.
 
-`old_string` must match file content exactly, including whitespace. Empty `old_string` in the first edit creates a new file. Empty `new_string` deletes the matched text. When `replace_all` is false (default), `old_string` must appear exactly once.
+- The edit will FAIL if `old_string` is not unique in the file. Provide more surrounding context to make it unique, or use `replace_all` to change every instance
+- Use `replace_all` for renaming variables or replacing repeated patterns across the file
+- When `old_string` is empty and `new_string` has content, creates a new file (fails if file exists)
+- When `new_string` is empty, deletes the matched text
+- `old_string` must match file content exactly, including whitespace and indentation

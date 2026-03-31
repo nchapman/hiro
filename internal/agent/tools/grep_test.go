@@ -70,7 +70,7 @@ func TestGrep_IncludeFilter(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello world\n"), 0644)
 
 	tool := NewGrepTool(dir)
-	content, isErr := runTool(t, tool, `{"pattern": "hello", "include": "*.go"}`)
+	content, isErr := runTool(t, tool, `{"pattern": "hello", "glob": "*.go"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -219,7 +219,7 @@ func TestGrep_IncludeBraceExpansion(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "c.js"), []byte("findme\n"), 0644)
 
 	tool := NewGrepTool(dir)
-	content, isErr := runTool(t, tool, `{"pattern": "findme", "include": "*.{ts,tsx}"}`)
+	content, isErr := runTool(t, tool, `{"pattern": "findme", "glob": "*.{ts,tsx}"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}

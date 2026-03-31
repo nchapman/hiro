@@ -17,13 +17,13 @@ var bashDescription string
 type BashParams struct {
 	Command         string `json:"command"                    description:"The shell command to execute."`
 	WorkingDir      string `json:"working_dir,omitempty"      description:"Working directory for the command. Defaults to the agent's working directory."`
-	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in a background job. Use job_output to read output later."`
+	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in a background job. Use BashOutput to read output later."`
 }
 
 // NewBashTool creates a tool that executes shell commands with background job support.
 func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"bash",
+		"Bash",
 		bashDescription,
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
@@ -52,7 +52,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 				}
 
 				return fantasy.NewTextResponse(
-					fmt.Sprintf("Background job started with ID: %s\n\nUse job_output to view output or job_kill to terminate.", job.ID)), nil
+					fmt.Sprintf("Background job started with ID: %s\n\nUse BashOutput to view output or KillShell to terminate.", job.ID)), nil
 			}
 
 			// Synchronous execution with auto-background on timeout.
@@ -81,7 +81,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 						return formatBashResult(stdout, stderr, execErr)
 					}
 					return fantasy.NewTextResponse(
-						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground job ID: %s\n\nUse job_output to view output or job_kill to terminate.", job.ID)), nil
+						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground job ID: %s\n\nUse BashOutput to view output or KillShell to terminate.", job.ID)), nil
 				case <-ctx.Done():
 					_ = bgMgr.Kill(job.ID)
 					return fantasy.NewTextErrorResponse("command cancelled"), nil

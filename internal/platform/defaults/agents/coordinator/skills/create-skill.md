@@ -50,7 +50,7 @@ Full instructions for the agent when using this skill.
 
 ## How skills work at runtime
 
-Skills use progressive disclosure. Only the name and description appear in the agent's system prompt. The agent calls `use_skill("<skill-name>")` to load the full instructions and any bundled resources. This keeps prompts lean as skills grow.
+Skills use progressive disclosure. Only the name and description appear in the agent's system prompt. The agent calls `Skill("<skill-name>")` to load the full instructions and any bundled resources. This keeps prompts lean as skills grow.
 
 ## Skill directory format
 
@@ -64,7 +64,7 @@ skills/my-skill/
   assets/          # Optional — templates, data files
 ```
 
-The agent can access all files in the skill directory via `read_file` and `list_files`.
+The agent can access all files in the skill directory via `Read` and `Glob`.
 
 ## Guidelines
 
@@ -72,5 +72,5 @@ The agent can access all files in the skill directory via `read_file` and `list_
 - Write the description as a trigger: what the skill does + when to use it.
 - Keep the SKILL.md body focused on instructions. Move detailed docs to `references/`.
 - Don't duplicate instructions already in the agent's `agent.md` or other skills.
-- Check existing skills first with `list_files agents/<agent-name>/skills/`.
+- Check existing skills first with `Glob` or `Bash` to list `agents/<agent-name>/skills/`.
 - Skills take effect on the agent's next message — no restart needed.

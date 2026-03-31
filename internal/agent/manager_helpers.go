@@ -25,7 +25,7 @@ func (m *Manager) SendMessage(ctx context.Context, instanceID, message string, o
 // (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
 func (m *Manager) SendMessageWithFiles(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
 	// Cycle detection: prevent re-entrant deadlocks when coordinator tools
-	// send messages in a loop (A → send_message(B) → B sends back to A).
+	// send messages in a loop (A → SendMessage(B) → B sends back to A).
 	if inference.IsInCallChain(ctx, instanceID) {
 		return "", fmt.Errorf("circular message dependency: instance %s is already awaiting a response in this call chain", instanceID)
 	}

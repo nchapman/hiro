@@ -11,9 +11,9 @@ func TestStringSlice(t *testing.T) {
 	}{
 		{
 			name: "normal string slice",
-			fm:   Frontmatter{"tools": []any{"bash", "read_file", "grep"}},
+			fm:   Frontmatter{"tools": []any{"Bash", "Read", "Grep"}},
 			key:  "tools",
-			want: []string{"bash", "read_file", "grep"},
+			want: []string{"Bash", "Read", "Grep"},
 		},
 		{
 			name: "missing key",

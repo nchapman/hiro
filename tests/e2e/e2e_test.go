@@ -386,7 +386,7 @@ func spawnPersistentAgent(t *testing.T, ctx context.Context, name string) string
 
 	containerWriteFile(t, fmt.Sprintf("/hive/agents/%s/agent.md", name), fmt.Sprintf(`---
 name: %s
-tools: [read_file, write_file, edit_file, glob, grep, bash]
+tools: [Read, Write, Edit, Glob, Grep, Bash]
 ---
 
 You are a test agent. Be concise.`, name))
@@ -400,7 +400,7 @@ You are a test agent. Be concise.`, name))
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	cs.chat(ctx, fmt.Sprintf(`Use spawn_instance with agent "%s" and mode "persistent" and prompt "Acknowledge you are ready." Do not use any other tools.`, name))
+	cs.chat(ctx, fmt.Sprintf(`Use SpawnInstance with agent "%s" and mode "persistent" and prompt "Acknowledge you are ready." Do not use any other tools.`, name))
 
 	// Find the new instance (not in the snapshot).
 	for _, inst := range listInstances(t) {

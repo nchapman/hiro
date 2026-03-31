@@ -9,19 +9,19 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed job_kill.md
-var jobKillDescription string
+//go:embed kill_shell.md
+var killShellDescription string
 
-type JobKillParams struct {
+type KillShellParams struct {
 	JobID string `json:"job_id" description:"The ID of the background job to terminate."`
 }
 
-// NewJobKillTool creates a tool that terminates background jobs.
-func NewJobKillTool(bgMgr *BackgroundJobManager) fantasy.AgentTool {
+// NewKillShellTool creates a tool that terminates background jobs.
+func NewKillShellTool(bgMgr *BackgroundJobManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"job_kill",
-		jobKillDescription,
-		func(ctx context.Context, params JobKillParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		"KillShell",
+		killShellDescription,
+		func(ctx context.Context, params KillShellParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.JobID == "" {
 				return fantasy.NewTextErrorResponse("job_id is required"), nil
 			}

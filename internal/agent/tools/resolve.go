@@ -131,7 +131,7 @@ func atomicWriteFile(path string, content []byte, mode os.FileMode) error {
 }
 
 // excludedDirs lists directories that tools should skip when walking
-// file trees. Used by list_files, glob, grep, and ripgrep.
+// file trees. Used by Glob, Grep, and ripgrep.
 var excludedDirs = map[string]bool{
 	"node_modules": true,
 	"vendor":       true,

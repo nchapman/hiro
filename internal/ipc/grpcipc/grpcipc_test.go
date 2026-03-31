@@ -60,7 +60,7 @@ func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
 	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "file contents here"}}
 	client := setupWorkerTest(t, worker)
 
-	result, err := client.ExecuteTool(t.Context(), "call-1", "read_file", `{"path":"test.txt"}`)
+	result, err := client.ExecuteTool(t.Context(), "call-1", "Read", `{"path":"test.txt"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -70,8 +70,8 @@ func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
 	if result.IsError {
 		t.Error("unexpected is_error=true")
 	}
-	if worker.lastTool.name != "read_file" {
-		t.Errorf("tool name = %q, want read_file", worker.lastTool.name)
+	if worker.lastTool.name != "Read" {
+		t.Errorf("tool name = %q, want Read", worker.lastTool.name)
 	}
 	if worker.lastTool.callID != "call-1" {
 		t.Errorf("call_id = %q, want call-1", worker.lastTool.callID)
@@ -82,7 +82,7 @@ func TestWorkerRoundtrip_ExecuteTool_Error(t *testing.T) {
 	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "not found", IsError: true}}
 	client := setupWorkerTest(t, worker)
 
-	result, err := client.ExecuteTool(t.Context(), "call-2", "read_file", `{"path":"missing.txt"}`)
+	result, err := client.ExecuteTool(t.Context(), "call-2", "Read", `{"path":"missing.txt"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}

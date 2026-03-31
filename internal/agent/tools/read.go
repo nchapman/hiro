@@ -10,26 +10,26 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed read_file.md
-var readFileDescription string
+//go:embed read.md
+var readDescription string
 
-type ReadFileParams struct {
-	Path   string `json:"path"             description:"Absolute or relative path to the file to read."`
-	Offset int    `json:"offset,omitempty"  description:"Line number to start reading from (1-based). Defaults to 1."`
-	Limit  int    `json:"limit,omitempty"   description:"Maximum number of lines to read. Defaults to all lines."`
+type ReadParams struct {
+	FilePath string `json:"file_path"        description:"Absolute or relative path to the file to read."`
+	Offset   int    `json:"offset,omitempty"  description:"Line number to start reading from (1-based). Defaults to 1."`
+	Limit    int    `json:"limit,omitempty"   description:"Maximum number of lines to read. Defaults to all lines."`
 }
 
-// NewReadFileTool creates a tool that reads file contents with line numbers.
-func NewReadFileTool(workingDir string) fantasy.AgentTool {
+// NewReadTool creates a tool that reads file contents with line numbers.
+func NewReadTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"read_file",
-		readFileDescription,
-		func(ctx context.Context, params ReadFileParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Path == "" {
-				return fantasy.NewTextErrorResponse("path is required"), nil
+		"Read",
+		readDescription,
+		func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if params.FilePath == "" {
+				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			path, err := resolveAndConfine(workingDir, params.Path)
+			path, err := resolveAndConfine(workingDir, params.FilePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

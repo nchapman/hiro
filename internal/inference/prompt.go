@@ -41,7 +41,7 @@ func buildSystemPrompt(cfg config.AgentConfig, persona, memory, todos string, se
 	}
 
 	if len(cfg.Skills) > 0 {
-		p.WriteString("\n\n## Skills\n\nDescriptions are triggers, not instructions. Call use_skill to get full instructions.\n\n")
+		p.WriteString("\n\n## Skills\n\nDescriptions are triggers, not instructions. Call Skill to get full instructions.\n\n")
 		for _, skill := range cfg.Skills {
 			fmt.Fprintf(&p, "- **%s**: %s\n", skill.Name, skill.Description)
 		}

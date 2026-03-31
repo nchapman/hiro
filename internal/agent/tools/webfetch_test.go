@@ -19,7 +19,7 @@ func TestFetch_SSRFBlocked(t *testing.T) {
 	defer ts.Close()
 
 	// Loopback should be blocked even when the server is actually running.
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if !isErr {
 		t.Fatalf("expected error for loopback URL, got: %s", content)
@@ -63,7 +63,7 @@ func TestFetch_SSRFAllowedWhenDisabled(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error with SSRF disabled: %s", content)
@@ -81,7 +81,7 @@ func TestFetch_BasicGet(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -108,7 +108,7 @@ func TestFetch_JSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -128,7 +128,7 @@ func TestFetch_404(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -139,7 +139,7 @@ func TestFetch_404(t *testing.T) {
 }
 
 func TestFetch_EmptyURL(t *testing.T) {
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": ""}`)
 	if !isErr {
 		t.Fatal("expected error for empty URL")
@@ -150,7 +150,7 @@ func TestFetch_EmptyURL(t *testing.T) {
 }
 
 func TestFetch_InvalidURL(t *testing.T) {
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "not-a-url"}`)
 	if !isErr {
 		t.Fatal("expected error for invalid URL")
@@ -169,7 +169,7 @@ func TestFetch_UnreachableHost(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	ts.Close() // immediately close so connection is refused
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if !isErr {
 		t.Fatal("expected error for unreachable host")
@@ -191,7 +191,7 @@ func TestFetch_LargeResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	content, isErr := runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -213,7 +213,7 @@ func TestFetch_ChecksUserAgent(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := NewFetchTool()
+	tool := NewWebFetchTool()
 	runTool(t, tool, `{"url": "`+ts.URL+`"}`)
 	if gotUA != "Hive/1.0" {
 		t.Errorf("User-Agent = %q, want %q", gotUA, "Hive/1.0")

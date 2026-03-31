@@ -11,7 +11,7 @@ func TestJobKill_RunningJob(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "sleep 60")
 
-	tool := NewJobKillTool(mgr)
+	tool := NewKillShellTool(mgr)
 	content, isErr := runTool(t, tool, fmt.Sprintf(`{"job_id": "%s"}`, job.ID))
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
@@ -29,7 +29,7 @@ func TestJobKill_RunningJob(t *testing.T) {
 
 func TestJobKill_NotFound(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
-	tool := NewJobKillTool(mgr)
+	tool := NewKillShellTool(mgr)
 	content, isErr := runTool(t, tool, `{"job_id": "NOPE"}`)
 	if !isErr {
 		t.Fatal("expected error for nonexistent job")
@@ -41,7 +41,7 @@ func TestJobKill_NotFound(t *testing.T) {
 
 func TestJobKill_MissingID(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
-	tool := NewJobKillTool(mgr)
+	tool := NewKillShellTool(mgr)
 	_, isErr := runTool(t, tool, `{"job_id": ""}`)
 	if !isErr {
 		t.Fatal("expected error for empty job_id")
@@ -53,7 +53,7 @@ func TestJobKill_AlreadyCompleted(t *testing.T) {
 	job, _ := mgr.Start(t.TempDir(), "true")
 	job.Wait(context.Background())
 
-	tool := NewJobKillTool(mgr)
+	tool := NewKillShellTool(mgr)
 	content, isErr := runTool(t, tool, fmt.Sprintf(`{"job_id": "%s"}`, job.ID))
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)

@@ -137,16 +137,14 @@ func (w *toolWorker) Shutdown(ctx context.Context) error {
 func buildWorkerTools(workingDir string, bgMgr *tools.BackgroundJobManager, allowed map[string]bool) []fantasy.AgentTool {
 	all := []fantasy.AgentTool{
 		tools.NewBashTool(workingDir, bgMgr),
-		tools.NewReadFileTool(workingDir),
+		tools.NewReadTool(workingDir),
 		tools.NewEditTool(workingDir),
-		tools.NewMultiEditTool(workingDir),
-		tools.NewWriteFileTool(workingDir),
-		tools.NewListFilesTool(workingDir),
+		tools.NewWriteTool(workingDir),
 		tools.NewGlobTool(workingDir),
 		tools.NewGrepTool(workingDir),
-		tools.NewFetchTool(),
-		tools.NewJobOutputTool(bgMgr),
-		tools.NewJobKillTool(bgMgr),
+		tools.NewWebFetchTool(),
+		tools.NewBashOutputTool(bgMgr),
+		tools.NewKillShellTool(bgMgr),
 	}
 
 	if allowed == nil {

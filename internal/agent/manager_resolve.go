@@ -8,16 +8,16 @@ import (
 )
 
 // spawnTool is injected into all agents.
-var spawnTool = "spawn_instance"
+var spawnTool = "SpawnInstance"
 
 // coordinatorTools are injected only for coordinator-mode instances.
 var coordinatorTools = []string{
-	"resume_instance", "list_instances", "send_message", "stop_instance", "delete_instance",
+	"ResumeInstance", "ListInstances", "SendMessage", "StopInstance", "DeleteInstance",
 }
 
 // persistentTools are injected for persistent and coordinator instances.
 var persistentTools = []string{
-	"todos", "history_search", "history_recall",
+	"TodoWrite", "HistorySearch", "HistoryRecall",
 }
 
 // computeEffectiveTools returns the set of built-in tools this instance is
@@ -81,7 +81,7 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 		allowed[t] = true
 	}
 
-	// All instances get spawn_instance; coordinators can use all modes.
+	// All instances get SpawnInstance; coordinators can use all modes.
 	allowed[spawnTool] = true
 
 	// Coordinator instances get full instance management tools.
@@ -99,7 +99,7 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 	}
 
 	if hasSkills {
-		allowed["use_skill"] = true
+		allowed["Skill"] = true
 	}
 	return allowed
 }

@@ -14,10 +14,10 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed fetch.md
-var fetchDescription string
+//go:embed webfetch.md
+var webFetchDescription string
 
-type FetchParams struct {
+type WebFetchParams struct {
 	URL string `json:"url" description:"The URL to fetch."`
 }
 
@@ -64,13 +64,13 @@ func SetSSRFProtection(enabled bool) {
 	ssrfEnabled.Store(enabled)
 }
 
-// NewFetchTool creates a tool that fetches content from URLs.
+// NewWebFetchTool creates a tool that fetches content from URLs.
 // When SSRF protection is enabled, blocks requests to private/loopback/link-local addresses.
-func NewFetchTool() fantasy.AgentTool {
+func NewWebFetchTool() fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
-		"fetch",
-		fetchDescription,
-		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		"WebFetch",
+		webFetchDescription,
+		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil
 			}

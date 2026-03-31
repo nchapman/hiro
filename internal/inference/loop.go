@@ -134,7 +134,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	redactor := NewRedactor(cfg.SecretEnvFn)
 	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, redactor, l.logger)
 
-	// Local tools: memory, todos, history, spawn, coordinator, use_skill.
+	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, coordinator tools, Skill.
 	localTools := l.buildLocalTools(cfg)
 	agentTools = append(agentTools, localTools...)
 
