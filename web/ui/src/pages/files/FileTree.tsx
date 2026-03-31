@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from "react"
-import { IconFolder, IconFolderOpen, IconFile, IconChevronRight, IconChevronDown, IconFilePlus, IconFolderPlus, IconPencil, IconTrash, IconTerminal2, IconUpload } from "@tabler/icons-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Folder01Icon, FolderOpenIcon, File01Icon, ArrowRight01Icon, ArrowDown01Icon, FilePlusIcon, FolderAddIcon, PencilEdit01Icon, Delete01Icon, TerminalIcon, Upload01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { listDir, writeFile, mkdir, deleteEntry, renameEntry, uploadFile } from "@/hooks/use-files"
@@ -451,7 +452,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     const items: { label: string; icon: React.ReactNode; onClick: () => void; variant?: "destructive" }[] = [
       {
         label: "New File",
-        icon: <IconFilePlus className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={FilePlusIcon} className="h-4 w-4" />,
         onClick: () => {
           if (entry?.type === "dir") {
             setExpanded((prev) => new Set(prev).add(entry.path))
@@ -467,7 +468,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       },
       {
         label: "New Folder",
-        icon: <IconFolderPlus className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={FolderAddIcon} className="h-4 w-4" />,
         onClick: () => {
           if (entry?.type === "dir") {
             setExpanded((prev) => new Set(prev).add(entry.path))
@@ -487,7 +488,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     if (!entry || entry.type === "dir") {
       items.push({
         label: "Open Terminal",
-        icon: <IconTerminal2 className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={TerminalIcon} className="h-4 w-4" />,
         onClick: () => {
           const dir = entry?.type === "dir" ? entry.path : ""
           const params = dir ? `?dir=${encodeURIComponent(dir)}` : ""
@@ -499,7 +500,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
     if (entry && !protectedPaths.has(entry.path)) {
       items.push({
         label: "Rename",
-        icon: <IconPencil className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={PencilEdit01Icon} className="h-4 w-4" />,
         onClick: () => {
           const depth = entry.path.split("/").length - 1
           setInlineAction({ type: "rename", entry, depth })
@@ -507,7 +508,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       })
       items.push({
         label: "Delete",
-        icon: <IconTrash className="h-4 w-4" />,
+        icon: <HugeiconsIcon icon={Delete01Icon} className="h-4 w-4" />,
         variant: "destructive" as const,
         onClick: () => handleDelete(entry, parentPath),
       })
@@ -537,9 +538,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
             depth={depth}
             icon={
               isDir ? (
-                <IconFolder className="h-4 w-4 shrink-0 text-amber-500" />
+                <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
               ) : (
-                <IconFile className="h-4 w-4 shrink-0" />
+                <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
               )
             }
           />
@@ -580,20 +581,20 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
             {isDir ? (
               <>
                 {isExpanded ? (
-                  <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  <HugeiconsIcon icon={ArrowDown01Icon} className="h-3.5 w-3.5 shrink-0" />
                 ) : (
-                  <IconChevronRight className="h-3.5 w-3.5 shrink-0" />
+                  <HugeiconsIcon icon={ArrowRight01Icon} className="h-3.5 w-3.5 shrink-0" />
                 )}
                 {isExpanded ? (
-                  <IconFolderOpen className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={FolderOpenIcon} className="h-4 w-4 shrink-0 text-amber-500" />
                 ) : (
-                  <IconFolder className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
                 )}
               </>
             ) : (
               <>
                 <span className="w-3.5 shrink-0" />
-                <IconFile className="h-4 w-4 shrink-0" />
+                <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
               </>
             )}
             <span className="truncate">{entry.name}</span>
@@ -615,9 +616,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
                     depth={depth + 1}
                     icon={
                       inlineAction.type === "new-folder" ? (
-                        <IconFolder className="h-4 w-4 shrink-0 text-amber-500" />
+                        <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
                       ) : (
-                        <IconFile className="h-4 w-4 shrink-0" />
+                        <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
                       )
                     }
                   />
@@ -662,7 +663,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
       >
         {isRootDropTarget ? (
           <span className="flex items-center gap-1.5">
-            <IconUpload className="h-4 w-4" /> Drop files to upload
+            <HugeiconsIcon icon={Upload01Icon} className="h-4 w-4" /> Drop files to upload
           </span>
         ) : (
           "No files"
@@ -714,9 +715,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
               depth={0}
               icon={
                 inlineAction.type === "new-folder" ? (
-                  <IconFolder className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
                 ) : (
-                  <IconFile className="h-4 w-4 shrink-0" />
+                  <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
                 )
               }
             />

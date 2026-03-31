@@ -17,7 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { IconCircleCheck, IconLoader2, IconCircleX } from "@tabler/icons-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { CheckmarkCircle01Icon, Loading02Icon, CancelCircleIcon } from "@hugeicons/core-free-icons"
 
 import type { ModelInfo } from "@/lib/chat-types"
 
@@ -286,7 +287,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     className="flex-1"
                   >
                     {testStatus === "testing" && (
-                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <HugeiconsIcon icon={Loading02Icon} className="mr-2 h-4 w-4 animate-spin" />
                     )}
                     Test Connection
                   </Button>
@@ -295,7 +296,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       variant="outline"
                       className="gap-1 border-green-500 text-green-500"
                     >
-                      <IconCircleCheck className="h-3 w-3" />
+                      <HugeiconsIcon icon={CheckmarkCircle01Icon} className="h-3 w-3" />
                       Connected
                     </Badge>
                   )}
@@ -304,7 +305,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       variant="outline"
                       className="gap-1 border-destructive text-destructive"
                     >
-                      <IconCircleX className="h-3 w-3" />
+                      <HugeiconsIcon icon={CancelCircleIcon} className="h-3 w-3" />
                       Failed
                     </Badge>
                   )}
@@ -330,7 +331,7 @@ export default function Setup({ onComplete }: SetupProps) {
                     className="flex-1"
                   >
                     {submitting ? (
-                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <HugeiconsIcon icon={Loading02Icon} className="mr-2 h-4 w-4 animate-spin" />
                     ) : null}
                     Complete Setup
                   </Button>
@@ -344,7 +345,7 @@ export default function Setup({ onComplete }: SetupProps) {
           <>
             <CardHeader className="text-center">
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
-                <IconCircleCheck className="h-6 w-6 text-green-500" />
+                <HugeiconsIcon icon={CheckmarkCircle01Icon} className="h-6 w-6 text-green-500" />
               </div>
               <CardTitle>You're all set!</CardTitle>
               <CardDescription>

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { IconX, IconCircle } from "@tabler/icons-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Cancel01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
 import FileTree from "@/pages/files/FileTree"
 import type { FileTreeHandle } from "@/pages/files/FileTree"
@@ -192,7 +193,7 @@ export default function FilesPage() {
                   {/* Left gap — dirty indicator */}
                   <div className="flex w-7 items-center justify-center shrink-0">
                     {tab.dirty && (
-                      <IconCircle className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+                      <div className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
                     )}
                   </div>
                   <span className="truncate max-w-40 py-1.5">{name}</span>
@@ -205,7 +206,7 @@ export default function FilesPage() {
                       }}
                       className="inline-flex h-5 w-5 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
                     >
-                      <IconX className="h-3 w-3" />
+                      <HugeiconsIcon icon={Cancel01Icon} className="h-3 w-3" />
                     </button>
                   </div>
                 </div>

@@ -96,7 +96,7 @@ function PromptInput({
 
 export type PromptInputTextareaProps = {
   disableAutosize?: boolean
-} & React.ComponentProps<typeof Textarea>
+} & React.ComponentProps<"textarea">
 
 function PromptInputTextarea({
   className,

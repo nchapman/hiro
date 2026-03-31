@@ -11,7 +11,8 @@ import { yaml } from "@codemirror/lang-yaml"
 import { keymap } from "@codemirror/view"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
-import { IconDeviceFloppy, IconShare, IconCheck, IconLoader2, IconX } from "@tabler/icons-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { FloppyDiskIcon, Share01Icon, Tick02Icon, Loading02Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { readFile, writeFile, shareFile } from "@/hooks/use-files"
@@ -215,13 +216,13 @@ export default function FileEditor({
             className="h-7 w-7"
           >
             {shareState === "copied" ? (
-              <IconCheck className="h-3.5 w-3.5 text-emerald-500" />
+              <HugeiconsIcon icon={Tick02Icon} className="h-3.5 w-3.5 text-emerald-500" />
             ) : shareState === "error" ? (
-              <IconX className="h-3.5 w-3.5 text-destructive" />
+              <HugeiconsIcon icon={Cancel01Icon} className="h-3.5 w-3.5 text-destructive" />
             ) : shareState === "sharing" ? (
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+              <HugeiconsIcon icon={Loading02Icon} className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <IconShare className="h-3.5 w-3.5" />
+              <HugeiconsIcon icon={Share01Icon} className="h-3.5 w-3.5" />
             )}
           </Button>
         }
@@ -339,9 +340,9 @@ export default function FileEditor({
                 className="h-7 w-7"
               >
                 {saving ? (
-                  <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                  <HugeiconsIcon icon={Loading02Icon} className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <IconDeviceFloppy className="h-3.5 w-3.5" />
+                  <HugeiconsIcon icon={FloppyDiskIcon} className="h-3.5 w-3.5" />
                 )}
               </Button>
             }

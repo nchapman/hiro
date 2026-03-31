@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  IconSearch,
-  IconPlayerPause,
-  IconPlayerPlay,
-  IconTrash,
-  IconArrowDown,
-  IconChevronRight,
-  IconChevronDown,
-} from "@tabler/icons-react"
+  Search01Icon,
+  PauseIcon,
+  PlayIcon,
+  Delete01Icon,
+  ArrowDown02Icon,
+  ArrowRight01Icon,
+  ArrowDown01Icon,
+} from "@hugeicons/core-free-icons"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -229,7 +230,7 @@ export default function LogsPage() {
         </Select>
 
         <div className="relative">
-          <IconSearch className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <HugeiconsIcon icon={Search01Icon} className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search logs..."
             value={search}
@@ -246,9 +247,9 @@ export default function LogsPage() {
             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
             {paused ? (
-              <IconPlayerPlay className="h-3.5 w-3.5" />
+              <HugeiconsIcon icon={PlayIcon} className="h-3.5 w-3.5" />
             ) : (
-              <IconPlayerPause className="h-3.5 w-3.5" />
+              <HugeiconsIcon icon={PauseIcon} className="h-3.5 w-3.5" />
             )}
           </TooltipTrigger>
           <TooltipContent>{paused ? "Resume" : "Pause"}</TooltipContent>
@@ -263,7 +264,7 @@ export default function LogsPage() {
             }}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <IconTrash className="h-3.5 w-3.5" />
+            <HugeiconsIcon icon={Delete01Icon} className="h-3.5 w-3.5" />
           </TooltipTrigger>
           <TooltipContent>Clear</TooltipContent>
         </Tooltip>
@@ -320,9 +321,9 @@ export default function LogsPage() {
                   <span className="mt-0.5 w-3.5 shrink-0 text-muted-foreground">
                     {hasAttrs &&
                       (expanded ? (
-                        <IconChevronDown className="h-3.5 w-3.5" />
+                        <HugeiconsIcon icon={ArrowDown01Icon} className="h-3.5 w-3.5" />
                       ) : (
-                        <IconChevronRight className="h-3.5 w-3.5" />
+                        <HugeiconsIcon icon={ArrowRight01Icon} className="h-3.5 w-3.5" />
                       ))}
                   </span>
 
@@ -391,7 +392,7 @@ export default function LogsPage() {
           }}
           className="absolute bottom-4 right-6 z-10 flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-opacity hover:bg-primary/90"
         >
-          <IconArrowDown className="h-3 w-3" />
+          <HugeiconsIcon icon={ArrowDown02Icon} className="h-3 w-3" />
           Jump to bottom
         </button>
       )}

@@ -28,13 +28,14 @@ import {
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { useTheme } from "@/hooks/use-theme"
+import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  IconPlus,
-  IconTrash,
-  IconCircleCheck,
-  IconCircleX,
-  IconLoader2,
-} from "@tabler/icons-react"
+  Add01Icon,
+  Delete01Icon,
+  CheckmarkCircle01Icon,
+  CancelCircleIcon,
+  Loading02Icon,
+} from "@hugeicons/core-free-icons"
 
 import type { ModelInfo } from "@/lib/chat-types"
 
@@ -273,7 +274,7 @@ export default function SettingsPage() {
                 <Dialog open={addOpen} onOpenChange={setAddOpen}>
                   <DialogTrigger>
                     <Button size="sm" className="gap-1">
-                      <IconPlus className="h-4 w-4" />
+                      <HugeiconsIcon icon={Add01Icon} className="h-4 w-4" />
                       Add
                     </Button>
                   </DialogTrigger>
@@ -347,10 +348,10 @@ export default function SettingsPage() {
                       </Label>
                       <div className="flex items-center gap-1">
                         {testStatus[type_] === "success" && (
-                          <IconCircleCheck className="h-4 w-4 text-green-500" />
+                          <HugeiconsIcon icon={CheckmarkCircle01Icon} className="h-4 w-4 text-green-500" />
                         )}
                         {testStatus[type_] === "error" && (
-                          <IconCircleX className="h-4 w-4 text-destructive" />
+                          <HugeiconsIcon icon={CancelCircleIcon} className="h-4 w-4 text-destructive" />
                         )}
                         <Button
                           variant="ghost"
@@ -359,7 +360,7 @@ export default function SettingsPage() {
                           disabled={testStatus[type_] === "testing"}
                         >
                           {testStatus[type_] === "testing" ? (
-                            <IconLoader2 className="h-4 w-4 animate-spin" />
+                            <HugeiconsIcon icon={Loading02Icon} className="h-4 w-4 animate-spin" />
                           ) : (
                             "Test"
                           )}
@@ -371,7 +372,7 @@ export default function SettingsPage() {
                             className="h-8 w-8 text-destructive"
                             onClick={() => handleDeleteProvider(type_)}
                           >
-                            <IconTrash className="h-4 w-4" />
+                            <HugeiconsIcon icon={Delete01Icon} className="h-4 w-4" />
                           </Button>
                         )}
                       </div>

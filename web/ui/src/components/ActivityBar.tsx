@@ -3,17 +3,19 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { HugeiconsIcon } from "@hugeicons/react"
+import type { IconSvgElement } from "@hugeicons/react"
 import {
-  IconMessage,
-  IconFolderOpen,
-  IconNotes,
-  IconSettings,
-  IconSun,
-  IconMoon,
-  IconDeviceDesktop,
-  IconLogout,
-  IconTerminal2,
-} from "@tabler/icons-react"
+  Message01Icon,
+  FolderOpenIcon,
+  NoteIcon,
+  Settings01Icon,
+  Sun01Icon,
+  Moon01Icon,
+  ComputerIcon,
+  Logout01Icon,
+  TerminalIcon,
+} from "@hugeicons/core-free-icons"
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 
@@ -26,18 +28,18 @@ interface ActivityBarProps {
 }
 
 const themeIcons = {
-  light: IconSun,
-  dark: IconMoon,
-  system: IconDeviceDesktop,
+  light: Sun01Icon,
+  dark: Moon01Icon,
+  system: ComputerIcon,
 } as const
 
 const themeOrder = ["system", "light", "dark"] as const
 
-const activities: { id: Activity; icon: typeof IconMessage; label: string }[] = [
-  { id: "chat", icon: IconMessage, label: "Chat" },
-  { id: "files", icon: IconFolderOpen, label: "Files" },
-  { id: "logs", icon: IconNotes, label: "Logs" },
-  { id: "settings", icon: IconSettings, label: "Settings" },
+const activities: { id: Activity; icon: IconSvgElement; label: string }[] = [
+  { id: "chat", icon: Message01Icon, label: "Chat" },
+  { id: "files", icon: FolderOpenIcon, label: "Files" },
+  { id: "logs", icon: NoteIcon, label: "Logs" },
+  { id: "settings", icon: Settings01Icon, label: "Settings" },
 ]
 
 export default function ActivityBar({
@@ -46,7 +48,7 @@ export default function ActivityBar({
   onLogout,
 }: ActivityBarProps) {
   const { theme, setTheme } = useTheme()
-  const ThemeIcon = themeIcons[theme]
+  const themeIcon = themeIcons[theme]
 
   const cycleTheme = () => {
     const idx = themeOrder.indexOf(theme)
@@ -57,7 +59,7 @@ export default function ActivityBar({
     <aside className="flex h-full w-12 min-w-12 flex-col items-center border-r bg-card py-2">
       {/* Activity icons */}
       <div className="flex flex-col items-center gap-1">
-        {activities.map(({ id, icon: Icon, label }) => (
+        {activities.map(({ id, icon, label }) => (
           <Tooltip key={id}>
             <TooltipTrigger
               onClick={() => onActivityChange(id)}
@@ -68,7 +70,7 @@ export default function ActivityBar({
                   : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
               )}
             >
-              <Icon className="h-5 w-5" />
+              <HugeiconsIcon icon={icon} className="h-5 w-5" />
             </TooltipTrigger>
             <TooltipContent side="right">{label}</TooltipContent>
           </Tooltip>
@@ -90,7 +92,7 @@ export default function ActivityBar({
             }
             className="inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <IconTerminal2 className="h-5 w-5" />
+            <HugeiconsIcon icon={TerminalIcon} className="h-5 w-5" />
           </TooltipTrigger>
           <TooltipContent side="right">Terminal</TooltipContent>
         </Tooltip>
@@ -99,7 +101,7 @@ export default function ActivityBar({
             onClick={cycleTheme}
             className="inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <ThemeIcon className="h-5 w-5" />
+            <HugeiconsIcon icon={themeIcon} className="h-5 w-5" />
           </TooltipTrigger>
           <TooltipContent side="right">Theme: {theme}</TooltipContent>
         </Tooltip>
@@ -108,7 +110,7 @@ export default function ActivityBar({
             onClick={onLogout}
             className="inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <IconLogout className="h-5 w-5" />
+            <HugeiconsIcon icon={Logout01Icon} className="h-5 w-5" />
           </TooltipTrigger>
           <TooltipContent side="right">Log out</TooltipContent>
         </Tooltip>

@@ -14,7 +14,7 @@ export default function TerminalPage() {
 
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: "'Geist Mono Variable', 'Geist Mono', Menlo, monospace",
       fontSize: 14,
       theme: {
         background: "#282c34",

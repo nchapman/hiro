@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { IconChevronDown } from "@tabler/icons-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 
 export type ScrollButtonProps = {
@@ -24,7 +25,7 @@ function ScrollButton({ className, ...props }: ScrollButtonProps) {
       onClick={() => scrollToBottom()}
       {...props}
     >
-      <IconChevronDown className="h-4 w-4" />
+      <HugeiconsIcon icon={ArrowDown01Icon} className="h-4 w-4" />
     </Button>
   )
 }

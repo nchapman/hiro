@@ -3,18 +3,19 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  IconArrowUp,
-  IconTool,
-  IconChevronRight,
-  IconDots,
-  IconSquare,
-  IconPlayerPlay,
-  IconTrash,
-  IconPaperclip,
-  IconX,
-  IconFileText,
-} from "@tabler/icons-react"
+  ArrowUp01Icon,
+  Wrench01Icon,
+  ArrowRight01Icon,
+  MoreHorizontalIcon,
+  StopIcon,
+  PlayIcon,
+  Delete01Icon,
+  Attachment01Icon,
+  Cancel01Icon,
+  File02Icon,
+} from "@hugeicons/core-free-icons"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -99,11 +100,11 @@ const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: Tool
           hasDetails && "cursor-pointer hover:bg-muted/50"
         )}
       >
-        <IconTool className="h-3 w-3 shrink-0" />
+        <HugeiconsIcon icon={Wrench01Icon} className="h-3 w-3 shrink-0" />
         {toolCall.status || toolCall.name}
         <span className="flex-1" />
         {hasDetails && (
-          <IconChevronRight className="h-3 w-3 shrink-0 transition-transform [[data-panel-open]_&]:rotate-90" />
+          <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3 shrink-0 transition-transform [[data-panel-open]_&]:rotate-90" />
         )}
       </CollapsibleTrigger>
 
@@ -163,7 +164,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?
         {isStreaming ? (
           <Loader variant="typing" size="sm" />
         ) : (
-          <IconChevronRight className="h-3 w-3 transition-transform [[data-panel-open]_&]:rotate-90" />
+          <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3 transition-transform [[data-panel-open]_&]:rotate-90" />
         )}
         <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
       </CollapsibleTrigger>
@@ -219,7 +220,7 @@ const UserMessage = memo(function UserMessage({ message }: { message: Message })
                 />
               ) : (
                 <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                  <IconFileText className="h-3 w-3" />
+                  <HugeiconsIcon icon={File02Icon} className="h-3 w-3" />
                   {att.filename}
                 </div>
               )
@@ -262,7 +263,7 @@ function ReasoningControl({
           }
         >
           {options.find((o) => o.value === effort)?.label ?? "Fast"}
-          <IconChevronRight className="h-3 w-3" />
+          <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-36 p-1">
           {options.map((o) => (
@@ -756,18 +757,18 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           {!isRoot && (
           <DropdownMenu>
             <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground">
-              <IconDots className="h-4 w-4" />
+              <HugeiconsIcon icon={MoreHorizontalIcon} className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {!isStopped && (
                 <DropdownMenuItem onClick={handleStop}>
-                  <IconSquare className="mr-2 h-4 w-4" />
+                  <HugeiconsIcon icon={StopIcon} className="mr-2 h-4 w-4" />
                   Stop
                 </DropdownMenuItem>
               )}
               {isStopped && (
                 <DropdownMenuItem onClick={handleStart}>
-                  <IconPlayerPlay className="mr-2 h-4 w-4" />
+                  <HugeiconsIcon icon={PlayIcon} className="mr-2 h-4 w-4" />
                   Start
                 </DropdownMenuItem>
               )}
@@ -776,7 +777,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                 onClick={handleDelete}
                 variant="destructive"
               >
-                <IconTrash className="mr-2 h-4 w-4" />
+                <HugeiconsIcon icon={Delete01Icon} className="mr-2 h-4 w-4" />
                 Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -818,7 +819,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           )}
           {isStopped && (
             <Button variant="outline" size="sm" onClick={handleStart}>
-              <IconPlayerPlay className="mr-2 h-4 w-4" />
+              <HugeiconsIcon icon={PlayIcon} className="mr-2 h-4 w-4" />
               Start session
             </Button>
           )}
@@ -862,7 +863,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           <div className="flex items-center justify-center gap-3 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
             Session is stopped.
             <Button variant="outline" size="sm" onClick={handleStart}>
-              <IconPlayerPlay className="mr-2 h-4 w-4" />
+              <HugeiconsIcon icon={PlayIcon} className="mr-2 h-4 w-4" />
               Start
             </Button>
           </div>
@@ -890,7 +891,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                       {att.preview ? (
                         <img src={att.preview} alt={att.file.name} className="h-8 w-8 rounded object-cover" />
                       ) : (
-                        <IconFileText className="h-4 w-4 text-muted-foreground" />
+                        <HugeiconsIcon icon={File02Icon} className="h-4 w-4 text-muted-foreground" />
                       )}
                       <span className="max-w-[120px] truncate">{att.file.name}</span>
                       <button
@@ -898,7 +899,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                         onClick={() => removeAttachment(att.id)}
                         className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
                       >
-                        <IconX className="h-3 w-3" />
+                        <HugeiconsIcon icon={Cancel01Icon} className="h-3 w-3" />
                       </button>
                     </div>
                   ))}
@@ -931,7 +932,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={streaming || !connected}
                   >
-                    <IconPaperclip className="h-4 w-4" />
+                    <HugeiconsIcon icon={Attachment01Icon} className="h-4 w-4" />
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
@@ -948,7 +949,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                     onClick={handleSend}
                     disabled={streaming || !connected || (!input.trim() && attachments.length === 0)}
                   >
-                    <IconArrowUp className="h-4 w-4" />
+                    <HugeiconsIcon icon={ArrowUp01Icon} className="h-4 w-4" />
                   </Button>
                 </div>
               </div>

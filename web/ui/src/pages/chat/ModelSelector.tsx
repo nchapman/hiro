@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react"
-import { IconChevronDown } from "@tabler/icons-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -70,7 +71,7 @@ export default function ModelSelector({
         }
       >
         <span>{currentName}</span>
-        <IconChevronDown className="h-3 w-3" />
+        <HugeiconsIcon icon={ArrowDown01Icon} className="h-3 w-3" />
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-80 p-0">
