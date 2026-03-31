@@ -879,7 +879,6 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
               onSubmit={handleSend}
               isLoading={streaming}
               disabled={!connected}
-              className="bg-muted/50"
             >
               {attachments.length > 0 && (
                 <div className="flex flex-wrap gap-2 px-3 pt-3">

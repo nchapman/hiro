@@ -1,4 +1,3 @@
-import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import React, {
   createContext,
@@ -83,7 +82,7 @@ function PromptInput({
       <div
         onClick={handleClick}
         className={cn(
-          "border-input bg-background cursor-text rounded-2xl border p-2 shadow-xs",
+          "cursor-text rounded-2xl border border-input bg-muted/50 p-2",
           disabled && "cursor-not-allowed opacity-60",
           className
         )}
@@ -152,13 +151,13 @@ function PromptInputTextarea({
   }
 
   return (
-    <Textarea
+    <textarea
       ref={handleRef}
       value={value}
       onChange={handleChange}
       onKeyDown={handleKeyDown}
       className={cn(
-        "min-h-[44px] w-full resize-none border-none bg-transparent text-foreground shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
+        "field-sizing-content min-h-[44px] w-full resize-none border-0 bg-transparent px-2 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       rows={1}
