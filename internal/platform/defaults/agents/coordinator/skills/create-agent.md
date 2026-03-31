@@ -20,7 +20,7 @@ You can create new agents at runtime. An agent is a directory under `agents/` wi
 ---
 name: <agent-name>
 description: One-line description of what this agent does.
-tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, BashOutput, KillShell]
+tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, BashOutput, TaskStop]
 ---
 
 The markdown body is the agent's system prompt — its core operating instructions.

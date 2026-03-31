@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,27 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 	"github.com/nchapman/hivebot/internal/ipc"
 )
+
+//go:embed spawn_instance.md
+var spawnInstanceDescription string
+
+//go:embed list_nodes.md
+var listNodesDescription string
+
+//go:embed resume_instance.md
+var resumeInstanceDescription string
+
+//go:embed list_instances.md
+var listInstancesDescription string
+
+//go:embed send_message.md
+var sendMessageDescription string
+
+//go:embed stop_instance.md
+var stopInstanceDescription string
+
+//go:embed delete_instance.md
+var deleteInstanceDescription string
 
 // ScopedManager wraps an ipc.HostManager with a caller ID, enforcing
 // descendant scoping on all instance management operations.
@@ -42,7 +64,7 @@ type spawnInstanceInput struct {
 
 func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("SpawnInstance",
-		"Spawn a new agent instance. Ephemeral mode runs a prompt and returns the result. Persistent/coordinator mode creates a long-lived instance.",
+		spawnInstanceDescription,
 		func(ctx context.Context, input spawnInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -112,7 +134,7 @@ func buildCoordinatorTools(mgr ipc.HostManager, logger *slog.Logger) []fantasy.A
 
 func buildListNodes(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("ListNodes",
-		"List all nodes in the cluster.",
+		listNodesDescription,
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			logger.Debug("tool call", "tool", "ListNodes")
 			nodes := mgr.ListNodes()
@@ -142,7 +164,7 @@ type resumeInstanceInput struct {
 
 func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("ResumeInstance",
-		"Resume a stopped instance with its persona and memory intact.",
+		resumeInstanceDescription,
 		func(ctx context.Context, input resumeInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
@@ -164,7 +186,7 @@ func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.Agent
 
 func buildListInstances(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("ListInstances",
-		"List your direct child instances.",
+		listInstancesDescription,
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			logger.Debug("tool call", "tool", "ListInstances")
 			callerID := callerIDFromContext(ctx)
@@ -192,7 +214,7 @@ type sendMessageInput struct {
 
 func buildSendMessage(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("SendMessage",
-		"Send a message to a running child instance and get its response.",
+		sendMessageDescription,
 		func(ctx context.Context, input sendMessageInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
@@ -222,7 +244,7 @@ type stopInstanceInput struct {
 
 func buildStopInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("StopInstance",
-		"Stop an instance and its descendants. Data is preserved.",
+		stopInstanceDescription,
 		func(ctx context.Context, input stopInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
@@ -248,7 +270,7 @@ type deleteInstanceInput struct {
 
 func buildDeleteInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("DeleteInstance",
-		"Permanently delete an instance and all its data. Cannot be undone.",
+		deleteInstanceDescription,
 		func(ctx context.Context, input deleteInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil

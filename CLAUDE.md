@@ -162,7 +162,7 @@ Skills are re-scanned from disk each turn (like persona and memory), so runtime-
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup). Error sentinels include `ErrInstanceNotFound`.
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
-- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, BashOutput, KillShell, Glob, Grep, WebFetch). These run in worker processes.
+- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, BashOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes.
 - **`internal/controlplane`** — Operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, memory/todos persistence.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
@@ -182,10 +182,10 @@ Implementations in `internal/agent/tools/*.go`. These run in worker processes an
 | `Write` | Write full content to file (creates dirs) | `file_path`, `content` | Full replacement only |
 | `Edit` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
 | `Glob` | Find files by glob pattern | `pattern`, `path` | Max 100 results; uses ripgrep if available, falls back to Go; sorted by mod time (newest first) |
-| `Grep` | Search file contents with regex | `pattern`, `path`, `glob` (file glob), `literal_text` | Max 100 matches; 30s timeout; uses ripgrep if available |
-| `Bash` | Execute shell commands | `command`, `working_dir`, `run_in_background` | 120s timeout (sync), 32KB max output; auto-backgrounds after 60s |
+| `Grep` | Search file contents with regex | `pattern`, `path`, `glob`, `type`, `output_mode`, `A`/`B`/`C`/`context`, `n`, `i`, `head_limit`, `offset`, `multiline`, `literal_text` | 3 output modes (content/files_with_matches/count); 30s timeout; default 250 results |
+| `Bash` | Execute shell commands | `command`, `working_dir`, `timeout`, `description`, `run_in_background` | Default auto-background after 60s; `timeout` overrides (max 600000ms); 32KB max output |
 | `BashOutput` | Get output from background job | `job_id`, `wait` | Returns stdout/stderr and completion status |
-| `KillShell` | Terminate a background job | `job_id` | Immediately terminates the process |
+| `TaskStop` | Terminate a background job | `job_id` | Immediately terminates the process |
 | `WebFetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
 
 ### Spawn Tool (all agents)

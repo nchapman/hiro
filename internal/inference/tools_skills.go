@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,9 +14,12 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 )
 
+//go:embed skill.md
+var skillDescription string
+
 func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("Skill",
-		"Load a skill's full instructions. Call before performing a skill-matched task.",
+		skillDescription,
 		func(ctx context.Context, input struct {
 			Name string `json:"name" description:"The name of the skill to activate."`
 		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

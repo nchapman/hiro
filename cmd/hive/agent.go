@@ -144,7 +144,7 @@ func buildWorkerTools(workingDir string, bgMgr *tools.BackgroundJobManager, allo
 		tools.NewGrepTool(workingDir),
 		tools.NewWebFetchTool(),
 		tools.NewBashOutputTool(bgMgr),
-		tools.NewKillShellTool(bgMgr),
+		tools.NewTaskStopTool(bgMgr),
 	}
 
 	if allowed == nil {

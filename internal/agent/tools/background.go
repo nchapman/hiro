@@ -44,6 +44,7 @@ func (cb *cappedBuffer) String() string {
 type BackgroundJob struct {
 	ID          string
 	Command     string
+	Description string
 	WorkingDir  string
 	cancel      context.CancelFunc
 	stdout      *cappedBuffer

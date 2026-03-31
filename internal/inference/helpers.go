@@ -125,7 +125,7 @@ var toolStatusMessages = map[string]string{
 	"Bash":           "Running command",
 	"WebFetch":       "Fetching {{url}}",
 	"BashOutput":     "Reading job output",
-	"KillShell":      "Killing job",
+	"TaskStop":       "Stopping job",
 	"SpawnInstance":   "Spawning {{agent}}",
 	"ResumeInstance":  "Resuming instance",
 	"StopInstance":    "Stopping instance",

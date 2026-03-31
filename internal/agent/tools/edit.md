@@ -1,7 +1,14 @@
-Performs exact string replacements in files.
+Find and replace exact text in a file.
 
-- The edit will FAIL if `old_string` is not unique in the file. Provide more surrounding context to make it unique, or use `replace_all` to change every instance
-- Use `replace_all` for renaming variables or replacing repeated patterns across the file
-- When `old_string` is empty and `new_string` has content, creates a new file (fails if file exists)
-- When `new_string` is empty, deletes the matched text
-- `old_string` must match file content exactly, including whitespace and indentation
+- `old_string` must be a character-perfect match against the file, including all whitespace and indentation
+- If you're working from Read output, strip the line number prefix — only use the actual file content
+- The edit fails when `old_string` appears more than once. Add surrounding context to disambiguate, or set `replace_all`
+- Setting `old_string` to empty with content in `new_string` creates a new file (errors if the file already exists)
+- An empty `new_string` deletes the matched text
+- `replace_all` is useful for variable renames and pattern replacements
+
+Best practices:
+- Always read the file before editing so you can match its content exactly
+- Keep `old_string` short — 2-4 lines that uniquely identify the location is usually enough
+- Reach for Edit over Write when modifying existing files
+- Don't use `sed` or `awk` through Bash for file edits

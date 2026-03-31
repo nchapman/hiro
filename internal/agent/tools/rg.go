@@ -45,24 +45,6 @@ func rgGlobCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-// rgSearchCmd builds a ripgrep command for content searching (--json mode).
-// Uses -- to separate flags from the pattern to prevent argument injection.
-func rgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
-	name := findRg()
-	if name == "" {
-		return nil
-	}
-	args := []string{"--json", "-H", "-n", "--no-ignore-vcs"}
-	for _, ex := range rgExcludeGlobs {
-		args = append(args, "--glob", ex)
-	}
-	args = append(args, "--glob", "!.*")
-	if include != "" {
-		args = append(args, "--glob", include)
-	}
-	args = append(args, "--", pattern, path)
-	return exec.CommandContext(ctx, name, args...)
-}
 
 // errRgUnavailable is returned when ripgrep is not installed.
 var errRgUnavailable = fmt.Errorf("ripgrep not available")

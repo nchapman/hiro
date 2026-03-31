@@ -1,6 +1,6 @@
 ---
 name: coordinator
-tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, BashOutput, KillShell]
+tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, BashOutput, TaskStop]
 description: Leader agent — manages conversations and coordinates work.
 ---
 
