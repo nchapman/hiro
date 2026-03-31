@@ -359,6 +359,25 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult, model, provider string) 
 			Cost:             models.Cost(model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens),
 		})
 	}
+	if len(events) > 0 {
+		var totalIn, totalOut, totalReasoning int64
+		var totalCost float64
+		for _, e := range events {
+			totalIn += e.InputTokens
+			totalOut += e.OutputTokens
+			totalReasoning += e.ReasoningTokens
+			totalCost += e.Cost
+		}
+		l.logger.Info("inference usage",
+			"model", model,
+			"provider", provider,
+			"input_tokens", totalIn,
+			"output_tokens", totalOut,
+			"reasoning_tokens", totalReasoning,
+			"cost", totalCost,
+			"steps", len(events),
+		)
+	}
 	if err := l.pdb.RecordTurnUsage(events); err != nil {
 		l.logger.Warn("failed to record usage", "error", err)
 	}
