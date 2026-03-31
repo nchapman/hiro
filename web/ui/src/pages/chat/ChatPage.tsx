@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, memo } from "react"
 import { Button } from "@/components/ui/button"
 import {
   IconArrowUp,
@@ -29,6 +29,7 @@ import type { SessionInfo } from "@/App"
 import {
   ChatContainerRoot,
   ChatContainerContent,
+  type ChatContainerHandle,
 } from "@/components/prompt-kit/chat-container"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { Markdown } from "@/components/prompt-kit/markdown"
@@ -84,7 +85,7 @@ async function processFiles(files: FileList | File[]): Promise<PendingAttachment
 
 // --- Tool call UI ---
 
-function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
+const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
   const [expanded, setExpanded] = useState(false)
   const hasDetails = toolCall.input || toolCall.output
 
@@ -131,7 +132,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
       )}
     </div>
   )
-}
+})
 
 function formatJSON(input: string): string {
   try {
@@ -182,7 +183,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?
   )
 }
 
-function AssistantMessage({ message }: { message: Message }) {
+const AssistantMessage = memo(function AssistantMessage({ message }: { message: Message }) {
   const toolCalls = message.toolCalls ?? []
   const content = message.content
 
@@ -205,7 +206,42 @@ function AssistantMessage({ message }: { message: Message }) {
       )}
     </div>
   )
-}
+})
+
+// --- User message ---
+
+const UserMessage = memo(function UserMessage({ message }: { message: Message }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[85%] space-y-2">
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-2">
+            {message.attachments.map((att, i) =>
+              isImageType(att.media_type) && att.data ? (
+                <img
+                  key={i}
+                  src={`data:${att.media_type};base64,${att.data}`}
+                  alt={att.filename}
+                  className="max-h-48 max-w-full rounded-lg object-contain"
+                />
+              ) : (
+                <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+                  <IconFileText className="h-3 w-3" />
+                  {att.filename}
+                </div>
+              )
+            )}
+          </div>
+        )}
+        {message.content && (
+          <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm">
+            {message.content}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})
 
 // --- Reasoning control ---
 
@@ -257,6 +293,26 @@ function ReasoningControl({
   )
 }
 
+// --- Session cache ---
+
+const MAX_SESSION_CACHE = 20
+
+interface SessionCacheEntry {
+  messages: Message[]
+  usage: UsageInfo | null
+  scrollTop: number
+}
+
+function setSessionCache(cache: Map<string, SessionCacheEntry>, id: string, entry: SessionCacheEntry) {
+  cache.delete(id) // remove so re-insert updates recency order
+  cache.set(id, entry)
+  if (cache.size > MAX_SESSION_CACHE) {
+    // Evict the oldest (least recently used) entry.
+    const oldest = cache.keys().next().value
+    if (oldest) cache.delete(oldest)
+  }
+}
+
 // --- Chat component ---
 
 interface ChatProps {
@@ -276,6 +332,24 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
+  const chatContainerRef = useRef<ChatContainerHandle>(null)
+  const prevSessionIdRef = useRef<string | null>(null)
+  const sessionCache = useRef(new Map<string, SessionCacheEntry>())
+  // Refs that mirror state so the session-change effect can read latest values.
+  const messagesRef = useRef<Message[]>(messages)
+  messagesRef.current = messages
+  const usageRef = useRef<UsageInfo | null>(usage)
+  usageRef.current = usage
+  const pendingScrollTop = useRef(0)
+
+  // Capture scroll position synchronously before React updates the DOM.
+  useLayoutEffect(() => {
+    return () => {
+      pendingScrollTop.current =
+        chatContainerRef.current?.scrollElement?.scrollTop ?? 0
+    }
+  }, [session?.id])
+
   const isStopped = session?.status === "stopped"
   const isRoot = session ? !session.mode || session.mode === "coordinator" : false
   const wsSessionId = isStopped ? null : (session?.id ?? null)
@@ -318,58 +392,94 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     [send]
   )
 
-  // Load message history when agent changes
+  // Load message history when agent changes — with per-session caching.
   useEffect(() => {
     const gen = ++sessionGeneration.current
 
     setOnMessage(() => {}) // clear stale handler immediately
+
+    // Save outgoing session state to cache (strip any in-flight streaming message).
+    const prevId = prevSessionIdRef.current
+    if (prevId) {
+      const cachedMessages = streamingMsgId.current
+        ? messagesRef.current.filter((m) => m.id !== streamingMsgId.current)
+        : messagesRef.current
+      setSessionCache(sessionCache.current, prevId, {
+        messages: cachedMessages,
+        usage: usageRef.current,
+        scrollTop: pendingScrollTop.current,
+      })
+    }
+    prevSessionIdRef.current = session?.id ?? null
 
     if (!session) {
       setMessages([])
       return
     }
 
+    // Check cache for instant restore.
+    const cached = sessionCache.current.get(session.id)
+    if (cached) {
+      setMessages(cached.messages)
+      setUsage(cached.usage)
+      setStreaming(false)
+      streamingMsgId.current = null
+      setLoadingHistory(false)
+
+      // Restore scroll position after DOM renders (double rAF ensures React flush).
+      const savedScrollTop = cached.scrollTop
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = chatContainerRef.current?.scrollElement
+          if (el) el.scrollTop = savedScrollTop
+        })
+      })
+    } else {
+      setMessages([])
+      setStreaming(false)
+      setUsage(null)
+      streamingMsgId.current = null
+      setLoadingHistory(true)
+    }
+
     const ac = new AbortController()
-    setMessages([])
-    setStreaming(false)
-    setUsage(null)
-    streamingMsgId.current = null
-    setLoadingHistory(true)
 
-    fetch(`/api/instances/${encodeURIComponent(session.id)}/usage`, {
-      signal: ac.signal,
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: UsageInfo | null) => {
-        if (sessionGeneration.current === gen && data) setUsage(data)
+    // Only fetch data if not restored from cache.
+    if (!cached) {
+      fetch(`/api/instances/${encodeURIComponent(session.id)}/usage`, {
+        signal: ac.signal,
       })
-      .catch(() => {})
-
-    fetch(`/api/instances/${encodeURIComponent(session.id)}/messages`, {
-      signal: ac.signal,
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json()
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: UsageInfo | null) => {
+          if (sessionGeneration.current === gen && data) setUsage(data)
+        })
+        .catch(() => {})
+      fetch(`/api/instances/${encodeURIComponent(session.id)}/messages`, {
+        signal: ac.signal,
       })
-      .then((history: HistoryMessage[]) => {
-        if (sessionGeneration.current !== gen) return
-        setMessages(mergeHistoryMessages(history))
-      })
-      .catch((err: Error) => {
-        if (err.name === "AbortError") return
-        if (sessionGeneration.current !== gen) return
-        setMessages([
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: "Failed to load conversation history.",
-          },
-        ])
-      })
-      .finally(() => {
-        if (sessionGeneration.current === gen) setLoadingHistory(false)
-      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          return res.json()
+        })
+        .then((history: HistoryMessage[]) => {
+          if (sessionGeneration.current !== gen) return
+          setMessages(mergeHistoryMessages(history))
+        })
+        .catch((err: Error) => {
+          if (err.name === "AbortError") return
+          if (sessionGeneration.current !== gen) return
+          setMessages([
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: "Failed to load conversation history.",
+            },
+          ])
+        })
+        .finally(() => {
+          if (sessionGeneration.current === gen) setLoadingHistory(false)
+        })
+    }
 
     setOnMessage((msg: ChatWireMessage) => {
       if (sessionGeneration.current !== gen) return
@@ -603,6 +713,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
       toast.error("Failed to delete session")
       return
     }
+    sessionCache.current.delete(session.id)
     onSessionsChanged()
   }
 
@@ -709,45 +820,12 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           )}
         </div>
       ) : (
-        <ChatContainerRoot className="relative flex-1">
+        <ChatContainerRoot ref={chatContainerRef} className="relative flex-1">
           <ChatContainerContent className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
             {messages.map((msg) => (
               <div key={msg.id}>
-                {msg.role === "user" && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] space-y-2">
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {msg.attachments.map((att, i) =>
-                            isImageType(att.media_type) && att.data ? (
-                              <img
-                                key={i}
-                                src={`data:${att.media_type};base64,${att.data}`}
-                                alt={att.filename}
-                                className="max-h-48 max-w-full rounded-lg object-contain"
-                              />
-                            ) : (
-                              <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                                <IconFileText className="h-3 w-3" />
-                                {att.filename}
-                              </div>
-                            )
-                          )}
-                        </div>
-                      )}
-                      {msg.content && (
-                        <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm">
-                          {msg.content}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {msg.role === "assistant" && (
-                  <AssistantMessage message={msg} />
-                )}
-
+                {msg.role === "user" && <UserMessage message={msg} />}
+                {msg.role === "assistant" && <AssistantMessage message={msg} />}
                 {msg.role === "system" && (
                   <div className="flex justify-center">
                     <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
