@@ -297,12 +297,11 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	}
 
 	// Resolve provider and model from control plane config.
-	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel(cfg)
-	cfg.Model = model // ensure the loop sees the resolved model
+	model := m.resolveModel()
 
 	spawnCfg := ipc.SpawnConfig{
 		InstanceID:     instanceID,
@@ -386,6 +385,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
+			Model:          model,
 			Provider:       providerName,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,

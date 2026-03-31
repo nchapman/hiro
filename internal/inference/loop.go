@@ -41,8 +41,9 @@ type LoopConfig struct {
 	SecretEnvFn    func() []string
 	Logger         *slog.Logger
 
+	// Model is the resolved model ID (e.g. "claude-sonnet-4-20250514").
+	Model string
 	// Provider is the resolved provider type (e.g. "anthropic", "openrouter").
-	// This may differ from AgentConfig.Provider when the agent uses the platform default.
 	Provider string
 
 	// For building local tools — the Loop needs access to the Manager
@@ -71,7 +72,8 @@ type Loop struct {
 	// Tools are stored for agent recreation on model switch.
 	tools []fantasy.AgentTool
 
-	// Per-session reasoning config (protected by updateMu).
+	// Per-session model/reasoning config (protected by updateMu).
+	model           string // resolved model ID (e.g. "claude-sonnet-4-20250514")
 	reasoningEffort string // "" = off, "low"/"medium"/"high"/"max"/"on" = enabled
 	provider        string // current provider type (e.g. "anthropic", "openrouter")
 
@@ -138,6 +140,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	// Store tools for agent recreation on model switch.
 	l.tools = agentTools
+	l.model = cfg.Model
 	l.provider = cfg.Provider
 
 	// Build the initial system prompt.
@@ -159,7 +162,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
 	l.updateMu.Lock()
 	agent := l.agent
-	agentModel := l.agentConfig.Model
+	agentModel := l.model
 	agentProvider := l.provider
 	lm := l.lm
 	providerOpts := l.buildReasoningOptionsLocked()
@@ -389,8 +392,7 @@ func (l *Loop) UpdateModel(lm fantasy.LanguageModel, model, provider string) {
 	l.updateMu.Lock()
 	defer l.updateMu.Unlock()
 	l.lm = lm
-	l.agentConfig.Model = model
-	l.agentConfig.Provider = provider
+	l.model = model
 	l.provider = provider
 	l.agent = fantasy.NewAgent(lm,
 		fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
@@ -418,7 +420,7 @@ func (l *Loop) ReasoningEffort() string {
 func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 	effort := l.reasoningEffort
 	provider := l.provider
-	model := l.agentConfig.Model
+	model := l.model
 
 	switch provider {
 	case "anthropic":

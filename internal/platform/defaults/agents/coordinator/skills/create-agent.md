@@ -19,9 +19,8 @@ You can create new agents at runtime. An agent is a directory under `agents/` wi
 ```markdown
 ---
 name: <agent-name>
-model: claude-sonnet-4-20250514  # Optional — omit to use the server default
-mode: persistent
 description: One-line description of what this agent does.
+tools: [bash, read_file, write_file, edit_file, multiedit_file, list_files, glob, grep, fetch, job_output, job_kill]
 ---
 
 The markdown body is the agent's system prompt — its core operating instructions.
@@ -33,9 +32,8 @@ Write this as direct instructions to the agent about what it is and how it shoul
 | Field | Required | Default | Values |
 |-------|----------|---------|--------|
 | `name` | yes | — | Must match the directory name |
-| `model` | no | inherited from env | Any supported model ID |
-| `mode` | no | `persistent` | `persistent` or `ephemeral` |
 | `description` | no | — | Short description shown in `list_instances` |
+| `tools` | no | *(none)* | List of built-in tools the agent can use |
 
 ### Mode guidance
 

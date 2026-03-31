@@ -1398,7 +1398,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 
 	agentDir := filepath.Join(dir, "agents", "worker")
 	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\nmodel: claude-sonnet-4-20250514\ntools: [bash, read_file]\n---\nWork."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\ntools: [bash, read_file]\n---\nWork."), 0644)
 
 	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "")
 	if err != nil {
@@ -1406,7 +1406,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	}
 
 	// Update agent.md
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\nmodel: claude-opus-4-20250514\ntools: [bash, read_file, grep]\n---\nUpdated work."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\ntools: [bash, read_file, grep]\n---\nUpdated work."), 0644)
 	mgr.pushConfigUpdate("worker")
 
 	// Verify the description was updated in-memory.

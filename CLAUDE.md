@@ -41,7 +41,7 @@ cd web/ui && npm run dev
 |---|---|---|
 | `HIVE_API_KEY` | *(none)* | LLM provider API key (required for agents) |
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
-| `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
+| `HIVE_MODEL` | *(platform default)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
 | `HIVE_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
@@ -108,7 +108,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 
 ```
 agents/<name>/
-  agent.md          # Required. YAML frontmatter (name, model, description, tools) + markdown body (system prompt)
+  agent.md          # Required. YAML frontmatter (name, description, tools) + markdown body (system prompt)
   skills/
     flat-skill.md           # Flat file skill
     dir-skill/

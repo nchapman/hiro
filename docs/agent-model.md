@@ -18,7 +18,7 @@ Users see instances as "agents" — the thing they talk to. The definition is th
 
 ## Definitions
 
-An agent definition is a markdown file with YAML frontmatter. It declares the agent's name, model, tools, and instructions. Definitions are templates — they carry no runtime state.
+An agent definition is a markdown file with YAML frontmatter. It declares the agent's name, tools, and instructions. Definitions are templates — they carry no runtime state.
 
 ```
 agents/researcher/

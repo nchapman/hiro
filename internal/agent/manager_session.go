@@ -210,12 +210,11 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		return "", fmt.Errorf("loading agent %q: %w", inst.info.Name, err)
 	}
 
-	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel(cfg)
-	cfg.Model = model
+	model := m.resolveModel()
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
@@ -281,6 +280,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
+			Model:          model,
 			Provider:       providerName,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
@@ -340,13 +340,13 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		return
 	}
 
-	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider()
 	if err != nil {
 		m.logger.Warn("failed to resolve provider for config push",
 			"agent", agentName, "error", err)
 		return
 	}
-	model := m.resolveModel(cfg)
+	model := m.resolveModel()
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {

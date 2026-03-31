@@ -108,7 +108,6 @@ func TestLoadAgentDir(t *testing.T) {
 	// Write agent.md
 	agentMD := `---
 name: researcher
-model: claude-sonnet-4-20250514
 description: A research agent
 ---
 
@@ -140,9 +139,6 @@ When searching, use multiple sources and cross-reference.`
 
 	if agent.Name != "researcher" {
 		t.Errorf("name = %q, want %q", agent.Name, "researcher")
-	}
-	if agent.Model != "claude-sonnet-4-20250514" {
-		t.Errorf("model = %q, want %q", agent.Model, "claude-sonnet-4-20250514")
 	}
 	if !strings.Contains(agent.Prompt, "research agent") {
 		t.Errorf("prompt should contain system prompt, got %q", agent.Prompt)

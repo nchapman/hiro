@@ -56,7 +56,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 					Description: cfg.Description,
 					ParentID:    dbInst.ParentID,
 					Status:      InstanceStatusStopped,
-					Model:       m.resolveModel(cfg),
+					Model:       m.resolveModel(),
 				},
 			}
 			m.mu.Lock()
