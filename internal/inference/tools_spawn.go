@@ -34,15 +34,15 @@ func (s *ScopedManager) checkDescendant(targetID string) error {
 // --- Spawn tool ---
 
 type spawnInstanceInput struct {
-	Agent  string `json:"agent"  description:"The name of the agent definition to run (matches a directory name under agents/)."`
-	Prompt string `json:"prompt" description:"The task prompt. Required for ephemeral mode. For persistent/coordinator instances, use send_message after creation."`
-	Mode   string `json:"mode"   description:"Instance mode: 'ephemeral' (default) runs the prompt and returns the result; 'persistent' or 'coordinator' creates a long-lived instance and returns its ID." default:"ephemeral"`
-	Node   string `json:"node"   description:"Target node to run on. Omit or use 'home' for the local machine. Use list_nodes to see available nodes."`
+	Agent  string `json:"agent"  description:"Agent definition name (directory under agents/)."`
+	Prompt string `json:"prompt" description:"Task prompt. Required for ephemeral mode."`
+	Mode   string `json:"mode"   description:"'ephemeral' (default), 'persistent', or 'coordinator'." default:"ephemeral"`
+	Node   string `json:"node"   description:"Target node name. Omit for local."`
 }
 
 func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("spawn_instance",
-		"Spawn a new instance from an agent definition. In ephemeral mode (default), runs a prompt and returns the result. In persistent or coordinator mode, creates a long-lived instance and returns its ID.",
+		"Spawn a new agent instance. Ephemeral mode runs a prompt and returns the result. Persistent/coordinator mode creates a long-lived instance.",
 		func(ctx context.Context, input spawnInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -112,7 +112,7 @@ func buildCoordinatorTools(mgr ipc.HostManager, logger *slog.Logger) []fantasy.A
 
 func buildListNodes(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("list_nodes",
-		"List all nodes in the cluster. Shows each node's name, status, capacity, and active worker count. Use node names with spawn_instance to run agents on specific machines.",
+		"List all nodes in the cluster.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			logger.Debug("tool call", "tool", "list_nodes")
 			nodes := mgr.ListNodes()
@@ -137,12 +137,12 @@ func buildListNodes(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool 
 }
 
 type resumeInstanceInput struct {
-	InstanceID string `json:"instance_id" description:"The ID of a stopped instance to resume."`
+	InstanceID string `json:"instance_id" description:"ID of a stopped instance."`
 }
 
 func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("resume_instance",
-		"Resume a stopped instance. Creates a new session within it. Picks up where it left off with its persona and memory.",
+		"Resume a stopped instance with its persona and memory intact.",
 		func(ctx context.Context, input resumeInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
@@ -164,7 +164,7 @@ func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.Agent
 
 func buildListInstances(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("list_instances",
-		"List your direct child instances with their name, mode, and status.",
+		"List your direct child instances.",
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			logger.Debug("tool call", "tool", "list_instances")
 			callerID := callerIDFromContext(ctx)
@@ -186,13 +186,13 @@ func buildListInstances(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentT
 }
 
 type sendMessageInput struct {
-	InstanceID string `json:"instance_id" description:"The ID of the instance to send a message to. Must be one of your child instances."`
-	Message    string `json:"message"     description:"The message to send to the instance."`
+	InstanceID string `json:"instance_id" description:"Child instance ID."`
+	Message    string `json:"message"     description:"The message to send."`
 }
 
 func buildSendMessage(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("send_message",
-		"Send a message to a running child instance and get its response. Blocks until the instance replies.",
+		"Send a message to a running child instance and get its response.",
 		func(ctx context.Context, input sendMessageInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
@@ -217,12 +217,12 @@ func buildSendMessage(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentToo
 }
 
 type stopInstanceInput struct {
-	InstanceID string `json:"instance_id" description:"The ID of the instance to stop. Must be one of your child instances."`
+	InstanceID string `json:"instance_id" description:"Child instance ID."`
 }
 
 func buildStopInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("stop_instance",
-		"Stop an instance and its descendants. Data is preserved — use resume_instance to restart, or delete_instance to remove permanently.",
+		"Stop an instance and its descendants. Data is preserved.",
 		func(ctx context.Context, input stopInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
@@ -243,12 +243,12 @@ func buildStopInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTo
 }
 
 type deleteInstanceInput struct {
-	InstanceID string `json:"instance_id" description:"The ID of the instance to delete. Must be one of your child instances."`
+	InstanceID string `json:"instance_id" description:"Child instance ID."`
 }
 
 func buildDeleteInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("delete_instance",
-		"Permanently delete an instance and its descendants, removing all data. Stops it first if running. Cannot be undone.",
+		"Permanently delete an instance and all its data. Cannot be undone.",
 		func(ctx context.Context, input deleteInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil

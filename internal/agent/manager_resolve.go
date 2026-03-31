@@ -17,7 +17,7 @@ var coordinatorTools = []string{
 
 // persistentTools are injected for persistent and coordinator instances.
 var persistentTools = []string{
-	"memory_read", "memory_write", "todos", "history_search", "history_recall",
+	"todos", "history_search", "history_recall",
 }
 
 // computeEffectiveTools returns the set of built-in tools this instance is

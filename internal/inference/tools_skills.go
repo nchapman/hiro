@@ -15,7 +15,7 @@ import (
 
 func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("use_skill",
-		"Activate a skill to get its full instructions and required formats. You MUST call this before performing any task that matches a skill.",
+		"Load a skill's full instructions. Call before performing a skill-matched task.",
 		func(ctx context.Context, input struct {
 			Name string `json:"name" description:"The name of the skill to activate."`
 		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

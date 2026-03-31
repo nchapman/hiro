@@ -13,7 +13,7 @@ import (
 func buildTodoTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		fantasy.NewAgentTool("todos",
-			"Replace your task list. Send the full updated list — add, remove, reorder, and change statuses in one call. Use for multi-step work. Tasks appear in your system prompt.",
+			"Replace your task list. Send the complete list each time — omitted items are removed.",
 			func(ctx context.Context, input struct {
 				Todos []struct {
 					Content    string `json:"content"     description:"What needs to be done."`

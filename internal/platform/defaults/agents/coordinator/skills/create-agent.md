@@ -45,8 +45,8 @@ Write this as direct instructions to the agent about what it is and how it shoul
 
 These files live in the instance directory, not the agent definition. The agent manages them at runtime:
 
-- **`persona.md`** — who this instance is. Identity, tone, behavioral traits. Seeded by the operator or written by the agent via `persona_write`. Appears in the system prompt under `## Persona`.
-- **`memory.md`** — what this instance knows. Facts, context, decisions. Written by the agent via `memory_write`. Appears in the system prompt under `## Memories`.
+- **`persona.md`** — who this instance is. Identity, tone, behavioral traits. Read and update using `read_file` and `edit_file`. Appears in the system prompt under `## Persona`.
+- **`memory.md`** — what this instance knows. Facts, context, decisions. Read and update using `read_file` and `edit_file`. Appears in the system prompt under `## Memories`.
 
 ## After creating an agent
 

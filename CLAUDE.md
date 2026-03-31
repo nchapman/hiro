@@ -101,7 +101,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 - **Sessions** are task-scoped work within an instance. Session-level state includes `todos.yaml`, `scratch/`, and `tmp/`. A new session is created on `/clear`.
 - **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `spawn_instance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
-- **Persistent instances** get extra tools: `persona_read/write`, `memory_read/write`, `todos`, `history_search/recall`.
+- **Persistent instances** get extra tools: `todos`, `history_search/recall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory).
 - **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
 
 ### Agent Definition Structure
@@ -192,7 +192,7 @@ Implementations in `internal/agent/tools/*.go`. These run in worker processes an
 
 ### Spawn Tool (all agents)
 
-All agents get `spawn_instance`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/local_tools.go`.
+All agents get `spawn_instance`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/tools_spawn.go`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
@@ -200,7 +200,7 @@ All agents get `spawn_instance`. The `mode` parameter controls behavior — non-
 
 ### Coordinator Tools (coordinator mode only)
 
-Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mode instances. Scoped to descendants via `ScopedManager.checkDescendant()`.
+Defined in `internal/inference/tools_spawn.go`. Only injected for coordinator-mode instances. Scoped to descendants via `ScopedManager.checkDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
@@ -212,14 +212,10 @@ Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mo
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
-Defined in `internal/inference/tools_persona.go`, `tools_memory.go`, `tools_todos.go`, `tools_history.go`. Run in the control plane process (not in workers).
+Defined in `internal/inference/tools_todos.go`, `tools_history.go`. Run in the control plane process (not in workers). Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` are seeded at instance creation and included in the system prompt).
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
-| `persona_read` | Read `persona.md` from instance dir | *(none)* | Returns empty if no persona defined yet |
-| `persona_write` | Overwrite `persona.md` | `content` | Full replacement; 0600 perms; visible in system prompt next turn |
-| `memory_read` | Read `memory.md` from instance dir | *(none)* | Returns empty if no memories yet |
-| `memory_write` | Overwrite `memory.md` | `content` | Full replacement — read first to avoid data loss; 0600 perms; visible in system prompt next turn |
 | `todos` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
 | `history_search` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
 | `history_recall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
@@ -233,8 +229,8 @@ Defined in `internal/inference/tools_persona.go`, `tools_memory.go`, `tools_todo
 ### Tool Totals by Agent Type
 
 - **Ephemeral instances:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
-- **Persistent instances:** 11 built-in + 1 spawn + 2 persona + 2 memory + 1 todos + 2 history = 19 tools (+ 1 if skills)
-- **Coordinator instances:** 11 built-in + 1 spawn + 5 coordinator + 2 persona + 2 memory + 1 todos + 2 history = 24 tools (+ 1 if skills)
+- **Persistent instances:** 11 built-in + 1 spawn + 1 todos + 2 history = 15 tools (+ 1 if skills)
+- **Coordinator instances:** 11 built-in + 1 spawn + 5 coordinator + 1 todos + 2 history = 20 tools (+ 1 if skills)
 
 ## Coordinator Agent
 

@@ -17,8 +17,7 @@ func TestBuildSystemPrompt_MinimalConfig(t *testing.T) {
 	if !strings.Contains(got, "## Security") {
 		t.Error("expected security section")
 	}
-	// Sections that should NOT appear without data.
-	for _, section := range []string{"## Persona", "## Memories", "## Current Tasks", "## Available Secrets", "## Skills"} {
+	for _, section := range []string{"## Persona", "## Memories", "## Current Tasks", "## Secrets", "## Skills"} {
 		if strings.Contains(got, section) {
 			t.Errorf("unexpected section %q in minimal prompt", section)
 		}
@@ -38,7 +37,7 @@ func TestBuildSystemPrompt_AllSections(t *testing.T) {
 		"## Persona", "Friendly and precise.",
 		"## Memories", "Remember X.",
 		"## Current Tasks", "Do Y",
-		"## Available Secrets", "`API_KEY`", "`DB_PASS`",
+		"## Secrets", "`API_KEY`", "`DB_PASS`",
 		"Main instructions.",
 		"## Skills", "**deploy**", "Deploy to production.",
 		"## Security",
@@ -56,7 +55,6 @@ func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 	}
 	got := buildSystemPrompt(cfg, "PERSONA", "MEMORIES", "TODOS", []string{"SECRET"})
 
-	// Verify ordering: memories < todos < secrets < instructions < persona < skills < security.
 	order := []string{
 		"MEMORIES",
 		"TODOS",
@@ -82,7 +80,7 @@ func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 func TestBuildSystemPrompt_NoSecretsSection_WhenEmpty(t *testing.T) {
 	cfg := config.AgentConfig{Prompt: "test"}
 	got := buildSystemPrompt(cfg, "", "", "", []string{})
-	if strings.Contains(got, "## Available Secrets") {
+	if strings.Contains(got, "## Secrets") {
 		t.Error("secrets section should not appear with empty slice")
 	}
 }

@@ -553,10 +553,6 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	var localTools []fantasy.AgentTool
 
-	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
-		localTools = append(localTools, buildPersonaTools(cfg.InstanceDir)...)
-		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
-	}
 	if cfg.Mode.IsPersistent() && cfg.SessionDir != "" {
 		localTools = append(localTools, buildTodoTools(cfg.SessionDir)...)
 	}

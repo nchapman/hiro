@@ -210,6 +210,18 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		return "", fmt.Errorf("creating instance dir: %w", err)
 	}
 
+	// Seed instance-level state files so agents can discover them.
+	if dirIsNew {
+		for _, name := range []string{"persona.md", "memory.md"} {
+			path := filepath.Join(instDir, name)
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				if err := os.WriteFile(path, nil, 0600); err != nil {
+					return "", fmt.Errorf("creating %s: %w", name, err)
+				}
+			}
+		}
+	}
+
 	// Create session directory with session-level state.
 	sessDir := m.instanceSessionDir(instanceID, sessionID)
 	if err := os.MkdirAll(sessDir, 0700); err != nil {

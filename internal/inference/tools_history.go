@@ -13,7 +13,7 @@ import (
 func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		fantasy.NewAgentTool("history_search",
-			"Search your conversation history for past messages and summaries.",
+			"Search your conversation history.",
 			func(ctx context.Context, input struct {
 				Query string `json:"query" description:"Search query (full-text search)."`
 				Scope string `json:"scope" description:"Where to search: 'messages', 'summaries', or 'all'. Default: 'all'." default:"all"`
@@ -52,7 +52,7 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 			},
 		),
 		fantasy.NewAgentTool("history_recall",
-			"Expand a conversation summary to see its full content and the lower-level summaries or messages it was created from.",
+			"Expand a conversation summary to see its source messages or child summaries.",
 			func(ctx context.Context, input struct {
 				SummaryID string `json:"summary_id" description:"The ID of a summary to expand (e.g. 'sum_abc123')."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

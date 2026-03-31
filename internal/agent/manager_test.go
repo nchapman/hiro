@@ -1150,8 +1150,7 @@ func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
 	if !allowed["spawn_instance"] {
 		t.Error("persistent agents should get spawn_instance")
 	}
-	if !allowed["memory_read"] || !allowed["memory_write"] || !allowed["todos"] ||
-		!allowed["history_search"] || !allowed["history_recall"] {
+	if !allowed["todos"] || !allowed["history_search"] || !allowed["history_recall"] {
 		t.Error("persistent agents should get persistent tools")
 	}
 	if allowed["resume_instance"] || allowed["stop_instance"] || allowed["send_message"] || allowed["list_instances"] {
@@ -1170,8 +1169,7 @@ func TestBuildAllowedToolsMap_CoordinatorMode(t *testing.T) {
 	if !allowed["resume_instance"] || !allowed["stop_instance"] || !allowed["delete_instance"] || !allowed["send_message"] || !allowed["list_instances"] {
 		t.Error("coordinators should get coordinator tools")
 	}
-	if !allowed["memory_read"] || !allowed["memory_write"] || !allowed["todos"] ||
-		!allowed["history_search"] || !allowed["history_recall"] {
+	if !allowed["todos"] || !allowed["history_search"] || !allowed["history_recall"] {
 		t.Error("coordinators should get persistent tools")
 	}
 }
@@ -1241,7 +1239,6 @@ func TestManager_CoordinatorTools_InSpawnConfig(t *testing.T) {
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
-model: fake-model
 tools: [bash]
 ---
 Coordinator.`)
@@ -1259,8 +1256,8 @@ Coordinator.`)
 	if !cfg.EffectiveTools["spawn_instance"] {
 		t.Error("coordinator should have spawn_instance in effective tools")
 	}
-	if !cfg.EffectiveTools["memory_read"] {
-		t.Error("coordinator should have memory_read in effective tools")
+	if !cfg.EffectiveTools["todos"] {
+		t.Error("coordinator should have todos in effective tools")
 	}
 }
 
