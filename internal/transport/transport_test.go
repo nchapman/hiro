@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/hub"
+	"github.com/nchapman/hiro/internal/hub"
 )
 
 func TestWorkerRegistration(t *testing.T) {

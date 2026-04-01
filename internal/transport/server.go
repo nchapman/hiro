@@ -14,7 +14,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/google/uuid"
 
-	"github.com/nchapman/hivebot/internal/hub"
+	"github.com/nchapman/hiro/internal/hub"
 )
 
 const (

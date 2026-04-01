@@ -6,7 +6,7 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 // ToolExecutorFromTools creates an ipc.ToolExecutor that dispatches tool calls

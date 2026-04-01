@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 func TestFormatJobNotification_Completed(t *testing.T) {

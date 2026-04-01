@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 // NodeID is re-exported from ipc for use within the cluster package.

@@ -1,4 +1,4 @@
-# Hive platform shell configuration
+# Hiro platform shell configuration
 # Sourced by /etc/bash.bashrc for all users (root + agent UIDs)
 
 # --- History ---
@@ -69,8 +69,8 @@ if command -v starship &>/dev/null; then
 fi
 
 # --- Welcome banner (interactive login shells only) ---
-if [[ $- == *i* ]] && [[ -z "$HIVE_BANNER_SHOWN" ]]; then
-    export HIVE_BANNER_SHOWN=1
-    echo -e "\033[1;33m⬡ hive\033[0m terminal"
+if [[ $- == *i* ]] && [[ -z "$HIRO_BANNER_SHOWN" ]]; then
+    export HIRO_BANNER_SHOWN=1
+    echo -e "\033[1;33m⬡ hiro\033[0m terminal"
     echo ""
 fi

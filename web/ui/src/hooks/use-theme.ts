@@ -32,7 +32,7 @@ function resolve(theme: Theme): "light" | "dark" {
 
 export function useThemeProvider() {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem("hive-theme")
+    const stored = localStorage.getItem("hiro-theme")
     return (stored as Theme) ?? "system"
   })
 
@@ -48,7 +48,7 @@ export function useThemeProvider() {
 
   const setTheme = useCallback(
     (t: Theme) => {
-      localStorage.setItem("hive-theme", t)
+      localStorage.setItem("hiro-theme", t)
       setThemeState(t)
       apply(t)
     },

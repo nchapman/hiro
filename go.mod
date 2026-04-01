@@ -1,4 +1,4 @@
-module github.com/nchapman/hivebot
+module github.com/nchapman/hiro
 
 go 1.26.1
 

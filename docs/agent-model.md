@@ -1,10 +1,10 @@
 # Agent Model
 
-This document describes Hive's conceptual model for agents, their lifecycle, and how state is organized. This is the **target architecture** — the current codebase uses a flat session model that will be migrated to this design.
+This document describes Hiro's conceptual model for agents, their lifecycle, and how state is organized. This is the **target architecture** — the current codebase uses a flat session model that will be migrated to this design.
 
 ## Overview
 
-Hive uses a three-tier model:
+Hiro uses a three-tier model:
 
 ```
 Definition → Instance → Session

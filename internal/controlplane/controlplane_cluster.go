@@ -6,9 +6,9 @@ import (
 )
 
 // ClusterMode returns the cluster mode: "leader" (default) or "worker".
-// HIVE_MODE env var takes precedence over config.yaml.
+// HIRO_MODE env var takes precedence over config.yaml.
 func (cp *ControlPlane) ClusterMode() string {
-	if envMode := os.Getenv("HIVE_MODE"); envMode != "" {
+	if envMode := os.Getenv("HIRO_MODE"); envMode != "" {
 		return envMode
 	}
 	cp.mu.RLock()
@@ -41,9 +41,9 @@ func (cp *ControlPlane) ClusterNodeName() string {
 }
 
 // ClusterTrackerURL returns the tracker URL for discovery.
-// HIVE_TRACKER_URL env var takes precedence over config.yaml.
+// HIRO_TRACKER_URL env var takes precedence over config.yaml.
 func (cp *ControlPlane) ClusterTrackerURL() string {
-	if envURL := os.Getenv("HIVE_TRACKER_URL"); envURL != "" {
+	if envURL := os.Getenv("HIRO_TRACKER_URL"); envURL != "" {
 		return envURL
 	}
 	cp.mu.RLock()
@@ -52,9 +52,9 @@ func (cp *ControlPlane) ClusterTrackerURL() string {
 }
 
 // ClusterSwarmCode returns the swarm code for tracker discovery.
-// HIVE_SWARM_CODE env var takes precedence over config.yaml.
+// HIRO_SWARM_CODE env var takes precedence over config.yaml.
 func (cp *ControlPlane) ClusterSwarmCode() string {
-	if v := os.Getenv("HIVE_SWARM_CODE"); v != "" {
+	if v := os.Getenv("HIRO_SWARM_CODE"); v != "" {
 		return v
 	}
 	cp.mu.RLock()

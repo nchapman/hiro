@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/uidpool"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/uidpool"
 )
 
 // agentCmd creates an exec.Cmd that runs as an agent user with the
@@ -49,9 +49,9 @@ func requireIsolation(t *testing.T) (uid, gid uint32) {
 	if os.Getuid() != 0 {
 		t.Skip("must run as root")
 	}
-	grp, err := user.LookupGroup("hive-agents")
+	grp, err := user.LookupGroup("hiro-agents")
 	if err != nil {
-		t.Skip("hive-agents group not found")
+		t.Skip("hiro-agents group not found")
 	}
 	g, _ := strconv.ParseUint(grp.Gid, 10, 32)
 	return uidpool.DefaultBaseUID, uint32(g)
@@ -62,7 +62,7 @@ func requireIsolation(t *testing.T) (uid, gid uint32) {
 // agent UID (t.TempDir creates root-owned parent dirs that block traversal).
 func agentSessionDir(t *testing.T, uid, gid uint32) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "hive-test-*")
+	dir, err := os.MkdirTemp("/tmp", "hiro-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestIsolation_NoEnvLeak(t *testing.T) {
 
 	allowed := map[string]bool{
 		"PATH": true, "HOME": true, "LANG": true, "LC_ALL": true,
-		"HIVE_API_KEY": true, "MISE_DATA_DIR": true, "MISE_CONFIG_DIR": true,
+		"HIRO_API_KEY": true, "MISE_DATA_DIR": true, "MISE_CONFIG_DIR": true,
 		"MISE_CACHE_DIR": true, "MISE_GLOBAL_CONFIG_FILE": true,
 		// PWD is set by the kernel on execve.
 		"PWD": true,

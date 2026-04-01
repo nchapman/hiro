@@ -17,7 +17,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // testLM creates a real language model from .env for online tests.
@@ -38,23 +38,23 @@ func testLM(t *testing.T) fantasy.LanguageModel {
 		}
 	}
 
-	provider := os.Getenv("HIVE_PROVIDER")
-	apiKey := os.Getenv("HIVE_API_KEY")
-	model := os.Getenv("HIVE_MODEL")
+	provider := os.Getenv("HIRO_PROVIDER")
+	apiKey := os.Getenv("HIRO_API_KEY")
+	model := os.Getenv("HIRO_MODEL")
 
-	// EVAL_MODEL overrides HIVE_MODEL, allowing parallel eval runs.
+	// EVAL_MODEL overrides HIRO_MODEL, allowing parallel eval runs.
 	if em := os.Getenv("EVAL_MODEL"); em != "" {
 		model = em
 	}
 
 	if apiKey == "" {
-		t.Skip("HIVE_API_KEY not set — skipping online test")
+		t.Skip("HIRO_API_KEY not set — skipping online test")
 	}
 	if provider == "" {
 		provider = "openrouter"
 	}
 	if model == "" {
-		t.Skip("HIVE_MODEL not set — skipping online test")
+		t.Skip("HIRO_MODEL not set — skipping online test")
 	}
 
 	t.Logf("Using model: %s (provider: %s)", model, provider)
@@ -86,7 +86,7 @@ func testModelName(t *testing.T) string {
 	}
 	model := os.Getenv("EVAL_MODEL")
 	if model == "" {
-		model = os.Getenv("HIVE_MODEL")
+		model = os.Getenv("HIRO_MODEL")
 	}
 	if model == "" {
 		model = "unknown"

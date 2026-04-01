@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"

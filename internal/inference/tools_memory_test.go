@@ -9,7 +9,7 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hiro/internal/config"
 )
 
 func runMemoryTool(t *testing.T, tools []fantasy.AgentTool, name, input string) fantasy.ToolResponse {

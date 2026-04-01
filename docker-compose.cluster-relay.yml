@@ -14,14 +14,14 @@ services:
     ports:
       - "0:8080"  # HTTP API for test harness (host access only)
     environment:
-      - HIVE_ADDR=:8080
-      - HIVE_CLUSTER_ADDR=:8081
-      - HIVE_ROOT=/hive
-      - HIVE_TRACKER_URL=https://discover.hellohiro.ai
-      - HIVE_SWARM_CODE=${HIVE_SWARM_CODE}
+      - HIRO_ADDR=:8080
+      - HIRO_CLUSTER_ADDR=:8081
+      - HIRO_ROOT=/hiro
+      - HIRO_TRACKER_URL=https://discover.hellohiro.ai
+      - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
     volumes:
-      - leader-hive:/hive
-      - ./tests/e2e_cluster/leader-config.yaml:/hive/config.yaml
+      - leader-hiro:/hiro
+      - ./tests/e2e_cluster/leader-config.yaml:/hiro/config.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 5s
@@ -37,19 +37,19 @@ services:
       leader:
         condition: service_healthy
     environment:
-      - HIVE_ROOT=/hive
-      - HIVE_MODE=worker
-      - HIVE_TRACKER_URL=https://discover.hellohiro.ai
-      - HIVE_SWARM_CODE=${HIVE_SWARM_CODE}
-      - HIVE_JOIN_TOKEN=${HIVE_JOIN_TOKEN}
-      # No HIVE_LEADER — discovers via tracker, connects via relay
+      - HIRO_ROOT=/hiro
+      - HIRO_MODE=worker
+      - HIRO_TRACKER_URL=https://discover.hellohiro.ai
+      - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
+      - HIRO_JOIN_TOKEN=${HIRO_JOIN_TOKEN}
+      # No HIRO_LEADER — discovers via tracker, connects via relay
     volumes:
-      - worker-hive:/hive
+      - worker-hiro:/hiro
 
 networks:
   leader-net:
   worker-net:
 
 volumes:
-  leader-hive:
-  worker-hive:
+  leader-hiro:
+  worker-hiro:

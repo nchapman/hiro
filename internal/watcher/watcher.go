@@ -1,4 +1,4 @@
-// Package watcher provides a recursive filesystem watcher for HIVE_ROOT.
+// Package watcher provides a recursive filesystem watcher for HIRO_ROOT.
 // Components subscribe with glob patterns and receive debounced change events.
 package watcher
 

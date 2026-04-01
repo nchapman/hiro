@@ -16,7 +16,7 @@ COPY . .
 # Build Go binary
 FROM go-base AS build
 COPY --from=web /app/web/ui/dist ./web/ui/dist
-RUN CGO_ENABLED=0 go build -o /hive ./cmd/hive
+RUN CGO_ENABLED=0 go build -o /hiro ./cmd/hiro
 
 # Test runner — docker compose run --rm --build test
 FROM go-base AS test
@@ -25,11 +25,11 @@ FROM go-base AS test
 RUN mkdir -p web/ui/dist && echo '<!doctype html>' > web/ui/dist/index.html
 
 # Create agent user pool and groups for isolation tests.
-RUN groupadd -g 10000 hive-agents \
-    && groupadd -g 10001 hive-coordinators \
+RUN groupadd -g 10000 hiro-agents \
+    && groupadd -g 10001 hiro-coordinators \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
-        useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
+        useradd -r -u $uid -g hiro-agents -M -d /nonexistent -s /bin/bash "hiro-agent-$i"; \
     done
 
 # Install mise — same env vars as runtime stage.
@@ -41,12 +41,12 @@ ENV MISE_INSTALL_PATH=/usr/local/bin/mise
 ENV PATH="/opt/mise/shims:${PATH}"
 RUN curl -fsSL https://mise.run | sh \
     && mise use -g node@24 python@3.12 \
-    && chgrp -R hive-agents /opt/mise \
+    && chgrp -R hiro-agents /opt/mise \
     && chmod -R g+rX /opt/mise \
     && chmod -R g-w /opt/mise
 
 # Pre-build the binary so tests that spawn agent processes have it available.
-RUN go build -o /usr/local/bin/hive ./cmd/hive
+RUN go build -o /usr/local/bin/hiro ./cmd/hiro
 
 CMD ["go", "test", "./...", "-v", "-count=1"]
 
@@ -79,19 +79,19 @@ ENV LC_ALL=en_US.UTF-8
 
 # Create agent user pool for per-agent Unix user isolation.
 # Each agent process runs as a dedicated user from this pool.
-# hive-coordinators grants write access to agents/ and skills/ directories.
-RUN groupadd -g 10000 hive-agents \
-    && groupadd -g 10001 hive-coordinators \
+# hiro-coordinators grants write access to agents/ and skills/ directories.
+RUN groupadd -g 10000 hiro-agents \
+    && groupadd -g 10001 hiro-coordinators \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
-        useradd -r -u $uid -g hive-agents -M -d /nonexistent -s /bin/bash "hive-agent-$i"; \
+        useradd -r -u $uid -g hiro-agents -M -d /nonexistent -s /bin/bash "hiro-agent-$i"; \
     done
 
 # Platform root uses setgid (2775) so files created by any agent inherit the
-# hive-agents group and are group-writable for collaborative access.
+# hiro-agents group and are group-writable for collaborative access.
 # Subdirectory ownership (agents/, skills/, workspace/) is set by platform.Init()
-# at runtime — hive-coordinators for agents/ and skills/, hive-agents for workspace/.
-RUN mkdir -p /hive && chown root:hive-agents /hive && chmod 2775 /hive
+# at runtime — hiro-coordinators for agents/ and skills/, hiro-agents for workspace/.
+RUN mkdir -p /hiro && chown root:hiro-agents /hiro && chmod 2775 /hiro
 
 # Install mise (tool version manager). All mise state lives under /opt/mise —
 # binary, tool installs, config, cache, and shims — so every user (root and
@@ -127,15 +127,15 @@ RUN mise use -g eza@latest bat@latest fd@latest fzf@latest zoxide@latest delta@l
 # Make mise installations readable (but not writable) by agent users.
 # Root owns everything — agents cannot inject malicious shims or replace binaries.
 # Agents that need to install tools at runtime should use per-instance directories.
-RUN chgrp -R hive-agents /opt/mise \
+RUN chgrp -R hiro-agents /opt/mise \
     && chmod -R g+rX /opt/mise \
     && chmod -R g-w /opt/mise
 
 # Shell configuration — polished terminal experience for all users.
-COPY docker/shell/bashrc /etc/hive.bashrc
+COPY docker/shell/bashrc /etc/hiro.bashrc
 COPY docker/shell/starship.toml /etc/starship.toml
 ENV STARSHIP_CONFIG=/etc/starship.toml
-RUN echo 'source /etc/hive.bashrc' >> /etc/bash.bashrc
+RUN echo 'source /etc/hiro.bashrc' >> /etc/bash.bashrc
 
 # Git defaults for a pleasant experience.
 RUN git config --system init.defaultBranch main \
@@ -146,9 +146,9 @@ RUN git config --system init.defaultBranch main \
     && git config --system delta.line-numbers true \
     && git config --system merge.conflictstyle zdiff3
 
-WORKDIR /hive
+WORKDIR /hiro
 
-COPY --from=build /hive /usr/local/bin/hive
+COPY --from=build /hiro /usr/local/bin/hiro
 
 # Control plane runs as root (required for per-agent UID switching).
-ENTRYPOINT ["hive"]
+ENTRYPOINT ["hiro"]

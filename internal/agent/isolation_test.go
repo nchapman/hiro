@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/uidpool"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/uidpool"
 )
 
 // isolationWorker extends testWorker to verify it runs as the expected UID.
@@ -47,9 +47,9 @@ func isolationWorkerFactory(response string) (WorkerFactory, *[]*isolationWorker
 func setupIsolationManager(t *testing.T) (*Manager, string, *[]*isolationWorker) {
 	t.Helper()
 
-	grp, err := user.LookupGroup("hive-agents")
+	grp, err := user.LookupGroup("hiro-agents")
 	if err != nil {
-		t.Skip("hive-agents group not found — run in Docker with user pool")
+		t.Skip("hiro-agents group not found — run in Docker with user pool")
 	}
 	gid, _ := strconv.ParseUint(grp.Gid, 10, 32)
 
@@ -161,9 +161,9 @@ func TestIsolation_UIDReleasedOnStop(t *testing.T) {
 }
 
 func TestIsolation_PoolExhaustion(t *testing.T) {
-	grp, err := user.LookupGroup("hive-agents")
+	grp, err := user.LookupGroup("hiro-agents")
 	if err != nil {
-		t.Skip("hive-agents group not found")
+		t.Skip("hiro-agents group not found")
 	}
 	gid, _ := strconv.ParseUint(grp.Gid, 10, 32)
 
@@ -263,9 +263,9 @@ func fileUID(info os.FileInfo) (fileOwnership, bool) {
 // with mode 0600 is not readable by agent users. The test creates the file as
 // root, then attempts to read it as an agent UID using a subprocess.
 func TestIsolation_ConfigYAMLProtected(t *testing.T) {
-	grp, err := user.LookupGroup("hive-agents")
+	grp, err := user.LookupGroup("hiro-agents")
 	if err != nil {
-		t.Skip("hive-agents group not found")
+		t.Skip("hiro-agents group not found")
 	}
 	gid, _ := strconv.ParseUint(grp.Gid, 10, 32)
 

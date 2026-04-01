@@ -5,8 +5,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/ipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 )
 

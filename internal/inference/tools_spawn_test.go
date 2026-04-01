@@ -9,7 +9,7 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 // fakeHostManager implements ipc.HostManager with controllable behavior.

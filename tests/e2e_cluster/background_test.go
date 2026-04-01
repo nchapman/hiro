@@ -25,7 +25,7 @@ You are a test agent running on a remote node. Be concise.
 When you receive a task-notification about a completed background task, report the task ID and status.`
 
 	apiWriteFile(t, "agents/remote-bg-agent/agent.md", agentMD)
-	waitForWorkerFile(t, "/hive/agents/remote-bg-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/hiro/agents/remote-bg-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()

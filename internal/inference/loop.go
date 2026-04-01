@@ -15,10 +15,10 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openrouter"
 
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/models"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/models"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // LoopConfig holds all configuration needed to create a Loop.
@@ -63,7 +63,7 @@ type Loop struct {
 	instanceID     string
 	sessionID      string // immutable after construction; safe to read without lock
 	mode           config.AgentMode
-	workingDir     string // platform root (e.g. /hive)
+	workingDir     string // platform root (e.g. /hiro)
 	instanceDir    string // instance-level state: persona.md, memory.md
 	sessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	agentDefDir    string

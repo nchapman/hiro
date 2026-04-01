@@ -1,14 +1,14 @@
-# E2E test overlay — run with: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up hive-e2e
+# E2E test overlay — run with: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up hiro-e2e
 services:
-  hive-e2e:
+  hiro-e2e:
     build: .
     ports:
       - "0:8080" # random host port to avoid conflicts
     environment:
-      - HIVE_ADDR=:8080
-      - HIVE_ROOT=/hive
+      - HIRO_ADDR=:8080
+      - HIRO_ROOT=/hiro
     volumes:
-      - e2e-hive:/hive
+      - e2e-hiro:/hiro
     init: true # clean up zombie agent processes
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
@@ -17,4 +17,4 @@ services:
       start_period: 10s
 
 volumes:
-  e2e-hive:
+  e2e-hiro:

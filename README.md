@@ -1,4 +1,4 @@
-# Hive
+# Hiro
 
 A distributed AI agent platform. A single Go binary serves an HTTP API, WebSocket chat, and a React dashboard. Agents are defined as markdown files and run agentic loops that can spawn and manage child agents.
 
@@ -7,11 +7,11 @@ A distributed AI agent platform. A single Go binary serves an HTTP API, WebSocke
 ### Docker (recommended)
 
 ```bash
-echo "HIVE_API_KEY=your-api-key" > .env
+echo "HIRO_API_KEY=your-api-key" > .env
 docker compose up
 ```
 
-The dashboard is available at `http://localhost:8080`. Omit `HIVE_API_KEY` to run the dashboard without agents.
+The dashboard is available at `http://localhost:8080`. Omit `HIRO_API_KEY` to run the dashboard without agents.
 
 Agent state is stored in a Docker volume — it survives container restarts but `docker compose down -v` will destroy it. The port is bound to localhost only; use a reverse proxy to expose it remotely.
 
@@ -21,7 +21,7 @@ Requires Go 1.26.1+ and Node.js 24+.
 
 ```bash
 make build
-HIVE_API_KEY=your-api-key ./hive
+HIRO_API_KEY=your-api-key ./hiro
 ```
 
 ## Configuration
@@ -30,12 +30,12 @@ All configuration is via environment variables. A `.env` file is loaded automati
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HIVE_API_KEY` | *(none)* | LLM provider API key (required for agents) |
-| `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
-| `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
-| `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_ROOT` | `.` | Platform root containing `agents/`, `sessions/`, `skills/`, `workspace/` |
-| `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
+| `HIRO_API_KEY` | *(none)* | LLM provider API key (required for agents) |
+| `HIRO_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
+| `HIRO_MODEL` | *(from agent config)* | Override model for all agents |
+| `HIRO_ADDR` | `:8080` | HTTP listen address |
+| `HIRO_ROOT` | `.` | Platform root containing `agents/`, `sessions/`, `skills/`, `workspace/` |
+| `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 ## How It Works
 
@@ -87,10 +87,10 @@ Agents can create new agent and skill definitions at runtime using their file to
 
 ### Platform Root
 
-On first boot, Hive initializes the platform root with a default coordinator agent. The coordinator manages conversations, spawns subagents, and can delegate tasks to remote swarm workers. The directory structure:
+On first boot, Hiro initializes the platform root with a default coordinator agent. The coordinator manages conversations, spawns subagents, and can delegate tasks to remote swarm workers. The directory structure:
 
 ```
-/hive/
+/hiro/
   agents/       # Agent definitions (coordinator-writable)
   skills/       # Shared skills (coordinator-writable)
   sessions/     # Per-agent runtime state (history, memory, todos)
@@ -133,7 +133,7 @@ The container is the primary security boundary. Inside it, each agent runs as a 
 - **Collaborative workspace**: The shared `workspace/` directory uses setgid (`2775`) so all agents can read and write collaborative files via group membership. Agent definitions (`agents/`, `skills/`) are writable only by coordinator-mode agents.
 - **Control plane as root**: The control plane runs as root for UID switching; agents run as unprivileged users.
 
-Isolation is auto-detected at startup (enabled when the `hive-agents` group exists). Outside Docker, all processes run as the same user.
+Isolation is auto-detected at startup (enabled when the `hiro-agents` group exists). Outside Docker, all processes run as the same user.
 
 ## License
 

@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 	cfg := ipc.SpawnConfig{
-		SessionDir: "/hive/sessions/abc-123",
+		SessionDir: "/hiro/sessions/abc-123",
 	}
 	getenv := func(key string) string {
 		if key == "PATH" {
@@ -23,7 +23,7 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 
 	expect := map[string]string{
 		"PATH":   "/opt/mise/shims:/usr/local/bin:/usr/bin",
-		"HOME":   "/hive/sessions/abc-123",
+		"HOME":   "/hiro/sessions/abc-123",
 		"LANG":   "en_US.UTF-8",
 		"LC_ALL": "en_US.UTF-8",
 	}
@@ -40,11 +40,11 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 }
 
 func TestBuildIsolatedEnv_HomeIsSessionDir(t *testing.T) {
-	cfg := ipc.SpawnConfig{SessionDir: "/hive/sessions/agent-xyz"}
+	cfg := ipc.SpawnConfig{SessionDir: "/hiro/sessions/agent-xyz"}
 	env := buildIsolatedEnv(cfg, func(string) string { return "" })
 	envMap := parseEnv(env)
 
-	if envMap["HOME"] != "/hive/sessions/agent-xyz" {
+	if envMap["HOME"] != "/hiro/sessions/agent-xyz" {
 		t.Errorf("HOME = %q, want session dir", envMap["HOME"])
 	}
 }

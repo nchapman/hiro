@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/ipc"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
-	"github.com/nchapman/hivebot/internal/uidpool"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/ipc"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/uidpool"
 )
 
 // openTestPDB opens a platform DB in the given directory for testing.
@@ -22,7 +22,7 @@ func openTestPDB(t *testing.T, dir string) *platformdb.DB {
 	if err := os.MkdirAll(filepath.Join(dir, "db"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	pdb, err := platformdb.Open(filepath.Join(dir, "db", "hive.db"))
+	pdb, err := platformdb.Open(filepath.Join(dir, "db", "hiro.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

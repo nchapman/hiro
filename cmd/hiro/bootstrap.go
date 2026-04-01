@@ -13,10 +13,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/cluster"
-	"github.com/nchapman/hivebot/internal/controlplane"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/controlplane"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // clusterState bundles all cluster infrastructure created at startup.
@@ -50,7 +50,7 @@ func setupNodeIdentity(rootDir string, logger *slog.Logger) (*cluster.NodeIdenti
 // worker node connections, and the file sync service for pushing workspace
 // changes to workers.
 func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplane.ControlPlane, logger *slog.Logger) (clusterState, error) {
-	clusterAddr := envOr("HIVE_CLUSTER_ADDR", ":8081")
+	clusterAddr := envOr("HIRO_CLUSTER_ADDR", ":8081")
 
 	registry := cluster.NewNodeRegistry()
 	registry.RegisterHome(envOr("HOSTNAME", "leader"))

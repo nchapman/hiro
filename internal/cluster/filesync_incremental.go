@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // WatchAndSync starts watching the synced directories for changes and

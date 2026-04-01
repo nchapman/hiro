@@ -19,7 +19,7 @@ func openTestDB(t *testing.T) *DB {
 }
 
 func TestOpen_CreatesDB(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hive.db")
+	path := filepath.Join(t.TempDir(), "hiro.db")
 	d, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)

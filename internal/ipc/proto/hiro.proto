@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package hive;
+package hiro;
 
-option go_package = "github.com/nchapman/hivebot/internal/ipc/proto";
+option go_package = "github.com/nchapman/hiro/internal/ipc/proto";
 
 // AgentWorker is served by each agent worker process. The control plane
 // calls these RPCs to execute tools and manage the worker's lifecycle.
@@ -116,8 +116,8 @@ message SpawnWorker {
   string session_id = 3;
   string agent_name = 4;
   map<string, bool> effective_tools = 5;
-  string working_dir = 6;          // relative to node's HIVE_ROOT
-  string session_dir = 7;          // relative to node's HIVE_ROOT
+  string working_dir = 6;          // relative to node's HIRO_ROOT
+  string session_dir = 7;          // relative to node's HIRO_ROOT
 }
 
 message SpawnResult {
@@ -170,7 +170,7 @@ message FileSyncData {
 }
 
 message FileUpdate {
-  string path = 1;                 // relative path within HIVE_ROOT
+  string path = 1;                 // relative path within HIRO_ROOT
   bytes content = 2;               // file content (empty for deletion)
   bool deleted = 3;                // true if file was deleted
   uint32 mode = 4;                 // file permission bits (e.g., 0644)

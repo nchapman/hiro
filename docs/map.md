@@ -1,4 +1,4 @@
-# Hive Project Map
+# Hiro Project Map
 
 > Comprehensive map of every major capability, package, and subsystem.
 > Use this to plan quality improvements one piece at a time.
@@ -15,7 +15,7 @@
 
 ---
 
-## 1. Entry Points (`cmd/hive/`)
+## 1. Entry Points (`cmd/hiro/`)
 
 | File | LOC | Role |
 |------|-----|------|
@@ -111,7 +111,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 
 ## 4. Database (`internal/platform/db/`)
 
-Unified SQLite database (`db/hive.db`). Single writer, WAL mode, FTS5 for search. Pure Go SQLite via `modernc.org/sqlite`.
+Unified SQLite database (`db/hiro.db`). Single writer, WAL mode, FTS5 for search. Pure Go SQLite via `modernc.org/sqlite`.
 
 | File | LOC | Role |
 |------|-----|------|
@@ -158,7 +158,7 @@ Interfaces and types for control plane ↔ worker communication.
 | `worker_server.go` | ~150 | gRPC server (worker side) |
 | `worker_client.go` | ~120 | gRPC client (control plane side) |
 
-**Proto**: `internal/ipc/proto/hive.proto` → generated `hive.pb.go` (1518 LOC) + `hive_grpc.pb.go` (279 LOC).
+**Proto**: `internal/ipc/proto/hiro.proto` → generated `hiro.pb.go` (1518 LOC) + `hiro_grpc.pb.go` (279 LOC).
 
 **Tests**: `grpcipc_test.go` uses bufconn for in-memory gRPC testing.
 
@@ -442,7 +442,7 @@ Files over 500 LOC or with high cyclomatic complexity deserve the most attention
 | `agent/manager_lifecycle.go` | 449 | Instance creation, spawning, shutdown — largest agent file post-split |
 | `transport/server.go` | 415 | WebSocket lifecycle, auth, routing |
 | `agent/manager_session.go` | 415 | Session management, config push |
-| `cmd/hive/main.go` | ~340 | Bootstrap — cluster setup extracted to `bootstrap.go` |
+| `cmd/hiro/main.go` | ~340 | Bootstrap — cluster setup extracted to `bootstrap.go` |
 | `cluster/relay.go` | 399 | NAT traversal — network complexity |
 | `config/markdown.go` | 394 | Parser — correctness matters |
 | `agent/tools/grep.go` | 368 | Ripgrep + fallback — two code paths |
@@ -450,7 +450,7 @@ Files over 500 LOC or with high cyclomatic complexity deserve the most attention
 | `cluster/leader_service.go` | 351 | gRPC service with stream management |
 | `watcher/watcher.go` | 344 | fsnotify debouncing, recursive watching |
 | `cluster/discovery.go` | 332 | HTTP-based tracker protocol |
-| `cmd/hive/worker_node.go` | 329 | Worker node connection lifecycle |
+| `cmd/hiro/worker_node.go` | 329 | Worker node connection lifecycle |
 
 ---
 
@@ -470,7 +470,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**Type assertions on concrete worker types**~~ | `agent/manager_lifecycle.go` | **DONE** — `SecretEnvSetter` interface added to `ipc`. Single interface check replaces assertions on `*grpcipc.WorkerClient` and `*cluster.RemoteWorker`. |
 | ~~**NodeID/HomeNodeID duplicated**~~ | `ipc`, `cluster` | **DONE** — Canonical definitions in `ipc/host_manager.go`. Cluster re-exports from ipc. |
 | ~~**API Server setter injection**~~ | `api/server.go` | **DONE** — `NewServer` takes required deps (`cp`, `pdb`, `rootDir`) in constructor. Only truly late-bound setters remain (`SetManager`, `SetStartManager`, `SetWatcher`). `hasManager()` helper. |
-| ~~**main.go cluster setup inline**~~ | `cmd/hive/main.go` | **DONE** — Extracted to `bootstrap.go`: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator`. main.go reduced from 406 to ~340 LOC. |
+| ~~**main.go cluster setup inline**~~ | `cmd/hiro/main.go` | **DONE** — Extracted to `bootstrap.go`: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator`. main.go reduced from 406 to ~340 LOC. |
 | ~~**filesync.go does too much**~~ (723 LOC) | `cluster/filesync*.go` | **DONE** — Split into 5 files: core (82), filter (71), initial sync (148), incremental (261), util (207). |
 | ~~**Cleanup logic duplicated**~~ | `agent/manager_worker.go` | **DONE** — 4 paths consolidated into `detachWorker` (atomic field nil + status under `inst.mu`) + `teardownInstance` (parameterized post-detach I/O). |
 | ~~**Resource limits scattered**~~ | `agent/tools/limits.go` | **DONE** — 18 constants from 7 files centralized into `limits.go`, organized by category (timeouts, output sizes, result limits). |
@@ -523,9 +523,9 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**Race on lastShared skills cache**~~ | `inference/loop.go` | **FIXED** — New `skillsMu` mutex. Lock ordering: `updateMu` → `skillsMu`. |
 | ~~**Config push uses unbounded context**~~ | `agent/manager_session.go` | **FIXED** — 10s `context.WithTimeout` for `CreateLanguageModel` in config push. |
 | ~~**allowedRoots is a global**~~ | `agent/tools/resolve.go` | **FIXED** — `atomic.Value` for goroutine-safe reads; `isInsideRoots` takes roots as parameter. |
-| ~~**No gRPC flow control**~~ | `cmd/hive/bootstrap.go` | **FIXED** — `MaxConcurrentStreams(64)` per-connection cap. |
+| ~~**No gRPC flow control**~~ | `cmd/hiro/bootstrap.go` | **FIXED** — `MaxConcurrentStreams(64)` per-connection cap. |
 | ~~**Unbounded handler goroutines**~~ | `cluster/worker_stream.go` | **FIXED** — Added semaphore (64 concurrent handlers max). |
-| ~~**No recv timeout on streams**~~ | `cmd/hive/bootstrap.go` | **FIXED** — gRPC keepalive: ping every 30s, 10s timeout for hung node detection. |
+| ~~**No recv timeout on streams**~~ | `cmd/hiro/bootstrap.go` | **FIXED** — gRPC keepalive: ping every 30s, 10s timeout for hung node detection. |
 
 ### Testing Gaps
 

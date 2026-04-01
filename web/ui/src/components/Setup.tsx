@@ -149,7 +149,7 @@ export default function Setup({ onComplete }: SetupProps) {
           <>
             <CardHeader>
               <CardTitle className="text-2xl font-bold">
-                Welcome to Hive
+                Welcome to Hiro
               </CardTitle>
               <CardDescription>
                 Set an admin password to secure your instance.
@@ -352,7 +352,7 @@ export default function Setup({ onComplete }: SetupProps) {
               </div>
               <CardTitle>You're all set!</CardTitle>
               <CardDescription>
-                Hive is configured and ready to use.
+                Hiro is configured and ready to use.
               </CardDescription>
             </CardHeader>
           </>

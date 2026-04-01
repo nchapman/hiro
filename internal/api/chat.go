@@ -13,10 +13,10 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/watcher"
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/watcher"
 )
 
 // ChatAttachment is a file attached to a chat message, base64-encoded.

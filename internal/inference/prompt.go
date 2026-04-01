@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hiro/internal/config"
 )
 
 // EnvInfo holds filesystem paths injected into the system prompt so agents
 // understand the platform layout and know where their state files live.
 type EnvInfo struct {
-	WorkingDir  string           // platform root (e.g. /hive)
+	WorkingDir  string           // platform root (e.g. /hiro)
 	InstanceDir string           // instance state dir (persona.md, memory.md)
 	SessionDir  string           // session state dir (todos.yaml, scratch/, tmp/)
 	Mode        config.AgentMode // ephemeral, persistent, or coordinator

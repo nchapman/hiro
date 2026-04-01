@@ -1,4 +1,4 @@
-// Package platform handles initialization of the hive platform root directory.
+// Package platform handles initialization of the hiro platform root directory.
 package platform
 
 import (
@@ -22,10 +22,10 @@ var requiredDirs = []string{
 	"db",
 	"instances",
 	"skills",
-	"workspace", // setgid so files created inside inherit the hive-agents group
+	"workspace", // setgid so files created inside inherit the hiro-agents group
 }
 
-// coordinatorDirs are directories owned by the hive-coordinators group.
+// coordinatorDirs are directories owned by the hiro-coordinators group.
 // Coordinator-mode agents get write access; others get read-only via "other" bits.
 var coordinatorDirs = map[string]bool{
 	"agents": true,
@@ -37,15 +37,15 @@ var coordinatorDirs = map[string]bool{
 // existing platform — it will not overwrite files that already exist.
 func Init(dir string, logger *slog.Logger) error {
 	// Detect groups for directory ownership.
-	coordGID := lookupGroupGID("hive-coordinators")
-	agentsGID := lookupGroupGID("hive-agents")
+	coordGID := lookupGroupGID("hiro-coordinators")
+	agentsGID := lookupGroupGID("hiro-agents")
 
 	for _, d := range requiredDirs {
 		path := filepath.Join(dir, d)
 		if err := os.MkdirAll(path, 0775); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
 		}
-		// agents/ and skills/ are owned by hive-coordinators with setgid,
+		// agents/ and skills/ are owned by hiro-coordinators with setgid,
 		// so coordinator agents can write and others get read-only access.
 		// Also walk existing subdirectories to handle upgrades from
 		// pre-coordinator versions where dirs were owned by root.
@@ -54,11 +54,11 @@ func Init(dir string, logger *slog.Logger) error {
 				logger.Warn("failed to apply coordinator ownership", "dir", d, "error", err)
 			}
 		}
-		// workspace/ is group-writable by all agents (hive-agents) with
+		// workspace/ is group-writable by all agents (hiro-agents) with
 		// setgid so files created inside inherit the group.
 		if agentsGID >= 0 && d == "workspace" {
 			if err := os.Chown(path, -1, agentsGID); err != nil {
-				logger.Warn("failed to chown workspace to hive-agents", "error", err)
+				logger.Warn("failed to chown workspace to hiro-agents", "error", err)
 			} else if err := os.Chmod(path, 02775); err != nil {
 				logger.Warn("failed to set setgid on workspace", "error", err)
 			}
@@ -105,7 +105,7 @@ func seedDefaults(agentsDir string, coordGID int) error {
 			// create new files inside seeded agent directories.
 			if coordGID >= 0 {
 				if err := os.Chown(dest, -1, coordGID); err != nil {
-					return fmt.Errorf("chown %s to hive-coordinators: %w", rel, err)
+					return fmt.Errorf("chown %s to hiro-coordinators: %w", rel, err)
 				}
 				if err := os.Chmod(dest, 02775); err != nil {
 					return fmt.Errorf("chmod %s: %w", rel, err)
@@ -128,7 +128,7 @@ func seedDefaults(agentsDir string, coordGID int) error {
 	})
 }
 
-// applyCoordinatorOwnership sets hive-coordinators group and setgid on a
+// applyCoordinatorOwnership sets hiro-coordinators group and setgid on a
 // directory and all its subdirectories. Files are left as-is (seeded defaults
 // stay root-owned 0644 to prevent prompt injection persistence; new files
 // created by coordinators inherit the group via setgid).
@@ -141,7 +141,7 @@ func applyCoordinatorOwnership(root string, coordGID int, logger *slog.Logger) e
 			return nil
 		}
 		if err := os.Chown(path, -1, coordGID); err != nil {
-			logger.Warn("cannot chown directory to hive-coordinators", "path", path, "error", err)
+			logger.Warn("cannot chown directory to hiro-coordinators", "path", path, "error", err)
 			return nil // best-effort
 		}
 		if err := os.Chmod(path, 02775); err != nil {

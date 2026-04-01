@@ -28,7 +28,7 @@ var ignoredNames = map[string]bool{
 	"node_modules": true,
 	"vendor":       true,
 	"dist":         true,
-	".hive":        true,
+	".hiro":        true,
 	"__pycache__":  true,
 	".DS_Store":    true,
 }
@@ -49,8 +49,8 @@ func shouldIgnore(relPath string) bool {
 		}
 	}
 	base := filepath.Base(relPath)
-	// Atomic write temp files (e.g. .hive-tmp-123456789).
-	if strings.HasPrefix(base, ".hive-tmp-") {
+	// Atomic write temp files (e.g. .hiro-tmp-123456789).
+	if strings.HasPrefix(base, ".hiro-tmp-") {
 		return true
 	}
 	ext := filepath.Ext(relPath)

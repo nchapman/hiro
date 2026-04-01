@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // FileChange represents a single filesystem change to sync.
@@ -21,7 +21,7 @@ type FileChange struct {
 //   - Echo suppression to prevent sync loops
 //   - Conflict preservation (never silently drops a version)
 type FileSyncService struct {
-	rootDir  string   // absolute path to the hive root
+	rootDir  string   // absolute path to the hiro root
 	syncDirs []string // directories to sync (relative to rootDir)
 	nodeID   string   // this node's ID (for conflict file naming)
 	logger   *slog.Logger
@@ -49,7 +49,7 @@ type FileSyncService struct {
 
 // FileSyncConfig configures the file sync service.
 type FileSyncConfig struct {
-	RootDir  string   // absolute path to HIVE_ROOT
+	RootDir  string   // absolute path to HIRO_ROOT
 	SyncDirs []string // directories to sync (e.g., ["agents", "skills", "workspace"])
 	NodeID   string   // this node's ID
 	SendFn   func(update *pb.FileUpdate) error

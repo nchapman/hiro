@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nchapman/hivebot/internal/watcher"
+	"github.com/nchapman/hiro/internal/watcher"
 )
 
 const maxFileReadSize = 2 << 20  // 2 MB — fits comfortably in the browser editor
@@ -228,7 +228,7 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create parent directories if needed. Use 02775 (setgid + group-writable)
-	// so agent processes (hive-agents group) can also write into these dirs.
+	// so agent processes (hiro-agents group) can also write into these dirs.
 	dir := filepath.Dir(absPath)
 	if err := os.MkdirAll(dir, 02775); err != nil {
 		s.logger.Error("files mkdir failed", "path", dir, "error", err)

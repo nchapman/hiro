@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc/grpcipc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -36,7 +36,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 	if len(sessPrefix) > 18 {
 		sessPrefix = sessPrefix[:18]
 	}
-	socketDir := fmt.Sprintf("/tmp/hive-%s", sessPrefix)
+	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}

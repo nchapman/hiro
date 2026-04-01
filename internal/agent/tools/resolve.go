@@ -28,7 +28,7 @@ func getAllowedRoots() []string {
 
 // SetAllowedRoots configures the directories file tools may access.
 // Must be called before any tool invocations. Paths should be absolute
-// and cleaned. Typically: the platform root (/hive) and any instance dirs.
+// and cleaned. Typically: the platform root (/hiro) and any instance dirs.
 func SetAllowedRoots(roots []string) {
 	if roots == nil {
 		roots = []string{}
@@ -104,7 +104,7 @@ func mkdirFor(filePath string) error {
 // atomicWriteFile writes content to path via a temp file + rename so
 // concurrent readers never see partial content.
 func atomicWriteFile(path string, content []byte, mode os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".hive-tmp-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".hiro-tmp-*")
 	if err != nil {
 		return err
 	}

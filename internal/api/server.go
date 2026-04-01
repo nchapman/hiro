@@ -11,11 +11,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/controlplane"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
-	"github.com/nchapman/hivebot/internal/platform/loghandler"
-	"github.com/nchapman/hivebot/internal/watcher"
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/controlplane"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/platform/loghandler"
+	"github.com/nchapman/hiro/internal/watcher"
 )
 
 // CommandHandler handles slash commands from the chat interface.
@@ -33,7 +33,7 @@ type Server struct {
 	startManager func() error            // callback to start the instance manager (set by main)
 	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
-	watcher      *watcher.Watcher        // filesystem watcher for HIVE_ROOT (nil = no watching)
+	watcher      *watcher.Watcher        // filesystem watcher for HIRO_ROOT (nil = no watching)
 	logHandler   *loghandler.Handler     // log handler for real-time streaming (nil = no log SSE)
 	limiter      *loginLimiter           // login rate limiter (per-server for testability)
 	mux          *http.ServeMux

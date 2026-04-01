@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/nchapman/hivebot/internal/models"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hiro/internal/models"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // Summarizer generates summaries from text.

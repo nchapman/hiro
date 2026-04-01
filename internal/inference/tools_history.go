@@ -8,7 +8,7 @@ import (
 
 	"charm.land/fantasy"
 
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 //go:embed history_search.md

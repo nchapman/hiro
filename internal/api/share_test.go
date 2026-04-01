@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hiro/internal/controlplane"
 )
 
 func TestShareEncryptDecryptRoundtrip(t *testing.T) {

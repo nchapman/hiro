@@ -11,7 +11,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 func TestShouldIgnore(t *testing.T) {
@@ -443,7 +443,7 @@ func TestAtomicWrite(t *testing.T) {
 	}
 
 	// No temp files should remain.
-	matches, _ := filepath.Glob(filepath.Join(dir, ".hive-tmp-*"))
+	matches, _ := filepath.Glob(filepath.Join(dir, ".hiro-tmp-*"))
 	if len(matches) != 0 {
 		t.Errorf("expected temp files to be cleaned up, found %v", matches)
 	}
@@ -487,7 +487,7 @@ func TestApplyInitialSyncStream(t *testing.T) {
 	}
 
 	// No temp files should remain.
-	matches, _ := filepath.Glob(filepath.Join(dstDir, "workspace", ".hive-tmp-*"))
+	matches, _ := filepath.Glob(filepath.Join(dstDir, "workspace", ".hiro-tmp-*"))
 	if len(matches) != 0 {
 		t.Errorf("expected no temp files, found %v", matches)
 	}
@@ -558,11 +558,11 @@ func TestReconcile_CatchesDrift(t *testing.T) {
 }
 
 func TestShouldIgnore_HiveTmp(t *testing.T) {
-	if !shouldIgnore("workspace/.hive-tmp-123456789") {
-		t.Error("expected .hive-tmp-* files to be ignored")
+	if !shouldIgnore("workspace/.hiro-tmp-123456789") {
+		t.Error("expected .hiro-tmp-* files to be ignored")
 	}
-	if shouldIgnore("workspace/hive-tmp-file.txt") {
-		t.Error("regular files with hive-tmp in name should not be ignored")
+	if shouldIgnore("workspace/hiro-tmp-file.txt") {
+		t.Error("regular files with hiro-tmp in name should not be ignored")
 	}
 }
 

@@ -1,7 +1,7 @@
 services:
-  hive:
+  hiro:
     build: .
-    image: hive:latest
+    image: hiro:latest
     restart: unless-stopped
     init: true
     ports:
@@ -9,10 +9,10 @@ services:
     env_file:
       - .env
     volumes:
-      - hive:/hive
+      - hiro:/hiro
     environment:
-      - HIVE_ADDR=:8080
-      - HIVE_ROOT=/hive
+      - HIRO_ADDR=:8080
+      - HIRO_ROOT=/hiro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 30s
@@ -21,4 +21,4 @@ services:
 
 # WARNING: 'docker compose down -v' destroys all agent state (history, memory, todos).
 volumes:
-  hive:
+  hiro:

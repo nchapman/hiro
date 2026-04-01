@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -23,7 +23,7 @@ const workerSpawnTimeout = 30 * time.Second
 
 // NodeBridge manages local worker processes on a worker node. It receives
 // commands from the leader stream and translates them into local process
-// operations using the same hive agent spawn protocol.
+// operations using the same hiro agent spawn protocol.
 type NodeBridge struct {
 	rootDir string
 	stream  *WorkerStream
@@ -33,7 +33,7 @@ type NodeBridge struct {
 	workers map[string]*localWorker // session ID → local worker
 }
 
-// localWorker tracks a locally spawned hive agent process.
+// localWorker tracks a locally spawned hiro agent process.
 type localWorker struct {
 	worker ipc.AgentWorker
 	kill   func()
@@ -59,7 +59,7 @@ func NewNodeBridge(rootDir string, stream *WorkerStream, logger *slog.Logger) *N
 	return nb
 }
 
-// handleSpawn spawns a local hive agent process.
+// handleSpawn spawns a local hiro agent process.
 func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	nb.logger.Info("spawning worker", "instance_id", msg.InstanceId, "session_id", msg.SessionId, "agent", msg.AgentName)
 
@@ -208,7 +208,7 @@ func (nb *NodeBridge) ShutdownAll(ctx context.Context) {
 	}
 }
 
-// spawnLocalWorker spawns a hive agent process locally using the same
+// spawnLocalWorker spawns a hiro agent process locally using the same
 // protocol as the leader's defaultWorkerFactory.
 func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig) (*localWorker, error) {
 	self, err := os.Executable()
@@ -222,7 +222,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	if len(sessPrefix) > 18 {
 		sessPrefix = sessPrefix[:18]
 	}
-	socketDir := fmt.Sprintf("/tmp/hive-%s", sessPrefix)
+	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}

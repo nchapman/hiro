@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 func openTestDB(t *testing.T) *platformdb.DB {

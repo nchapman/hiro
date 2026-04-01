@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.0
-// source: internal/ipc/proto/hive.proto
+// source: internal/ipc/proto/hiro.proto
 
 package proto
 
@@ -29,7 +29,7 @@ type WatchJobsRequest struct {
 
 func (x *WatchJobsRequest) Reset() {
 	*x = WatchJobsRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[0]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -41,7 +41,7 @@ func (x *WatchJobsRequest) String() string {
 func (*WatchJobsRequest) ProtoMessage() {}
 
 func (x *WatchJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[0]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -54,7 +54,7 @@ func (x *WatchJobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchJobsRequest.ProtoReflect.Descriptor instead.
 func (*WatchJobsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{0}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{0}
 }
 
 type JobCompletion struct {
@@ -70,7 +70,7 @@ type JobCompletion struct {
 
 func (x *JobCompletion) Reset() {
 	*x = JobCompletion{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -82,7 +82,7 @@ func (x *JobCompletion) String() string {
 func (*JobCompletion) ProtoMessage() {}
 
 func (x *JobCompletion) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[1]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -95,7 +95,7 @@ func (x *JobCompletion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobCompletion.ProtoReflect.Descriptor instead.
 func (*JobCompletion) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{1}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *JobCompletion) GetTaskId() string {
@@ -145,7 +145,7 @@ type ExecuteToolRequest struct {
 
 func (x *ExecuteToolRequest) Reset() {
 	*x = ExecuteToolRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -157,7 +157,7 @@ func (x *ExecuteToolRequest) String() string {
 func (*ExecuteToolRequest) ProtoMessage() {}
 
 func (x *ExecuteToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[2]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -170,7 +170,7 @@ func (x *ExecuteToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteToolRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteToolRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{2}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ExecuteToolRequest) GetName() string {
@@ -211,7 +211,7 @@ type ExecuteToolResponse struct {
 
 func (x *ExecuteToolResponse) Reset() {
 	*x = ExecuteToolResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -223,7 +223,7 @@ func (x *ExecuteToolResponse) String() string {
 func (*ExecuteToolResponse) ProtoMessage() {}
 
 func (x *ExecuteToolResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[3]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -236,7 +236,7 @@ func (x *ExecuteToolResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteToolResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteToolResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{3}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ExecuteToolResponse) GetContent() string {
@@ -261,7 +261,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[4]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -273,7 +273,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[4]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -286,7 +286,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{4}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{4}
 }
 
 type ShutdownResponse struct {
@@ -297,7 +297,7 @@ type ShutdownResponse struct {
 
 func (x *ShutdownResponse) Reset() {
 	*x = ShutdownResponse{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -309,7 +309,7 @@ func (x *ShutdownResponse) String() string {
 func (*ShutdownResponse) ProtoMessage() {}
 
 func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[5]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -322,7 +322,7 @@ func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
 func (*ShutdownResponse) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{5}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{5}
 }
 
 // NodeMessage is sent from a worker node to the leader.
@@ -345,7 +345,7 @@ type NodeMessage struct {
 
 func (x *NodeMessage) Reset() {
 	*x = NodeMessage{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -357,7 +357,7 @@ func (x *NodeMessage) String() string {
 func (*NodeMessage) ProtoMessage() {}
 
 func (x *NodeMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[6]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -370,7 +370,7 @@ func (x *NodeMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeMessage.ProtoReflect.Descriptor instead.
 func (*NodeMessage) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{6}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *NodeMessage) GetMsg() isNodeMessage_Msg {
@@ -518,7 +518,7 @@ type JobCompletionNotify struct {
 
 func (x *JobCompletionNotify) Reset() {
 	*x = JobCompletionNotify{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +530,7 @@ func (x *JobCompletionNotify) String() string {
 func (*JobCompletionNotify) ProtoMessage() {}
 
 func (x *JobCompletionNotify) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[7]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +543,7 @@ func (x *JobCompletionNotify) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobCompletionNotify.ProtoReflect.Descriptor instead.
 func (*JobCompletionNotify) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{7}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *JobCompletionNotify) GetSessionId() string {
@@ -596,7 +596,7 @@ type FileSyncAck struct {
 
 func (x *FileSyncAck) Reset() {
 	*x = FileSyncAck{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -608,7 +608,7 @@ func (x *FileSyncAck) String() string {
 func (*FileSyncAck) ProtoMessage() {}
 
 func (x *FileSyncAck) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[8]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -621,7 +621,7 @@ func (x *FileSyncAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileSyncAck.ProtoReflect.Descriptor instead.
 func (*FileSyncAck) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{8}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{8}
 }
 
 // LeaderMessage is sent from the leader to a worker node.
@@ -643,7 +643,7 @@ type LeaderMessage struct {
 
 func (x *LeaderMessage) Reset() {
 	*x = LeaderMessage{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -655,7 +655,7 @@ func (x *LeaderMessage) String() string {
 func (*LeaderMessage) ProtoMessage() {}
 
 func (x *LeaderMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[9]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -668,7 +668,7 @@ func (x *LeaderMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaderMessage.ProtoReflect.Descriptor instead.
 func (*LeaderMessage) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{9}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *LeaderMessage) GetMsg() isLeaderMessage_Msg {
@@ -798,7 +798,7 @@ type NodeRegister struct {
 
 func (x *NodeRegister) Reset() {
 	*x = NodeRegister{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -810,7 +810,7 @@ func (x *NodeRegister) String() string {
 func (*NodeRegister) ProtoMessage() {}
 
 func (x *NodeRegister) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[10]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -823,7 +823,7 @@ func (x *NodeRegister) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeRegister.ProtoReflect.Descriptor instead.
 func (*NodeRegister) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{10}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *NodeRegister) GetNodeName() string {
@@ -856,7 +856,7 @@ type NodeRegistered struct {
 
 func (x *NodeRegistered) Reset() {
 	*x = NodeRegistered{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -868,7 +868,7 @@ func (x *NodeRegistered) String() string {
 func (*NodeRegistered) ProtoMessage() {}
 
 func (x *NodeRegistered) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[11]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -881,7 +881,7 @@ func (x *NodeRegistered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeRegistered.ProtoReflect.Descriptor instead.
 func (*NodeRegistered) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{11}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NodeRegistered) GetNodeId() string {
@@ -898,15 +898,15 @@ type SpawnWorker struct {
 	SessionId      string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	AgentName      string                 `protobuf:"bytes,4,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
 	EffectiveTools map[string]bool        `protobuf:"bytes,5,rep,name=effective_tools,json=effectiveTools,proto3" json:"effective_tools,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	WorkingDir     string                 `protobuf:"bytes,6,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"` // relative to node's HIVE_ROOT
-	SessionDir     string                 `protobuf:"bytes,7,opt,name=session_dir,json=sessionDir,proto3" json:"session_dir,omitempty"` // relative to node's HIVE_ROOT
+	WorkingDir     string                 `protobuf:"bytes,6,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"` // relative to node's HIRO_ROOT
+	SessionDir     string                 `protobuf:"bytes,7,opt,name=session_dir,json=sessionDir,proto3" json:"session_dir,omitempty"` // relative to node's HIRO_ROOT
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SpawnWorker) Reset() {
 	*x = SpawnWorker{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +918,7 @@ func (x *SpawnWorker) String() string {
 func (*SpawnWorker) ProtoMessage() {}
 
 func (x *SpawnWorker) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[12]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +931,7 @@ func (x *SpawnWorker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnWorker.ProtoReflect.Descriptor instead.
 func (*SpawnWorker) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{12}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SpawnWorker) GetRequestId() string {
@@ -993,7 +993,7 @@ type SpawnResult struct {
 
 func (x *SpawnResult) Reset() {
 	*x = SpawnResult{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1005,7 +1005,7 @@ func (x *SpawnResult) String() string {
 func (*SpawnResult) ProtoMessage() {}
 
 func (x *SpawnResult) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[13]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1018,7 +1018,7 @@ func (x *SpawnResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnResult.ProtoReflect.Descriptor instead.
 func (*SpawnResult) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{13}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SpawnResult) GetRequestId() string {
@@ -1044,7 +1044,7 @@ type ShutdownWorker struct {
 
 func (x *ShutdownWorker) Reset() {
 	*x = ShutdownWorker{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1056,7 +1056,7 @@ func (x *ShutdownWorker) String() string {
 func (*ShutdownWorker) ProtoMessage() {}
 
 func (x *ShutdownWorker) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[14]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1069,7 +1069,7 @@ func (x *ShutdownWorker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownWorker.ProtoReflect.Descriptor instead.
 func (*ShutdownWorker) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{14}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ShutdownWorker) GetSessionId() string {
@@ -1088,7 +1088,7 @@ type KillWorker struct {
 
 func (x *KillWorker) Reset() {
 	*x = KillWorker{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1100,7 +1100,7 @@ func (x *KillWorker) String() string {
 func (*KillWorker) ProtoMessage() {}
 
 func (x *KillWorker) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[15]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1113,7 +1113,7 @@ func (x *KillWorker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillWorker.ProtoReflect.Descriptor instead.
 func (*KillWorker) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{15}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *KillWorker) GetSessionId() string {
@@ -1133,7 +1133,7 @@ type WorkerExited struct {
 
 func (x *WorkerExited) Reset() {
 	*x = WorkerExited{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1145,7 +1145,7 @@ func (x *WorkerExited) String() string {
 func (*WorkerExited) ProtoMessage() {}
 
 func (x *WorkerExited) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[16]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1158,7 +1158,7 @@ func (x *WorkerExited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerExited.ProtoReflect.Descriptor instead.
 func (*WorkerExited) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{16}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *WorkerExited) GetSessionId() string {
@@ -1188,7 +1188,7 @@ type ExecuteToolRemote struct {
 
 func (x *ExecuteToolRemote) Reset() {
 	*x = ExecuteToolRemote{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1200,7 +1200,7 @@ func (x *ExecuteToolRemote) String() string {
 func (*ExecuteToolRemote) ProtoMessage() {}
 
 func (x *ExecuteToolRemote) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[17]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1213,7 +1213,7 @@ func (x *ExecuteToolRemote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteToolRemote.ProtoReflect.Descriptor instead.
 func (*ExecuteToolRemote) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{17}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ExecuteToolRemote) GetSessionId() string {
@@ -1264,7 +1264,7 @@ type NodeToolResult struct {
 
 func (x *NodeToolResult) Reset() {
 	*x = NodeToolResult{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1276,7 +1276,7 @@ func (x *NodeToolResult) String() string {
 func (*NodeToolResult) ProtoMessage() {}
 
 func (x *NodeToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[18]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1289,7 +1289,7 @@ func (x *NodeToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeToolResult.ProtoReflect.Descriptor instead.
 func (*NodeToolResult) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{18}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NodeToolResult) GetCallId() string {
@@ -1336,7 +1336,7 @@ type NodeHeartbeat struct {
 
 func (x *NodeHeartbeat) Reset() {
 	*x = NodeHeartbeat{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[19]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1348,7 +1348,7 @@ func (x *NodeHeartbeat) String() string {
 func (*NodeHeartbeat) ProtoMessage() {}
 
 func (x *NodeHeartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[19]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1361,7 +1361,7 @@ func (x *NodeHeartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeHeartbeat.ProtoReflect.Descriptor instead.
 func (*NodeHeartbeat) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{19}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *NodeHeartbeat) GetActiveWorkers() int32 {
@@ -1381,7 +1381,7 @@ type FileSyncData struct {
 
 func (x *FileSyncData) Reset() {
 	*x = FileSyncData{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[20]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1393,7 +1393,7 @@ func (x *FileSyncData) String() string {
 func (*FileSyncData) ProtoMessage() {}
 
 func (x *FileSyncData) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[20]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1406,7 +1406,7 @@ func (x *FileSyncData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileSyncData.ProtoReflect.Descriptor instead.
 func (*FileSyncData) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{20}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *FileSyncData) GetData() []byte {
@@ -1425,7 +1425,7 @@ func (x *FileSyncData) GetFinal() bool {
 
 type FileUpdate struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Path           string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`                                              // relative path within HIVE_ROOT
+	Path           string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`                                              // relative path within HIRO_ROOT
 	Content        []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`                                        // file content (empty for deletion)
 	Deleted        bool                   `protobuf:"varint,3,opt,name=deleted,proto3" json:"deleted,omitempty"`                                       // true if file was deleted
 	Mode           uint32                 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`                                             // file permission bits (e.g., 0644)
@@ -1437,7 +1437,7 @@ type FileUpdate struct {
 
 func (x *FileUpdate) Reset() {
 	*x = FileUpdate{}
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[21]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1449,7 +1449,7 @@ func (x *FileUpdate) String() string {
 func (*FileUpdate) ProtoMessage() {}
 
 func (x *FileUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_ipc_proto_hive_proto_msgTypes[21]
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1462,7 +1462,7 @@ func (x *FileUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileUpdate.ProtoReflect.Descriptor instead.
 func (*FileUpdate) Descriptor() ([]byte, []int) {
-	return file_internal_ipc_proto_hive_proto_rawDescGZIP(), []int{21}
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *FileUpdate) GetPath() string {
@@ -1507,11 +1507,11 @@ func (x *FileUpdate) GetOriginNode() string {
 	return ""
 }
 
-var File_internal_ipc_proto_hive_proto protoreflect.FileDescriptor
+var File_internal_ipc_proto_hiro_proto protoreflect.FileDescriptor
 
-const file_internal_ipc_proto_hive_proto_rawDesc = "" +
+const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
 	"\n" +
-	"\x1dinternal/ipc/proto/hive.proto\x12\x04hive\"\x12\n" +
+	"\x1dinternal/ipc/proto/hiro.proto\x12\x04hiro\"\x12\n" +
 	"\x10WatchJobsRequest\"\x99\x01\n" +
 	"\rJobCompletion\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x18\n" +
@@ -1531,16 +1531,16 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\x0fShutdownRequest\"\x12\n" +
 	"\x10ShutdownResponse\"\xd9\x03\n" +
 	"\vNodeMessage\x120\n" +
-	"\bregister\x18\x01 \x01(\v2\x12.hive.NodeRegisterH\x00R\bregister\x126\n" +
-	"\fspawn_result\x18\x02 \x01(\v2\x11.hive.SpawnResultH\x00R\vspawnResult\x127\n" +
-	"\vtool_result\x18\x03 \x01(\v2\x14.hive.NodeToolResultH\x00R\n" +
+	"\bregister\x18\x01 \x01(\v2\x12.hiro.NodeRegisterH\x00R\bregister\x126\n" +
+	"\fspawn_result\x18\x02 \x01(\v2\x11.hiro.SpawnResultH\x00R\vspawnResult\x127\n" +
+	"\vtool_result\x18\x03 \x01(\v2\x14.hiro.NodeToolResultH\x00R\n" +
 	"toolResult\x123\n" +
-	"\theartbeat\x18\x04 \x01(\v2\x13.hive.NodeHeartbeatH\x00R\theartbeat\x129\n" +
-	"\rworker_exited\x18\x05 \x01(\v2\x12.hive.WorkerExitedH\x00R\fworkerExited\x123\n" +
-	"\vfile_update\x18\x06 \x01(\v2\x10.hive.FileUpdateH\x00R\n" +
+	"\theartbeat\x18\x04 \x01(\v2\x13.hiro.NodeHeartbeatH\x00R\theartbeat\x129\n" +
+	"\rworker_exited\x18\x05 \x01(\v2\x12.hiro.WorkerExitedH\x00R\fworkerExited\x123\n" +
+	"\vfile_update\x18\x06 \x01(\v2\x10.hiro.FileUpdateH\x00R\n" +
 	"fileUpdate\x127\n" +
-	"\rfile_sync_ack\x18\a \x01(\v2\x11.hive.FileSyncAckH\x00R\vfileSyncAck\x12B\n" +
-	"\x0ejob_completion\x18\b \x01(\v2\x19.hive.JobCompletionNotifyH\x00R\rjobCompletionB\x05\n" +
+	"\rfile_sync_ack\x18\a \x01(\v2\x11.hiro.FileSyncAckH\x00R\vfileSyncAck\x12B\n" +
+	"\x0ejob_completion\x18\b \x01(\v2\x19.hiro.JobCompletionNotifyH\x00R\rjobCompletionB\x05\n" +
 	"\x03msg\"\xbe\x01\n" +
 	"\x13JobCompletionNotify\x12\x1d\n" +
 	"\n" +
@@ -1553,15 +1553,15 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\vFileSyncAck\"\xa2\x03\n" +
 	"\rLeaderMessage\x126\n" +
 	"\n" +
-	"registered\x18\x01 \x01(\v2\x14.hive.NodeRegisteredH\x00R\n" +
+	"registered\x18\x01 \x01(\v2\x14.hiro.NodeRegisteredH\x00R\n" +
 	"registered\x126\n" +
-	"\fspawn_worker\x18\x02 \x01(\v2\x11.hive.SpawnWorkerH\x00R\vspawnWorker\x12<\n" +
-	"\fexecute_tool\x18\x03 \x01(\v2\x17.hive.ExecuteToolRemoteH\x00R\vexecuteTool\x12?\n" +
-	"\x0fshutdown_worker\x18\x04 \x01(\v2\x14.hive.ShutdownWorkerH\x00R\x0eshutdownWorker\x123\n" +
-	"\vkill_worker\x18\x05 \x01(\v2\x10.hive.KillWorkerH\x00R\n" +
+	"\fspawn_worker\x18\x02 \x01(\v2\x11.hiro.SpawnWorkerH\x00R\vspawnWorker\x12<\n" +
+	"\fexecute_tool\x18\x03 \x01(\v2\x17.hiro.ExecuteToolRemoteH\x00R\vexecuteTool\x12?\n" +
+	"\x0fshutdown_worker\x18\x04 \x01(\v2\x14.hiro.ShutdownWorkerH\x00R\x0eshutdownWorker\x123\n" +
+	"\vkill_worker\x18\x05 \x01(\v2\x10.hiro.KillWorkerH\x00R\n" +
 	"killWorker\x121\n" +
-	"\tfile_sync\x18\x06 \x01(\v2\x12.hive.FileSyncDataH\x00R\bfileSync\x123\n" +
-	"\vfile_update\x18\a \x01(\v2\x10.hive.FileUpdateH\x00R\n" +
+	"\tfile_sync\x18\x06 \x01(\v2\x12.hiro.FileSyncDataH\x00R\bfileSync\x123\n" +
+	"\vfile_update\x18\a \x01(\v2\x10.hiro.FileUpdateH\x00R\n" +
 	"fileUpdateB\x05\n" +
 	"\x03msg\"f\n" +
 	"\fNodeRegister\x12\x1b\n" +
@@ -1580,7 +1580,7 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x04 \x01(\tR\tagentName\x12N\n" +
-	"\x0feffective_tools\x18\x05 \x03(\v2%.hive.SpawnWorker.EffectiveToolsEntryR\x0eeffectiveTools\x12\x1f\n" +
+	"\x0feffective_tools\x18\x05 \x03(\v2%.hiro.SpawnWorker.EffectiveToolsEntryR\x0eeffectiveTools\x12\x1f\n" +
 	"\vworking_dir\x18\x06 \x01(\tR\n" +
 	"workingDir\x12\x1f\n" +
 	"\vsession_dir\x18\a \x01(\tR\n" +
@@ -1633,76 +1633,76 @@ const file_internal_ipc_proto_hive_proto_rawDesc = "" +
 	"\vorigin_node\x18\x06 \x01(\tR\n" +
 	"originNode2\xc8\x01\n" +
 	"\vAgentWorker\x12B\n" +
-	"\vExecuteTool\x12\x18.hive.ExecuteToolRequest\x1a\x19.hive.ExecuteToolResponse\x129\n" +
-	"\bShutdown\x12\x15.hive.ShutdownRequest\x1a\x16.hive.ShutdownResponse\x12:\n" +
-	"\tWatchJobs\x12\x16.hive.WatchJobsRequest\x1a\x13.hive.JobCompletion0\x012C\n" +
+	"\vExecuteTool\x12\x18.hiro.ExecuteToolRequest\x1a\x19.hiro.ExecuteToolResponse\x129\n" +
+	"\bShutdown\x12\x15.hiro.ShutdownRequest\x1a\x16.hiro.ShutdownResponse\x12:\n" +
+	"\tWatchJobs\x12\x16.hiro.WatchJobsRequest\x1a\x13.hiro.JobCompletion0\x012C\n" +
 	"\aCluster\x128\n" +
 	"\n" +
-	"NodeStream\x12\x11.hive.NodeMessage\x1a\x13.hive.LeaderMessage(\x010\x01B0Z.github.com/nchapman/hivebot/internal/ipc/protob\x06proto3"
+	"NodeStream\x12\x11.hiro.NodeMessage\x1a\x13.hiro.LeaderMessage(\x010\x01B-Z+github.com/nchapman/hiro/internal/ipc/protob\x06proto3"
 
 var (
-	file_internal_ipc_proto_hive_proto_rawDescOnce sync.Once
-	file_internal_ipc_proto_hive_proto_rawDescData []byte
+	file_internal_ipc_proto_hiro_proto_rawDescOnce sync.Once
+	file_internal_ipc_proto_hiro_proto_rawDescData []byte
 )
 
-func file_internal_ipc_proto_hive_proto_rawDescGZIP() []byte {
-	file_internal_ipc_proto_hive_proto_rawDescOnce.Do(func() {
-		file_internal_ipc_proto_hive_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hive_proto_rawDesc), len(file_internal_ipc_proto_hive_proto_rawDesc)))
+func file_internal_ipc_proto_hiro_proto_rawDescGZIP() []byte {
+	file_internal_ipc_proto_hiro_proto_rawDescOnce.Do(func() {
+		file_internal_ipc_proto_hiro_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hiro_proto_rawDesc), len(file_internal_ipc_proto_hiro_proto_rawDesc)))
 	})
-	return file_internal_ipc_proto_hive_proto_rawDescData
+	return file_internal_ipc_proto_hiro_proto_rawDescData
 }
 
-var file_internal_ipc_proto_hive_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
-var file_internal_ipc_proto_hive_proto_goTypes = []any{
-	(*WatchJobsRequest)(nil),    // 0: hive.WatchJobsRequest
-	(*JobCompletion)(nil),       // 1: hive.JobCompletion
-	(*ExecuteToolRequest)(nil),  // 2: hive.ExecuteToolRequest
-	(*ExecuteToolResponse)(nil), // 3: hive.ExecuteToolResponse
-	(*ShutdownRequest)(nil),     // 4: hive.ShutdownRequest
-	(*ShutdownResponse)(nil),    // 5: hive.ShutdownResponse
-	(*NodeMessage)(nil),         // 6: hive.NodeMessage
-	(*JobCompletionNotify)(nil), // 7: hive.JobCompletionNotify
-	(*FileSyncAck)(nil),         // 8: hive.FileSyncAck
-	(*LeaderMessage)(nil),       // 9: hive.LeaderMessage
-	(*NodeRegister)(nil),        // 10: hive.NodeRegister
-	(*NodeRegistered)(nil),      // 11: hive.NodeRegistered
-	(*SpawnWorker)(nil),         // 12: hive.SpawnWorker
-	(*SpawnResult)(nil),         // 13: hive.SpawnResult
-	(*ShutdownWorker)(nil),      // 14: hive.ShutdownWorker
-	(*KillWorker)(nil),          // 15: hive.KillWorker
-	(*WorkerExited)(nil),        // 16: hive.WorkerExited
-	(*ExecuteToolRemote)(nil),   // 17: hive.ExecuteToolRemote
-	(*NodeToolResult)(nil),      // 18: hive.NodeToolResult
-	(*NodeHeartbeat)(nil),       // 19: hive.NodeHeartbeat
-	(*FileSyncData)(nil),        // 20: hive.FileSyncData
-	(*FileUpdate)(nil),          // 21: hive.FileUpdate
-	nil,                         // 22: hive.SpawnWorker.EffectiveToolsEntry
+var file_internal_ipc_proto_hiro_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_internal_ipc_proto_hiro_proto_goTypes = []any{
+	(*WatchJobsRequest)(nil),    // 0: hiro.WatchJobsRequest
+	(*JobCompletion)(nil),       // 1: hiro.JobCompletion
+	(*ExecuteToolRequest)(nil),  // 2: hiro.ExecuteToolRequest
+	(*ExecuteToolResponse)(nil), // 3: hiro.ExecuteToolResponse
+	(*ShutdownRequest)(nil),     // 4: hiro.ShutdownRequest
+	(*ShutdownResponse)(nil),    // 5: hiro.ShutdownResponse
+	(*NodeMessage)(nil),         // 6: hiro.NodeMessage
+	(*JobCompletionNotify)(nil), // 7: hiro.JobCompletionNotify
+	(*FileSyncAck)(nil),         // 8: hiro.FileSyncAck
+	(*LeaderMessage)(nil),       // 9: hiro.LeaderMessage
+	(*NodeRegister)(nil),        // 10: hiro.NodeRegister
+	(*NodeRegistered)(nil),      // 11: hiro.NodeRegistered
+	(*SpawnWorker)(nil),         // 12: hiro.SpawnWorker
+	(*SpawnResult)(nil),         // 13: hiro.SpawnResult
+	(*ShutdownWorker)(nil),      // 14: hiro.ShutdownWorker
+	(*KillWorker)(nil),          // 15: hiro.KillWorker
+	(*WorkerExited)(nil),        // 16: hiro.WorkerExited
+	(*ExecuteToolRemote)(nil),   // 17: hiro.ExecuteToolRemote
+	(*NodeToolResult)(nil),      // 18: hiro.NodeToolResult
+	(*NodeHeartbeat)(nil),       // 19: hiro.NodeHeartbeat
+	(*FileSyncData)(nil),        // 20: hiro.FileSyncData
+	(*FileUpdate)(nil),          // 21: hiro.FileUpdate
+	nil,                         // 22: hiro.SpawnWorker.EffectiveToolsEntry
 }
-var file_internal_ipc_proto_hive_proto_depIdxs = []int32{
-	10, // 0: hive.NodeMessage.register:type_name -> hive.NodeRegister
-	13, // 1: hive.NodeMessage.spawn_result:type_name -> hive.SpawnResult
-	18, // 2: hive.NodeMessage.tool_result:type_name -> hive.NodeToolResult
-	19, // 3: hive.NodeMessage.heartbeat:type_name -> hive.NodeHeartbeat
-	16, // 4: hive.NodeMessage.worker_exited:type_name -> hive.WorkerExited
-	21, // 5: hive.NodeMessage.file_update:type_name -> hive.FileUpdate
-	8,  // 6: hive.NodeMessage.file_sync_ack:type_name -> hive.FileSyncAck
-	7,  // 7: hive.NodeMessage.job_completion:type_name -> hive.JobCompletionNotify
-	11, // 8: hive.LeaderMessage.registered:type_name -> hive.NodeRegistered
-	12, // 9: hive.LeaderMessage.spawn_worker:type_name -> hive.SpawnWorker
-	17, // 10: hive.LeaderMessage.execute_tool:type_name -> hive.ExecuteToolRemote
-	14, // 11: hive.LeaderMessage.shutdown_worker:type_name -> hive.ShutdownWorker
-	15, // 12: hive.LeaderMessage.kill_worker:type_name -> hive.KillWorker
-	20, // 13: hive.LeaderMessage.file_sync:type_name -> hive.FileSyncData
-	21, // 14: hive.LeaderMessage.file_update:type_name -> hive.FileUpdate
-	22, // 15: hive.SpawnWorker.effective_tools:type_name -> hive.SpawnWorker.EffectiveToolsEntry
-	2,  // 16: hive.AgentWorker.ExecuteTool:input_type -> hive.ExecuteToolRequest
-	4,  // 17: hive.AgentWorker.Shutdown:input_type -> hive.ShutdownRequest
-	0,  // 18: hive.AgentWorker.WatchJobs:input_type -> hive.WatchJobsRequest
-	6,  // 19: hive.Cluster.NodeStream:input_type -> hive.NodeMessage
-	3,  // 20: hive.AgentWorker.ExecuteTool:output_type -> hive.ExecuteToolResponse
-	5,  // 21: hive.AgentWorker.Shutdown:output_type -> hive.ShutdownResponse
-	1,  // 22: hive.AgentWorker.WatchJobs:output_type -> hive.JobCompletion
-	9,  // 23: hive.Cluster.NodeStream:output_type -> hive.LeaderMessage
+var file_internal_ipc_proto_hiro_proto_depIdxs = []int32{
+	10, // 0: hiro.NodeMessage.register:type_name -> hiro.NodeRegister
+	13, // 1: hiro.NodeMessage.spawn_result:type_name -> hiro.SpawnResult
+	18, // 2: hiro.NodeMessage.tool_result:type_name -> hiro.NodeToolResult
+	19, // 3: hiro.NodeMessage.heartbeat:type_name -> hiro.NodeHeartbeat
+	16, // 4: hiro.NodeMessage.worker_exited:type_name -> hiro.WorkerExited
+	21, // 5: hiro.NodeMessage.file_update:type_name -> hiro.FileUpdate
+	8,  // 6: hiro.NodeMessage.file_sync_ack:type_name -> hiro.FileSyncAck
+	7,  // 7: hiro.NodeMessage.job_completion:type_name -> hiro.JobCompletionNotify
+	11, // 8: hiro.LeaderMessage.registered:type_name -> hiro.NodeRegistered
+	12, // 9: hiro.LeaderMessage.spawn_worker:type_name -> hiro.SpawnWorker
+	17, // 10: hiro.LeaderMessage.execute_tool:type_name -> hiro.ExecuteToolRemote
+	14, // 11: hiro.LeaderMessage.shutdown_worker:type_name -> hiro.ShutdownWorker
+	15, // 12: hiro.LeaderMessage.kill_worker:type_name -> hiro.KillWorker
+	20, // 13: hiro.LeaderMessage.file_sync:type_name -> hiro.FileSyncData
+	21, // 14: hiro.LeaderMessage.file_update:type_name -> hiro.FileUpdate
+	22, // 15: hiro.SpawnWorker.effective_tools:type_name -> hiro.SpawnWorker.EffectiveToolsEntry
+	2,  // 16: hiro.AgentWorker.ExecuteTool:input_type -> hiro.ExecuteToolRequest
+	4,  // 17: hiro.AgentWorker.Shutdown:input_type -> hiro.ShutdownRequest
+	0,  // 18: hiro.AgentWorker.WatchJobs:input_type -> hiro.WatchJobsRequest
+	6,  // 19: hiro.Cluster.NodeStream:input_type -> hiro.NodeMessage
+	3,  // 20: hiro.AgentWorker.ExecuteTool:output_type -> hiro.ExecuteToolResponse
+	5,  // 21: hiro.AgentWorker.Shutdown:output_type -> hiro.ShutdownResponse
+	1,  // 22: hiro.AgentWorker.WatchJobs:output_type -> hiro.JobCompletion
+	9,  // 23: hiro.Cluster.NodeStream:output_type -> hiro.LeaderMessage
 	20, // [20:24] is the sub-list for method output_type
 	16, // [16:20] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
@@ -1710,12 +1710,12 @@ var file_internal_ipc_proto_hive_proto_depIdxs = []int32{
 	0,  // [0:16] is the sub-list for field type_name
 }
 
-func init() { file_internal_ipc_proto_hive_proto_init() }
-func file_internal_ipc_proto_hive_proto_init() {
-	if File_internal_ipc_proto_hive_proto != nil {
+func init() { file_internal_ipc_proto_hiro_proto_init() }
+func file_internal_ipc_proto_hiro_proto_init() {
+	if File_internal_ipc_proto_hiro_proto != nil {
 		return
 	}
-	file_internal_ipc_proto_hive_proto_msgTypes[6].OneofWrappers = []any{
+	file_internal_ipc_proto_hiro_proto_msgTypes[6].OneofWrappers = []any{
 		(*NodeMessage_Register)(nil),
 		(*NodeMessage_SpawnResult)(nil),
 		(*NodeMessage_ToolResult)(nil),
@@ -1725,7 +1725,7 @@ func file_internal_ipc_proto_hive_proto_init() {
 		(*NodeMessage_FileSyncAck)(nil),
 		(*NodeMessage_JobCompletion)(nil),
 	}
-	file_internal_ipc_proto_hive_proto_msgTypes[9].OneofWrappers = []any{
+	file_internal_ipc_proto_hiro_proto_msgTypes[9].OneofWrappers = []any{
 		(*LeaderMessage_Registered)(nil),
 		(*LeaderMessage_SpawnWorker)(nil),
 		(*LeaderMessage_ExecuteTool)(nil),
@@ -1738,17 +1738,17 @@ func file_internal_ipc_proto_hive_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hive_proto_rawDesc), len(file_internal_ipc_proto_hive_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hiro_proto_rawDesc), len(file_internal_ipc_proto_hiro_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_internal_ipc_proto_hive_proto_goTypes,
-		DependencyIndexes: file_internal_ipc_proto_hive_proto_depIdxs,
-		MessageInfos:      file_internal_ipc_proto_hive_proto_msgTypes,
+		GoTypes:           file_internal_ipc_proto_hiro_proto_goTypes,
+		DependencyIndexes: file_internal_ipc_proto_hiro_proto_depIdxs,
+		MessageInfos:      file_internal_ipc_proto_hiro_proto_msgTypes,
 	}.Build()
-	File_internal_ipc_proto_hive_proto = out.File
-	file_internal_ipc_proto_hive_proto_goTypes = nil
-	file_internal_ipc_proto_hive_proto_depIdxs = nil
+	File_internal_ipc_proto_hiro_proto = out.File
+	file_internal_ipc_proto_hiro_proto_goTypes = nil
+	file_internal_ipc_proto_hiro_proto_depIdxs = nil
 }

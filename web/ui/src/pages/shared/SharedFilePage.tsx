@@ -187,7 +187,7 @@ function Header({ name, size, content }: { name: string; size: number; content?:
             </Tooltip>
           )}
           <span className="text-xs text-muted-foreground">
-            Shared via Hive
+            Shared via Hiro
           </span>
         </div>
       </header>

@@ -9,7 +9,7 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hiro/internal/config"
 )
 
 //go:embed add_memory.md

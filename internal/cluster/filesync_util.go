@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // Reconcile performs a full directory walk and sends updates for any files
@@ -151,7 +151,7 @@ func (s *FileSyncService) scanNewDir(dir string, mu *sync.Mutex, pending map[str
 // It is placed in the same directory to guarantee same-filesystem rename
 // (which is atomic on POSIX).
 func atomicWrite(path string, content []byte, mode os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".hive-tmp-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".hiro-tmp-*")
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func atomicWrite(path string, content []byte, mode os.FileMode) error {
 // atomicWriteFromReader is like atomicWrite but reads from an io.Reader
 // (used during tar extraction where content is streamed).
 func atomicWriteFromReader(path string, r io.Reader, mode os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".hive-tmp-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".hiro-tmp-*")
 	if err != nil {
 		return err
 	}

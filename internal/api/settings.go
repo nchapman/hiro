@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/controlplane"
-	"github.com/nchapman/hivebot/internal/models"
-	"github.com/nchapman/hivebot/internal/provider"
+	"github.com/nchapman/hiro/internal/controlplane"
+	"github.com/nchapman/hiro/internal/models"
+	"github.com/nchapman/hiro/internal/provider"
 )
 
 type settingsResponse struct {

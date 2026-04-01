@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/nchapman/hivebot/internal/models"
+	"github.com/nchapman/hiro/internal/models"
 )
 
 // UsageInfo is the JSON shape for session usage data.

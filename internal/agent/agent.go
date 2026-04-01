@@ -5,5 +5,5 @@ package agent
 // Options configures the Manager.
 type Options struct {
 	WorkingDir string // working directory for file/bash tools
-	Model      string // override model for all agents (from HIVE_MODEL)
+	Model      string // override model for all agents (from HIRO_MODEL)
 }

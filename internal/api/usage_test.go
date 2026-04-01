@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 func TestTotalUsage(t *testing.T) {

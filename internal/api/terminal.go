@@ -162,7 +162,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 }
 
 // terminalEnv builds an explicit environment for the terminal shell.
-// Only essential variables are included — secrets (HIVE_API_KEY, etc.)
+// Only essential variables are included — secrets (HIRO_API_KEY, etc.)
 // are deliberately excluded to prevent credential exposure.
 func terminalEnv() []string {
 	env := []string{

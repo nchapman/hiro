@@ -42,7 +42,7 @@ export default function Login({ onSuccess }: LoginProps) {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">hive</CardTitle>
+          <CardTitle className="text-2xl font-bold">hiro</CardTitle>
           <p className="text-sm text-muted-foreground">
             Enter your password to continue
           </p>

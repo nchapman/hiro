@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/inference"
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 // HistoryMessage is a simplified message for API consumers.

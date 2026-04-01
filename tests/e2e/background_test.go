@@ -15,7 +15,7 @@ import (
 // <task-notification> meta message triggering an auto-response.
 func TestE2E_BackgroundTaskCompletion(t *testing.T) {
 	// Create a persistent agent with bash + task tools.
-	containerWriteFile(t, "/hive/agents/bg-test/agent.md", `---
+	containerWriteFile(t, "/hiro/agents/bg-test/agent.md", `---
 name: bg-test
 tools: [Bash, TaskOutput, TaskStop]
 ---
@@ -61,7 +61,7 @@ When you receive a task-notification about a completed background task, report t
 // output from a completed background task.
 func TestE2E_BackgroundTaskOutput(t *testing.T) {
 	// Use a persistent agent so we can do multi-turn interaction.
-	containerWriteFile(t, "/hive/agents/taskout-test/agent.md", `---
+	containerWriteFile(t, "/hiro/agents/taskout-test/agent.md", `---
 name: taskout-test
 tools: [Bash, TaskOutput, TaskStop]
 ---

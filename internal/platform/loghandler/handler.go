@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // reservedKeys are slog attribute keys extracted into dedicated DB columns.

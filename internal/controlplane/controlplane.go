@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/nchapman/hivebot/internal/auth"
+	"github.com/nchapman/hiro/internal/auth"
 	"gopkg.in/yaml.v3"
 )
 

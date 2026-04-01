@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hiro/internal/controlplane"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -51,11 +51,11 @@ func loginAndGetToken(t *testing.T, srv *Server) string {
 		t.Fatalf("login failed: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "hive_session" {
+		if c.Name == "hiro_session" {
 			return c.Value
 		}
 	}
-	t.Fatal("no hive_session cookie in login response")
+	t.Fatal("no hiro_session cookie in login response")
 	return ""
 }
 
@@ -70,7 +70,7 @@ func authedRequest(t *testing.T, srv *Server, method, path string, body []byte) 
 		bodyReader = bytes.NewReader(nil)
 	}
 	req := httptest.NewRequest(method, path, bodyReader)
-	req.AddCookie(&http.Cookie{Name: "hive_session", Value: token})
+	req.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})
 	req.Header.Set("Content-Type", "application/json")
 	return req
 }
@@ -133,7 +133,7 @@ func TestLogin_Success(t *testing.T) {
 	// Verify cookie is set.
 	var found bool
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "hive_session" && c.Value != "" {
+		if c.Name == "hiro_session" && c.Value != "" {
 			found = true
 			if !c.HttpOnly {
 				t.Error("cookie should be HttpOnly")
@@ -141,7 +141,7 @@ func TestLogin_Success(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("no hive_session cookie in response")
+		t.Error("no hiro_session cookie in response")
 	}
 }
 
@@ -196,7 +196,7 @@ func TestLogout_ClearsCookie(t *testing.T) {
 	}
 
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "hive_session" && c.MaxAge != -1 {
+		if c.Name == "hiro_session" && c.MaxAge != -1 {
 			t.Error("expected MaxAge=-1 to clear cookie")
 		}
 	}
@@ -256,7 +256,7 @@ func TestChangePassword_Success(t *testing.T) {
 		"new":     "newpass12",
 	})
 	req := httptest.NewRequest("POST", "/api/auth/password", bytes.NewReader(body))
-	req.AddCookie(&http.Cookie{Name: "hive_session", Value: token})
+	req.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -268,17 +268,17 @@ func TestChangePassword_Success(t *testing.T) {
 	// Password change should issue a new session token in the response.
 	var newToken string
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "hive_session" && c.Value != "" {
+		if c.Name == "hiro_session" && c.Value != "" {
 			newToken = c.Value
 		}
 	}
 	if newToken == "" {
-		t.Fatal("password change response should include a new hive_session cookie")
+		t.Fatal("password change response should include a new hiro_session cookie")
 	}
 
 	// Old token should be invalidated (password change rotates session secret).
 	req2 := httptest.NewRequest("GET", "/api/instances", nil)
-	req2.AddCookie(&http.Cookie{Name: "hive_session", Value: token})
+	req2.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusUnauthorized {
@@ -287,7 +287,7 @@ func TestChangePassword_Success(t *testing.T) {
 
 	// New token from password change response should work.
 	req2b := httptest.NewRequest("GET", "/api/instances", nil)
-	req2b.AddCookie(&http.Cookie{Name: "hive_session", Value: newToken})
+	req2b.AddCookie(&http.Cookie{Name: "hiro_session", Value: newToken})
 	rec2b := httptest.NewRecorder()
 	srv.ServeHTTP(rec2b, req2b)
 	if rec2b.Code == http.StatusUnauthorized {

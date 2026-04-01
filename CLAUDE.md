@@ -2,14 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What is Hive?
+## What is Hiro?
 
-Hive is a distributed AI agent platform written in Go. A single binary serves an HTTP API, a WebSocket chat endpoint, and an embedded React dashboard. Agents are defined as markdown files with YAML frontmatter; they run agentic loops backed by [charm.land/fantasy](https://charm.land/fantasy) and can spawn/manage child agents.
+Hiro is a distributed AI agent platform written in Go. A single binary serves an HTTP API, a WebSocket chat endpoint, and an embedded React dashboard. Agents are defined as markdown files with YAML frontmatter; they run agentic loops backed by [charm.land/fantasy](https://charm.land/fantasy) and can spawn/manage child agents.
 
 ## Build & Dev Commands
 
 ```bash
-make build        # Build web UI + Go binary (outputs ./hive)
+make build        # Build web UI + Go binary (outputs ./hiro)
 make build-dev    # Build Go binary without web UI (uses -tags dev)
 make test            # Run tests in Docker (builds test container)
 make test-local      # Run tests locally (no Docker, uses mock workers)
@@ -32,7 +32,7 @@ go test ./internal/agent/... -tags=online -v -count=1
 
 ### E2E Tests
 
-E2E tests (`tests/e2e/`) run against a real Hive server in Docker with a real LLM provider. They require `HIVE_API_KEY` (sourced from `.env`).
+E2E tests (`tests/e2e/`) run against a real Hiro server in Docker with a real LLM provider. They require `HIRO_API_KEY` (sourced from `.env`).
 
 ```bash
 # Source .env and run e2e tests — builds Docker image, starts server, runs tests, tears down
@@ -57,12 +57,12 @@ cd web/ui && npm run dev
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HIVE_API_KEY` | *(none)* | LLM provider API key (required for agents) |
-| `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
-| `HIVE_MODEL` | *(platform default)* | Override model for all agents |
-| `HIVE_ADDR` | `:8080` | HTTP listen address |
-| `HIVE_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
-| `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
+| `HIRO_API_KEY` | *(none)* | LLM provider API key (required for agents) |
+| `HIRO_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
+| `HIRO_MODEL` | *(platform default)* | Override model for all agents |
+| `HIRO_ADDR` | `:8080` | HTTP listen address |
+| `HIRO_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
+| `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 
 A `.env` file is loaded automatically via godotenv (does not override existing vars).
 
@@ -70,32 +70,32 @@ A `.env` file is loaded automatically via godotenv (does not override existing v
 
 ### Process Model
 
-Hive uses **process isolation**: the control plane owns all inference (LLM calls, conversation history, system prompt assembly) while tool execution runs in separate worker processes under isolated Unix UIDs. Communication is via gRPC over Unix sockets.
+Hiro uses **process isolation**: the control plane owns all inference (LLM calls, conversation history, system prompt assembly) while tool execution runs in separate worker processes under isolated Unix UIDs. Communication is via gRPC over Unix sockets.
 
 ```
-Control Plane Process (hive)
+Control Plane Process (hiro)
 ├── HTTP/WS API (web UI, REST, chat)
 ├── Inference loops (fantasy agent per instance)
-├── Unified database (db/hive.db — instances, sessions, messages, usage)
+├── Unified database (db/hiro.db — instances, sessions, messages, usage)
 ├── System prompt assembly, context management, compaction
 ├── Local tools: memory, todos, history, spawn, coordinator, skills
 ├── Secrets + tool policies (config.yaml)
 ├── Process registry + instance lifecycle
-└── Spawns: hive agent (one worker per instance)
+└── Spawns: hiro agent (one worker per instance)
 
-Agent Worker Process (hive agent)
+Agent Worker Process (hiro agent)
 ├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
 ├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
 └── Runs under isolated UID for security
 ```
 
-**Spawn protocol**: Control plane spawns `hive agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
+**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
 
-**Unix user isolation**: Auto-detected at startup (enabled iff `hive-agents` group exists). A pre-created pool of 64 Unix users (`hive-agent-0` through `hive-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
+**Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
 
 **Group-based access control**: Two Unix groups control filesystem access:
-- `hive-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hive` and `/opt/mise`.
-- `hive-coordinators` (GID 10001) — supplementary group for coordinator-mode agents. Grants write access to `agents/` and `skills/` directories (setgid `2775`). Non-coordinator agents get read-only access via "other" bits. Group membership is assigned dynamically at spawn time via `SysProcAttr.Credential.Groups` — no UIDs are statically added to `hive-coordinators` in `/etc/group`.
+- `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
+- `hiro-coordinators` (GID 10001) — supplementary group for coordinator-mode agents. Grants write access to `agents/` and `skills/` directories (setgid `2775`). Non-coordinator agents get read-only access via "other" bits. Group membership is assigned dynamically at spawn time via `SysProcAttr.Credential.Groups` — no UIDs are statically added to `hiro-coordinators` in `/etc/group`.
 
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 
@@ -111,7 +111,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
                                                                   todos.yaml
                                                                   scratch/
                                                                   tmp/
-                                                              db/hive.db (shared, all instances)
+                                                              db/hiro.db (shared, all instances)
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
@@ -120,7 +120,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 - **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
 - **Persistent instances** get extra tools: `TodoWrite`, `HistorySearch/HistoryRecall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory).
-- **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
+- **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) and write access to `agents/` and `skills/` directories via the `hiro-coordinators` Unix group.
 
 ### Agent Definition Structure
 
@@ -175,10 +175,10 @@ Skills are re-scanned from disk each turn (like persona and memory), so runtime-
 
 ### Key Packages
 
-- **`cmd/hive`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC).
+- **`cmd/hiro`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC).
 - **`internal/agent`** — Instance management. `Manager` supervises instance lifecycles, spawns workers via `WorkerFactory`, creates inference loops. `CreateLanguageModel` handles LLM provider setup.
 - **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per instance. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, coordinator, skills). `ScopedManager` enforces descendant scoping via instance IDs. Context-based cycle detection prevents re-entrant deadlocks.
-- **`internal/platform/db`** — Unified SQLite database (`db/hive.db`). Stores instances, sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
+- **`internal/platform/db`** — Unified SQLite database (`db/hiro.db`). Stores instances, sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup). Error sentinels include `ErrInstanceNotFound`.
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
@@ -257,14 +257,14 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 
 The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started in coordinator mode at bootstrap.
 
-**Bootstrap flow** (`cmd/hive/main.go`):
-1. Check `HIVE_API_KEY` is set
+**Bootstrap flow** (`cmd/hiro/main.go`):
+1. Check `HIRO_API_KEY` is set
 2. Create `Manager` with provider/API key
 3. `RestoreInstances()` — resume any persistent agents from prior runs
 4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
 5. If not running, `CreateInstance(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
 
-Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `SpawnInstance` which supports all modes (non-coordinators are restricted to ephemeral).
+Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and write access to `agents/` and `skills/` via the `hiro-coordinators` Unix group. All agents get `SpawnInstance` which supports all modes (non-coordinators are restricted to ephemeral).
 
 ## Control Plane
 
@@ -310,7 +310,7 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 ## Conversation Modes
 
-- **Coordinator and persistent agents** use the unified platform database (`db/hive.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
+- **Coordinator and persistent agents** use the unified platform database (`db/hiro.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
 - **WebSocket chat** sends messages to the coordinator's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
 
@@ -327,4 +327,4 @@ Coordinator tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstanc
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hive-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hive-agents` group).
+- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hiro-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).

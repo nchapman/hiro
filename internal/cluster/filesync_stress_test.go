@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // --- Test harness ---
@@ -100,7 +100,7 @@ func fileExists(dir, relPath, wantContent string) bool {
 	return string(data) == wantContent
 }
 
-// countFiles counts regular files under dir (excluding .conflict and .hive-tmp files).
+// countFiles counts regular files under dir (excluding .conflict and .hiro-tmp files).
 func countFiles(dir string) int {
 	count := 0
 	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -108,7 +108,7 @@ func countFiles(dir string) int {
 			return nil
 		}
 		base := filepath.Base(path)
-		if strings.Contains(base, ".conflict.") || strings.HasPrefix(base, ".hive-tmp-") {
+		if strings.Contains(base, ".conflict.") || strings.HasPrefix(base, ".hiro-tmp-") {
 			return nil
 		}
 		count++
@@ -473,7 +473,7 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 	// No temp files should remain.
 	var tmpFiles []string
 	filepath.WalkDir(workerDir, func(path string, d os.DirEntry, err error) error {
-		if err == nil && strings.HasPrefix(filepath.Base(path), ".hive-tmp-") {
+		if err == nil && strings.HasPrefix(filepath.Base(path), ".hiro-tmp-") {
 			tmpFiles = append(tmpFiles, path)
 		}
 		return nil
@@ -629,7 +629,7 @@ func TestStress_DeleteDuringSync(t *testing.T) {
 	// No temp files should remain.
 	var tmpFiles []string
 	filepath.WalkDir(p.workerDir, func(path string, d os.DirEntry, err error) error {
-		if err == nil && strings.HasPrefix(filepath.Base(path), ".hive-tmp-") {
+		if err == nil && strings.HasPrefix(filepath.Base(path), ".hiro-tmp-") {
 			tmpFiles = append(tmpFiles, path)
 		}
 		return nil

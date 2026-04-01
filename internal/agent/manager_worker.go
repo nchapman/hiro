@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/inference"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // shutdownGrace is the deadline for a graceful worker shutdown before force-killing.

@@ -8,10 +8,10 @@
 //
 // Required environment:
 //
-//	HIVE_E2E_URL            — leader's HTTP base URL (e.g. http://localhost:8080)
-//	HIVE_LEADER_CONTAINER   — leader Docker container ID
-//	HIVE_WORKER_CONTAINER   — worker Docker container ID
-//	HIVE_API_KEY            — LLM provider API key
+//	HIRO_E2E_URL            — leader's HTTP base URL (e.g. http://localhost:8080)
+//	HIRO_LEADER_CONTAINER   — leader Docker container ID
+//	HIRO_WORKER_CONTAINER   — worker Docker container ID
+//	HIRO_API_KEY            — LLM provider API key
 package e2e_cluster
 
 import (
@@ -42,17 +42,17 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	baseURL = os.Getenv("HIVE_E2E_URL")
+	baseURL = os.Getenv("HIRO_E2E_URL")
 	if baseURL == "" {
-		fmt.Println("HIVE_E2E_URL not set — skipping cluster e2e tests")
+		fmt.Println("HIRO_E2E_URL not set — skipping cluster e2e tests")
 		os.Exit(0)
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	leaderContainer = os.Getenv("HIVE_LEADER_CONTAINER")
-	workerContainer = os.Getenv("HIVE_WORKER_CONTAINER")
+	leaderContainer = os.Getenv("HIRO_LEADER_CONTAINER")
+	workerContainer = os.Getenv("HIRO_WORKER_CONTAINER")
 	if leaderContainer == "" || workerContainer == "" {
-		fmt.Println("HIVE_LEADER_CONTAINER and HIVE_WORKER_CONTAINER must be set")
+		fmt.Println("HIRO_LEADER_CONTAINER and HIRO_WORKER_CONTAINER must be set")
 		os.Exit(1)
 	}
 
@@ -125,14 +125,14 @@ func TestCluster_CoordinatorSeesWorkerNode(t *testing.T) {
 func TestCluster_FileSyncLeaderToWorker(t *testing.T) {
 	testContent := fmt.Sprintf("leader-to-worker-%d", time.Now().UnixNano())
 
-	// Write via the Hive API so the leader's hive process creates the file
+	// Write via the Hiro API so the leader's hiro process creates the file
 	// (triggering fsnotify for the file sync watcher).
 	apiWriteFile(t, "workspace/sync-l2w-test.txt", testContent)
 
 	var workerContent string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/hive/workspace/sync-l2w-test.txt").Output()
+		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/hiro/workspace/sync-l2w-test.txt").Output()
 		if err == nil && strings.TrimSpace(string(out)) == testContent {
 			workerContent = strings.TrimSpace(string(out))
 			break
@@ -160,7 +160,7 @@ You are a test agent. Write files as instructed. Be concise.`
 	apiWriteFile(t, "agents/sync-writer-agent/agent.md", agentMD)
 
 	// Wait for the agent definition to sync to the worker.
-	waitForWorkerFile(t, "/hive/agents/sync-writer-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/hiro/agents/sync-writer-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -192,8 +192,8 @@ Set the node parameter to the worker node's ID. Tell me the result.`, marker)
 
 	if !strings.Contains(leaderContent, marker) {
 		// Also check via docker exec for debugging.
-		out, _ := exec.Command("docker", "exec", leaderContainer, "cat", "/hive/workspace/sync-w2l-test.txt").CombinedOutput()
-		wout, _ := exec.Command("docker", "exec", workerContainer, "cat", "/hive/workspace/sync-w2l-test.txt").CombinedOutput()
+		out, _ := exec.Command("docker", "exec", leaderContainer, "cat", "/hiro/workspace/sync-w2l-test.txt").CombinedOutput()
+		wout, _ := exec.Command("docker", "exec", workerContainer, "cat", "/hiro/workspace/sync-w2l-test.txt").CombinedOutput()
 		t.Errorf("worker→leader sync failed: leader has %q, want marker %q\nleader docker exec: %s\nworker docker exec: %s",
 			leaderContent, marker, out, wout)
 	}
@@ -211,7 +211,7 @@ You are a test agent. When asked, run the command given and report the output. B
 
 	apiWriteFile(t, "agents/remote-worker-agent/agent.md", agentMD)
 
-	waitForWorkerFile(t, "/hive/agents/remote-worker-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/hiro/agents/remote-worker-agent/agent.md", 15*time.Second)
 }
 
 // TestCluster_SpawnAgentOnWorkerNode is the core clustering test.
@@ -230,7 +230,7 @@ You are a test agent running on a remote node. Execute commands as asked. Be con
 	apiWriteFile(t, "agents/remote-exec-agent/agent.md", agentMD)
 
 	// Wait for definition to sync to worker.
-	waitForWorkerFile(t, "/hive/agents/remote-exec-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/hiro/agents/remote-exec-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -274,7 +274,7 @@ You are a test agent. Write files as instructed. Use relative paths from your wo
 	apiWriteFile(t, "agents/remote-writer-agent/agent.md", agentMD)
 
 	// Wait for sync.
-	waitForWorkerFile(t, "/hive/agents/remote-writer-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/hiro/agents/remote-writer-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -285,7 +285,7 @@ You are a test agent. Write files as instructed. Use relative paths from your wo
 	marker := fmt.Sprintf("cluster-e2e-%d", time.Now().UnixNano())
 
 	// Use a relative path (workspace/remote-test.txt) so the agent writes
-	// relative to its working directory (/hive on the worker).
+	// relative to its working directory (/hiro on the worker).
 	prompt := fmt.Sprintf(`Use ListNodes to find a non-home worker node, then SpawnInstance "remote-writer-agent" on it in ephemeral mode. The prompt should be:
 
 "Use Write to create workspace/remote-test.txt with exactly this content: %s"
@@ -299,7 +299,7 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 	var workerContent string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/hive/workspace/remote-test.txt").Output()
+		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/hiro/workspace/remote-test.txt").Output()
 		if err == nil && strings.Contains(string(out), marker) {
 			workerContent = strings.TrimSpace(string(out))
 			break
@@ -309,7 +309,7 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 
 	if !strings.Contains(workerContent, marker) {
 		// Debug: list files on worker.
-		ls, _ := exec.Command("docker", "exec", workerContainer, "find", "/hive/workspace", "-type", "f").CombinedOutput()
+		ls, _ := exec.Command("docker", "exec", workerContainer, "find", "/hiro/workspace", "-type", "f").CombinedOutput()
 		t.Errorf("file on worker should contain marker %q, got %q\nworker workspace files: %s", marker, workerContent, ls)
 	}
 
@@ -428,15 +428,15 @@ func waitHealthy(ctx context.Context) error {
 }
 
 func runSetup() error {
-	apiKey := os.Getenv("HIVE_API_KEY")
+	apiKey := os.Getenv("HIRO_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("HIVE_API_KEY must be set")
+		return fmt.Errorf("HIRO_API_KEY must be set")
 	}
-	provider := os.Getenv("HIVE_PROVIDER")
+	provider := os.Getenv("HIRO_PROVIDER")
 	if provider == "" {
 		provider = "anthropic"
 	}
-	model := os.Getenv("HIVE_MODEL")
+	model := os.Getenv("HIRO_MODEL")
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "e2e-cluster-test-12345",
@@ -492,8 +492,8 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 	}
 }
 
-// apiWriteFile writes a file on the leader through the Hive REST API.
-// This ensures the hive process creates the file, triggering fsnotify
+// apiWriteFile writes a file on the leader through the Hiro REST API.
+// This ensures the hiro process creates the file, triggering fsnotify
 // for the file sync watcher.
 func apiWriteFile(t *testing.T, relPath, content string) {
 	t.Helper()
@@ -515,7 +515,7 @@ func apiWriteFile(t *testing.T, relPath, content string) {
 	}
 }
 
-// apiReadFile reads a file from the leader through the Hive REST API.
+// apiReadFile reads a file from the leader through the Hiro REST API.
 func apiReadFile(relPath string) (string, error) {
 	reqURL := fmt.Sprintf("%s/api/files/file?path=%s", baseURL, url.QueryEscape(relPath))
 	resp, err := httpClient.Get(reqURL)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/ipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // RemoteWorker implements ipc.AgentWorker by forwarding tool calls over

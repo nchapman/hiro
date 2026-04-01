@@ -10,12 +10,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/nchapman/hivebot/internal/cluster"
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/inference"
-	"github.com/nchapman/hivebot/internal/ipc"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
-	"github.com/nchapman/hivebot/internal/provider"
+	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/provider"
 )
 
 // CreateInstance loads an agent definition by name and starts an instance in the
@@ -320,7 +320,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
-		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", sessionID)),
+		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hiro-agent-%s.sock", sessionID)),
 		UID:            uid,
 		GID:            gid,
 		Groups:         groups,
@@ -347,7 +347,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			SessionID:      sessionID,
 			AgentName:      cfg.Name,
 			EffectiveTools: allowedTools,
-			WorkingDir:     ".", // relative to node's HIVE_ROOT
+			WorkingDir:     ".", // relative to node's HIRO_ROOT
 			SessionDir:     filepath.Join("instances", instanceID, "sessions", sessionID),
 		})
 		if err != nil {

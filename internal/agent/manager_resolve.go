@@ -3,8 +3,8 @@ package agent
 import (
 	"fmt"
 
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/models"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/models"
 )
 
 // spawnTool is injected into all agents.

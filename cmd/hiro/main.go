@@ -16,20 +16,20 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/api"
-	"github.com/nchapman/hivebot/internal/cluster"
-	"github.com/nchapman/hivebot/internal/controlplane"
-	"github.com/nchapman/hivebot/internal/platform"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
-	"github.com/nchapman/hivebot/internal/platform/loghandler"
-	"github.com/nchapman/hivebot/internal/uidpool"
-	"github.com/nchapman/hivebot/internal/watcher"
-	"github.com/nchapman/hivebot/web"
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/api"
+	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/controlplane"
+	"github.com/nchapman/hiro/internal/platform"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/platform/loghandler"
+	"github.com/nchapman/hiro/internal/uidpool"
+	"github.com/nchapman/hiro/internal/watcher"
+	"github.com/nchapman/hiro/web"
 )
 
 func main() {
-	// Dispatch subcommand: "hive agent" runs an agent worker process.
+	// Dispatch subcommand: "hiro agent" runs an agent worker process.
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
 		if err := runAgent(); err != nil {
 			fmt.Fprintf(os.Stderr, "agent error: %v\n", err)
@@ -50,9 +50,9 @@ func run() error {
 
 	// Parse log level from environment (default INFO).
 	logLevel := slog.LevelInfo
-	if lvl := os.Getenv("HIVE_LOG_LEVEL"); lvl != "" {
+	if lvl := os.Getenv("HIRO_LOG_LEVEL"); lvl != "" {
 		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
-			return fmt.Errorf("invalid HIVE_LOG_LEVEL %q: %w", lvl, err)
+			return fmt.Errorf("invalid HIRO_LOG_LEVEL %q: %w", lvl, err)
 		}
 	}
 
@@ -61,8 +61,8 @@ func run() error {
 		Level: logLevel,
 	}))
 
-	listenAddr := envOr("HIVE_ADDR", ":8080")
-	rootDir := envOr("HIVE_ROOT", ".")
+	listenAddr := envOr("HIRO_ADDR", ":8080")
+	rootDir := envOr("HIRO_ROOT", ".")
 
 	absRootDir, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -76,7 +76,7 @@ func run() error {
 	}
 
 	// Open the unified platform database.
-	pdb, err := platformdb.Open(filepath.Join(absRootDir, "db", "hive.db"))
+	pdb, err := platformdb.Open(filepath.Join(absRootDir, "db", "hiro.db"))
 	if err != nil {
 		return fmt.Errorf("opening platform database: %w", err)
 	}
@@ -123,7 +123,7 @@ func run() error {
 		return fmt.Errorf("loading web UI: %w", err)
 	}
 
-	// Start filesystem watcher for HIVE_ROOT.
+	// Start filesystem watcher for HIRO_ROOT.
 	fsWatcher, err := watcher.New(absRootDir, logger)
 	if err != nil {
 		return fmt.Errorf("starting filesystem watcher: %w", err)
@@ -158,7 +158,7 @@ func run() error {
 	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
 		swarmCode := cp.ClusterSwarmCode()
 		if swarmCode == "" {
-			return fmt.Errorf("cluster.swarm_code (or HIVE_SWARM_CODE) is required when tracker_url is set")
+			return fmt.Errorf("cluster.swarm_code (or HIRO_SWARM_CODE) is required when tracker_url is set")
 		}
 
 		// Parse gRPC port from cluster address.
@@ -264,21 +264,21 @@ func run() error {
 			return fmt.Errorf("no LLM provider configured")
 		}
 
-		// Detect Unix user isolation: enabled iff the hive-agents group exists.
+		// Detect Unix user isolation: enabled iff the hiro-agents group exists.
 		var pool *uidpool.Pool
-		if grp, err := user.LookupGroup("hive-agents"); err == nil {
+		if grp, err := user.LookupGroup("hiro-agents"); err == nil {
 			gid, err := strconv.ParseUint(grp.Gid, 10, 32)
 			if err != nil {
-				return fmt.Errorf("parsing hive-agents GID %q: %w", grp.Gid, err)
+				return fmt.Errorf("parsing hiro-agents GID %q: %w", grp.Gid, err)
 			}
 			pool = uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
 			logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
 
-			// Detect hive-coordinators group for agents/ and skills/ write access.
-			if coordGrp, err := user.LookupGroup("hive-coordinators"); err == nil {
+			// Detect hiro-coordinators group for agents/ and skills/ write access.
+			if coordGrp, err := user.LookupGroup("hiro-coordinators"); err == nil {
 				coordGID, err := strconv.ParseUint(coordGrp.Gid, 10, 32)
 				if err != nil {
-					return fmt.Errorf("parsing hive-coordinators GID %q: %w", coordGrp.Gid, err)
+					return fmt.Errorf("parsing hiro-coordinators GID %q: %w", coordGrp.Gid, err)
 				}
 				pool.SetCoordinatorGID(uint32(coordGID))
 				logger.Info("coordinator group detected", "gid", coordGID)
@@ -335,7 +335,7 @@ func run() error {
 	}
 
 	go func() {
-		logger.Info("hive starting", "addr", listenAddr, "cluster", cs.listener.Addr())
+		logger.Info("hiro starting", "addr", listenAddr, "cluster", cs.listener.Addr())
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "error", err)
 			cancel()

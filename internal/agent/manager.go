@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/nchapman/hivebot/internal/cluster"
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/inference"
-	"github.com/nchapman/hivebot/internal/ipc"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
-	"github.com/nchapman/hivebot/internal/uidpool"
+	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/uidpool"
 )
 
 // InstanceStatus represents the lifecycle state of an instance.
@@ -62,7 +62,7 @@ type instance struct {
 	effectiveTools map[string]bool    // built-in tools this instance is allowed; nil = unrestricted
 	uid            uint32             // isolated UID (0 = no isolation)
 	gid            uint32             // isolated GID
-	groups         []uint32           // supplementary groups (includes hive-coordinators for coordinators)
+	groups         []uint32           // supplementary groups (includes hiro-coordinators for coordinators)
 	nodeID         ipc.NodeID         // which node this instance runs on ("home" for local)
 }
 
@@ -96,7 +96,7 @@ type ControlPlane interface {
 	DefaultModel() string
 }
 
-// NewManager creates a new agent manager. rootDir is the hive platform root
+// NewManager creates a new agent manager. rootDir is the hiro platform root
 // containing agents/, instances/, skills/, and workspace/ subdirectories. The context
 // controls the lifetime of persistent instances. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.

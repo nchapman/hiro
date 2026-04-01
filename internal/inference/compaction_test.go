@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // fakeSummarizer returns canned summaries for testing.

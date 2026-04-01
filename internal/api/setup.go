@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/nchapman/hivebot/internal/controlplane"
-	"github.com/nchapman/hivebot/internal/provider"
+	"github.com/nchapman/hiro/internal/controlplane"
+	"github.com/nchapman/hiro/internal/provider"
 )
 
 type setupRequest struct {
@@ -93,7 +93,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	token := signer.Create()
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "hive_session",
+		Name:     "hiro_session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,

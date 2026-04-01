@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.0
-// source: internal/ipc/proto/hive.proto
+// source: internal/ipc/proto/hiro.proto
 
 package proto
 
@@ -19,9 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentWorker_ExecuteTool_FullMethodName = "/hive.AgentWorker/ExecuteTool"
-	AgentWorker_Shutdown_FullMethodName    = "/hive.AgentWorker/Shutdown"
-	AgentWorker_WatchJobs_FullMethodName   = "/hive.AgentWorker/WatchJobs"
+	AgentWorker_ExecuteTool_FullMethodName = "/hiro.AgentWorker/ExecuteTool"
+	AgentWorker_Shutdown_FullMethodName    = "/hiro.AgentWorker/Shutdown"
+	AgentWorker_WatchJobs_FullMethodName   = "/hiro.AgentWorker/WatchJobs"
 )
 
 // AgentWorkerClient is the client API for AgentWorker service.
@@ -192,7 +192,7 @@ type AgentWorker_WatchJobsServer = grpc.ServerStreamingServer[JobCompletion]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AgentWorker_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "hive.AgentWorker",
+	ServiceName: "hiro.AgentWorker",
 	HandlerType: (*AgentWorkerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -211,11 +211,11 @@ var AgentWorker_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "internal/ipc/proto/hive.proto",
+	Metadata: "internal/ipc/proto/hiro.proto",
 }
 
 const (
-	Cluster_NodeStream_FullMethodName = "/hive.Cluster/NodeStream"
+	Cluster_NodeStream_FullMethodName = "/hiro.Cluster/NodeStream"
 )
 
 // ClusterClient is the client API for Cluster service.
@@ -310,7 +310,7 @@ type Cluster_NodeStreamServer = grpc.BidiStreamingServer[NodeMessage, LeaderMess
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Cluster_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "hive.Cluster",
+	ServiceName: "hiro.Cluster",
 	HandlerType: (*ClusterServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
@@ -321,5 +321,5 @@ var Cluster_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "internal/ipc/proto/hive.proto",
+	Metadata: "internal/ipc/proto/hiro.proto",
 }

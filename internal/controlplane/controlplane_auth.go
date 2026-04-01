@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/auth"
+	"github.com/nchapman/hiro/internal/auth"
 )
 
 const sessionTTL = 24 * time.Hour

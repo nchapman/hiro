@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/auth"
+	"github.com/nchapman/hiro/internal/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -122,7 +122,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	token := signer.Create()
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "hive_session",
+		Name:     "hiro_session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
@@ -136,7 +136,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "hive_session",
+		Name:     "hiro_session",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
@@ -192,7 +192,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if signer != nil {
 		token := signer.Create()
 		http.SetCookie(w, &http.Cookie{
-			Name:     "hive_session",
+			Name:     "hiro_session",
 			Value:    token,
 			Path:     "/",
 			HttpOnly: true,
@@ -212,7 +212,7 @@ func (s *Server) isAuthenticated(r *http.Request) bool {
 	}
 
 	// Check cookie first
-	if cookie, err := r.Cookie("hive_session"); err == nil {
+	if cookie, err := r.Cookie("hiro_session"); err == nil {
 		if signer.Valid(cookie.Value) {
 			return true
 		}

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/controlplane"
+	"github.com/nchapman/hiro/internal/controlplane"
 )
 
 // newSetupServer creates a server that needs setup (no password set).
@@ -49,12 +49,12 @@ func TestSetup_Success(t *testing.T) {
 	// Should set a session cookie.
 	var foundCookie bool
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "hive_session" {
+		if c.Name == "hiro_session" {
 			foundCookie = true
 		}
 	}
 	if !foundCookie {
-		t.Error("expected hive_session cookie")
+		t.Error("expected hiro_session cookie")
 	}
 
 	// Setup should no longer be needed.

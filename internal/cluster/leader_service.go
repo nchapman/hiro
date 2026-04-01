@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/ipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/ipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 const spawnTimeout = 30 * time.Second
@@ -360,8 +360,8 @@ type SpawnRequest struct {
 	SessionID      string
 	AgentName      string
 	EffectiveTools map[string]bool
-	WorkingDir     string // relative path within HIVE_ROOT
-	SessionDir     string // relative path within HIVE_ROOT
+	WorkingDir     string // relative path within HIRO_ROOT
+	SessionDir     string // relative path within HIRO_ROOT
 }
 
 // RemoteWorkerHandle wraps a RemoteWorker with control functions,

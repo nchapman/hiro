@@ -14,25 +14,25 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/cluster"
-	"github.com/nchapman/hivebot/internal/controlplane"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/controlplane"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
-// runWorkerNode starts hive in worker mode. It connects to the leader,
+// runWorkerNode starts hiro in worker mode. It connects to the leader,
 // receives file sync, and manages local agent worker processes.
 func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.Logger) error {
 	leaderAddr := cp.ClusterLeaderAddr()
-	if envAddr := os.Getenv("HIVE_LEADER"); envAddr != "" {
+	if envAddr := os.Getenv("HIRO_LEADER"); envAddr != "" {
 		leaderAddr = envAddr
 	}
 
 	joinToken := cp.ClusterJoinToken()
-	if envToken := os.Getenv("HIVE_JOIN_TOKEN"); envToken != "" {
+	if envToken := os.Getenv("HIRO_JOIN_TOKEN"); envToken != "" {
 		joinToken = envToken
 	}
 	if joinToken == "" {
-		return fmt.Errorf("worker mode requires cluster.join_token in config.yaml or HIVE_JOIN_TOKEN env var")
+		return fmt.Errorf("worker mode requires cluster.join_token in config.yaml or HIRO_JOIN_TOKEN env var")
 	}
 
 	nodeName := cp.ClusterNodeName()
@@ -61,7 +61,7 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
 		swarmCode := cp.ClusterSwarmCode()
 		if swarmCode == "" {
-			return fmt.Errorf("HIVE_SWARM_CODE is required when tracker_url is set")
+			return fmt.Errorf("HIRO_SWARM_CODE is required when tracker_url is set")
 		}
 
 		discovery = cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
@@ -81,7 +81,7 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	// Resolve leader address: static config takes precedence, then tracker discovery.
 	if leaderAddr == "" {
 		if discovery == nil {
-			return fmt.Errorf("worker mode requires cluster.leader_addr, HIVE_LEADER, or tracker_url + HIVE_SWARM_CODE")
+			return fmt.Errorf("worker mode requires cluster.leader_addr, HIRO_LEADER, or tracker_url + HIRO_SWARM_CODE")
 		}
 		logger.Info("waiting for leader via tracker discovery...")
 		leaderAddr, err = discovery.WaitForLeader(ctx)

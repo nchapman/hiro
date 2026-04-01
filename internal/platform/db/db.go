@@ -1,4 +1,4 @@
-// Package db provides the unified platform database (hive.db).
+// Package db provides the unified platform database (hiro.db).
 //
 // All session, message, history, usage, and request log data is stored in a
 // single SQLite database. The control plane is the sole writer; agent workers

@@ -810,17 +810,17 @@ func TestClusterMode_Default(t *testing.T) {
 }
 
 func TestClusterMode_EnvOverride(t *testing.T) {
-	t.Setenv("HIVE_MODE", "worker")
+	t.Setenv("HIRO_MODE", "worker")
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 	cp.SetClusterMode("leader")
 
 	if mode := cp.ClusterMode(); mode != "worker" {
-		t.Errorf("expected HIVE_MODE env var to take precedence, got %q", mode)
+		t.Errorf("expected HIRO_MODE env var to take precedence, got %q", mode)
 	}
 }
 
 func TestClusterTrackerURL_EnvOverride(t *testing.T) {
-	t.Setenv("HIVE_TRACKER_URL", "https://env-tracker.example.com")
+	t.Setenv("HIRO_TRACKER_URL", "https://env-tracker.example.com")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	os.WriteFile(path, []byte("cluster:\n  tracker_url: https://config-tracker.example.com\n"), 0600)
@@ -969,7 +969,7 @@ func TestClusterGetters(t *testing.T) {
 }
 
 func TestClusterSwarmCode_EnvOverride(t *testing.T) {
-	t.Setenv("HIVE_SWARM_CODE", "env-swarm")
+	t.Setenv("HIRO_SWARM_CODE", "env-swarm")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	os.WriteFile(path, []byte("cluster:\n  swarm_code: config-swarm\n"), 0600)

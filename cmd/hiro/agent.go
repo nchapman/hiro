@@ -14,11 +14,11 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/agent/tools"
-	"github.com/nchapman/hivebot/internal/ipc"
-	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/agent/tools"
+	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 )
 
@@ -54,7 +54,7 @@ func runAgent() error {
 	var secretEnv []string
 
 	// When running under UID isolation, enable additional security:
-	// 1. Confine file tools to the platform root (/hive) — prevents reading/writing
+	// 1. Confine file tools to the platform root (/hiro) — prevents reading/writing
 	//    outside the workspace (e.g. /opt/mise, /etc, other instance dirs).
 	// 2. Block SSRF in fetch — prevents hitting cloud metadata (169.254.169.254)
 	//    or internal services.
@@ -107,7 +107,7 @@ func runAgent() error {
 	// Start gRPC server on Unix socket.
 	socketPath := cfg.AgentSocket
 	if socketPath == "" {
-		socketPath = fmt.Sprintf("/tmp/hive-agent-%s.sock", cfg.SessionID)
+		socketPath = fmt.Sprintf("/tmp/hiro-agent-%s.sock", cfg.SessionID)
 	}
 	os.Remove(socketPath)
 	lis, err := net.Listen("unix", socketPath)

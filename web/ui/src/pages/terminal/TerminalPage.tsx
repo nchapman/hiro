@@ -105,7 +105,7 @@ export default function TerminalPage() {
     observer.observe(el)
 
     // Set page title.
-    document.title = "Hive Terminal"
+    document.title = "Hiro Terminal"
 
     return () => {
       observer.disconnect()

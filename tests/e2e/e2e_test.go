@@ -1,13 +1,13 @@
 //go:build e2e
 
-// Package e2e contains end-to-end tests that run against a live hive server
+// Package e2e contains end-to-end tests that run against a live hiro server
 // in Docker. Tests communicate exclusively over HTTP/WebSocket — no internal
 // packages are imported.
 //
 // Required environment:
 //
-//	HIVE_E2E_URL        — base URL of the running server (e.g. http://localhost:8080)
-//	HIVE_E2E_CONTAINER  — Docker container name for filesystem access (e.g. hive-e2e)
+//	HIRO_E2E_URL        — base URL of the running server (e.g. http://localhost:8080)
+//	HIRO_E2E_CONTAINER  — Docker container name for filesystem access (e.g. hiro-e2e)
 package e2e
 
 import (
@@ -38,16 +38,16 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	baseURL = os.Getenv("HIVE_E2E_URL")
+	baseURL = os.Getenv("HIRO_E2E_URL")
 	if baseURL == "" {
-		fmt.Println("HIVE_E2E_URL not set — skipping e2e tests")
+		fmt.Println("HIRO_E2E_URL not set — skipping e2e tests")
 		os.Exit(0)
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	containerName = os.Getenv("HIVE_E2E_CONTAINER")
+	containerName = os.Getenv("HIRO_E2E_CONTAINER")
 	if containerName == "" {
-		containerName = "hive-e2e"
+		containerName = "hiro-e2e"
 	}
 
 	// Create HTTP client with cookie jar for authenticated requests.
@@ -84,18 +84,18 @@ func TestMain(m *testing.M) {
 }
 
 // runSetup calls POST /api/setup to configure the LLM provider and admin password.
-// Reads HIVE_API_KEY, HIVE_PROVIDER, and HIVE_MODEL from environment.
+// Reads HIRO_API_KEY, HIRO_PROVIDER, and HIRO_MODEL from environment.
 // The session cookie is stored in the shared httpClient's cookie jar.
 func runSetup() error {
-	apiKey := os.Getenv("HIVE_API_KEY")
+	apiKey := os.Getenv("HIRO_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("HIVE_API_KEY must be set")
+		return fmt.Errorf("HIRO_API_KEY must be set")
 	}
-	provider := os.Getenv("HIVE_PROVIDER")
+	provider := os.Getenv("HIRO_PROVIDER")
 	if provider == "" {
 		provider = "anthropic"
 	}
-	model := os.Getenv("HIVE_MODEL")
+	model := os.Getenv("HIRO_MODEL")
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "e2e-test-password-12345",
@@ -302,7 +302,7 @@ func (c *chatSession) chat(ctx context.Context, text string) string {
 
 // --- Docker exec helpers ---
 
-// containerExec runs a command inside the hive container and returns stdout.
+// containerExec runs a command inside the hiro container and returns stdout.
 func containerExec(t *testing.T, args ...string) string {
 	t.Helper()
 	cmdArgs := append([]string{"exec", containerName}, args...)
@@ -384,7 +384,7 @@ func findInstance(t *testing.T, name string) (instanceInfo, bool) {
 func spawnPersistentAgent(t *testing.T, ctx context.Context, name string) string {
 	t.Helper()
 
-	containerWriteFile(t, fmt.Sprintf("/hive/agents/%s/agent.md", name), fmt.Sprintf(`---
+	containerWriteFile(t, fmt.Sprintf("/hiro/agents/%s/agent.md", name), fmt.Sprintf(`---
 name: %s
 tools: [Read, Write, Edit, Glob, Grep, Bash]
 ---
@@ -414,17 +414,17 @@ You are a test agent. Be concise.`, name))
 
 // instanceDir returns the container path to an instance's directory.
 func instanceDir(_ *testing.T, instanceID string) string {
-	return "/hive/instances/" + instanceID
+	return "/hiro/instances/" + instanceID
 }
 
 // activeSessionDir returns the container path to an instance's active session directory.
 // Session IDs are UUID v7 (time-ordered), so the last entry alphabetically is the newest.
 func activeSessionDir(t *testing.T, instanceID string) string {
 	t.Helper()
-	out := containerExec(t, "sh", "-c", fmt.Sprintf("ls -1 /hive/instances/%s/sessions/ | tail -1", instanceID))
+	out := containerExec(t, "sh", "-c", fmt.Sprintf("ls -1 /hiro/instances/%s/sessions/ | tail -1", instanceID))
 	sessionID := strings.TrimSpace(out)
 	if sessionID == "" {
 		t.Fatalf("no sessions found for instance %s", instanceID)
 	}
-	return fmt.Sprintf("/hive/instances/%s/sessions/%s", instanceID, sessionID)
+	return fmt.Sprintf("/hiro/instances/%s/sessions/%s", instanceID, sessionID)
 }

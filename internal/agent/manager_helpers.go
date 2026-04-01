@@ -9,10 +9,10 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/cluster"
-	"github.com/nchapman/hivebot/internal/inference"
-	"github.com/nchapman/hivebot/internal/ipc"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // SendMessage sends a message to a running instance and streams the response.

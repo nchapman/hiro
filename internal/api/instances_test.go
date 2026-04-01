@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/agent"
-	"github.com/nchapman/hivebot/internal/ipc"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/ipc"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // testWorkerFactory returns a fake worker that does nothing.

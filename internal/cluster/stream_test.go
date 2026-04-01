@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nchapman/hivebot/internal/cluster"
-	pb "github.com/nchapman/hivebot/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/cluster"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"

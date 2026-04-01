@@ -27,7 +27,7 @@ func WriteMemoryFile(instanceDir, content string) error {
 
 // atomicWrite writes content to path via a temp file + rename.
 func atomicWrite(path string, content []byte, mode os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".hive-tmp-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".hiro-tmp-*")
 	if err != nil {
 		return err
 	}

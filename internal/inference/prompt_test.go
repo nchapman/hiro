@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nchapman/hivebot/internal/config"
+	"github.com/nchapman/hiro/internal/config"
 )
 
 func TestBuildSystemPrompt_MinimalConfig(t *testing.T) {
@@ -32,9 +32,9 @@ func TestBuildSystemPrompt_AllSections(t *testing.T) {
 		},
 	}
 	env := EnvInfo{
-		WorkingDir:  "/hive",
-		InstanceDir: "/hive/instances/abc123",
-		SessionDir:  "/hive/instances/abc123/sessions/sess1",
+		WorkingDir:  "/hiro",
+		InstanceDir: "/hiro/instances/abc123",
+		SessionDir:  "/hiro/instances/abc123/sessions/sess1",
 		Mode:        config.ModePersistent,
 	}
 	got := buildSystemPrompt(cfg, env, "Friendly and precise.", "Remember X.", "- [ ] Do Y", []string{"API_KEY", "DB_PASS"})
@@ -61,9 +61,9 @@ func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 		Skills: []config.SkillConfig{{Name: "s", Description: "d"}},
 	}
 	env := EnvInfo{
-		WorkingDir:  "/hive",
-		InstanceDir: "/hive/instances/x",
-		SessionDir:  "/hive/instances/x/sessions/y",
+		WorkingDir:  "/hiro",
+		InstanceDir: "/hiro/instances/x",
+		SessionDir:  "/hiro/instances/x/sessions/y",
 		Mode:        config.ModePersistent,
 	}
 	got := buildSystemPrompt(cfg, env, "PERSONA", "MEMORIES", "TODOS", []string{"SECRET"})
@@ -101,9 +101,9 @@ func TestBuildSystemPrompt_NoSecretsSection_WhenEmpty(t *testing.T) {
 
 func TestBuildEnvironmentSection_Persistent(t *testing.T) {
 	env := EnvInfo{
-		WorkingDir:  "/hive",
-		InstanceDir: "/hive/instances/abc-123",
-		SessionDir:  "/hive/instances/abc-123/sessions/sess-456",
+		WorkingDir:  "/hiro",
+		InstanceDir: "/hiro/instances/abc-123",
+		SessionDir:  "/hiro/instances/abc-123/sessions/sess-456",
 		Mode:        config.ModePersistent,
 	}
 	got := buildEnvironmentSection(env)
@@ -116,8 +116,8 @@ func TestBuildEnvironmentSection_Persistent(t *testing.T) {
 		"todos.yaml",
 		"scratch/",
 		"tmp/",
-		"/hive/instances/abc-123",
-		"/hive/instances/abc-123/sessions/sess-456",
+		"/hiro/instances/abc-123",
+		"/hiro/instances/abc-123/sessions/sess-456",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in environment section", want)
@@ -127,9 +127,9 @@ func TestBuildEnvironmentSection_Persistent(t *testing.T) {
 
 func TestBuildEnvironmentSection_Ephemeral(t *testing.T) {
 	env := EnvInfo{
-		WorkingDir:  "/hive",
-		InstanceDir: "/hive/instances/eph-1",
-		SessionDir:  "/hive/instances/eph-1/sessions/s1",
+		WorkingDir:  "/hiro",
+		InstanceDir: "/hiro/instances/eph-1",
+		SessionDir:  "/hiro/instances/eph-1/sessions/s1",
 		Mode:        config.ModeEphemeral,
 	}
 	got := buildEnvironmentSection(env)

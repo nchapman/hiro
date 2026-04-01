@@ -10,12 +10,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/inference"
-	"github.com/nchapman/hivebot/internal/ipc"
-	platformdb "github.com/nchapman/hivebot/internal/platform/db"
-	"github.com/nchapman/hivebot/internal/provider"
-	"github.com/nchapman/hivebot/internal/watcher"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/provider"
+	"github.com/nchapman/hiro/internal/watcher"
 )
 
 var validEfforts = map[string]bool{
@@ -234,7 +234,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
-		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hive-agent-%s.sock", newSessionID)),
+		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hiro-agent-%s.sock", newSessionID)),
 		UID:            inst.uid,
 		GID:            inst.gid,
 		Groups:         inst.groups,

@@ -9,8 +9,8 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/config"
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 //go:embed spawn_instance.md

@@ -7,8 +7,8 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hivebot/internal/agent/tools"
-	"github.com/nchapman/hivebot/internal/ipc"
+	"github.com/nchapman/hiro/internal/agent/tools"
+	"github.com/nchapman/hiro/internal/ipc"
 )
 
 // RemoteTools are tools that execute in the worker process via ExecuteTool gRPC.
