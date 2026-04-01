@@ -65,6 +65,8 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 
 	leaderStream := cluster.NewLeaderStream(registry, func(nodeID string) bool {
 		return cp.IsNodeApproved(nodeID)
+	}, func(nodeID string) bool {
+		return cp.IsNodeRevoked(nodeID)
 	}, pending, logger)
 
 	serverTLS := cluster.ServerTLSConfig(tlsCert)

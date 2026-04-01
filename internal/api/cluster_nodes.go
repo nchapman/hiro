@@ -113,9 +113,9 @@ func (s *Server) handleRemoveApproved(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cp.RemoveApprovedNode(nodeID)
+	s.cp.RevokeNode(nodeID)
 	if err := s.cp.Save(); err != nil {
-		s.logger.Error("failed to save config after removing approved node", "error", err)
+		s.logger.Error("failed to save config after revoking node", "error", err)
 		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
 		return
 	}
@@ -125,5 +125,31 @@ func (s *Server) handleRemoveApproved(w http.ResponseWriter, r *http.Request) {
 		s.disconnectNode(nodeID)
 	}
 
+	s.logger.Info("node revoked", "node_id", nodeID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleClearRevoked removes a node from the revoked list, allowing it to
+// reconnect and appear as pending again.
+// DELETE /api/cluster/revoked/{nodeID}
+func (s *Server) handleClearRevoked(w http.ResponseWriter, r *http.Request) {
+	nodeID := r.PathValue("nodeID")
+	if nodeID == "" {
+		http.Error(w, "nodeID is required", http.StatusBadRequest)
+		return
+	}
+	if s.cp == nil {
+		http.Error(w, "cluster not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	s.cp.ClearRevokedNode(nodeID)
+	if err := s.cp.Save(); err != nil {
+		s.logger.Error("failed to save config after clearing revoked node", "error", err)
+		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Info("revocation cleared", "node_id", nodeID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -94,6 +94,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/cluster/pending/{nodeID}", s.requireStrictAuth(s.handleDismissNode))
 	s.mux.HandleFunc("GET /api/cluster/approved", s.requireStrictAuth(s.handleListApproved))
 	s.mux.HandleFunc("DELETE /api/cluster/approved/{nodeID}", s.requireStrictAuth(s.handleRemoveApproved))
+	s.mux.HandleFunc("DELETE /api/cluster/revoked/{nodeID}", s.requireStrictAuth(s.handleClearRevoked))
 	s.mux.HandleFunc("GET /api/settings/providers", s.requireAuth(s.handleListProviders))
 	s.mux.HandleFunc("PUT /api/settings/providers/{type}", s.requireAuth(s.handlePutProvider))
 	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))

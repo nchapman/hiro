@@ -77,11 +77,43 @@ func (cp *ControlPlane) ApproveNode(nodeID, name string) {
 	}
 }
 
-// RemoveApprovedNode removes a node from the approved list. Caller must call Save() to persist.
-func (cp *ControlPlane) RemoveApprovedNode(nodeID string) {
+// RevokeNode removes a node from the approved list and adds it to the revoked
+// list so the leader can reject future connection attempts. Caller must call Save().
+func (cp *ControlPlane) RevokeNode(nodeID string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
+	// Capture the name before deleting from approved.
+	name := ""
+	if n, ok := cp.config.Cluster.ApprovedNodes[nodeID]; ok {
+		name = n.Name
+	}
 	delete(cp.config.Cluster.ApprovedNodes, nodeID)
+	if cp.config.Cluster.RevokedNodes == nil {
+		cp.config.Cluster.RevokedNodes = make(map[string]RevokedNode)
+	}
+	cp.config.Cluster.RevokedNodes[nodeID] = RevokedNode{
+		Name:      name,
+		RevokedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// IsNodeRevoked checks if a node has been explicitly revoked.
+func (cp *ControlPlane) IsNodeRevoked(nodeID string) bool {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	if cp.config.Cluster.RevokedNodes == nil {
+		return false
+	}
+	_, ok := cp.config.Cluster.RevokedNodes[nodeID]
+	return ok
+}
+
+// ClearRevokedNode removes a node from the revoked list, allowing it to
+// appear as pending again on next connection. Caller must call Save().
+func (cp *ControlPlane) ClearRevokedNode(nodeID string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	delete(cp.config.Cluster.RevokedNodes, nodeID)
 }
 
 // ApprovedNodes returns a copy of the approved nodes map.
@@ -96,6 +128,15 @@ func (cp *ControlPlane) ApprovedNodes() map[string]ApprovedNode {
 		nodes[k] = v
 	}
 	return nodes
+}
+
+// ClearAllClusterNodes removes all approved and revoked nodes.
+// Used during cluster reset to prevent stale node state from surviving mode changes.
+func (cp *ControlPlane) ClearAllClusterNodes() {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.Cluster.ApprovedNodes = nil
+	cp.config.Cluster.RevokedNodes = nil
 }
 
 // SetClusterMode sets the cluster mode.

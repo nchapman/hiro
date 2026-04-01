@@ -168,6 +168,9 @@ func (w *WorkerStream) Connect(ctx context.Context) error {
 		}
 	case *pb.LeaderMessage_Pending:
 		return ErrPendingApproval
+	case *pb.LeaderMessage_Rejected:
+		w.logger.Warn("rejected by leader", "reason", resp.Rejected.Reason)
+		return ErrApprovalRevoked
 	default:
 		return fmt.Errorf("expected NodeRegistered or NodePending, got %T", msg.Msg)
 	}

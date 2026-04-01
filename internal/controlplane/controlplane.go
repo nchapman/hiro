@@ -39,6 +39,12 @@ type ApprovedNode struct {
 	ApprovedAt string `yaml:"approved_at" json:"approved_at"` // RFC3339 timestamp
 }
 
+// RevokedNode represents a worker node whose approval has been explicitly revoked.
+type RevokedNode struct {
+	Name      string `yaml:"name" json:"name"`
+	RevokedAt string `yaml:"revoked_at" json:"revoked_at"` // RFC3339 timestamp
+}
+
 // ClusterConfig holds settings for leader-worker clustering.
 type ClusterConfig struct {
 	Mode          string                  `yaml:"mode,omitempty"`           // "standalone", "leader", or "worker"
@@ -47,6 +53,7 @@ type ClusterConfig struct {
 	TrackerURL    string                  `yaml:"tracker_url,omitempty"`   // discovery tracker URL (e.g. https://discover.hellohiro.ai)
 	SwarmCode     string                  `yaml:"swarm_code,omitempty"`    // shared swarm code for tracker discovery
 	ApprovedNodes map[string]ApprovedNode `yaml:"approved_nodes,omitempty"` // keyed by NodeID (hex sha256 of pubkey)
+	RevokedNodes  map[string]RevokedNode `yaml:"revoked_nodes,omitempty"`  // keyed by NodeID — explicitly revoked
 }
 
 // Config is the on-disk representation of the control plane state.
@@ -166,7 +173,8 @@ func (cp *ControlPlane) hasContent() bool {
 		len(cp.config.Agents) > 0 ||
 		cp.config.Cluster.Mode != "" ||
 		cp.config.Cluster.TrackerURL != "" ||
-		len(cp.config.Cluster.ApprovedNodes) > 0
+		len(cp.config.Cluster.ApprovedNodes) > 0 ||
+		len(cp.config.Cluster.RevokedNodes) > 0
 }
 
 // Reload re-reads config.yaml from disk and replaces the in-memory state.

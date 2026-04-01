@@ -94,12 +94,18 @@ message LeaderMessage {
     FileSyncData file_sync = 6;
     FileUpdate file_update = 7;
     NodePending pending = 8;
+    NodeRejected rejected = 9;
   }
 }
 
 message NodePending {
   string node_id = 1;    // identity-derived node ID (hex sha256 of pubkey)
   string message = 2;    // human-readable reason, e.g. "awaiting approval"
+}
+
+message NodeRejected {
+  string node_id = 1;    // identity-derived node ID
+  string reason = 2;     // human-readable reason, e.g. "approval revoked"
 }
 
 // --- Node registration ---

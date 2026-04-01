@@ -13,6 +13,10 @@ import (
 // has not yet approved this node. The worker should retry after a delay.
 var ErrPendingApproval = errors.New("pending approval from leader")
 
+// ErrApprovalRevoked is returned by WorkerStream.Connect when the leader
+// has explicitly revoked this node's approval. The worker should stop retrying.
+var ErrApprovalRevoked = errors.New("approval revoked by leader")
+
 // PendingNode represents a worker that connected but is not yet approved.
 type PendingNode struct {
 	NodeID    string    `json:"node_id"`
@@ -67,8 +71,9 @@ func (r *PendingRegistry) Load() error {
 const maxPendingNodes = 256
 
 // AddOrUpdate adds a pending node or updates LastSeen if it already exists.
-// Returns false if the registry is full and the node is new.
-func (r *PendingRegistry) AddOrUpdate(node PendingNode) bool {
+// Returns (ok, isNew): ok is false if the registry is full and the node is new;
+// isNew is true only when the node was not already in the pending list.
+func (r *PendingRegistry) AddOrUpdate(node PendingNode) (ok bool, isNew bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -78,18 +83,18 @@ func (r *PendingRegistry) AddOrUpdate(node PendingNode) bool {
 		existing.Name = node.Name
 		existing.Addr = node.Addr
 		_ = r.saveLocked()
-		return true
+		return true, false
 	}
 
 	if len(r.nodes) >= maxPendingNodes {
-		return false
+		return false, false
 	}
 
 	node.FirstSeen = now
 	node.LastSeen = now
 	r.nodes[node.NodeID] = &node
 	_ = r.saveLocked()
-	return true
+	return true, true
 }
 
 // Remove deletes a pending node.

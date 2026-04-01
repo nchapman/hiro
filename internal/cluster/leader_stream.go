@@ -23,6 +23,7 @@ type LeaderStream struct {
 
 	registry        *NodeRegistry
 	isApproved      func(nodeID string) bool // returns true if node is approved
+	isRevoked       func(nodeID string) bool // returns true if node was explicitly revoked
 	pending         *PendingRegistry
 	onNodeConnected func(nodeID NodeID) // called when a node successfully registers
 	relayAddr       string              // relay server address (for detecting relay connections)
@@ -55,10 +56,11 @@ type NodeHandlers struct {
 // NewLeaderStream creates a new leader-side cluster gRPC service.
 // isApproved checks whether a node ID has been approved by the operator.
 // pending tracks unapproved nodes so they can be shown in the dashboard.
-func NewLeaderStream(registry *NodeRegistry, isApproved func(string) bool, pending *PendingRegistry, logger *slog.Logger) *LeaderStream {
+func NewLeaderStream(registry *NodeRegistry, isApproved, isRevoked func(string) bool, pending *PendingRegistry, logger *slog.Logger) *LeaderStream {
 	return &LeaderStream{
 		registry:   registry,
 		isApproved: isApproved,
+		isRevoked:  isRevoked,
 		pending:    pending,
 		logger:     logger,
 		conns:      make(map[NodeID]*nodeConn),
@@ -141,19 +143,40 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 		nodeName = nodeName[:128]
 	}
 
-	// Step 3: Check approval.
+	// Step 3: Check approval / revocation.
+	// Note: isApproved and isRevoked are called separately; there is a brief
+	// window where config could change between checks. A node approved between
+	// the two calls will receive NodePending and succeed on its next retry.
 	if !s.isApproved(string(nodeID)) {
-		s.pending.AddOrUpdate(PendingNode{
+		truncID := string(nodeID)
+		if len(truncID) > 16 {
+			truncID = truncID[:16] + "..."
+		}
+
+		// Revoked nodes get a rejection — they should stop reconnecting.
+		if s.isRevoked != nil && s.isRevoked(string(nodeID)) {
+			s.logger.Info("rejected revoked node", "node_id", truncID, "name", nodeName)
+			_ = stream.Send(&pb.LeaderMessage{
+				Msg: &pb.LeaderMessage_Rejected{
+					Rejected: &pb.NodeRejected{
+						NodeId: string(nodeID),
+						Reason: "approval revoked by leader operator",
+					},
+				},
+			})
+			return nil
+		}
+
+		// Not approved and not revoked — add to pending list.
+		_, isNew := s.pending.AddOrUpdate(PendingNode{
 			NodeID: string(nodeID),
 			Name:   nodeName,
 			Addr:   peerAddr,
 		})
 
-		truncID := string(nodeID)
-		if len(truncID) > 16 {
-			truncID = truncID[:16] + "..."
+		if isNew {
+			s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)
 		}
-		s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)
 
 		// Tell the worker it's pending (not an error, just not yet approved).
 		_ = stream.Send(&pb.LeaderMessage{

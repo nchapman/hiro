@@ -41,6 +41,9 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// restartRequested is set when the UI triggers a cluster reset.
+	var restartRequested atomic.Bool
+
 	// Load or create node identity for mTLS.
 	identity, err := cluster.LoadOrCreateIdentity(rootDir)
 	if err != nil {
@@ -109,6 +112,10 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	webFS, _ := web.DistFS()
 	httpSrv := api.NewServer(logger, webFS, cp, nil, rootDir)
 	httpSrv.SetWorkerStatus(func() string { return connStatus.Load().(string) })
+	httpSrv.SetRestartFunc(func() {
+		restartRequested.Store(true)
+		cancel() // unblock the reconnect loop
+	})
 	httpServer := &http.Server{
 		Addr:              listenAddr,
 		Handler:           httpSrv,
@@ -249,7 +256,9 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		err := ws.Connect(ctx)
 
 		// Set status based on the disconnect reason before cleanup.
-		if errors.Is(err, cluster.ErrPendingApproval) {
+		if errors.Is(err, cluster.ErrApprovalRevoked) {
+			connStatus.Store("revoked")
+		} else if errors.Is(err, cluster.ErrPendingApproval) {
 			connStatus.Store("pending")
 		} else {
 			connStatus.Store("disconnected")
@@ -270,7 +279,17 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		}
 		syncMu.Unlock()
 
-		// Create a fresh sync service for the new connection (Stop is one-shot).
+		if ctx.Err() != nil {
+			break
+		}
+		if errors.Is(err, cluster.ErrApprovalRevoked) {
+			logger.Warn("approval revoked by leader, stopping reconnection")
+			// Block until context is cancelled (user must disconnect via UI).
+			<-ctx.Done()
+			break
+		}
+
+		// Create a fresh sync service for the next connection attempt (Stop is one-shot).
 		syncSvc = cluster.NewFileSyncService(cluster.FileSyncConfig{
 			RootDir:  rootDir,
 			SyncDirs: []string{"agents", "skills", "workspace"},
@@ -283,9 +302,6 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 			Logger: logger,
 		})
 
-		if ctx.Err() != nil {
-			break
-		}
 		if errors.Is(err, cluster.ErrPendingApproval) {
 			logger.Info("awaiting approval from leader, will retry...")
 		} else {
@@ -310,6 +326,9 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	}
 
 	logger.Info("worker node shutting down")
+	if restartRequested.Load() {
+		return errRestartRequested
+	}
 	return nil
 }
 

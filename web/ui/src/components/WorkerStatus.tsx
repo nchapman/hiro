@@ -21,7 +21,7 @@ interface ClusterSettings {
   node_name?: string
   leader_addr?: string
   swarm_code?: string
-  connection_status?: string // "connecting" | "pending" | "connected" | "disconnected"
+  connection_status?: string // "connecting" | "pending" | "connected" | "disconnected" | "revoked"
 }
 
 interface WorkerStatusProps {
@@ -77,6 +77,7 @@ export default function WorkerStatus({ onDisconnect }: WorkerStatusProps) {
   const statusIcon =
     connStatus === "connected" ? CheckmarkCircle01Icon :
     connStatus === "pending" ? Loading02Icon :
+    connStatus === "revoked" ? CancelCircleIcon :
     connStatus === "disconnected" ? CancelCircleIcon :
     Loading02Icon
 
@@ -85,9 +86,11 @@ export default function WorkerStatus({ onDisconnect }: WorkerStatusProps) {
       ? "Connected"
       : connStatus === "pending"
         ? "Waiting for Approval"
-        : connStatus === "disconnected"
-          ? "Disconnected"
-          : "Connecting..."
+        : connStatus === "revoked"
+          ? "Revoked"
+          : connStatus === "disconnected"
+            ? "Disconnected"
+            : "Connecting..."
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -117,7 +120,7 @@ export default function WorkerStatus({ onDisconnect }: WorkerStatusProps) {
                     ? "border-green-500 text-green-500"
                     : connStatus === "pending"
                       ? "border-yellow-500 text-yellow-500"
-                      : connStatus === "disconnected"
+                      : connStatus === "revoked" || connStatus === "disconnected"
                         ? "border-destructive text-destructive"
                         : ""
                 }`}
@@ -154,9 +157,11 @@ export default function WorkerStatus({ onDisconnect }: WorkerStatusProps) {
             </div>
 
             <p className="text-center text-xs text-muted-foreground">
-              {connStatus === "pending"
-                ? "The leader operator needs to approve this machine from their dashboard before it can connect."
-                : "This node receives tasks from the leader and executes them locally. Manage agents and settings from the leader dashboard."}
+              {connStatus === "revoked"
+                ? "This node's approval has been revoked by the leader operator. Disconnect to reset and reconfigure."
+                : connStatus === "pending"
+                  ? "The leader operator needs to approve this machine from their dashboard before it can connect."
+                  : "This node receives tasks from the leader and executes them locally. Manage agents and settings from the leader dashboard."}
             </p>
 
             <Button

@@ -727,10 +727,19 @@ func TestApproveNode(t *testing.T) {
 		t.Errorf("name = %q, want worker-1", n.Name)
 	}
 
-	// Remove and verify.
-	cp.RemoveApprovedNode("node-abc")
+	// Revoke and verify.
+	cp.RevokeNode("node-abc")
 	if cp.IsNodeApproved("node-abc") {
-		t.Error("node should not be approved after removal")
+		t.Error("node should not be approved after revocation")
+	}
+	if !cp.IsNodeRevoked("node-abc") {
+		t.Error("node should be in revoked list after revocation")
+	}
+
+	// Clear revocation and verify.
+	cp.ClearRevokedNode("node-abc")
+	if cp.IsNodeRevoked("node-abc") {
+		t.Error("node should not be revoked after clearing")
 	}
 }
 

@@ -43,7 +43,7 @@ func setupApprovalTest(t *testing.T, registry *cluster.NodeRegistry, approvedIDs
 
 	leader := cluster.NewLeaderStream(registry, func(nodeID string) bool {
 		return approvedIDs[nodeID]
-	}, pending, logger)
+	}, nil, pending, logger)
 
 	serverID := testIdentityFromSeed(0)
 	serverCert, err := cluster.TLSCertFromIdentity(serverID)
@@ -176,6 +176,72 @@ func TestStream_PendingApproval(t *testing.T) {
 	}
 	if nodes[0].Name != "unapproved-node" {
 		t.Errorf("pending node name = %q, want %q", nodes[0].Name, "unapproved-node")
+	}
+}
+
+func TestStream_RejectedRevoked(t *testing.T) {
+	registry := cluster.NewNodeRegistry()
+	clientID := testIdentityFromSeed(1)
+	logger := slog.Default()
+
+	// Mark the node as revoked (not approved, but explicitly revoked).
+	revokedIDs := map[string]bool{nodeIDFromIdentity(clientID): true}
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
+
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) bool {
+		return false // not approved
+	}, func(nodeID string) bool {
+		return revokedIDs[nodeID]
+	}, pending, logger)
+
+	serverID := testIdentityFromSeed(0)
+	serverCert, err := cluster.TLSCertFromIdentity(serverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTLS := cluster.ServerTLSConfig(serverCert)
+	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
+	leader.Register(srv)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	addr := lis.Addr().String()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
+
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "revoked-node",
+		Capacity:   2,
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
+	})
+
+	err = ws.Connect(ctx)
+	if err != cluster.ErrApprovalRevoked {
+		t.Fatalf("expected ErrApprovalRevoked, got %v", err)
+	}
+
+	// Node should NOT be in the registry.
+	if registry.Len() != 0 {
+		t.Error("revoked node should not be registered")
+	}
+
+	// Node should NOT be in the pending list (revoked nodes are silently rejected).
+	if pending.Count() != 0 {
+		t.Error("revoked node should not be added to pending list")
 	}
 }
 

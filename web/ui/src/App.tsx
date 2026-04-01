@@ -212,19 +212,29 @@ export default function App() {
   }, [fetchSessions, appState.kind])
 
   // Poll for pending node count when running as leader.
+  // Only show a toast when genuinely new nodes appear (not on reconnects).
   const pendingToastId = useRef<string | number | null>(null)
-  const toastSuppressed = useRef(false)
+  const knownPendingIds = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (appState.kind !== "ready" || clusterMode !== "leader") return
     const fetchPending = async () => {
       try {
         const res = await fetch("/api/cluster/pending")
         if (res.ok) {
-          const data = await res.json()
-          const count = Array.isArray(data) ? data.length : 0
+          const data: { node_id: string }[] = await res.json()
+          const currentIds = new Set(data.map((n) => n.node_id))
+          const count = data.length
           setPendingNodeCount(count)
 
-          if (count > 0 && pendingToastId.current === null && !toastSuppressed.current) {
+          // Detect genuinely new nodes (not previously seen).
+          const newNodes = data.filter((n) => !knownPendingIds.current.has(n.node_id))
+          knownPendingIds.current = currentIds
+
+          if (newNodes.length > 0) {
+            // Dismiss any existing toast and show an updated one.
+            if (pendingToastId.current !== null) {
+              toast.dismiss(pendingToastId.current)
+            }
             const label = count === 1
               ? "A worker node is waiting for approval"
               : `${count} worker nodes are waiting for approval`
@@ -235,17 +245,13 @@ export default function App() {
                 onClick: () => {
                   toast.dismiss(pendingToastId.current!)
                   pendingToastId.current = null
-                  toastSuppressed.current = true
                   navigate("/settings")
                 },
               },
             })
-          } else if (count === 0) {
-            toastSuppressed.current = false
-            if (pendingToastId.current !== null) {
-              toast.dismiss(pendingToastId.current)
-              pendingToastId.current = null
-            }
+          } else if (count === 0 && pendingToastId.current !== null) {
+            toast.dismiss(pendingToastId.current)
+            pendingToastId.current = null
           }
         }
       } catch { /* ignore */ }
