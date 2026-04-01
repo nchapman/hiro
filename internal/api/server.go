@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/platform/loghandler"
@@ -23,15 +24,21 @@ type CommandHandler interface {
 	HandleCommand(input string) (string, error)
 }
 
-// Server is the HTTP server for the Hive leader.
+// Server is the HTTP server for the Hiro leader.
 type Server struct {
 	manager      *agent.Manager          // instance manager (nil = no instances)
 	leaderID     string                  // ID of the leader instance for chat
 	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
 	cp           *controlplane.ControlPlane // control plane (for auth + settings)
 	pdb          *platformdb.DB          // platform database (nil = no usage endpoints)
-	startManager func() error            // callback to start the instance manager (set by main)
-	webFS        fs.FS                   // embedded web UI files (nil = no UI serving)
+	startManager   func() error            // callback to start the instance manager (set by main)
+	startCluster   func() error            // callback to start the cluster gRPC server (set by main)
+	requestRestart func()                  // callback to request a process restart (set by main)
+	nodeRegistry    *cluster.NodeRegistry   // cluster node registry (leader mode only)
+	pendingRegistry *cluster.PendingRegistry // pending node approval registry (leader mode only)
+	workerStatus    func() string            // returns worker connection status (worker mode only)
+	disconnectNode  func(string)             // forcefully disconnect a node (leader mode only)
+	webFS          fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
 	watcher      *watcher.Watcher        // filesystem watcher for HIRO_ROOT (nil = no watching)
 	logHandler   *loghandler.Handler     // log handler for real-time streaming (nil = no log SSE)
@@ -73,12 +80,19 @@ func (s *Server) routes() {
 	// Setup routes (unauthenticated, only work when needsSetup is true)
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 	s.mux.HandleFunc("POST /api/setup/test-provider", s.handleTestProvider)
+	s.mux.HandleFunc("POST /api/setup/validate-swarm", s.handleValidateSwarm)
 	s.mux.HandleFunc("GET /api/setup/provider-types", s.handleListProviderTypes)
 	s.mux.HandleFunc("GET /api/setup/models", s.handleListModels)
 
 	// Settings routes (authenticated)
 	s.mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleGetSettings))
 	s.mux.HandleFunc("PUT /api/settings", s.requireAuth(s.handleUpdateSettings))
+	s.mux.HandleFunc("GET /api/settings/cluster", s.requireAuth(s.handleGetClusterSettings))
+	s.mux.HandleFunc("GET /api/cluster/pending", s.requireAuth(s.handleListPending))
+	s.mux.HandleFunc("POST /api/cluster/pending/{nodeID}/approve", s.requireAuth(s.handleApproveNode))
+	s.mux.HandleFunc("DELETE /api/cluster/pending/{nodeID}", s.requireAuth(s.handleDismissNode))
+	s.mux.HandleFunc("GET /api/cluster/approved", s.requireAuth(s.handleListApproved))
+	s.mux.HandleFunc("DELETE /api/cluster/approved/{nodeID}", s.requireAuth(s.handleRemoveApproved))
 	s.mux.HandleFunc("GET /api/settings/providers", s.requireAuth(s.handleListProviders))
 	s.mux.HandleFunc("PUT /api/settings/providers/{type}", s.requireAuth(s.handlePutProvider))
 	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))
@@ -163,7 +177,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	resp := map[string]string{"status": "ok"}
+	if s.cp != nil {
+		mode := s.cp.ClusterMode()
+		if mode != "" {
+			resp["mode"] = mode
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {

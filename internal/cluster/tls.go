@@ -51,8 +51,8 @@ func TLSFingerprint(cert tls.Certificate) string {
 
 // ServerTLSConfig creates a TLS config for the leader's gRPC server.
 // It requires client certificates (mutual TLS) and uses a custom verifier
-// that accepts any self-signed cert — authentication is handled by join tokens,
-// TLS provides encryption and identity binding.
+// that accepts any self-signed cert — authentication is handled by
+// identity-based approval. TLS provides encryption and identity binding.
 func ServerTLSConfig(cert tls.Certificate) *tls.Config {
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -65,8 +65,8 @@ func ServerTLSConfig(cert tls.Certificate) *tls.Config {
 // ClientTLSConfig creates a TLS config for a worker connecting to the leader.
 // If expectedPubKey is non-nil, the leader's certificate public key is verified
 // against it (the key was learned from the tracker or config).
-// If expectedPubKey is nil, any valid TLS handshake is accepted — the join token
-// provides authentication in this case.
+// If expectedPubKey is nil, any valid TLS handshake is accepted — the leader's
+// identity-based approval system handles authentication.
 func ClientTLSConfig(clientCert tls.Certificate, expectedPubKey ed25519.PublicKey) *tls.Config {
 	return &tls.Config{
 		Certificates:       []tls.Certificate{clientCert},

@@ -215,7 +215,7 @@ func TestFetch_ChecksUserAgent(t *testing.T) {
 
 	tool := NewWebFetchTool()
 	runTool(t, tool, `{"url": "`+ts.URL+`"}`)
-	if gotUA != "Hive/1.0" {
-		t.Errorf("User-Agent = %q, want %q", gotUA, "Hive/1.0")
+	if gotUA != "Hiro/1.0" {
+		t.Errorf("User-Agent = %q, want %q", gotUA, "Hiro/1.0")
 	}
 }

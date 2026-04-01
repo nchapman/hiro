@@ -93,14 +93,20 @@ message LeaderMessage {
     KillWorker kill_worker = 5;
     FileSyncData file_sync = 6;
     FileUpdate file_update = 7;
+    NodePending pending = 8;
   }
+}
+
+message NodePending {
+  string node_id = 1;    // identity-derived node ID (hex sha256 of pubkey)
+  string message = 2;    // human-readable reason, e.g. "awaiting approval"
 }
 
 // --- Node registration ---
 
 message NodeRegister {
   string node_name = 1;   // human-friendly node name
-  string join_token = 2;  // auth token
+  reserved 2;             // was join_token (removed: replaced by identity-based approval)
   int32 capacity = 3;     // max concurrent workers (0 = unlimited)
 }
 

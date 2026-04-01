@@ -1,4 +1,4 @@
-// Package auth provides HMAC-signed token authentication for the Hive web UI.
+// Package auth provides HMAC-signed token authentication for the Hiro web UI.
 // Tokens are stateless — the server only needs a persistent signing secret
 // (stored in config.yaml) to validate them across restarts.
 package auth

@@ -4,19 +4,24 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/nchapman/hiro/internal/api"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
+	"github.com/nchapman/hiro/web"
 )
 
 // runWorkerNode starts hiro in worker mode. It connects to the leader,
@@ -25,14 +30,6 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	leaderAddr := cp.ClusterLeaderAddr()
 	if envAddr := os.Getenv("HIRO_LEADER"); envAddr != "" {
 		leaderAddr = envAddr
-	}
-
-	joinToken := cp.ClusterJoinToken()
-	if envToken := os.Getenv("HIRO_JOIN_TOKEN"); envToken != "" {
-		joinToken = envToken
-	}
-	if joinToken == "" {
-		return fmt.Errorf("worker mode requires cluster.join_token in config.yaml or HIRO_JOIN_TOKEN env var")
 	}
 
 	nodeName := cp.ClusterNodeName()
@@ -103,9 +100,37 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		"node_name", nodeName,
 	)
 
+	// Start a minimal HTTP server so workers have a web UI for settings.
+	listenAddr := envOr("HIRO_ADDR", ":8080")
+	// Track connection status for the worker status page.
+	var connStatus atomic.Value
+	connStatus.Store("connecting")
+
+	webFS, _ := web.DistFS()
+	httpSrv := api.NewServer(logger, webFS, cp, nil, rootDir)
+	httpSrv.SetWorkerStatus(func() string { return connStatus.Load().(string) })
+	httpServer := &http.Server{
+		Addr:              listenAddr,
+		Handler:           httpSrv,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() {
+		logger.Info("worker HTTP server starting", "addr", listenAddr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("worker HTTP server error", "error", err)
+		}
+	}()
+	defer func() {
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutCancel()
+		_ = httpServer.Shutdown(shutCtx)
+	}()
+
 	// Build mTLS config. When using tracker discovery, pin the leader's public
 	// key so a MITM can't intercept the connection. For direct leader_addr,
-	// the operator already trusts the address — TLS encrypts, join token authenticates.
+	// the operator already trusts the address — TLS encrypts, identity-based
+	// approval handles authentication.
 	var leaderPubKey ed25519.PublicKey
 	if discovery != nil {
 		if leader := discovery.Leader(); leader != nil {
@@ -136,11 +161,12 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
 		LeaderAddr: leaderAddr,
 		NodeName:   nodeName,
-		JoinToken:  joinToken,
 		TLSConfig:  clientTLS,
 		DialFunc:   dialFunc,
 		Logger:     logger,
 	})
+
+	ws.SetOnConnected(func() { connStatus.Store("connected") })
 
 	// Create the node bridge that manages local workers.
 	bridge := cluster.NewNodeBridge(rootDir, ws, logger)
@@ -219,7 +245,9 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 
 	// Connect to leader with reconnection.
 	for {
+		connStatus.Store("connecting")
 		err := ws.Connect(ctx)
+		connStatus.Store("disconnected")
 		// Clean up all local workers from the previous connection
 		// before retrying, to prevent goroutine/resource leaks.
 		bridge.ShutdownAll(context.Background())
@@ -251,7 +279,12 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		if ctx.Err() != nil {
 			break
 		}
-		logger.Warn("disconnected from leader, reconnecting...", "error", err)
+		if errors.Is(err, cluster.ErrPendingApproval) {
+			connStatus.Store("pending")
+			logger.Info("awaiting approval from leader, will retry...")
+		} else {
+			logger.Warn("disconnected from leader, reconnecting...", "error", err)
+		}
 		select {
 		case <-time.After(5 * time.Second):
 		case <-ctx.Done():

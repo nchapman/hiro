@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { Routes, Route, useNavigate, useLocation, matchPath } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Toaster } from "sonner"
+import { Toaster, toast } from "sonner"
 import { ThemeCtx, useThemeProvider } from "@/hooks/use-theme"
 import ActivityBar from "@/components/ActivityBar"
 import type { Activity } from "@/components/ActivityBar"
 import Login from "@/components/Login"
 import Setup from "@/components/Setup"
+import WorkerStatus from "@/components/WorkerStatus"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -35,6 +36,7 @@ type AppState =
   | { kind: "error" }
   | { kind: "setup" }
   | { kind: "login" }
+  | { kind: "worker" }
   | { kind: "ready" }
 
 const suspenseFallback = (
@@ -107,7 +109,7 @@ const settingsSkeleton = (
 )
 
 /** All known top-level route prefixes — used for unknown-path redirect. */
-const KNOWN_PREFIXES = ["/chat", "/files", "/logs", "/settings", "/terminal", "/shared"]
+const KNOWN_PREFIXES = ["/chat", "/files", "/logs", "/settings", "/terminal", "/shared", "/setup", "/login", "/worker"]
 
 /**
  * Derives the current activity from the URL pathname.
@@ -130,6 +132,8 @@ function sessionIdFromPath(pathname: string): string | undefined {
 export default function App() {
   const themeCtx = useThemeProvider()
   const [appState, setAppState] = useState<AppState>({ kind: "loading" })
+  const [clusterMode, setClusterMode] = useState("")
+  const [pendingNodeCount, setPendingNodeCount] = useState(0)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const hasAutoSelected = useRef(false)
@@ -169,10 +173,13 @@ export default function App() {
         return
       }
       const data = await res.json()
+      setClusterMode(data.mode || "")
       if (data.needsSetup) {
         setAppState({ kind: "setup" })
       } else if (data.authRequired && !data.authenticated) {
         setAppState({ kind: "login" })
+      } else if (data.mode === "worker") {
+        setAppState({ kind: "worker" })
       } else {
         setAppState({ kind: "ready" })
       }
@@ -204,6 +211,56 @@ export default function App() {
     return () => clearInterval(interval)
   }, [fetchSessions, appState.kind])
 
+  // Poll for pending node count when running as leader.
+  const pendingToastId = useRef<string | number | null>(null)
+  const toastSuppressed = useRef(false)
+  useEffect(() => {
+    if (appState.kind !== "ready" || clusterMode !== "leader") return
+    const fetchPending = async () => {
+      try {
+        const res = await fetch("/api/cluster/pending")
+        if (res.ok) {
+          const data = await res.json()
+          const count = Array.isArray(data) ? data.length : 0
+          setPendingNodeCount(count)
+
+          if (count > 0 && pendingToastId.current === null && !toastSuppressed.current) {
+            const label = count === 1
+              ? "A worker node is waiting for approval"
+              : `${count} worker nodes are waiting for approval`
+            pendingToastId.current = toast.info(label, {
+              duration: Infinity,
+              action: {
+                label: "Review",
+                onClick: () => {
+                  toast.dismiss(pendingToastId.current!)
+                  pendingToastId.current = null
+                  toastSuppressed.current = true
+                  navigate("/settings")
+                },
+              },
+            })
+          } else if (count === 0) {
+            toastSuppressed.current = false
+            if (pendingToastId.current !== null) {
+              toast.dismiss(pendingToastId.current)
+              pendingToastId.current = null
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    fetchPending()
+    const interval = setInterval(fetchPending, 5000)
+    return () => {
+      clearInterval(interval)
+      if (pendingToastId.current !== null) {
+        toast.dismiss(pendingToastId.current)
+        pendingToastId.current = null
+      }
+    }
+  }, [appState.kind, clusterMode, navigate])
+
   // Auto-select first persistent running session (once)
   useEffect(() => {
     if (hasAutoSelected.current || sessions.length === 0) return
@@ -218,13 +275,25 @@ export default function App() {
     }
   }, [sessions, location.pathname, navigate])
 
-  // Redirect unknown paths to /chat
+  // Navigate to the correct path for the current app state.
   useEffect(() => {
+    if (appState.kind === "setup" && location.pathname !== "/setup") {
+      navigate("/setup", { replace: true })
+    } else if (appState.kind === "login" && location.pathname !== "/login") {
+      navigate("/login", { replace: true })
+    } else if (appState.kind === "worker" && location.pathname !== "/worker") {
+      navigate("/worker", { replace: true })
+    }
+  }, [appState.kind, location.pathname, navigate])
+
+  // Redirect unknown paths to /chat (only when ready)
+  useEffect(() => {
+    if (appState.kind !== "ready") return
     const p = location.pathname
     if (p === "/" || !KNOWN_PREFIXES.some((prefix) => p.startsWith(prefix))) {
       navigate("/chat", { replace: true })
     }
-  }, [location.pathname, navigate])
+  }, [location.pathname, navigate, appState.kind])
 
   // Sync URL → selected session when on a /chat/:sessionId route
   const urlSessionId = sessionIdFromPath(location.pathname)
@@ -259,6 +328,8 @@ export default function App() {
       /* best-effort */
     }
     setAppState({ kind: "login" })
+    setClusterMode("")
+    setPendingNodeCount(0)
     setSessions([])
     setSelectedSessionId(null)
     hasAutoSelected.current = false
@@ -328,11 +399,15 @@ export default function App() {
         )}
 
         {appState.kind === "setup" && (
-          <Setup onComplete={() => setAppState({ kind: "ready" })} />
+          <Setup onComplete={() => checkAuth()} />
         )}
 
         {appState.kind === "login" && (
-          <Login onSuccess={() => setAppState({ kind: "ready" })} />
+          <Login onSuccess={() => checkAuth()} />
+        )}
+
+        {appState.kind === "worker" && (
+          <WorkerStatus onDisconnect={() => setAppState({ kind: "setup" })} />
         )}
 
         {appState.kind === "ready" && (
@@ -341,6 +416,7 @@ export default function App() {
               activity={activity}
               onActivityChange={handleActivityChange}
               onLogout={handleLogout}
+              pendingNodeCount={pendingNodeCount}
             />
             <div className="flex flex-1 overflow-hidden">
               {/* Chat — always mounted (default section) */}
@@ -395,7 +471,7 @@ export default function App() {
           </div>
         )}
       </TooltipProvider>
-      <Toaster position="bottom-right" richColors closeButton theme={themeCtx.resolved} />
+      <Toaster position="top-right" richColors closeButton theme={themeCtx.resolved} />
     </ThemeCtx.Provider>
   )
 }

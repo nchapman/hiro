@@ -20,6 +20,7 @@ import type { ProviderInfo, ProviderTypeInfo } from "@/pages/settings/ProvidersC
 import DefaultModelCard from "@/pages/settings/DefaultModelCard"
 import type { Settings } from "@/pages/settings/DefaultModelCard"
 import SecurityCard from "@/pages/settings/SecurityCard"
+import ClusterCard from "@/pages/settings/ClusterCard"
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme()
@@ -89,6 +90,8 @@ export default function SettingsPage() {
       </div>
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+          <ClusterCard />
+
           <ProvidersCard
             providerItems={providerItems}
             providers={providers}

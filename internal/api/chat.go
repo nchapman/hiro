@@ -61,6 +61,18 @@ func (s *Server) SetStartManager(fn func() error) {
 	s.startManager = fn
 }
 
+// SetStartCluster sets the callback to start the cluster gRPC server.
+// Used by the setup endpoint when leader mode is selected.
+func (s *Server) SetStartCluster(fn func() error) {
+	s.startCluster = fn
+}
+
+// SetRestartFunc sets the callback to request a process restart.
+// Used by the setup endpoint when worker mode requires a restart.
+func (s *Server) SetRestartFunc(fn func()) {
+	s.requestRestart = fn
+}
+
 // SetWatcher sets the filesystem watcher for pushing live updates.
 func (s *Server) SetWatcher(w *watcher.Watcher) {
 	s.watcher = w

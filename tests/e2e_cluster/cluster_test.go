@@ -1,6 +1,6 @@
 //go:build e2e_cluster
 
-// Package e2e_cluster contains end-to-end tests for Hive's leader-worker
+// Package e2e_cluster contains end-to-end tests for Hiro's leader-worker
 // clustering. Tests verify the full flow: worker connects to leader,
 // files sync bidirectionally, coordinator spawns agents on the worker
 // node, and those agents execute tools remotely with results flowing

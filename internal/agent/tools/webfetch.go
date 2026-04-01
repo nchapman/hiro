@@ -88,7 +88,7 @@ func NewWebFetchTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("invalid request: %v", err)), nil
 			}
-			req.Header.Set("User-Agent", "Hive/1.0")
+			req.Header.Set("User-Agent", "Hiro/1.0")
 
 			resp, err := client.Do(req)
 			if err != nil {

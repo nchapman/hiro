@@ -1,4 +1,4 @@
-// Package agent provides the Hive agent runtime. The Manager supervises
+// Package agent provides the Hiro agent runtime. The Manager supervises
 // agent session lifecycles while the inference package handles the LLM loop.
 package agent
 

@@ -12,6 +12,41 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// sessionCookieName returns a port-scoped cookie name so multiple instances
+// on the same host (e.g., localhost:8080 and localhost:8082) don't clobber
+// each other's sessions.
+func sessionCookieName(r *http.Request) string {
+	_, port, err := net.SplitHostPort(r.Host)
+	if err != nil || port == "" || port == "80" || port == "443" {
+		return "hiro_session"
+	}
+	return "hiro_session_" + port
+}
+
+// setSessionCookie writes a session token cookie to the response.
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName(r),
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400, // 24 hours
+	})
+}
+
+// clearSessionCookie expires the session cookie.
+func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName(r),
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+}
+
 // loginLimiter tracks failed login attempts per IP.
 type loginLimiter struct {
 	mu       sync.Mutex
@@ -64,9 +99,10 @@ func (s *Server) tokenSigner() *auth.TokenSigner {
 
 // authStatusResponse is the response for GET /api/auth/status.
 type authStatusResponse struct {
-	NeedsSetup    bool `json:"needsSetup"`
-	AuthRequired  bool `json:"authRequired"`
-	Authenticated bool `json:"authenticated"`
+	NeedsSetup    bool   `json:"needsSetup"`
+	AuthRequired  bool   `json:"authRequired"`
+	Authenticated bool   `json:"authenticated"`
+	Mode          string `json:"mode,omitempty"` // "standalone", "leader", or "worker"
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -74,10 +110,16 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	authRequired := s.cp != nil && !s.cp.NeedsSetup()
 	authenticated := !authRequired || s.isAuthenticated(r)
 
+	var mode string
+	if s.cp != nil {
+		mode = s.cp.ClusterMode()
+	}
+
 	writeJSON(w, http.StatusOK, authStatusResponse{
 		NeedsSetup:    needsSetup,
 		AuthRequired:  authRequired,
 		Authenticated: authenticated,
+		Mode:          mode,
 	})
 }
 
@@ -120,29 +162,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := signer.Create()
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "hiro_session",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400, // 24 hours
-	})
+	setSessionCookie(w, r, token)
 
 	s.logger.Info("login succeeded")
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "hiro_session",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   -1,
-	})
+	clearSessionCookie(w, r)
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -191,14 +218,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	signer := s.tokenSigner()
 	if signer != nil {
 		token := signer.Create()
-		http.SetCookie(w, &http.Cookie{
-			Name:     "hiro_session",
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   86400,
-		})
+		setSessionCookie(w, r, token)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -212,7 +232,7 @@ func (s *Server) isAuthenticated(r *http.Request) bool {
 	}
 
 	// Check cookie first
-	if cookie, err := r.Cookie("hiro_session"); err == nil {
+	if cookie, err := r.Cookie(sessionCookieName(r)); err == nil {
 		if signer.Valid(cookie.Value) {
 			return true
 		}

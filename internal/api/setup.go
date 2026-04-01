@@ -4,19 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
 	"github.com/nchapman/hiro/internal/provider"
 )
 
+const defaultTrackerURL = "https://discover.hellohiro.ai"
+
 type setupRequest struct {
-	Password        string `json:"password"`
-	ProviderType    string `json:"provider_type"`
-	APIKey          string `json:"api_key"`
-	DefaultModel    string `json:"default_model"`
+	Password string `json:"password"`
+	Mode     string `json:"mode"`                   // "standalone", "leader", or "worker"
+	NodeName string `json:"node_name,omitempty"`     // human-friendly machine name (leader + worker)
+
+	// Provider (standalone + leader only; workers get this from the leader)
+	ProviderType string `json:"provider_type,omitempty"`
+	APIKey       string `json:"api_key,omitempty"`
+	DefaultModel string `json:"default_model,omitempty"`
+
+	// Worker-specific (one of swarm code or direct connection)
+	WorkerSwarmCode  string `json:"worker_swarm_code,omitempty"`
+	WorkerLeaderAddr string `json:"worker_leader_addr,omitempty"`
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -43,9 +55,33 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
-	if req.ProviderType == "" || req.APIKey == "" {
-		http.Error(w, "provider_type and api_key are required", http.StatusBadRequest)
+
+	// Validate mode
+	switch req.Mode {
+	case "standalone", "leader", "worker":
+		// ok
+	case "":
+		http.Error(w, "mode is required", http.StatusBadRequest)
 		return
+	default:
+		http.Error(w, "mode must be standalone, leader, or worker", http.StatusBadRequest)
+		return
+	}
+
+	// Standalone and leader require a provider; worker does not.
+	if req.Mode != "worker" {
+		if req.ProviderType == "" || req.APIKey == "" {
+			http.Error(w, "provider_type and api_key are required", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Worker requires either a swarm code or a direct leader address.
+	if req.Mode == "worker" {
+		if req.WorkerSwarmCode == "" && req.WorkerLeaderAddr == "" {
+			http.Error(w, "worker mode requires worker_swarm_code or worker_leader_addr", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Hash password
@@ -56,17 +92,54 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply config
+	// Apply common config
 	s.cp.SetPasswordHash(string(hash))
-	if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
-		APIKey: req.APIKey,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	s.cp.SetClusterMode(req.Mode)
+
+	// Save node name (all modes).
+	nodeName := req.NodeName
+	if nodeName == "" {
+		if h, err := os.Hostname(); err == nil {
+			nodeName = h
+		}
 	}
-	s.cp.SetDefaultProvider(req.ProviderType)
-	if req.DefaultModel != "" {
-		s.cp.SetDefaultModel(req.DefaultModel)
+	if nodeName != "" {
+		s.cp.SetClusterNodeName(nodeName)
+	}
+
+	// Apply provider config (standalone + leader)
+	if req.Mode != "worker" {
+		if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
+			APIKey: req.APIKey,
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.cp.SetDefaultProvider(req.ProviderType)
+		if req.DefaultModel != "" {
+			s.cp.SetDefaultModel(req.DefaultModel)
+		}
+	}
+
+	// Apply mode-specific cluster config
+	resp := map[string]any{"ok": true}
+
+	switch req.Mode {
+	case "leader":
+		swarmCode := cluster.GenerateSwarmCode()
+		s.cp.SetClusterTrackerURL(defaultTrackerURL)
+		s.cp.SetClusterSwarmCode(swarmCode)
+		resp["swarm_code"] = swarmCode
+
+	case "worker":
+		if req.WorkerSwarmCode != "" {
+			s.cp.SetClusterTrackerURL(defaultTrackerURL)
+			s.cp.SetClusterSwarmCode(req.WorkerSwarmCode)
+		}
+		if req.WorkerLeaderAddr != "" {
+			s.cp.SetClusterLeaderAddr(req.WorkerLeaderAddr)
+		}
+		resp["restart_required"] = true
 	}
 
 	// Persist immediately
@@ -76,11 +149,29 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Start the agent manager
-	if s.startManager != nil {
-		if err := s.startManager(); err != nil {
-			s.logger.Error("failed to start manager after setup", "error", err)
+	// Start services based on mode (worker restart is deferred until after response).
+	needsRestart := false
+	switch req.Mode {
+	case "standalone":
+		if s.startManager != nil {
+			if err := s.startManager(); err != nil {
+				s.logger.Error("failed to start manager after setup", "error", err)
+			}
 		}
+	case "leader":
+		// Cluster must start before manager so the manager gets the cluster service.
+		if s.startCluster != nil {
+			if err := s.startCluster(); err != nil {
+				s.logger.Error("failed to start cluster after setup", "error", err)
+			}
+		}
+		if s.startManager != nil {
+			if err := s.startManager(); err != nil {
+				s.logger.Error("failed to start manager after setup", "error", err)
+			}
+		}
+	case "worker":
+		needsRestart = true
 	}
 
 	// Create a signed session token so the user is logged in
@@ -91,17 +182,18 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := signer.Create()
+	setSessionCookie(w, r, token)
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "hiro_session",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400, // 24 hours
-	})
+	writeJSON(w, http.StatusOK, resp)
 
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	// Request restart AFTER the response is written to avoid a race where
+	// httpServer.Shutdown() interrupts the in-flight response.
+	if needsRestart && s.requestRestart != nil {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.requestRestart()
+		}()
+	}
 }
 
 func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
@@ -152,5 +244,50 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+}
+
+func (s *Server) handleValidateSwarm(w http.ResponseWriter, r *http.Request) {
+	if s.cp != nil && !s.cp.NeedsSetup() {
+		http.Error(w, "setup already complete", http.StatusConflict)
+		return
+	}
+	if !isLoopbackOrigin(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		SwarmCode string `json:"swarm_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.SwarmCode == "" {
+		http.Error(w, "swarm_code is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create/load the node's real identity for the tracker probe.
+	identity, err := cluster.LoadOrCreateIdentity(s.rootDir)
+	if err != nil {
+		s.logger.Error("failed to load node identity for swarm check", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := cluster.CheckSwarm(ctx, defaultTrackerURL, req.SwarmCode, identity, s.logger)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"leader_found": false,
+			"error":        err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 

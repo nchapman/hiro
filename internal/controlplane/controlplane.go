@@ -33,15 +33,20 @@ type AgentPolicy struct {
 	Tools []string `yaml:"tools,omitempty"`
 }
 
+// ApprovedNode represents a worker node that has been approved to join the cluster.
+type ApprovedNode struct {
+	Name       string `yaml:"name" json:"name"`
+	ApprovedAt string `yaml:"approved_at" json:"approved_at"` // RFC3339 timestamp
+}
+
 // ClusterConfig holds settings for leader-worker clustering.
 type ClusterConfig struct {
-	Mode       string            `yaml:"mode,omitempty"`        // "leader" (default) or "worker"
-	LeaderAddr string            `yaml:"leader_addr,omitempty"` // gRPC address for worker→leader connection
-	JoinToken  string            `yaml:"join_token,omitempty"`  // auth token (worker mode)
-	NodeName   string            `yaml:"node_name,omitempty"`   // human-friendly node name
-	JoinTokens map[string]string `yaml:"join_tokens,omitempty"` // named tokens for node auth (leader mode)
-	TrackerURL string            `yaml:"tracker_url,omitempty"` // discovery tracker URL (e.g. https://discover.hellohiro.ai)
-	SwarmCode  string            `yaml:"swarm_code,omitempty"`  // shared swarm code for tracker discovery
+	Mode          string                  `yaml:"mode,omitempty"`           // "standalone", "leader", or "worker"
+	LeaderAddr    string                  `yaml:"leader_addr,omitempty"`    // gRPC address for worker→leader connection
+	NodeName      string                  `yaml:"node_name,omitempty"`     // human-friendly node name
+	TrackerURL    string                  `yaml:"tracker_url,omitempty"`   // discovery tracker URL (e.g. https://discover.hellohiro.ai)
+	SwarmCode     string                  `yaml:"swarm_code,omitempty"`    // shared swarm code for tracker discovery
+	ApprovedNodes map[string]ApprovedNode `yaml:"approved_nodes,omitempty"` // keyed by NodeID (hex sha256 of pubkey)
 }
 
 // Config is the on-disk representation of the control plane state.
@@ -55,10 +60,9 @@ type Config struct {
 	Cluster         ClusterConfig             `yaml:"cluster,omitempty"`
 }
 
-// initMaps ensures all map fields are non-nil. JoinTokens is intentionally
-// excluded — it is lazily initialised in SetClusterJoinToken so that
-// ClusterJoinTokens() returns nil when no tokens exist, signaling
-// "not configured" to callers.
+// initMaps ensures all map fields are non-nil. ApprovedNodes is intentionally
+// excluded — it is lazily initialised in ApproveNode so that
+// ApprovedNodes() returns nil when no nodes are approved.
 func (cfg *Config) initMaps() {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderConfig)
@@ -162,7 +166,7 @@ func (cp *ControlPlane) hasContent() bool {
 		len(cp.config.Agents) > 0 ||
 		cp.config.Cluster.Mode != "" ||
 		cp.config.Cluster.TrackerURL != "" ||
-		len(cp.config.Cluster.JoinTokens) > 0
+		len(cp.config.Cluster.ApprovedNodes) > 0
 }
 
 // Reload re-reads config.yaml from disk and replaces the in-memory state.
@@ -190,9 +194,9 @@ func (cp *ControlPlane) Reload() error {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 
-	// Invalidate signer if either the password hash or session secret changed.
-	// This covers both password rotation (which changes the hash) and manual
-	// session secret rotation (e.g., emergency session invalidation).
+	// Invalidate signer if the password hash or session secret changed on disk.
+	// This covers password rotation (external edit), manual secret rotation
+	// (emergency session invalidation), and SetPasswordHash which clears both.
 	if cfg.Auth.PasswordHash != cp.config.Auth.PasswordHash ||
 		cfg.Auth.SessionSecret != cp.config.Auth.SessionSecret {
 		cp.signer = nil
