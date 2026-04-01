@@ -16,6 +16,9 @@ import (
 //go:embed spawn_instance.md
 var spawnInstanceDescription string
 
+//go:embed create_persistent_instance.md
+var createPersistentInstanceDescription string
+
 //go:embed list_nodes.md
 var listNodesDescription string
 
@@ -53,68 +56,113 @@ func (s *ScopedManager) checkDescendant(targetID string) error {
 	return nil
 }
 
-// --- Spawn tool ---
+// --- Spawn tool (ephemeral) ---
 
-type spawnInstanceInput struct {
-	Agent  string `json:"agent"  description:"Agent definition name (directory under agents/)."`
-	Prompt string `json:"prompt" description:"Task prompt. Required for ephemeral mode."`
-	Mode   string `json:"mode"   description:"'ephemeral' (default), 'persistent', or 'coordinator'." default:"ephemeral"`
-	Node   string `json:"node"   description:"Target node name. Omit for local."`
-}
-
-func buildSpawnTool(mgr ipc.HostManager, callerMode config.AgentMode, logger *slog.Logger) fantasy.AgentTool {
+func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessionID string, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("SpawnInstance",
 		spawnInstanceDescription,
-		func(ctx context.Context, input spawnInstanceInput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, input struct {
+			Agent      string `json:"agent"      description:"Agent definition name (directory under agents/)."`
+			Prompt     string `json:"prompt"     description:"The task for the agent to complete."`
+			Background bool   `json:"background" description:"Run in the background. Returns immediately; you'll be notified when it completes."`
+			Node       string `json:"node"       description:"Target node name. Omit for local."`
+		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if input.Agent == "" {
+				return fantasy.NewTextErrorResponse("agent name is required"), nil
+			}
+			if input.Prompt == "" {
+				return fantasy.NewTextErrorResponse("prompt is required"), nil
+			}
+
+			callerID := callerIDFromContext(ctx)
+			nodeID := ipc.NodeID(input.Node)
+
+			logger.Info("tool call", "tool", "SpawnInstance", "agent", input.Agent, "background", input.Background)
+
+			if input.Background {
+				bgCtx := context.WithoutCancel(ctx)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Error("background SpawnInstance panicked", "agent", input.Agent, "panic", r)
+							notifications.Push(Notification{
+								Content:   fmt.Sprintf("<agent-notification>\n<agent>%s</agent>\n<status>failed</status>\n<summary>Agent %q crashed unexpectedly</summary>\n<result></result>\n</agent-notification>", input.Agent, input.Agent),
+								Source:    "agent-completion",
+								SessionID: sessionID,
+							})
+						}
+					}()
+					result, err := mgr.SpawnEphemeral(bgCtx, input.Agent, input.Prompt, callerID, nodeID, nil)
+					status := "completed"
+					summary := fmt.Sprintf("Agent %q finished", input.Agent)
+					if err != nil {
+						status = "failed"
+						summary = fmt.Sprintf("Agent %q failed: %v", input.Agent, err)
+						result = ""
+						logger.Warn("background SpawnInstance failed", "agent", input.Agent, "error", err)
+					}
+					content := fmt.Sprintf(
+						"<agent-notification>\n<agent>%s</agent>\n<status>%s</status>\n<summary>%s</summary>\n<result>%s</result>\n</agent-notification>",
+						input.Agent, status, summary, truncateResult(result))
+					notifications.Push(Notification{
+						Content:   content,
+						Source:    "agent-completion",
+						SessionID: sessionID,
+					})
+				}()
+				return fantasy.NewTextResponse(
+					fmt.Sprintf("Agent %q launched in background. You'll be notified when it completes.", input.Agent)), nil
+			}
+
+			result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
+			if err != nil {
+				logger.Warn("SpawnInstance failed", "agent", input.Agent, "error", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
+			}
+			return fantasy.NewTextResponse(truncateResult(result)), nil
+		},
+	)
+}
+
+// --- CreatePersistentInstance tool (coordinator only) ---
+
+func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
+	return fantasy.NewAgentTool("CreatePersistentInstance",
+		createPersistentInstanceDescription,
+		func(ctx context.Context, input struct {
+			Agent string `json:"agent" description:"Agent definition name (directory under agents/)."`
+			Mode  string `json:"mode"  description:"'persistent' (default) or 'coordinator'." default:"persistent"`
+			Node  string `json:"node"  description:"Target node name. Omit for local."`
+		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
 
 			mode := input.Mode
 			if mode == "" {
-				mode = "ephemeral"
+				mode = "persistent"
 			}
 
-			// Extract caller ID from context for parent lineage.
-			callerID := callerIDFromContext(ctx)
-
-			nodeID := ipc.NodeID(input.Node)
-
 			switch config.AgentMode(mode) {
-			case config.ModeEphemeral:
-				if input.Prompt == "" {
-					return fantasy.NewTextErrorResponse("prompt is required for ephemeral mode"), nil
-				}
 			case config.ModePersistent, config.ModeCoordinator:
-				if callerMode != config.ModeCoordinator {
-					return fantasy.NewTextErrorResponse(
-						fmt.Sprintf("only coordinator agents can spawn %s instances", mode)), nil
-				}
+				// valid
 			default:
 				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("invalid mode %q: must be ephemeral, persistent, or coordinator", mode)), nil
+					fmt.Sprintf("invalid mode %q: must be persistent or coordinator", mode)), nil
 			}
 
-			logger.Info("tool call", "tool", "SpawnInstance", "agent", input.Agent, "mode", mode)
+			callerID := callerIDFromContext(ctx)
+			nodeID := ipc.NodeID(input.Node)
 
-			switch config.AgentMode(mode) {
-			case config.ModeEphemeral:
-				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
-				if err != nil {
-					logger.Warn("SpawnInstance failed", "agent", input.Agent, "mode", mode, "error", err)
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
-				}
-				return fantasy.NewTextResponse(truncateResult(result)), nil
+			logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode)
 
-			default: // persistent or coordinator
-				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID)
-				if err != nil {
-					logger.Warn("SpawnInstance failed", "agent", input.Agent, "mode", mode, "error", err)
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create instance: %v", err)), nil
-				}
-				return fantasy.NewTextResponse(
-					fmt.Sprintf("Instance created from %q with ID: %s (mode: %s)", input.Agent, id, mode)), nil
+			id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID)
+			if err != nil {
+				logger.Warn("CreatePersistentInstance failed", "agent", input.Agent, "mode", mode, "error", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create instance: %v", err)), nil
 			}
+			return fantasy.NewTextResponse(
+				fmt.Sprintf("Instance created from %q with ID: %s (mode: %s). Use SendMessage to communicate with it.", input.Agent, id, mode)), nil
 		},
 	)
 }

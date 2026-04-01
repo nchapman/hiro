@@ -44,7 +44,7 @@ func TestE2E_MemoryWriteTool(t *testing.T) {
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	cs.chat(ctx, "Write 'The project uses PostgreSQL 16' to your memory.md file.")
+	cs.chat(ctx, `Use the AddMemory tool with content "The project uses PostgreSQL 16". Do not use any other tools.`)
 
 	// Verify memory.md was written at instance level.
 	instDir := instanceDir(t, coordinatorID)

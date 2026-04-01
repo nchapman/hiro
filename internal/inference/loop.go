@@ -54,7 +54,7 @@ type LoopConfig struct {
 	// for coordinator/spawn tools. This avoids a circular dependency
 	// by using the HostManager interface.
 	HostManager ipc.HostManager
-	CallerMode  config.AgentMode
+	InstanceMode  config.AgentMode
 }
 
 // Loop runs the fantasy agent loop for a single session.
@@ -612,8 +612,9 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	}
 
 	if cfg.HostManager != nil {
-		localTools = append(localTools, buildSpawnTool(cfg.HostManager, cfg.CallerMode, l.logger))
-		if cfg.CallerMode == config.ModeCoordinator {
+		localTools = append(localTools, buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger))
+		if cfg.InstanceMode == config.ModeCoordinator {
+			localTools = append(localTools, buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
 			localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 		}
 	}

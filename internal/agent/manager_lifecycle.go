@@ -411,7 +411,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			Notifications:  notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 			HostManager:    m,
-			CallerMode:     mode,
+			InstanceMode:     mode,
 		})
 		if err != nil {
 			handle.Kill()

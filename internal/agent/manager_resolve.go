@@ -12,7 +12,7 @@ var spawnTool = "SpawnInstance"
 
 // coordinatorTools are injected only for coordinator-mode instances.
 var coordinatorTools = []string{
-	"ResumeInstance", "ListInstances", "SendMessage", "StopInstance", "DeleteInstance",
+	"CreatePersistentInstance", "ResumeInstance", "ListInstances", "SendMessage", "StopInstance", "DeleteInstance",
 }
 
 // persistentTools are injected for persistent and coordinator instances.

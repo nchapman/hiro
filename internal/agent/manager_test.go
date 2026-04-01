@@ -1153,7 +1153,7 @@ func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
 	if !allowed["TodoWrite"] || !allowed["HistorySearch"] || !allowed["HistoryRecall"] {
 		t.Error("persistent agents should get persistent tools")
 	}
-	if allowed["ResumeInstance"] || allowed["StopInstance"] || allowed["SendMessage"] || allowed["ListInstances"] {
+	if allowed["CreatePersistentInstance"] || allowed["ResumeInstance"] || allowed["StopInstance"] || allowed["SendMessage"] || allowed["ListInstances"] {
 		t.Error("persistent agents should not get coordinator tools")
 	}
 }
@@ -1166,7 +1166,7 @@ func TestBuildAllowedToolsMap_CoordinatorMode(t *testing.T) {
 	if !allowed["SpawnInstance"] {
 		t.Error("coordinators should get SpawnInstance")
 	}
-	if !allowed["ResumeInstance"] || !allowed["StopInstance"] || !allowed["DeleteInstance"] || !allowed["SendMessage"] || !allowed["ListInstances"] {
+	if !allowed["CreatePersistentInstance"] || !allowed["ResumeInstance"] || !allowed["StopInstance"] || !allowed["DeleteInstance"] || !allowed["SendMessage"] || !allowed["ListInstances"] {
 		t.Error("coordinators should get coordinator tools")
 	}
 	if !allowed["TodoWrite"] || !allowed["HistorySearch"] || !allowed["HistoryRecall"] {

@@ -195,7 +195,7 @@ All agents get `SpawnInstance`. The `mode` parameter controls behavior — non-c
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `SpawnInstance` | Spawn a new instance from an agent definition | `agent` (name), `prompt`, `mode` (ephemeral/persistent/coordinator) | Ephemeral (default): blocks until done, returns result, cleans up. Persistent/coordinator: creates long-lived instance, returns ID. 32KB max result |
+| `SpawnInstance` | Run an agent to complete a task | `agent` (name), `prompt`, `background` (bool) | Blocks until done, returns result, cleans up. `background: true`: returns immediately, notifies on completion. 32KB max result |
 
 ### Coordinator Tools (coordinator mode only)
 
@@ -203,6 +203,7 @@ Defined in `internal/inference/tools_spawn.go`. Only injected for coordinator-mo
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
+| `CreatePersistentInstance` | Create a long-lived agent instance | `agent` (name), `mode` (persistent/coordinator) | Returns instance ID. Interact via SendMessage. |
 | `ResumeInstance` | Restart a stopped instance | `instance_id` | Resumes with previous memory, history, todos |
 | `SendMessage` | Send message to child and get response | `instance_id`, `message` | Blocks; scoped to descendants; serialized per-instance (mutex); 32KB max result |
 | `StopInstance` | Stop instance and its subtree | `instance_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent instances |
@@ -231,7 +232,7 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 
 - **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
 - **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills)
-- **Coordinator instances:** 9 built-in + 1 spawn + 6 coordinator + 2 memory + 1 todos + 2 history = 21 tools (+ 1 if skills)
+- **Coordinator instances:** 9 built-in + 1 spawn + 7 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
 
 ## Coordinator Agent
 

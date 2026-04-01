@@ -291,7 +291,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			Notifications:  inst.notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", newSessionID, "agent", cfg.Name),
 			HostManager:    m,
-			CallerMode:     inst.info.Mode,
+			InstanceMode:     inst.info.Mode,
 		})
 		if err != nil {
 			handle.Kill()

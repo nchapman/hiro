@@ -400,7 +400,7 @@ You are a test agent. Be concise.`, name))
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	cs.chat(ctx, fmt.Sprintf(`Use SpawnInstance with agent "%s" and mode "persistent" and prompt "Acknowledge you are ready." Do not use any other tools.`, name))
+	cs.chat(ctx, fmt.Sprintf(`Use CreatePersistentInstance with agent "%s". Then use SendMessage to send it "Acknowledge you are ready." Do not use any other tools.`, name))
 
 	// Find the new instance (not in the snapshot).
 	for _, inst := range listInstances(t) {
