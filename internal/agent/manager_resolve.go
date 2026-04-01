@@ -8,16 +8,16 @@ import (
 )
 
 // spawnTool is injected into all agents.
-var spawnTool = "spawn_instance"
+var spawnTool = "SpawnInstance"
 
 // coordinatorTools are injected only for coordinator-mode instances.
 var coordinatorTools = []string{
-	"resume_instance", "list_instances", "send_message", "stop_instance", "delete_instance",
+	"CreatePersistentInstance", "ResumeInstance", "ListInstances", "SendMessage", "StopInstance", "DeleteInstance",
 }
 
 // persistentTools are injected for persistent and coordinator instances.
 var persistentTools = []string{
-	"memory_read", "memory_write", "todos", "history_search", "history_recall",
+	"TodoWrite", "HistorySearch", "HistoryRecall",
 }
 
 // computeEffectiveTools returns the set of built-in tools this instance is
@@ -81,7 +81,7 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 		allowed[t] = true
 	}
 
-	// All instances get spawn_instance; coordinators can use all modes.
+	// All instances get SpawnInstance; coordinators can use all modes.
 	allowed[spawnTool] = true
 
 	// Coordinator instances get full instance management tools.
@@ -99,25 +99,17 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 	}
 
 	if hasSkills {
-		allowed["use_skill"] = true
+		allowed["Skill"] = true
 	}
 	return allowed
 }
 
 // --- Config resolution and push ---
 
-// resolveProvider returns the provider type, API key, and base URL for an agent config.
-// Uses the agent's provider override if set, otherwise the default.
-func (m *Manager) resolveProvider(cfg config.AgentConfig) (provider, apiKey, baseURL string, err error) {
+// resolveProvider returns the default provider type, API key, and base URL.
+func (m *Manager) resolveProvider() (provider, apiKey, baseURL string, err error) {
 	if m.cp == nil {
 		return "", "", "", nil
-	}
-	if cfg.Provider != "" {
-		apiKey, baseURL, ok := m.cp.ProviderByType(cfg.Provider)
-		if !ok {
-			return "", "", "", fmt.Errorf("agent %q requests provider %q which is not configured", cfg.Name, cfg.Provider)
-		}
-		return cfg.Provider, apiKey, baseURL, nil
 	}
 	provider, apiKey, baseURL, ok := m.cp.ProviderInfo()
 	if !ok {
@@ -144,13 +136,12 @@ func (m *Manager) resolveProviderForModel(model string) (provider, apiKey, baseU
 	return "", "", "", fmt.Errorf("model %q not found in any configured provider", model)
 }
 
-// resolveModel returns the resolved model for an agent config.
-func (m *Manager) resolveModel(cfg config.AgentConfig) string {
-	model := cfg.Model
+// resolveModel returns the resolved model from the control plane default
+// or the environment variable override.
+func (m *Manager) resolveModel() string {
+	var model string
 	if m.cp != nil {
-		if dm := m.cp.DefaultModel(); dm != "" && model == "" {
-			model = dm
-		}
+		model = m.cp.DefaultModel()
 	}
 	if m.opts.Model != "" {
 		model = m.opts.Model

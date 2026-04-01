@@ -15,6 +15,7 @@ type HistoryMessage struct {
 	Role      string `json:"role"`
 	Content   string `json:"content"`
 	RawJSON   string `json:"raw_json,omitempty"` // full fantasy.Message JSON with tool calls
+	IsMeta    bool   `json:"is_meta,omitempty"`  // meta messages are hidden from the user transcript
 	Timestamp string `json:"timestamp"`
 }
 
@@ -112,6 +113,7 @@ func (m *Manager) GetHistory(instanceID string, limit int) ([]HistoryMessage, er
 				Role:      msg.Role,
 				Content:   msg.Content,
 				RawJSON:   rawJSON,
+				IsMeta:    msg.Meta,
 				Timestamp: msg.CreatedAt.Format(time.RFC3339),
 			})
 		}
@@ -141,6 +143,7 @@ func (m *Manager) GetSessionHistory(sessionID string, limit int) ([]HistoryMessa
 				Role:      msg.Role,
 				Content:   msg.Content,
 				RawJSON:   rawJSON,
+				IsMeta:    msg.Meta,
 				Timestamp: msg.CreatedAt.Format(time.RFC3339),
 			})
 		}

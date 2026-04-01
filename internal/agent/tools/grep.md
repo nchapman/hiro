@@ -1,35 +1,13 @@
-Fast content search tool that finds files containing specific text or regex patterns.
+Regex search across file contents, backed by ripgrep.
 
-## Usage
+- Full regex support (e.g., `log\.Error`, `func\s+\w+`)
+- Narrow results with `glob` (e.g., `*.js`) or `type` (e.g., `go`, `py`) filters
+- Three output modes: `files_with_matches` (default — paths only), `content` (matching lines with optional context), `count` (per-file match tallies)
+- Results are paginated: `head_limit` defaults to 250 entries, `offset` skips the first N. Set `head_limit: 0` for no cap
+- Ripgrep syntax — escape literal braces with backslashes (e.g., `interface\{\}` to find `interface{}`)
+- For patterns that cross line boundaries, enable `multiline`
+- Use `literal_text` to disable regex and match the exact string
 
-- Provide a regex pattern to search within file contents.
-- Set `literal_text=true` to escape special regex characters (search for exact text).
-- Optional starting directory (defaults to the working directory).
-- Optional `include` glob pattern to filter which files to search (e.g. `*.go`).
-- Results sorted with most recently modified files first.
-
-## Regex examples
-
-- `function` — literal text search
-- `log\..*Error` — text starting with "log." ending with "Error"
-- `import\s+.*\s+from` — import statements
-
-## Include patterns
-
-- `*.go` — only search Go files
-- `*.{ts,tsx}` — only search TypeScript files
-- `*.py` — only search Python files
-
-## Limitations
-
-- Results limited to 100 matches total.
-- In environments without ripgrep, results are further limited to 50 matches per file.
-- Binary files are skipped.
-- Hidden files/directories (starting with `.`) are skipped.
-- `node_modules`, `vendor`, `dist`, `__pycache__`, `.git` are skipped.
-
-## Tips
-
-- Use `literal_text=true` when searching for text with dots, parentheses, etc.
-- Combine with glob: find files with glob, search contents with grep.
-- Narrow results with `include` pattern for faster searches.
+Best practices:
+- Use Grep for all content searching — don't run `grep` or `rg` through Bash
+- Prefer `type` over `glob` for standard language filters — it's faster

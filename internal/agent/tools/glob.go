@@ -27,7 +27,7 @@ type GlobParams struct {
 // NewGlobTool creates a tool that finds files matching a glob pattern.
 func NewGlobTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"glob",
+		"Glob",
 		globDescription,
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
@@ -54,9 +54,13 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextResponse("No files found"), nil
 			}
 
-			// Normalize to forward slashes for consistent output
+			// Convert to relative paths and normalize to forward slashes
 			for i, f := range files {
-				files[i] = filepath.ToSlash(f)
+				if rel, err := filepath.Rel(searchPath, f); err == nil {
+					files[i] = filepath.ToSlash(rel)
+				} else {
+					files[i] = filepath.ToSlash(f)
+				}
 			}
 
 			result := strings.Join(files, "\n")

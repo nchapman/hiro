@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -118,5 +119,100 @@ func TestBackgroundJob_IDFormat(t *testing.T) {
 	matched, _ := regexp.MatchString(`^[0-9A-F]{1,6}$`, job.ID)
 	if !matched {
 		t.Errorf("job ID %q does not match expected hex format", job.ID)
+	}
+}
+
+func TestNotifyOnComplete_FiresForBackgroundedJob(t *testing.T) {
+	var count atomic.Int32
+	mgr := NewBackgroundJobManager(nil)
+	mgr.OnComplete = func(job *BackgroundJob) {
+		count.Add(1)
+	}
+
+	job, err := mgr.Start(t.TempDir(), "echo done")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Opt in to notification (simulates backgrounding).
+	mgr.NotifyOnComplete(job.ID)
+	job.Wait(context.Background())
+
+	// Give the watcher goroutine time to fire.
+	time.Sleep(50 * time.Millisecond)
+
+	if count.Load() != 1 {
+		t.Fatalf("expected 1 completion callback, got %d", count.Load())
+	}
+}
+
+func TestNotifyOnComplete_DoesNotFireForSyncJob(t *testing.T) {
+	called := false
+	mgr := NewBackgroundJobManager(nil)
+	mgr.OnComplete = func(job *BackgroundJob) {
+		called = true
+	}
+
+	job, err := mgr.Start(t.TempDir(), "echo done")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Do NOT call NotifyOnComplete — simulates sync consumption.
+	job.Wait(context.Background())
+	mgr.Remove(job.ID)
+
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("OnComplete should not fire for jobs that are consumed synchronously")
+	}
+}
+
+func TestNotifyOnComplete_SuppressedByKill(t *testing.T) {
+	called := false
+	mgr := NewBackgroundJobManager(nil)
+	mgr.OnComplete = func(job *BackgroundJob) {
+		called = true
+	}
+
+	job, err := mgr.Start(t.TempDir(), "sleep 60")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Opt in, then kill — kill should suppress the notification.
+	mgr.NotifyOnComplete(job.ID)
+	mgr.Kill(job.ID)
+
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("OnComplete should not fire when Kill() is called")
+	}
+}
+
+func TestNotifyOnComplete_AtMostOnce(t *testing.T) {
+	var count atomic.Int32
+	mgr := NewBackgroundJobManager(nil)
+	mgr.OnComplete = func(job *BackgroundJob) {
+		count.Add(1)
+	}
+
+	job, err := mgr.Start(t.TempDir(), "echo done")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Call NotifyOnComplete multiple times — should still fire at most once.
+	mgr.NotifyOnComplete(job.ID)
+	mgr.NotifyOnComplete(job.ID)
+	mgr.NotifyOnComplete(job.ID)
+	job.Wait(context.Background())
+
+	time.Sleep(50 * time.Millisecond)
+
+	if count.Load() != 1 {
+		t.Fatalf("expected exactly 1 callback, got %d", count.Load())
 	}
 }

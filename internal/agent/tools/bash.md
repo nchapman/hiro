@@ -1,29 +1,18 @@
-Execute a shell command using bash.
+Run a shell command and return stdout/stderr.
 
-Use this tool to run commands, install packages, build projects, run tests, or perform any system operation.
+- Commands that run longer than 60s are automatically moved to background. Use `timeout` to set a different threshold — shorter or longer (max 600000ms)
+- Output is capped at 32KB
+- Set `run_in_background` for intentionally long-running processes, then manage with `TaskOutput` and `TaskStop`
+- `description` labels what the command does — purely informational, no effect on execution
+- Quote paths that contain spaces
+- Chain dependent commands with `&&`. Avoid using newlines as command separators
 
-## Guidelines
-
-- Prefer simple, single commands over complex pipelines when possible.
-- Use absolute paths when referencing files outside the working directory.
-- For long-running commands, keep the output reasonable — pipe through `head` or `tail` if needed.
-- Synchronous commands are moved to background automatically after 60 seconds.
-- Output larger than 32KB is truncated: the beginning and end are preserved with a note showing how many lines were skipped.
-
-## Background execution
-
-- Set `run_in_background` to true to run a command in a background shell.
-- Returns a job ID for managing the background process.
-- Use the `job_output` tool to view current output from a background job.
-- Use the `job_kill` tool to terminate a background job.
-- NEVER use `&` at the end of commands — use `run_in_background` instead.
-
-Good candidates for background:
-- Long-running servers (`npm start`, `python -m http.server`, `node server.js`)
-- Watch/monitoring tasks (`npm run watch`, `tail -f logfile`)
-- Continuous processes that don't exit on their own
-
-Not suitable for background:
-- Build commands (`npm run build`, `go build`)
-- Test suites (`npm test`, `pytest`)
-- Git operations, file operations, short-lived scripts
+Best practices:
+- Prefer the purpose-built tools over Bash equivalents:
+  - Glob over `find`/`ls` for file discovery
+  - Grep over `grep`/`rg` for content search
+  - Read over `cat`/`head`/`tail` for reading files
+  - Edit over `sed`/`awk` for file modifications
+  - Write over `echo >`/heredocs for creating files
+- For git: don't force-push to main, create new commits rather than amending, and don't skip hooks unless explicitly told to
+- Don't `sleep` to wait for background work — use `TaskOutput` with `block` instead

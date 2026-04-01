@@ -118,12 +118,12 @@ func TestRemoteWorker_ExecuteTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	result, err := rw.ExecuteTool(ctx, "call-1", "read_file", `{"path":"test.txt"}`)
+	result, err := rw.ExecuteTool(ctx, "call-1", "Read", `{"file_path":"test.txt"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
-	if result.Content != "result from read_file" {
-		t.Errorf("content = %q, want %q", result.Content, "result from read_file")
+	if result.Content != "result from Read" {
+		t.Errorf("content = %q, want %q", result.Content, "result from Read")
 	}
 	if result.IsError {
 		t.Error("unexpected is_error=true")
@@ -157,7 +157,7 @@ func TestRemoteWorker_ExecuteTool_Error(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	result, err := rw.ExecuteTool(ctx, "call-2", "read_file", `{"path":"missing.txt"}`)
+	result, err := rw.ExecuteTool(ctx, "call-2", "Read", `{"file_path":"missing.txt"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}

@@ -135,7 +135,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 }
 
 // NewSession ends the current session and starts a new one within the same instance.
-// This is the /clear handler — memory and identity persist, messages and todos reset.
+// This is the /clear handler — persona and memory persist, messages and todos reset.
 func (m *Manager) NewSession(instanceID string) (string, error) {
 	inst := m.getInstance(instanceID)
 	if inst == nil {
@@ -210,12 +210,11 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		return "", fmt.Errorf("loading agent %q: %w", inst.info.Name, err)
 	}
 
-	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel(cfg)
-	cfg.Model = model
+	model := m.resolveModel()
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
@@ -281,6 +280,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
+			Model:          model,
 			Provider:       providerName,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
@@ -288,9 +288,10 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
+			Notifications:  inst.notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", newSessionID, "agent", cfg.Name),
 			HostManager:    m,
-			CallerMode:     inst.info.Mode,
+			InstanceMode:     inst.info.Mode,
 		})
 		if err != nil {
 			handle.Kill()
@@ -304,6 +305,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	inst.loop = loop
 
 	go m.watchWorker(instanceID, handle.Done)
+	go m.watchJobCompletions(spawnCtx, handle.Worker, inst.notifications)
 
 	m.logger.Info("new session created",
 		"instance", instanceID,
@@ -340,13 +342,13 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		return
 	}
 
-	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider()
 	if err != nil {
 		m.logger.Warn("failed to resolve provider for config push",
 			"agent", agentName, "error", err)
 		return
 	}
-	model := m.resolveModel(cfg)
+	model := m.resolveModel()
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {

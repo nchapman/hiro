@@ -14,16 +14,21 @@ import (
 //go:embed bash.md
 var bashDescription string
 
+// maxBashTimeout is the maximum allowed timeout (10 minutes).
+const maxBashTimeout = 600000
+
 type BashParams struct {
 	Command         string `json:"command"                    description:"The shell command to execute."`
 	WorkingDir      string `json:"working_dir,omitempty"      description:"Working directory for the command. Defaults to the agent's working directory."`
-	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in a background job. Use job_output to read output later."`
+	Timeout         int    `json:"timeout,omitempty"          description:"Optional timeout in milliseconds (max 600000). Overrides the default timeout."`
+	Description     string `json:"description,omitempty"      description:"Clear, concise description of what this command does."`
+	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true to run this command in the background. Use TaskOutput to read output later."`
 }
 
 // NewBashTool creates a tool that executes shell commands with background job support.
 func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		"bash",
+		"Bash",
 		bashDescription,
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
@@ -35,12 +40,23 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 				dir = resolvePath(workingDir, params.WorkingDir)
 			}
 
+			// Resolve timeout: use param if provided, else default.
+			bgTimeout := autoBackgroundAfter
+			if params.Timeout > 0 {
+				t := params.Timeout
+				if t > maxBashTimeout {
+					t = maxBashTimeout
+				}
+				bgTimeout = time.Duration(t) * time.Millisecond
+			}
+
 			// Explicit background mode.
 			if params.RunInBackground {
 				job, err := bgMgr.Start(dir, params.Command)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
+				job.Description = params.Description
 
 				// Quick check for fast failures (syntax errors, missing commands).
 				select {
@@ -51,8 +67,10 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 				case <-time.After(100 * time.Millisecond):
 				}
 
+				// Truly backgrounded — enable completion notification.
+				bgMgr.NotifyOnComplete(job.ID)
 				return fantasy.NewTextResponse(
-					fmt.Sprintf("Background job started with ID: %s\n\nUse job_output to view output or job_kill to terminate.", job.ID)), nil
+					fmt.Sprintf("Background task started with ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
 			}
 
 			// Synchronous execution with auto-background on timeout.
@@ -60,10 +78,11 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			job.Description = params.Description
 
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
-			timeout := time.After(autoBackgroundAfter)
+			timeout := time.After(bgTimeout)
 
 			for {
 				select {
@@ -80,8 +99,10 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 						bgMgr.Remove(job.ID)
 						return formatBashResult(stdout, stderr, execErr)
 					}
+					// Auto-backgrounded — enable completion notification.
+					bgMgr.NotifyOnComplete(job.ID)
 					return fantasy.NewTextResponse(
-						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground job ID: %s\n\nUse job_output to view output or job_kill to terminate.", job.ID)), nil
+						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground task ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
 				case <-ctx.Done():
 					_ = bgMgr.Kill(job.ID)
 					return fantasy.NewTextErrorResponse("command cancelled"), nil

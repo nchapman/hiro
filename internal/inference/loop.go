@@ -28,7 +28,7 @@ type LoopConfig struct {
 	AgentConfig    config.AgentConfig
 	Mode           config.AgentMode
 	WorkingDir     string
-	InstanceDir    string // instance-level state: memory.md, identity.md
+	InstanceDir    string // instance-level state: persona.md, memory.md
 	SessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	AgentDefDir    string
 	SharedSkillDir string
@@ -41,24 +41,30 @@ type LoopConfig struct {
 	SecretEnvFn    func() []string
 	Logger         *slog.Logger
 
+	// Model is the resolved model ID (e.g. "claude-sonnet-4-20250514").
+	Model string
 	// Provider is the resolved provider type (e.g. "anthropic", "openrouter").
-	// This may differ from AgentConfig.Provider when the agent uses the platform default.
 	Provider string
+
+	// Notification queue for this instance. Owned by the instance, passed
+	// to the Loop so it can expose Notify(). Must not be nil.
+	Notifications *NotificationQueue
 
 	// For building local tools — the Loop needs access to the Manager
 	// for coordinator/spawn tools. This avoids a circular dependency
 	// by using the HostManager interface.
 	HostManager ipc.HostManager
-	CallerMode  config.AgentMode
+	InstanceMode  config.AgentMode
 }
 
 // Loop runs the fantasy agent loop for a single session.
 type Loop struct {
 	agent          fantasy.Agent
 	instanceID     string
-	sessionID      string
+	sessionID      string // immutable after construction; safe to read without lock
 	mode           config.AgentMode
-	instanceDir    string // instance-level state: memory.md, identity.md
+	workingDir     string // platform root (e.g. /hive)
+	instanceDir    string // instance-level state: persona.md, memory.md
 	sessionDir     string // session-level state: todos.yaml, scratch/, tmp/
 	agentDefDir    string
 	sharedSkillDir string
@@ -71,9 +77,16 @@ type Loop struct {
 	// Tools are stored for agent recreation on model switch.
 	tools []fantasy.AgentTool
 
-	// Per-session reasoning config (protected by updateMu).
+	// Per-session model/reasoning config (protected by updateMu).
+	model           string // resolved model ID (e.g. "claude-sonnet-4-20250514")
 	reasoningEffort string // "" = off, "low"/"medium"/"high"/"max"/"on" = enabled
 	provider        string // current provider type (e.g. "anthropic", "openrouter")
+
+	// Notification queue for injecting meta messages (background task
+	// completions, cron triggers, webhooks, etc.). Producers call Notify
+	// from any goroutine; the session driver (WebSocket handler, etc.)
+	// watches Notifications().Ready() and triggers turns via ChatMeta.
+	notifications *NotificationQueue
 
 	// Ephemeral message buffer (non-persistent sessions only).
 	// Protected by ephemeralMu.
@@ -117,6 +130,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		instanceID:     cfg.InstanceID,
 		sessionID:      cfg.SessionID,
 		mode:           cfg.Mode,
+		workingDir:     cfg.WorkingDir,
 		instanceDir:    cfg.InstanceDir,
 		sessionDir:     cfg.SessionDir,
 		agentDefDir:    cfg.AgentDefDir,
@@ -125,6 +139,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		lm:             cfg.LM,
 		pdb:            cfg.PDB,
 		secretNamesFn:  cfg.SecretNamesFn,
+		notifications:  cfg.Notifications,
 		logger:         cfg.Logger.With("component", "inference", "instance_id", cfg.InstanceID),
 	}
 
@@ -132,12 +147,13 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	redactor := NewRedactor(cfg.SecretEnvFn)
 	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, redactor, l.logger)
 
-	// Local tools: memory, todos, history, spawn, coordinator, use_skill.
+	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, coordinator tools, Skill.
 	localTools := l.buildLocalTools(cfg)
 	agentTools = append(agentTools, localTools...)
 
 	// Store tools for agent recreation on model switch.
 	l.tools = agentTools
+	l.model = cfg.Model
 	l.provider = cfg.Provider
 
 	// Build the initial system prompt.
@@ -151,15 +167,42 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	return l, nil
 }
 
+// Notify pushes a notification into the queue. The session driver (WebSocket
+// handler, etc.) will drain it and trigger a ChatMeta turn. Safe to call from
+// any goroutine. SessionID is automatically set to the loop's current session.
+func (l *Loop) Notify(n Notification) {
+	if n.SessionID == "" {
+		n.SessionID = l.sessionID
+	}
+	l.notifications.Push(n)
+	l.logger.Info("notification queued", "source", n.Source, "length", l.notifications.Len())
+}
+
+// Notifications returns the queue so callers can watch Ready() and Drain().
+func (l *Loop) Notifications() *NotificationQueue {
+	return l.notifications
+}
+
 // Chat runs one turn of the inference loop: assembles context, calls the LLM,
 // dispatches tools, persists results. Files are optional image attachments for vision.
 func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return l.chat(ctx, prompt, files, false, onEvent)
+}
+
+// ChatMeta runs an inference turn where the user message is stored as a meta
+// message — visible to the model but hidden from the user's transcript. Used
+// for notification-triggered turns (background task completions, cron, webhooks).
+func (l *Loop) ChatMeta(ctx context.Context, prompt string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return l.chat(ctx, prompt, nil, true, onEvent)
+}
+
+func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, onEvent func(ipc.ChatEvent) error) (string, error) {
 	var messages []fantasy.Message
 
 	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
 	l.updateMu.Lock()
 	agent := l.agent
-	agentModel := l.agentConfig.Model
+	agentModel := l.model
 	agentProvider := l.provider
 	lm := l.lm
 	providerOpts := l.buildReasoningOptionsLocked()
@@ -268,7 +311,7 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	// Persist results.
 	if l.mode.IsPersistent() && l.pdb != nil {
-		l.persistTurn(ctx, prompt, files, result, lm, agentModel, providerOpts)
+		l.persistTurn(ctx, prompt, files, meta, result, lm, agentModel, providerOpts)
 	} else {
 		l.ephemeralMu.Lock()
 		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
@@ -289,10 +332,10 @@ func (l *Loop) Chat(ctx context.Context, prompt string, files []fantasy.FilePart
 // persistTurn stores the user message and all step messages in the platform DB,
 // then kicks off async compaction. lm, model, and providerOpts are snapshots
 // captured at the start of the turn to avoid racing with UpdateModel.
-func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
+func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
 	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
-	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens); err != nil {
+	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens, meta); err != nil {
 		l.logger.Warn("failed to ingest user message", "error", err)
 	}
 
@@ -389,8 +432,7 @@ func (l *Loop) UpdateModel(lm fantasy.LanguageModel, model, provider string) {
 	l.updateMu.Lock()
 	defer l.updateMu.Unlock()
 	l.lm = lm
-	l.agentConfig.Model = model
-	l.agentConfig.Provider = provider
+	l.model = model
 	l.provider = provider
 	l.agent = fantasy.NewAgent(lm,
 		fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
@@ -418,7 +460,7 @@ func (l *Loop) ReasoningEffort() string {
 func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 	effort := l.reasoningEffort
 	provider := l.provider
-	model := l.agentConfig.Model
+	model := l.model
 
 	switch provider {
 	case "anthropic":
@@ -485,15 +527,15 @@ func (l *Loop) currentSystemPrompt() string {
 // config snapshot. Does not acquire updateMu — safe to call from UpdateModel
 // which already holds the lock.
 func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
-	identity := ""
+	persona := ""
 	memory := ""
 	todos := ""
-	// Identity and memory are instance-level state.
+	// Persona and memory are instance-level state.
 	if l.instanceDir != "" {
-		if id, err := config.ReadOptionalFile(filepath.Join(l.instanceDir, "identity.md")); err != nil {
-			l.logger.Warn("could not read identity.md", "error", err)
+		if p, err := config.ReadPersonaFile(l.instanceDir); err != nil {
+			l.logger.Warn("could not read persona.md", "error", err)
 		} else {
-			identity = id
+			persona = p
 		}
 		if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
 			l.logger.Warn("could not read memory.md", "error", err)
@@ -511,13 +553,11 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 	}
 
 	if l.agentDefDir != "" {
-		prompt, soul, toolNotes, err := config.ReloadAgentTexts(l.agentDefDir)
+		prompt, err := config.ReloadAgentTexts(l.agentDefDir)
 		if err != nil {
 			l.logger.Warn("could not reload agent texts", "error", err)
 		} else {
 			cfg.Prompt = prompt
-			cfg.Soul = soul
-			cfg.Tools = toolNotes
 		}
 	}
 
@@ -546,18 +586,25 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		secretNames = l.secretNamesFn()
 	}
 
-	return buildSystemPrompt(cfg, identity, memory, todos, secretNames)
+	env := EnvInfo{
+		WorkingDir:  l.workingDir,
+		InstanceDir: l.instanceDir,
+		SessionDir:  l.sessionDir,
+		Mode:        l.mode,
+	}
+	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames)
 }
 
 // buildLocalTools creates tools that run in the control plane process.
 func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	var localTools []fantasy.AgentTool
 
-	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
-		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
-	}
 	if cfg.Mode.IsPersistent() && cfg.SessionDir != "" {
 		localTools = append(localTools, buildTodoTools(cfg.SessionDir)...)
+	}
+
+	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
+		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
 	}
 
 	if cfg.Mode.IsPersistent() && cfg.PDB != nil {
@@ -565,8 +612,9 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	}
 
 	if cfg.HostManager != nil {
-		localTools = append(localTools, buildSpawnTool(cfg.HostManager, cfg.CallerMode, l.logger))
-		if cfg.CallerMode == config.ModeCoordinator {
+		localTools = append(localTools, buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger))
+		if cfg.InstanceMode == config.ModeCoordinator {
+			localTools = append(localTools, buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
 			localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 		}
 	}

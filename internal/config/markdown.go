@@ -173,13 +173,9 @@ func (m AgentMode) IsPersistent() bool {
 // AgentConfig represents an agent's configuration loaded from markdown.
 type AgentConfig struct {
 	Name          string
-	Model         string
-	Provider      string // optional: override default provider (e.g. "openrouter")
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
 	Prompt        string   // the markdown body — the agent's operating instructions
-	Soul          string   // persona, tone, boundaries (from soul.md)
-	Tools         string   // tool notes and conventions (from tools.md)
 	Skills        []SkillConfig
 }
 
@@ -221,8 +217,6 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 
 	agent := AgentConfig{
 		Name:          parsed.Frontmatter.String("name"),
-		Model:         parsed.Frontmatter.String("model"),
-		Provider:      parsed.Frontmatter.String("provider"),
 		Description:   parsed.Frontmatter.String("description"),
 		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
 		Prompt:        parsed.Body,
@@ -231,19 +225,6 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	if agent.Name == "" {
 		return AgentConfig{}, fmt.Errorf("agent config at %s missing required 'name' field", agentPath)
 	}
-
-	// Load optional files
-	soul, err := ReadOptionalFile(filepath.Join(dir, "soul.md"))
-	if err != nil {
-		return AgentConfig{}, fmt.Errorf("reading soul.md: %w", err)
-	}
-	agent.Soul = soul
-
-	toolsContent, err := ReadOptionalFile(filepath.Join(dir, "tools.md"))
-	if err != nil {
-		return AgentConfig{}, fmt.Errorf("reading tools.md: %w", err)
-	}
-	agent.Tools = toolsContent
 
 	// Load skills
 	skills, err := LoadSkills(filepath.Join(dir, "skills"))
@@ -255,28 +236,15 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	return agent, nil
 }
 
-// ReloadAgentTexts re-reads the text content of an agent definition from disk.
-// It returns the prompt body (from agent.md), soul (from soul.md), and tool
-// notes (from tools.md). Structural frontmatter (name, model, tools) is
-// parsed but discarded — only the body text matters for hot-reload.
-func ReloadAgentTexts(dir string) (prompt, soul, tools string, err error) {
+// ReloadAgentTexts re-reads the prompt body from agent.md on disk.
+// Structural frontmatter (name, model, tools) is parsed but discarded —
+// only the body text matters for hot-reload.
+func ReloadAgentTexts(dir string) (prompt string, err error) {
 	parsed, err := ParseMarkdownFile(filepath.Join(dir, "agent.md"))
 	if err != nil {
-		return "", "", "", fmt.Errorf("reloading agent.md: %w", err)
+		return "", fmt.Errorf("reloading agent.md: %w", err)
 	}
-	prompt = parsed.Body
-
-	soul, err = ReadOptionalFile(filepath.Join(dir, "soul.md"))
-	if err != nil {
-		return "", "", "", fmt.Errorf("reloading soul.md: %w", err)
-	}
-
-	tools, err = ReadOptionalFile(filepath.Join(dir, "tools.md"))
-	if err != nil {
-		return "", "", "", fmt.Errorf("reloading tools.md: %w", err)
-	}
-
-	return prompt, soul, tools, nil
+	return parsed.Body, nil
 }
 
 // LoadSkills loads all skill configs from a skills directory.

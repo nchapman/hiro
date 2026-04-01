@@ -88,16 +88,16 @@ Agent capabilities are controlled by a closed-by-default tool whitelist. An agen
 Effective tools = declared tools ∩ control plane policy ∩ parent's effective tools
 ```
 
-**Declared tools:** Each agent declares the tools it needs in `agent.md` frontmatter (`tools: [bash, read_file, ...]`). If no tools are declared, the agent gets no built-in tools.
+**Declared tools:** Each agent declares the tools it needs in `agent.md` frontmatter (`tools: [Bash, Read, ...]`). If no tools are declared, the agent gets no built-in tools.
 
 **Control plane policy:** Operators can further restrict an agent's tools via `config.yaml` or the `/tools` slash command. These overrides can only remove tools, never add ones the agent didn't declare.
 
 **Parent inheritance:** A child agent's effective tools are intersected with its parent's effective tools. A child can never have more capabilities than its parent.
 
 **Structural tools** bypass this system — they are intrinsic to the agent's mode:
-- `spawn_instance` is available to all agents.
-- Coordinator tools (`resume_instance`, `stop_instance`, `delete_instance`, `send_message`, `list_instances`) are only available to coordinator-mode agents.
-- Persistent tools (`memory_read`, `memory_write`, `todos`, `history_search`, `history_recall`) are available to persistent and coordinator agents.
+- `SpawnInstance` is available to all agents.
+- Coordinator tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) are only available to coordinator-mode agents.
+- Persistent tools (`TodoWrite`, `AddMemory`, `ForgetMemory`, `HistorySearch`, `HistoryRecall`) are available to persistent and coordinator agents.
 
 ### 6. Secrets Management
 
@@ -118,19 +118,19 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 **How it works:**
 
 1. Each instance's inference loop receives its instance ID as a `callerID` via context propagation.
-2. Coordinator tools (`send_message`, `stop_instance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
+2. Coordinator tools (`SendMessage`, `StopInstance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
 3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the platform DB. If the target is not a descendant of the caller, the request is rejected.
 
 **Scoping rules:**
 
 | Operation | Authorization |
 |---|---|
-| `spawn_instance` | No check needed — caller becomes the parent. |
-| `resume_instance` | Target must be a descendant of caller. Coordinator mode only. |
-| `send_message` | Target must be a descendant of caller. Coordinator mode only. |
-| `stop_instance` | Target must be a descendant of caller. Coordinator mode only. |
-| `delete_instance` | Target must be a descendant of caller. Coordinator mode only. |
-| `list_instances` | Returns only direct children of caller. Coordinator mode only. |
+| `SpawnInstance` | No check needed — caller becomes the parent. |
+| `ResumeInstance` | Target must be a descendant of caller. Coordinator mode only. |
+| `SendMessage` | Target must be a descendant of caller. Coordinator mode only. |
+| `StopInstance` | Target must be a descendant of caller. Coordinator mode only. |
+| `DeleteInstance` | Target must be a descendant of caller. Coordinator mode only. |
+| `ListInstances` | Returns only direct children of caller. Coordinator mode only. |
 
 An agent cannot send messages to, stop, or inspect siblings, ancestors, or unrelated agents.
 
@@ -150,7 +150,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### What agents CAN do
 
-- Execute arbitrary shell commands (if granted the `bash` tool).
+- Execute arbitrary shell commands (if granted the `Bash` tool).
 - Read and write files in the shared workspace (`/hive/workspace/`, mode `2775`).
 - Read agent definitions (`agents/`).
 - Spawn ephemeral child agents (with equal or fewer capabilities).
@@ -174,7 +174,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### Limitations
 
-- **No network isolation between agents.** Agents share the container's network namespace. An agent with `bash` could connect to another agent's gRPC socket by enumerating `/tmp/hive-agent-*.sock` — the path format is known but the UUID suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations.
+- **No network isolation between agents.** Agents share the container's network namespace. An agent with `Bash` could connect to another agent's gRPC socket by enumerating `/tmp/hive-agent-*.sock` — the path format is known but the UUID suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations.
 - **Shared workspace is collaborative.** Any agent can read or modify files in `/hive/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
 - **No syscall filtering.** Agents are not confined by seccomp, AppArmor, or similar mechanisms beyond what Docker applies by default.

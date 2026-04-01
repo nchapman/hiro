@@ -2,11 +2,14 @@ package grpcipc_test
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/nchapman/hivebot/internal/ipc"
 	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -60,7 +63,7 @@ func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
 	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "file contents here"}}
 	client := setupWorkerTest(t, worker)
 
-	result, err := client.ExecuteTool(t.Context(), "call-1", "read_file", `{"path":"test.txt"}`)
+	result, err := client.ExecuteTool(t.Context(), "call-1", "Read", `{"path":"test.txt"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -70,8 +73,8 @@ func TestWorkerRoundtrip_ExecuteTool(t *testing.T) {
 	if result.IsError {
 		t.Error("unexpected is_error=true")
 	}
-	if worker.lastTool.name != "read_file" {
-		t.Errorf("tool name = %q, want read_file", worker.lastTool.name)
+	if worker.lastTool.name != "Read" {
+		t.Errorf("tool name = %q, want Read", worker.lastTool.name)
 	}
 	if worker.lastTool.callID != "call-1" {
 		t.Errorf("call_id = %q, want call-1", worker.lastTool.callID)
@@ -82,7 +85,7 @@ func TestWorkerRoundtrip_ExecuteTool_Error(t *testing.T) {
 	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "not found", IsError: true}}
 	client := setupWorkerTest(t, worker)
 
-	result, err := client.ExecuteTool(t.Context(), "call-2", "read_file", `{"path":"missing.txt"}`)
+	result, err := client.ExecuteTool(t.Context(), "call-2", "Read", `{"path":"missing.txt"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -151,6 +154,76 @@ func TestWorkerRoundtrip_SecretEnvInjection(t *testing.T) {
 	}
 	if receivedSecrets[1] != "DB_PASS=hunter2" {
 		t.Errorf("secret[1] = %q, want DB_PASS=hunter2", receivedSecrets[1])
+	}
+}
+
+func TestWorkerRoundtrip_WatchJobs(t *testing.T) {
+	worker := &fakeWorker{toolResult: ipc.ToolResult{Content: "ok"}}
+
+	// Create server with a completion channel.
+	completions := make(chan *pb.JobCompletion, 10)
+	ws := grpcipc.NewWorkerServer(worker)
+	ws.SetCompletionChannel(completions)
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	ws.Register(srv)
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := grpcipc.NewWorkerClient(conn)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch := client.WatchJobs(ctx, slog.Default())
+
+	// Send a completion.
+	completions <- &pb.JobCompletion{
+		TaskId:      "ABC123",
+		Command:     "echo hi",
+		Description: "test job",
+		ExitCode:    0,
+		Failed:      false,
+	}
+
+	select {
+	case c := <-ch:
+		if c.TaskId != "ABC123" {
+			t.Errorf("task_id = %q, want ABC123", c.TaskId)
+		}
+		if c.Command != "echo hi" {
+			t.Errorf("command = %q, want 'echo hi'", c.Command)
+		}
+		if c.Failed {
+			t.Error("expected failed=false")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for completion")
+	}
+
+	// Close channel — should close the client channel.
+	close(completions)
+	select {
+	case _, ok := <-ch:
+		if ok {
+			// Might get one more nil read, that's fine. Wait for close.
+			if _, ok2 := <-ch; ok2 {
+				t.Error("expected channel to be closed after completions channel closed")
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for channel close")
 	}
 }
 

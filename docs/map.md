@@ -57,13 +57,11 @@ All run in **worker processes**, dispatched via gRPC.
 | `grep.go` | 368 | Regex search with ripgrep fallback to Go |
 | `glob.go` | 256 | File pattern matching, ripgrep or Go fallback |
 | `edit.go` | ~180 | Surgical find-and-replace |
-| `multiedit.go` | ~150 | Batch edits to one file |
-| `read_file.go` | ~120 | Read with offset/limit, 64KB cap |
-| `write_file.go` | ~100 | Atomic file write (temp+rename), auto-mkdir |
-| `list_files.go` | ~120 | Directory listing with glob filter |
-| `fetch.go` | ~100 | HTTP fetch, 64KB response cap |
-| `job_output.go` | ~80 | Background job stdout/stderr |
-| `job_kill.go` | ~50 | Terminate background job |
+| `read.go` | ~120 | Read with offset/limit, 64KB cap |
+| `write.go` | ~100 | Atomic file write (temp+rename), auto-mkdir |
+| `webfetch.go` | ~100 | HTTP fetch, 64KB response cap |
+| `task_output.go` | ~80 | Background task stdout/stderr |
+| `task_stop.go` | ~50 | Terminate background task |
 | `schema.go` | ~40 | `RemoteToolNames` registry + `RemoteToolInfos()` for schema extraction |
 | `resolve.go` | ~120 | Path resolution, sandboxing, symlink confinement, atomicWriteFile |
 | `rg.go` | ~60 | Ripgrep detection helper |
@@ -79,15 +77,15 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 | File | LOC | Role |
 |------|-----|------|
 | `loop.go` | 564 | Main inference loop — calls `fantasy.Agent.Stream()`, handles tool dispatch |
-| `tools_spawn.go` | 251 | Spawn tool + coordinator tools (ScopedManager, list_nodes, send_message, etc.) |
-| `tools_history.go` | 111 | history_search, history_recall |
-| `tools_skills.go` | 125 | use_skill + path validation |
-| `tools_todos.go` | 76 | todos tool |
-| `tools_memory.go` | 43 | memory_read, memory_write |
+| `tools_spawn.go` | 251 | Spawn tool + coordinator tools (ScopedManager, ListNodes, SendMessage, etc.) |
+| `tools_history.go` | 111 | HistorySearch, HistoryRecall |
+| `tools_skills.go` | 125 | Skill + path validation |
+| `tools_todos.go` | 76 | TodoWrite tool |
+
 | `compaction.go` | 682 | LLM-driven conversation summarization (now with MaxSummaryDepth cap) |
 | `assembly.go` | 152 | Message assembly within token budget (now with fresh tail overflow protection) |
 | `context.go` | ~180 | Context item management (system prompt sections) |
-| `prompt.go` | ~200 | System prompt builder (soul + identity + memory + todos + agent.md + tools.md + skills) |
+| `prompt.go` | ~200 | System prompt builder (persona + memory + todos + agent.md + skills) |
 | `tools.go` | ~60 | Tool proxy — wraps remote tool schemas (from `tools.RemoteToolInfos`) with gRPC dispatch |
 | `helpers.go` | ~120 | Token counting, message utilities |
 | `redact.go` | ~80 | Secret redaction in tool outputs |
@@ -96,16 +94,16 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 
 | Tool | Scope | Purpose |
 |------|-------|---------|
-| `spawn_instance` | All agents | Spawn child instance (ephemeral/persistent/coordinator) |
-| `memory_read` / `memory_write` | Persistent+ | Read/write `memory.md` |
-| `todos` | Persistent+ | Manage task list (YAML) |
-| `history_search` / `history_recall` | Persistent+ | FTS search conversation history |
-| `resume_instance` | Coordinator | Restart stopped child |
-| `send_message` | Coordinator | Message child, get response |
-| `stop_instance` | Coordinator | Stop child + subtree |
-| `delete_instance` | Coordinator | Permanently remove child + subtree |
-| `list_instances` | Coordinator | List direct children |
-| `use_skill` | Agents with skills | Load skill instructions on demand |
+| `SpawnInstance` | All agents | Spawn child instance (ephemeral/persistent/coordinator) |
+
+| `TodoWrite` | Persistent+ | Manage task list (YAML) |
+| `HistorySearch` / `HistoryRecall` | Persistent+ | FTS search conversation history |
+| `ResumeInstance` | Coordinator | Restart stopped child |
+| `SendMessage` | Coordinator | Message child, get response |
+| `StopInstance` | Coordinator | Stop child + subtree |
+| `DeleteInstance` | Coordinator | Permanently remove child + subtree |
+| `ListInstances` | Coordinator | List direct children |
+| `Skill` | Agents with skills | Load skill instructions on demand |
 
 **Tests**: `assembly_test.go`, `compaction_test.go`, `context_test.go`, `prompt_test.go`, `tools_test.go`, `helpers_test.go`, `redact_test.go`, plus two online eval tests.
 
@@ -393,7 +391,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 1 | **Agent Manager** | `agent/manager*.go` | ~1820 (8 files) | `manager_test.go` | Split into 8 focused files. Lifecycle, session, query, worker, resolve, restore. |
 | 2 | **Inference Loop** | `inference/loop.go` | 564 | (integration) | Core agentic loop, streaming, tool dispatch. |
 | 3 | **Compaction** | `inference/compaction.go` | 675 | `compaction_test.go` | LLM-driven summarization. Complex async logic. |
-| 4 | **Local Tools** | `inference/tools_*.go` | ~606 (5 files) | `tools_test.go` | Split: spawn, memory, todos, history, skills. |
+| 4 | **Local Tools** | `inference/tools_*.go` | ~500 (4 files) | `tools_test.go` | Split: spawn, todos, history, skills. |
 | 5 | **System Prompt** | `inference/prompt.go`, `assembly.go`, `context.go` | ~580 | 3 test files | Prompt assembly, token budgeting, context management. |
 | 6 | **File Sync** | `cluster/filesync.go` | 723 | 2 test files | Bidirectional sync, atomic writes, streaming tar. |
 | 7 | **Cluster Leader** | `cluster/leader_service.go`, `leader_stream.go` | ~500 | `stream_test.go` | gRPC service, worker registration, tool dispatch. |
@@ -412,8 +410,8 @@ Each row is a reviewable unit. Tackle them in any order.
 | 20 | **IPC/gRPC** | `ipc/`, `ipc/grpcipc/` | ~750 | `grpcipc_test.go` | Interfaces, proto, gRPC adapters (bufconn tests). |
 | 21 | **Bash Tool** | `agent/tools/bash.go`, `background.go` | ~440 | 3 test files | Shell exec, job management, auto-background. |
 | 22 | **Search Tools** | `agent/tools/grep.go`, `glob.go` | ~624 | 2 test files | Ripgrep integration, Go fallbacks. |
-| 23 | **Edit Tools** | `agent/tools/edit.go`, `multiedit.go` | ~330 | 2 test files | Find-and-replace, batch edits. |
-| 24 | **File Tools** | `agent/tools/read_file.go`, `write_file.go`, `list_files.go` | ~340 | 3 test files | Read/write/list with sandboxing. |
+| 23 | **Edit Tool** | `agent/tools/edit.go` | ~180 | 1 test file | Find-and-replace. |
+| 24 | **File Tools** | `agent/tools/read.go`, `write.go` | ~220 | 2 test files | Read/write with sandboxing. |
 | 25 | **UID Pool** | `uidpool/pool.go` | ~120 | `pool_test.go` | UID allocation for process isolation. |
 | 26 | **File Watcher** | `watcher/watcher.go` | 344 | `watcher_test.go` | fsnotify wrapper, debounced events. |
 | 27 | **Web UI: Chat** | `components/Chat.tsx`, `prompt-kit/*` | ~1500 | — | Chat interface, markdown, streaming. |
@@ -482,8 +480,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | Finding | Where | Severity |
 |---------|-------|----------|
 | ~~**Fresh tail can overflow context**~~ | `inference/assembly.go` | **FIXED** — Tail capped at 80% of budget; shrinks from oldest end with slog warning. |
-| **Multiedit partial failure** | `agent/tools/multiedit.go` | Medium — By design: applies as many edits as possible, reports failures. No rollback. |
-| ~~**write_file not atomic**~~ | `agent/tools/write_file.go` | **FIXED** — Uses temp+rename via `atomicWriteFile()`. |
+| ~~**Write not atomic**~~ | `agent/tools/write.go` | **FIXED** — Uses temp+rename via `atomicWriteFile()`. |
 | ~~**Memory/todos not atomic**~~ | `config/memory.go`, `config/todos.go` | **FIXED** — Both use `atomicWrite()` (temp+rename). |
 | ~~**Compaction depth unbounded**~~ | `inference/compaction.go` | **FIXED** — Added `MaxSummaryDepth` (scales 4–8 with context window). Condensation stops at limit. |
 | ~~**Job ID collision**~~ | `agent/tools/background.go` | **FIXED** — Widened from 12-bit (4K) to 24-bit (16M) hex ID space. |
@@ -574,7 +571,7 @@ Completed items struck through. Next priorities:
 3. ~~**Split `local_tools.go`**~~ — **DONE** (5 files by tool category).
 4. ~~**Cluster hardening**~~ — **DONE** (path traversal fix, node bridge robustness, goroutine bounding, gRPC flow control + keepalive recv timeouts).
 5. ~~**File sync**~~ — **DONE** (Reconcile wired into production after initial sync; watch race documented as sufficient).
-6. ~~**Tool correctness**~~ — **DONE** (atomic writes for write_file/memory/todos, resolve.go symlink protection, job ID space widened).
+6. ~~**Tool correctness**~~ — **DONE** (atomic writes for Write/memory/todos, resolve.go symlink protection, job ID space widened).
 7. ~~**API test coverage**~~ — **DONE** (2 → 101 tests across 9 files: auth, instances, settings, usage, files, setup, share, origin). Remaining: chat/terminal WebSocket.
 8. ~~**Web UI polish**~~ — **DONE** (sonner toast system, theme-aware, all console.error→toast.error). Remaining: message virtualization, mobile responsiveness.
 9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests, rate limiter proxy support, setup CSRF loopback hardening, password change session reissue).

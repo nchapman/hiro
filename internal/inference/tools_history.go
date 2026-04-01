@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"strings"
 
@@ -10,10 +11,16 @@ import (
 	platformdb "github.com/nchapman/hivebot/internal/platform/db"
 )
 
+//go:embed history_search.md
+var historySearchDescription string
+
+//go:embed history_recall.md
+var historyRecallDescription string
+
 func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		fantasy.NewAgentTool("history_search",
-			"Search your conversation history for past messages and summaries.",
+		fantasy.NewAgentTool("HistorySearch",
+			historySearchDescription,
 			func(ctx context.Context, input struct {
 				Query string `json:"query" description:"Search query (full-text search)."`
 				Scope string `json:"scope" description:"Where to search: 'messages', 'summaries', or 'all'. Default: 'all'." default:"all"`
@@ -51,8 +58,8 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 				return fantasy.NewTextResponse(sb.String()), nil
 			},
 		),
-		fantasy.NewAgentTool("history_recall",
-			"Expand a conversation summary to see its full content and the lower-level summaries or messages it was created from.",
+		fantasy.NewAgentTool("HistoryRecall",
+			historyRecallDescription,
 			func(ctx context.Context, input struct {
 				SummaryID string `json:"summary_id" description:"The ID of a summary to expand (e.g. 'sum_abc123')."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

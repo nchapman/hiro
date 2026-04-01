@@ -23,7 +23,7 @@ You are a concise test agent. Respond in one short sentence.`)
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use spawn_instance to run the agent named "echo-test" with the prompt "What is the capital of France? One word." and tell me what it responded.`)
+	resp := cs.chat(ctx, `Use SpawnInstance to run the agent named "echo-test" with the prompt "What is the capital of France? One word." and tell me what it responded.`)
 	if !strings.Contains(strings.ToLower(resp), "paris") {
 		t.Errorf("expected 'paris' in response, got %q", resp)
 	}
@@ -46,7 +46,7 @@ Always respond with exactly "HELLO WORLD" in all caps. Nothing else.`)
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use spawn_instance with agent "greeter" and prompt "Say your greeting." and report back exactly what it said.`)
+	resp := cs.chat(ctx, `Use SpawnInstance with agent "greeter" and prompt "Say your greeting." and report back exactly what it said.`)
 	t.Logf("Create agent response: %s", resp)
 
 	if !strings.Contains(strings.ToUpper(resp), "HELLO WORLD") {
@@ -76,7 +76,7 @@ When activated, respond entirely in pirate speak.`)
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use spawn_instance with agent "responder" and prompt "Say hello like a pirate. Use your pirate-speak skill." and report back exactly what it said.`)
+	resp := cs.chat(ctx, `Use SpawnInstance with agent "responder" and prompt "Say hello like a pirate. Use your pirate-speak skill." and report back exactly what it said.`)
 	t.Logf("Create skill response: %s", resp)
 
 	lower := strings.ToLower(resp)

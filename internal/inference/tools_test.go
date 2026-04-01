@@ -32,26 +32,26 @@ func (f *fakeExecutor) ExecuteTool(_ context.Context, callID, name, input string
 func TestProxyTool_ForwardsToExecutor(t *testing.T) {
 	exec := &fakeExecutor{result: ipc.ToolResult{Content: "file contents"}}
 	pt := &proxyTool{
-		info:     fantasy.ToolInfo{Name: "read_file"},
+		info:     fantasy.ToolInfo{Name: "Read"},
 		executor: exec,
 		logger:   testLogger,
 	}
 
 	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 		ID:    "call-1",
-		Name:  "read_file",
-		Input: `{"path":"main.go"}`,
+		Name:  "Read",
+		Input: `{"file_path":"main.go"}`,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if exec.lastName != "read_file" {
-		t.Errorf("executor got name %q, want read_file", exec.lastName)
+	if exec.lastName != "Read" {
+		t.Errorf("executor got name %q, want Read", exec.lastName)
 	}
 	if exec.lastCallID != "call-1" {
 		t.Errorf("executor got callID %q, want call-1", exec.lastCallID)
 	}
-	if exec.lastInput != `{"path":"main.go"}` {
+	if exec.lastInput != `{"file_path":"main.go"}` {
 		t.Errorf("executor got input %q, want expected JSON", exec.lastInput)
 	}
 
@@ -66,14 +66,14 @@ func TestProxyTool_ForwardsToExecutor(t *testing.T) {
 func TestProxyTool_ErrorResult(t *testing.T) {
 	exec := &fakeExecutor{result: ipc.ToolResult{Content: "not found", IsError: true}}
 	pt := &proxyTool{
-		info:     fantasy.ToolInfo{Name: "read_file"},
+		info:     fantasy.ToolInfo{Name: "Read"},
 		executor: exec,
 		logger:   testLogger,
 	}
 
 	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 		ID:   "call-2",
-		Name: "read_file",
+		Name: "Read",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -92,7 +92,7 @@ func TestProxyTool_RedactsSecrets(t *testing.T) {
 		return []string{"API_KEY=sk-secret-12345678"}
 	})
 	pt := &proxyTool{
-		info:     fantasy.ToolInfo{Name: "bash"},
+		info:     fantasy.ToolInfo{Name: "Bash"},
 		executor: exec,
 		redactor: redactor,
 		logger:   testLogger,
@@ -100,7 +100,7 @@ func TestProxyTool_RedactsSecrets(t *testing.T) {
 
 	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 		ID:   "call-3",
-		Name: "bash",
+		Name: "Bash",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -112,18 +112,18 @@ func TestProxyTool_RedactsSecrets(t *testing.T) {
 
 func TestBuildProxyTools_RespectsAllowlist(t *testing.T) {
 	exec := &fakeExecutor{}
-	allowed := map[string]bool{"bash": true, "read_file": true}
+	allowed := map[string]bool{"Bash": true, "Read": true}
 	proxies := buildProxyTools("/tmp", exec, allowed, nil, testLogger)
 
 	names := make(map[string]bool)
 	for _, p := range proxies {
 		names[p.Info().Name] = true
 	}
-	if !names["bash"] || !names["read_file"] {
-		t.Error("expected bash and read_file in proxies")
+	if !names["Bash"] || !names["Read"] {
+		t.Error("expected Bash and Read in proxies")
 	}
-	if names["write_file"] || names["glob"] {
-		t.Error("write_file and glob should be filtered out")
+	if names["Write"] || names["Glob"] {
+		t.Error("Write and Glob should be filtered out")
 	}
 	if len(proxies) != 2 {
 		t.Errorf("expected 2 proxies, got %d", len(proxies))

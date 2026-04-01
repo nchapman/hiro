@@ -112,8 +112,8 @@ func TestBash_BackgroundLongRunning(t *testing.T) {
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
-	if !strings.Contains(content, "Background job started") {
-		t.Fatalf("expected background job message, got %q", content)
+	if !strings.Contains(content, "Background task started") {
+		t.Fatalf("expected background task message, got %q", content)
 	}
 	// Clean up.
 	for _, id := range getJobIDs(mgr) {

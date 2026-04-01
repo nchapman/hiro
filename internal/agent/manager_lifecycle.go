@@ -210,6 +210,16 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		return "", fmt.Errorf("creating instance dir: %w", err)
 	}
 
+	// Seed instance-level state files so agents can discover them.
+	if dirIsNew {
+		for _, name := range []string{"persona.md", "memory.md"} {
+			path := filepath.Join(instDir, name)
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				return "", fmt.Errorf("creating %s: %w", name, err)
+			}
+		}
+	}
+
 	// Create session directory with session-level state.
 	sessDir := m.instanceSessionDir(instanceID, sessionID)
 	if err := os.MkdirAll(sessDir, 0700); err != nil {
@@ -297,12 +307,11 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	}
 
 	// Resolve provider and model from control plane config.
-	providerName, apiKey, baseURL, err := m.resolveProvider(cfg)
+	providerName, apiKey, baseURL, err := m.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel(cfg)
-	cfg.Model = model // ensure the loop sees the resolved model
+	model := m.resolveModel()
 
 	spawnCfg := ipc.SpawnConfig{
 		InstanceID:     instanceID,
@@ -365,6 +374,11 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		s.SetSecretEnvFn(m.SecretEnv)
 	}
 
+	// Create the notification queue (instance-level, survives loop recreation).
+	notifications := inference.NewNotificationQueue(
+		m.logger.With("component", "notifications", "instance_id", instanceID),
+	)
+
 	// Create the inference loop (skipped if no provider — test mode).
 	var loop *inference.Loop
 	if providerName != "" {
@@ -386,6 +400,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
+			Model:          model,
 			Provider:       providerName,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
@@ -393,9 +408,10 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
+			Notifications:  notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 			HostManager:    m,
-			CallerMode:     mode,
+			InstanceMode:     mode,
 		})
 		if err != nil {
 			handle.Kill()
@@ -424,6 +440,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		worker:         handle.Worker,
 		handle:         handle,
 		loop:           loop,
+		notifications:  notifications,
 		effectiveTools: effectiveTools,
 		uid:            uid,
 		gid:            gid,
@@ -440,6 +457,10 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	// Start death-watcher goroutine for unexpected process exits.
 	go m.watchWorker(instanceID, handle.Done)
+
+	// Start background job completion watcher to push notifications
+	// when background bash tasks finish on this worker.
+	go m.watchJobCompletions(spawnCtx, handle.Worker, notifications)
 
 	m.logger.Info("instance started",
 		"id", instanceID,

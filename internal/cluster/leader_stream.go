@@ -37,10 +37,11 @@ type nodeConn struct {
 
 // NodeHandlers holds callbacks for messages received from a node.
 type NodeHandlers struct {
-	OnSpawnResult  func(nodeID NodeID, msg *pb.SpawnResult)
-	OnToolResult   func(nodeID NodeID, msg *pb.NodeToolResult)
-	OnWorkerExited func(nodeID NodeID, msg *pb.WorkerExited)
-	OnFileUpdate   func(nodeID NodeID, msg *pb.FileUpdate)
+	OnSpawnResult    func(nodeID NodeID, msg *pb.SpawnResult)
+	OnToolResult     func(nodeID NodeID, msg *pb.NodeToolResult)
+	OnWorkerExited   func(nodeID NodeID, msg *pb.WorkerExited)
+	OnFileUpdate     func(nodeID NodeID, msg *pb.FileUpdate)
+	OnJobCompletion  func(nodeID NodeID, msg *pb.JobCompletionNotify)
 }
 
 // NewLeaderStream creates a new leader-side cluster gRPC service.
@@ -175,6 +176,11 @@ func (s *LeaderStream) readLoop(conn *nodeConn) error {
 		case *pb.NodeMessage_FileUpdate:
 			if h.OnFileUpdate != nil {
 				h.OnFileUpdate(conn.nodeID, m.FileUpdate)
+			}
+
+		case *pb.NodeMessage_JobCompletion:
+			if h.OnJobCompletion != nil {
+				h.OnJobCompletion(conn.nodeID, m.JobCompletion)
 			}
 		}
 	}

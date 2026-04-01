@@ -540,7 +540,7 @@ func summarizationPrompt(depth int, aggressive bool, targetTokens int, prevConte
 }
 
 // expandFooter is appended to all summarization prompts. It tells the model
-// to list what was dropped so the agent can use history_recall to expand later.
+// to list what was dropped so the agent can use HistoryRecall to expand later.
 const expandFooter = ` End with: "Expand for details about: <comma-separated list of topics you compressed or dropped>".`
 
 // leafPrompt summarizes raw conversation messages into bullet points.
@@ -626,6 +626,11 @@ Format: terse bullet points. Include a short timeline of major milestones with d
 func buildLeafInput(msgs []platformdb.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
+		// Skip meta messages — they're internal signals (task notifications, etc.)
+		// and shouldn't appear in conversation summaries.
+		if m.Meta {
+			continue
+		}
 		fmt.Fprintf(&b, "[%s] %s: %s\n\n",
 			m.CreatedAt.Format("2006-01-02 15:04:05"),
 			m.Role,

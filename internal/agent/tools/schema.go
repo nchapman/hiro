@@ -5,10 +5,9 @@ import "charm.land/fantasy"
 // RemoteToolNames lists tools that execute in worker processes via gRPC.
 // Used by the inference engine to determine which tools need proxy wrappers.
 var RemoteToolNames = map[string]bool{
-	"bash": true, "read_file": true, "write_file": true,
-	"edit_file": true, "multiedit_file": true, "list_files": true,
-	"glob": true, "grep": true, "fetch": true,
-	"job_output": true, "job_kill": true,
+	"Bash": true, "Read": true, "Write": true,
+	"Edit": true, "Glob": true, "Grep": true,
+	"WebFetch": true, "TaskOutput": true, "TaskStop": true,
 }
 
 // RemoteToolInfos returns the schema (ToolInfo) for all remote tools.
@@ -19,16 +18,14 @@ func RemoteToolInfos(workingDir string) []fantasy.ToolInfo {
 	bgMgr := NewBackgroundJobManager(nil)
 	allTools := []fantasy.AgentTool{
 		NewBashTool(workingDir, bgMgr),
-		NewReadFileTool(workingDir),
+		NewReadTool(workingDir),
 		NewEditTool(workingDir),
-		NewMultiEditTool(workingDir),
-		NewWriteFileTool(workingDir),
-		NewListFilesTool(workingDir),
+		NewWriteTool(workingDir),
 		NewGlobTool(workingDir),
 		NewGrepTool(workingDir),
-		NewFetchTool(),
-		NewJobOutputTool(bgMgr),
-		NewJobKillTool(bgMgr),
+		NewWebFetchTool(),
+		NewTaskOutputTool(bgMgr),
+		NewTaskStopTool(bgMgr),
 	}
 
 	infos := make([]fantasy.ToolInfo, 0, len(allTools))

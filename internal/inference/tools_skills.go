@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,9 +14,12 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 )
 
+//go:embed skill.md
+var skillDescription string
+
 func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.Logger) fantasy.AgentTool {
-	return fantasy.NewAgentTool("use_skill",
-		"Activate a skill to get its full instructions and required formats. You MUST call this before performing any task that matches a skill.",
+	return fantasy.NewAgentTool("Skill",
+		skillDescription,
 		func(ctx context.Context, input struct {
 			Name string `json:"name" description:"The name of the skill to activate."`
 		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -48,11 +52,11 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.
 					fmt.Sprintf("skill %q path is outside allowed directories", input.Name)), nil
 			}
 
-			logger.Info("tool call", "tool", "use_skill", "skill", input.Name)
+			logger.Info("tool call", "tool", "Skill", "skill", input.Name)
 
 			parsed, err := config.ParseMarkdownFile(realPath)
 			if err != nil {
-				logger.Warn("use_skill read failed", "skill", input.Name, "error", err)
+				logger.Warn("Skill read failed", "skill", input.Name, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading skill file: %v", err)), nil
 			}
 

@@ -2,8 +2,13 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
+
+	"github.com/nchapman/hivebot/internal/inference"
+	"github.com/nchapman/hivebot/internal/ipc/grpcipc"
+	pb "github.com/nchapman/hivebot/internal/ipc/proto"
 )
 
 // shutdownGrace is the deadline for a graceful worker shutdown before force-killing.
@@ -166,6 +171,47 @@ func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
 
 			m.teardownInstance(id, h, teardownOpts{removeDir: true})
 		}
+	}
+}
+
+// watchJobCompletions monitors a worker for background task completions and
+// pushes notifications into the instance's notification queue. If the worker
+// does not support WatchJobs (e.g. test fakes), this is a no-op.
+func (m *Manager) watchJobCompletions(ctx context.Context, worker interface{}, notifications *inference.NotificationQueue) {
+	wc, ok := worker.(*grpcipc.WorkerClient)
+	if !ok {
+		return
+	}
+	ch := wc.WatchJobs(ctx, m.logger)
+	for completion := range ch {
+		notifications.Push(formatJobNotification(completion))
+	}
+}
+
+// formatJobNotification creates a notification matching Claude Code's
+// <task-notification> XML format.
+func formatJobNotification(c *pb.JobCompletion) inference.Notification {
+	status := "completed"
+	if c.Failed {
+		status = "failed"
+	}
+	desc := c.Description
+	if desc == "" {
+		desc = c.Command
+	}
+	var summary string
+	if c.Failed {
+		summary = fmt.Sprintf("Background command \"%s\" failed with exit code %d", desc, c.ExitCode)
+	} else {
+		summary = fmt.Sprintf("Background command \"%s\" completed (exit code %d)", desc, c.ExitCode)
+	}
+
+	content := fmt.Sprintf("<task-notification>\n<task_id>%s</task_id>\n<status>%s</status>\n<summary>%s</summary>\n</task-notification>",
+		c.TaskId, status, summary)
+
+	return inference.Notification{
+		Content: content,
+		Source:  "background-job",
 	}
 }
 

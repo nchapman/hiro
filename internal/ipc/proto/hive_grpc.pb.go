@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	AgentWorker_ExecuteTool_FullMethodName = "/hive.AgentWorker/ExecuteTool"
 	AgentWorker_Shutdown_FullMethodName    = "/hive.AgentWorker/Shutdown"
+	AgentWorker_WatchJobs_FullMethodName   = "/hive.AgentWorker/WatchJobs"
 )
 
 // AgentWorkerClient is the client API for AgentWorker service.
@@ -34,6 +35,9 @@ type AgentWorkerClient interface {
 	ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error)
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
+	// WatchJobs streams background job completion events from the worker.
+	// The control plane uses this to push notifications into the inference loop.
+	WatchJobs(ctx context.Context, in *WatchJobsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[JobCompletion], error)
 }
 
 type agentWorkerClient struct {
@@ -64,6 +68,25 @@ func (c *agentWorkerClient) Shutdown(ctx context.Context, in *ShutdownRequest, o
 	return out, nil
 }
 
+func (c *agentWorkerClient) WatchJobs(ctx context.Context, in *WatchJobsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[JobCompletion], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentWorker_ServiceDesc.Streams[0], AgentWorker_WatchJobs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchJobsRequest, JobCompletion]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentWorker_WatchJobsClient = grpc.ServerStreamingClient[JobCompletion]
+
 // AgentWorkerServer is the server API for AgentWorker service.
 // All implementations must embed UnimplementedAgentWorkerServer
 // for forward compatibility.
@@ -75,6 +98,9 @@ type AgentWorkerServer interface {
 	ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error)
 	// Shutdown gracefully stops the agent worker process.
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
+	// WatchJobs streams background job completion events from the worker.
+	// The control plane uses this to push notifications into the inference loop.
+	WatchJobs(*WatchJobsRequest, grpc.ServerStreamingServer[JobCompletion]) error
 	mustEmbedUnimplementedAgentWorkerServer()
 }
 
@@ -90,6 +116,9 @@ func (UnimplementedAgentWorkerServer) ExecuteTool(context.Context, *ExecuteToolR
 }
 func (UnimplementedAgentWorkerServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedAgentWorkerServer) WatchJobs(*WatchJobsRequest, grpc.ServerStreamingServer[JobCompletion]) error {
+	return status.Error(codes.Unimplemented, "method WatchJobs not implemented")
 }
 func (UnimplementedAgentWorkerServer) mustEmbedUnimplementedAgentWorkerServer() {}
 func (UnimplementedAgentWorkerServer) testEmbeddedByValue()                     {}
@@ -148,6 +177,17 @@ func _AgentWorker_Shutdown_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentWorker_WatchJobs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchJobsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentWorkerServer).WatchJobs(m, &grpc.GenericServerStream[WatchJobsRequest, JobCompletion]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentWorker_WatchJobsServer = grpc.ServerStreamingServer[JobCompletion]
+
 // AgentWorker_ServiceDesc is the grpc.ServiceDesc for AgentWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -164,7 +204,13 @@ var AgentWorker_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentWorker_Shutdown_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchJobs",
+			Handler:       _AgentWorker_WatchJobs_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "internal/ipc/proto/hive.proto",
 }
 

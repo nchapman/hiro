@@ -12,8 +12,8 @@ func TestReadFile_Basic(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("line one\nline two\nline three\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "`+path+`"}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "`+path+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -30,8 +30,8 @@ func TestReadFile_WithOffset(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "`+path+`", "offset": 3}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "offset": 3}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -48,8 +48,8 @@ func TestReadFile_WithLimit(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "`+path+`", "limit": 2}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "limit": 2}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -66,8 +66,8 @@ func TestReadFile_OffsetAndLimit(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "`+path+`", "offset": 2, "limit": 2}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "offset": 2, "limit": 2}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -77,8 +77,8 @@ func TestReadFile_OffsetAndLimit(t *testing.T) {
 }
 
 func TestReadFile_NotFound(t *testing.T) {
-	tool := NewReadFileTool(t.TempDir())
-	content, isErr := runTool(t, tool, `{"path": "/nonexistent/file.txt"}`)
+	tool := NewReadTool(t.TempDir())
+	content, isErr := runTool(t, tool, `{"file_path": "/nonexistent/file.txt"}`)
 	if !isErr {
 		t.Fatal("expected error for missing file")
 	}
@@ -88,8 +88,8 @@ func TestReadFile_NotFound(t *testing.T) {
 }
 
 func TestReadFile_EmptyPath(t *testing.T) {
-	tool := NewReadFileTool(t.TempDir())
-	content, isErr := runTool(t, tool, `{"path": ""}`)
+	tool := NewReadTool(t.TempDir())
+	content, isErr := runTool(t, tool, `{"file_path": ""}`)
 	if !isErr {
 		t.Fatal("expected error for empty path")
 	}
@@ -103,8 +103,8 @@ func TestReadFile_OffsetBeyondEnd(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("short\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "`+path+`", "offset": 999}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "offset": 999}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -117,8 +117,8 @@ func TestReadFile_RelativePath(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello world\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "hello.txt"}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "hello.txt"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}
@@ -133,8 +133,8 @@ func TestReadFile_RelativeSubdirectory(t *testing.T) {
 	os.MkdirAll(sub, 0755)
 	os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("nested content\n"), 0644)
 
-	tool := NewReadFileTool(dir)
-	content, isErr := runTool(t, tool, `{"path": "sub/dir/nested.txt"}`)
+	tool := NewReadTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "sub/dir/nested.txt"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}

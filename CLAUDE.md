@@ -30,6 +30,24 @@ Run integration tests that hit real APIs (excluded from normal `make test`):
 go test ./internal/agent/... -tags=online -v -count=1
 ```
 
+### E2E Tests
+
+E2E tests (`tests/e2e/`) run against a real Hive server in Docker with a real LLM provider. They require `HIVE_API_KEY` (sourced from `.env`).
+
+```bash
+# Source .env and run e2e tests — builds Docker image, starts server, runs tests, tears down
+set -a; . .env; set +a; make test-online
+
+# Cluster e2e tests (leader + worker topology)
+set -a; . .env; set +a; make test-cluster
+```
+
+Key details:
+- Tests talk to the coordinator via WebSocket, instructing it to use specific tools by name
+- If you rename or split tools, update the prompts in `tests/e2e/e2e_test.go` (e.g. `spawnPersistentAgent` tells the coordinator which tool to call)
+- The `SessionClear` test is known to be flaky due to OpenRouter connection timeouts
+- Tests take ~2-6 minutes depending on LLM latency
+
 Web UI dev server (separate terminal — proxies `/api` and `/ws` to `localhost:8080`):
 ```bash
 cd web/ui && npm run dev
@@ -41,7 +59,7 @@ cd web/ui && npm run dev
 |---|---|---|
 | `HIVE_API_KEY` | *(none)* | LLM provider API key (required for agents) |
 | `HIVE_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
-| `HIVE_MODEL` | *(from agent config)* | Override model for all agents |
+| `HIVE_MODEL` | *(platform default)* | Override model for all agents |
 | `HIVE_ADDR` | `:8080` | HTTP listen address |
 | `HIVE_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
 | `HIVE_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
@@ -66,7 +84,7 @@ Control Plane Process (hive)
 └── Spawns: hive agent (one worker per instance)
 
 Agent Worker Process (hive agent)
-├── Tool execution sandbox (bash, file ops, glob, grep, fetch)
+├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
 ├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
 └── Runs under isolated UID for security
 ```
@@ -87,8 +105,8 @@ Agent Worker Process (hive agent)
 agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inference Loop + spawns worker
                                                                        ↓
                                                               instances/<uuid>/
+                                                                persona.md
                                                                 memory.md
-                                                                identity.md
                                                                 sessions/<session-id>/
                                                                   todos.yaml
                                                                   scratch/
@@ -96,21 +114,19 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
                                                               db/hive.db (shared, all instances)
 ```
 
-- **Agent definitions** live in `agents/<name>/` with `agent.md` (required), optional `soul.md`, `tools.md`, and a `skills/` subdirectory.
-- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `memory.md` and `identity.md`. Persistent and coordinator instances survive restarts via `RestoreInstances()`.
+- **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
+- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Persistent and coordinator instances survive restarts via `RestoreInstances()`.
 - **Sessions** are task-scoped work within an instance. Session-level state includes `todos.yaml`, `scratch/`, and `tmp/`. A new session is created on `/clear`.
-- **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `spawn_instance` tool accepts a `mode` parameter (defaulting to ephemeral).
+- **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
-- **Persistent instances** get extra tools: `memory_read/write`, `todos`, `history_search/recall`.
-- **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
+- **Persistent instances** get extra tools: `TodoWrite`, `HistorySearch/HistoryRecall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory).
+- **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) and write access to `agents/` and `skills/` directories via the `hive-coordinators` Unix group.
 
 ### Agent Definition Structure
 
 ```
 agents/<name>/
-  agent.md          # Required. YAML frontmatter (name, model, description, tools) + markdown body (system prompt)
-  soul.md           # Optional. Persona, tone, boundaries — prepended to system prompt
-  tools.md          # Optional. Tool usage guidelines — appended as "## Tool Notes"
+  agent.md          # Required. YAML frontmatter (name, description, tools) + markdown body (system prompt)
   skills/
     flat-skill.md           # Flat file skill
     dir-skill/
@@ -122,7 +138,7 @@ agents/<name>/
 
 A platform-level `skills/` directory provides shared skills available to all agents. Agent-specific skills take precedence over shared skills with the same name.
 
-Skills use **progressive disclosure** — only name and description are listed in the system prompt. The agent activates a skill via the `use_skill` tool, which returns the full instructions and lists bundled resources.
+Skills use **progressive disclosure** — only name and description are listed in the system prompt. The agent activates a skill via the `Skill` tool, which returns the full instructions and lists bundled resources.
 
 ### Skill File Format
 
@@ -146,16 +162,16 @@ Validation: name must match `^[a-z0-9]+(-[a-z0-9]+)*$`. For directory skills, na
 
 Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
 
-1. `soul.md` content (if present)
-2. `## Identity` + `identity.md` (persistent agents only)
-3. `## Memories` + `memory.md` (persistent agents only)
-4. `## Current Tasks` + formatted todos (persistent agents only)
-5. `## Available Secrets` + secret names (if any)
-6. `agent.md` body (main instructions)
-7. `## Tool Notes` + `tools.md` (if present)
-8. `## Skills` + skill name/description listing (if present)
+1. `## Environment` + directory tree with instance/session paths (always present)
+2. `## Memories` + `memory.md` from instance dir (persistent agents only)
+3. `## Current Tasks` + formatted todos (persistent agents only)
+4. `## Secrets` + secret names (if any)
+5. `agent.md` body (main instructions)
+6. `## Persona` + `persona.md` from instance dir (refines instructions above)
+7. `## Skills` + skill name/description listing (if present)
+8. `## Security` + tool result trust warning (always present)
 
-Skills are re-scanned from disk each turn (like memory and identity), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `read_file`.
+Skills are re-scanned from disk each turn (like persona and memory), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `Skill`.
 
 ### Key Packages
 
@@ -166,7 +182,7 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup). Error sentinels include `ErrInstanceNotFound`.
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
-- **`internal/agent/tools/`** — Built-in tool implementations (read_file, write_file, edit, multiedit, bash, job_output, job_kill, glob, grep, list_files, fetch). These run in worker processes.
+- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes.
 - **`internal/controlplane`** — Operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, memory/todos persistence.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
@@ -176,67 +192,66 @@ Skills are re-scanned from disk each turn (like memory and identity), so runtime
 
 ## Agent Tools
 
-### Built-in Tools (11 total, agents must declare which they use)
+### Built-in Tools (9 total, agents must declare which they use)
 
 Implementations in `internal/agent/tools/*.go`. These run in worker processes and are dispatched via `ExecuteTool` gRPC from the control plane.
 
 | Tool | Purpose | Key Params | Constraints |
 |------|---------|------------|-------------|
-| `read_file` | Read file contents with line numbers | `path`, `offset`, `limit` | 64KB max output |
-| `write_file` | Write full content to file (creates dirs) | `path`, `content` | Full replacement only |
-| `edit_file` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
-| `multiedit_file` | Batch multiple edits to one file | `file_path`, `edits` (array of `{old_string, new_string, replace_all}`) | Edits applied sequentially; partial success supported |
-| `list_files` | List directory contents | `path`, `pattern` (glob) | Max 500 entries; skips node_modules, vendor, dist, .git, hidden dirs |
-| `glob` | Find files by glob pattern | `pattern`, `path` | Max 100 results; uses ripgrep if available, falls back to Go; sorted by mod time (newest first) |
-| `grep` | Search file contents with regex | `pattern`, `path`, `include` (file glob), `literal_text` | Max 100 matches; 30s timeout; uses ripgrep if available |
-| `bash` | Execute shell commands | `command`, `working_dir`, `run_in_background` | 120s timeout (sync), 32KB max output; auto-backgrounds after 60s |
-| `job_output` | Get output from background job | `job_id`, `wait` | Returns stdout/stderr and completion status |
-| `job_kill` | Terminate a background job | `job_id` | Immediately terminates the process |
-| `fetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
+| `Read` | Read file contents with line numbers | `file_path`, `offset`, `limit` | 64KB max output |
+| `Write` | Write full content to file (creates dirs) | `file_path`, `content` | Full replacement only |
+| `Edit` | Surgical find-and-replace edits | `file_path`, `old_string`, `new_string`, `replace_all` | Single match must be unique; empty `old_string` + content = create file |
+| `Glob` | Find files by glob pattern | `pattern`, `path` | Max 100 results; uses ripgrep if available, falls back to Go; sorted by mod time (newest first) |
+| `Grep` | Search file contents with regex | `pattern`, `path`, `glob`, `type`, `output_mode`, `A`/`B`/`C`/`context`, `n`, `i`, `head_limit`, `offset`, `multiline`, `literal_text` | 3 output modes (content/files_with_matches/count); 30s timeout; default 250 results |
+| `Bash` | Execute shell commands | `command`, `working_dir`, `timeout`, `description`, `run_in_background` | Default auto-background after 60s; `timeout` overrides (max 600000ms); 32KB max output |
+| `TaskOutput` | Get output from background task | `task_id`, `block` | Returns stdout/stderr and completion status; block (default true) waits for completion |
+| `TaskStop` | Stop a running background task | `task_id` | Immediately terminates the process |
+| `WebFetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
 
 ### Spawn Tool (all agents)
 
-All agents get `spawn_instance`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/local_tools.go`.
+All agents get `SpawnInstance`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/tools_spawn.go`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `spawn_instance` | Spawn a new instance from an agent definition | `agent` (name), `prompt`, `mode` (ephemeral/persistent/coordinator) | Ephemeral (default): blocks until done, returns result, cleans up. Persistent/coordinator: creates long-lived instance, returns ID. 32KB max result |
+| `SpawnInstance` | Run an agent to complete a task | `agent` (name), `prompt`, `background` (bool) | Blocks until done, returns result, cleans up. `background: true`: returns immediately, notifies on completion. 32KB max result |
 
 ### Coordinator Tools (coordinator mode only)
 
-Defined in `internal/inference/local_tools.go`. Only injected for coordinator-mode instances. Scoped to descendants via `ScopedManager.checkDescendant()`.
+Defined in `internal/inference/tools_spawn.go`. Only injected for coordinator-mode instances. Scoped to descendants via `ScopedManager.checkDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `resume_instance` | Restart a stopped instance | `instance_id` | Resumes with previous memory, history, todos |
-| `send_message` | Send message to child and get response | `instance_id`, `message` | Blocks; scoped to descendants; serialized per-instance (mutex); 32KB max result |
-| `stop_instance` | Stop instance and its subtree | `instance_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent instances |
-| `delete_instance` | Permanently delete instance and subtree | `instance_id` | Removes all data; cannot be undone |
-| `list_instances` | List direct child instances | *(none)* | Shows name, ID, mode, description for direct children only |
+| `CreatePersistentInstance` | Create a long-lived agent instance | `agent` (name), `mode` (persistent/coordinator) | Returns instance ID. Interact via SendMessage. |
+| `ResumeInstance` | Restart a stopped instance | `instance_id` | Resumes with previous memory, history, todos |
+| `SendMessage` | Send message to child and get response | `instance_id`, `message` | Blocks; scoped to descendants; serialized per-instance (mutex); 32KB max result |
+| `StopInstance` | Stop instance and its subtree | `instance_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent instances |
+| `DeleteInstance` | Permanently delete instance and subtree | `instance_id` | Removes all data; cannot be undone |
+| `ListInstances` | List direct child instances | *(none)* | Shows name, ID, mode, description for direct children only |
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
-Defined in `internal/inference/local_tools.go`. Run in the control plane process (not in workers).
+Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_history.go`. Run in the control plane process (not in workers). Persona is managed via the standard file tools (`persona.md` is seeded at instance creation and included in the system prompt).
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
-| `memory_read` | Read `memory.md` from instance dir | *(none)* | Returns empty if no memories yet |
-| `memory_write` | Overwrite `memory.md` | `content` | Full replacement — read first to avoid data loss; 0600 perms; visible in system prompt next turn |
-| `todos` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
-| `history_search` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
-| `history_recall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
+| `AddMemory` | Append a memory entry | `content` (single line) | Appends to `memory.md` with date stamp; evicts oldest when over 100 entries |
+| `ForgetMemory` | Remove memory entries | `match` (substring) | Case-insensitive match against content (not date stamps); removes all matches |
+| `TodoWrite` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
+| `HistorySearch` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
+| `HistoryRecall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
 
 ### Skill Tool (agents with skills)
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
-| `use_skill` | Activate a skill and get full instructions | `name` | Returns full skill body + directory listing of bundled resources. Only present when agent has skills available. |
+| `Skill` | Activate a skill and get full instructions | `name` | Returns full skill body + directory listing of bundled resources. Only present when agent has skills available. |
 
 ### Tool Totals by Agent Type
 
-- **Ephemeral instances:** 11 built-in + 1 spawn = 12 tools (+ 1 if skills)
-- **Persistent instances:** 11 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 17 tools (+ 1 if skills)
-- **Coordinator instances:** 11 built-in + 1 spawn + 5 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
+- **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
+- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills)
+- **Coordinator instances:** 9 built-in + 1 spawn + 7 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
 
 ## Coordinator Agent
 
@@ -249,7 +264,7 @@ The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started 
 4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
 5. If not running, `CreateInstance(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
 
-Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`, `delete_instance`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `spawn_instance` which supports all modes (non-coordinators are restricted to ephemeral).
+Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and write access to `agents/` and `skills/` via the `hive-coordinators` Unix group. All agents get `SpawnInstance` which supports all modes (non-coordinators are restricted to ephemeral).
 
 ## Control Plane
 
@@ -263,15 +278,15 @@ secrets:
 
 agents:
   researcher:
-    tools: [read_file, glob, grep]  # restrict below declared tools
+    tools: [Read, Glob, Grep]  # restrict below declared tools
 ```
 
 **Key concepts:**
 
-- **Secrets** — Named key-value pairs. Injected as env vars into bash commands. Agents see names in system prompt but never values.
-- **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`tools: [bash, read_file, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
+- **Secrets** — Named key-value pairs. Injected as env vars into Bash commands. Agents see names in system prompt but never values.
+- **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`tools: [Bash, Read, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
 - **Inherited caps** — Child effective tools = intersection of (declared tools ∩ control plane ∩ parent's effective tools).
-- **Bash is binary** — Agent gets bash or doesn't. No sandboxing pretense.
+- **Bash is binary** — Agent gets Bash or doesn't. No sandboxing pretense.
 
 **Slash commands** (intercepted in WebSocket handler, never reach agent):
 
@@ -287,8 +302,8 @@ agents:
 ## Creating Agents at Runtime
 
 Agents can create new agent definitions at runtime using their file tools:
-1. Use `write_file` / `edit_file` to create `agents/<name>/agent.md` (and optionally `soul.md`, `tools.md`, `skills/*.md`)
-2. Use `spawn_instance` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
+1. Use `Write` / `Edit` to create `agents/<name>/agent.md` (and optionally `skills/*.md`)
+2. Use `SpawnInstance` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 
 Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next inference loop turn.
@@ -301,7 +316,7 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 ### Agent Tool Scoping
 
-Coordinator tools (`resume_instance`, `stop_instance`, `send_message`, `list_instances`, `delete_instance`) and `spawn_instance` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+Coordinator tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`, `DeleteInstance`) and `SpawnInstance` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
 
 ## Testing Notes
 

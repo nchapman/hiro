@@ -112,6 +112,30 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 		nb.logger.Info("worker exited", "session_id", msg.SessionId)
 	}()
 
+	// Forward background job completions from this worker to the leader.
+	if wc, ok := handle.worker.(*grpcipc.WorkerClient); ok {
+		go func() {
+			ch := wc.WatchJobs(ctx, nb.logger)
+			for c := range ch {
+				if err := nb.stream.Send(&pb.NodeMessage{
+					Msg: &pb.NodeMessage_JobCompletion{
+						JobCompletion: &pb.JobCompletionNotify{
+							SessionId:   msg.SessionId,
+							TaskId:      c.TaskId,
+							Command:     c.Command,
+							Description: c.Description,
+							ExitCode:    c.ExitCode,
+							Failed:      c.Failed,
+						},
+					},
+				}); err != nil {
+					nb.logger.Debug("failed to forward job completion", "session_id", msg.SessionId, "error", err)
+					return
+				}
+			}
+		}()
+	}
+
 	nb.stream.SendSpawnResult(msg.RequestId, "")
 	nb.logger.Info("worker spawned", "session_id", msg.SessionId)
 }

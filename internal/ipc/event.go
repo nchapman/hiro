@@ -18,4 +18,9 @@ type ChatEvent struct {
 	// Tool result (type == "tool_result")
 	Output  string `json:"output,omitempty"`
 	IsError bool   `json:"is_error,omitempty"`
+
+	// Meta flag — when true, the event is visible to the model but hidden
+	// from the user's chat transcript. Used for task completion notifications,
+	// system diagnostics, and other internal signals.
+	IsMeta bool `json:"is_meta,omitempty"`
 }

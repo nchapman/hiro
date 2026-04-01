@@ -47,8 +47,6 @@ Agents are defined as markdown files in the `agents/` directory:
 agents/
   coordinator/
     agent.md          # Required: YAML frontmatter + system prompt
-    soul.md           # Optional: persona and tone
-    tools.md          # Optional: tool usage guidelines
     skills/
       delegate.md     # Skills available to this agent
 ```

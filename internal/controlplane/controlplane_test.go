@@ -30,7 +30,7 @@ func TestLoadExistingFile(t *testing.T) {
   DB_URL: "postgres://localhost"
 agents:
   researcher:
-    tools: [read_file, grep]
+    tools: [Read, Grep]
 `
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ agents:
 	if !ok {
 		t.Fatal("expected researcher policy to exist")
 	}
-	if len(tools) != 2 || tools[0] != "read_file" || tools[1] != "grep" {
+	if len(tools) != 2 || tools[0] != "Read" || tools[1] != "Grep" {
 		t.Errorf("unexpected tools: %v", tools)
 	}
 
@@ -73,7 +73,7 @@ func TestSaveRoundtrip(t *testing.T) {
 	}
 
 	cp.SetSecret("TOKEN", "abc123")
-	cp.SetAgentTools("worker", []string{"read_file", "grep"})
+	cp.SetAgentTools("worker", []string{"Read", "Grep"})
 
 	if err := cp.Save(); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -144,7 +144,7 @@ func TestAgentToolsCRUD(t *testing.T) {
 		t.Error("expected no policy initially")
 	}
 
-	cp.SetAgentTools("worker", []string{"bash", "read_file"})
+	cp.SetAgentTools("worker", []string{"Bash", "Read"})
 	tools, ok := cp.AgentTools("worker")
 	if !ok || len(tools) != 2 {
 		t.Errorf("expected 2 tools, got %v", tools)
@@ -161,7 +161,7 @@ func TestAllPolicies(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 
 	cp.SetAgentTools("a", []string{"bash"})
-	cp.SetAgentTools("b", []string{"grep"})
+	cp.SetAgentTools("b", []string{"Grep"})
 
 	policies := cp.AllPolicies()
 	if len(policies) != 2 {
@@ -259,7 +259,7 @@ func TestCommandSecretsList(t *testing.T) {
 func TestCommandToolsSet(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 
-	result, err := cp.HandleCommand("/tools set researcher read_file,grep,glob")
+	result, err := cp.HandleCommand("/tools set researcher Read,Grep,Glob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,26 +278,26 @@ func TestCommandToolsSet(t *testing.T) {
 
 func TestCommandToolsList(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"bash"})
+	cp.SetAgentTools("worker", []string{"Bash"})
 
 	result, err := cp.HandleCommand("/tools list")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "worker") || !strings.Contains(result, "bash") {
+	if !strings.Contains(result, "worker") || !strings.Contains(result, "Bash") {
 		t.Errorf("unexpected result: %s", result)
 	}
 }
 
 func TestCommandToolsListSpecific(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"bash", "grep"})
+	cp.SetAgentTools("worker", []string{"Bash", "Grep"})
 
 	result, err := cp.HandleCommand("/tools list worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "bash") || !strings.Contains(result, "grep") {
+	if !strings.Contains(result, "Bash") || !strings.Contains(result, "Grep") {
 		t.Errorf("unexpected result: %s", result)
 	}
 }

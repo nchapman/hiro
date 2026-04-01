@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"strings"
 
@@ -10,10 +11,13 @@ import (
 	"github.com/nchapman/hivebot/internal/config"
 )
 
+//go:embed todo_write.md
+var todoWriteDescription string
+
 func buildTodoTools(sessionDir string) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
-		fantasy.NewAgentTool("todos",
-			"Replace your task list. Send the full updated list — add, remove, reorder, and change statuses in one call. Use for multi-step work. Tasks appear in your system prompt.",
+		fantasy.NewAgentTool("TodoWrite",
+			todoWriteDescription,
 			func(ctx context.Context, input struct {
 				Todos []struct {
 					Content    string `json:"content"     description:"What needs to be done."`

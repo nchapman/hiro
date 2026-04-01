@@ -111,7 +111,7 @@ func TestCluster_CoordinatorSeesWorkerNode(t *testing.T) {
 	cs := openChat(t, ctx)
 	defer cs.close()
 
-	resp := cs.chat(ctx, `Use the list_nodes tool and tell me what nodes are available. Just list them.`)
+	resp := cs.chat(ctx, `Use the ListNodes tool and tell me what nodes are available. Just list them.`)
 	t.Logf("coordinator response: %s", resp)
 
 	// The response should mention at least the home node and the worker.
@@ -153,7 +153,7 @@ func TestCluster_FileSyncWorkerToLeader(t *testing.T) {
 	// Ensure the writer agent definition exists on the leader.
 	agentMD := `---
 name: sync-writer-agent
-tools: [bash, write_file]
+tools: [Bash, Write]
 ---
 
 You are a test agent. Write files as instructed. Be concise.`
@@ -169,9 +169,9 @@ You are a test agent. Write files as instructed. Be concise.`
 	defer cs.close()
 
 	marker := fmt.Sprintf("w2l-sync-%d", time.Now().UnixNano())
-	prompt := fmt.Sprintf(`Use list_nodes to find a non-home worker node, then spawn_instance "sync-writer-agent" on it in ephemeral mode with this prompt:
+	prompt := fmt.Sprintf(`Use ListNodes to find a non-home worker node, then SpawnInstance "sync-writer-agent" on it in ephemeral mode with this prompt:
 
-"Use the write_file tool to create workspace/sync-w2l-test.txt with exactly this content: %s"
+"Use the Write tool to create workspace/sync-w2l-test.txt with exactly this content: %s"
 
 Set the node parameter to the worker node's ID. Tell me the result.`, marker)
 
@@ -204,7 +204,7 @@ Set the node parameter to the worker node's ID. Tell me the result.`, marker)
 func TestCluster_AgentDefinitionSyncsToWorker(t *testing.T) {
 	agentMD := `---
 name: remote-worker-agent
-tools: [bash, read_file, write_file]
+tools: [Bash, Read, Write]
 ---
 
 You are a test agent. When asked, run the command given and report the output. Be concise.`
@@ -222,7 +222,7 @@ func TestCluster_SpawnAgentOnWorkerNode(t *testing.T) {
 	// Ensure the agent definition exists on the leader.
 	agentMD := `---
 name: remote-exec-agent
-tools: [bash, read_file, write_file]
+tools: [Bash, Read, Write]
 ---
 
 You are a test agent running on a remote node. Execute commands as asked. Be concise.`
@@ -241,13 +241,13 @@ You are a test agent running on a remote node. Execute commands as asked. Be con
 	// Ask the coordinator to spawn an ephemeral agent on the worker node.
 	prompt := `I need you to do something on a remote worker node.
 
-1. First use list_nodes to see what's available.
+1. First use ListNodes to see what's available.
 2. Pick the non-home node.
-3. Use spawn_instance to run the "remote-exec-agent" on that node in ephemeral mode.
+3. Use SpawnInstance to run the "remote-exec-agent" on that node in ephemeral mode.
    The prompt should be: "Run 'hostname' using bash and report the output."
 4. Tell me the hostname that was reported.
 
-Important: when calling spawn_instance, set the "node" parameter to the worker node's ID.`
+Important: when calling SpawnInstance, set the "node" parameter to the worker node's ID.`
 
 	resp := cs.chat(ctx, prompt)
 	t.Logf("coordinator response: %s", resp)
@@ -266,7 +266,7 @@ Important: when calling spawn_instance, set the "node" parameter to the worker n
 func TestCluster_RemoteAgentWritesFile(t *testing.T) {
 	agentMD := `---
 name: remote-writer-agent
-tools: [bash, write_file]
+tools: [Bash, Write]
 ---
 
 You are a test agent. Write files as instructed. Use relative paths from your working directory. Be concise.`
@@ -286,9 +286,9 @@ You are a test agent. Write files as instructed. Use relative paths from your wo
 
 	// Use a relative path (workspace/remote-test.txt) so the agent writes
 	// relative to its working directory (/hive on the worker).
-	prompt := fmt.Sprintf(`Use list_nodes to find a non-home worker node, then spawn_instance "remote-writer-agent" on it in ephemeral mode. The prompt should be:
+	prompt := fmt.Sprintf(`Use ListNodes to find a non-home worker node, then SpawnInstance "remote-writer-agent" on it in ephemeral mode. The prompt should be:
 
-"Use write_file to create workspace/remote-test.txt with exactly this content: %s"
+"Use Write to create workspace/remote-test.txt with exactly this content: %s"
 
 Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 
