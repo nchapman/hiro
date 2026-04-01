@@ -39,3 +39,4 @@ coverage.out
 internal/inference/testdata/locomo10.json
 internal/inference/testdata/eval-output/
 tests/e2e_cluster/leader-config.yaml
+hiro
