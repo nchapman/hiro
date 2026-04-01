@@ -211,10 +211,12 @@ Defined in `internal/inference/tools_spawn.go`. Only injected for coordinator-mo
 
 ### Persistent Agent Tools (mode: persistent or coordinator)
 
-Defined in `internal/inference/tools_todos.go`, `tools_history.go`. Run in the control plane process (not in workers). Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` are seeded at instance creation and included in the system prompt).
+Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_history.go`. Run in the control plane process (not in workers). Persona is managed via the standard file tools (`persona.md` is seeded at instance creation and included in the system prompt).
 
 | Tool | Purpose | Key Params | Notes |
 |------|---------|------------|-------|
+| `AddMemory` | Append a memory entry | `content` (single line) | Appends to `memory.md` with date stamp; evicts oldest when over 100 entries |
+| `ForgetMemory` | Remove memory entries | `match` (substring) | Case-insensitive match against content (not date stamps); removes all matches |
 | `TodoWrite` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
 | `HistorySearch` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
 | `HistoryRecall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
@@ -228,8 +230,8 @@ Defined in `internal/inference/tools_todos.go`, `tools_history.go`. Run in the c
 ### Tool Totals by Agent Type
 
 - **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
-- **Persistent instances:** 9 built-in + 1 spawn + 1 todos + 2 history = 13 tools (+ 1 if skills)
-- **Coordinator instances:** 9 built-in + 1 spawn + 6 coordinator + 1 todos + 2 history = 19 tools (+ 1 if skills)
+- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills)
+- **Coordinator instances:** 9 built-in + 1 spawn + 6 coordinator + 2 memory + 1 todos + 2 history = 21 tools (+ 1 if skills)
 
 ## Coordinator Agent
 

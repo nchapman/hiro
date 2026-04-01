@@ -603,6 +603,10 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 		localTools = append(localTools, buildTodoTools(cfg.SessionDir)...)
 	}
 
+	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
+		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
+	}
+
 	if cfg.Mode.IsPersistent() && cfg.PDB != nil {
 		localTools = append(localTools, buildHistoryTools(cfg.PDB, cfg.SessionID)...)
 	}

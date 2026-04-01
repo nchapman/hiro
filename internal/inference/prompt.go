@@ -95,7 +95,7 @@ func buildEnvironmentSection(env EnvInfo) string {
 
 	if env.Mode.IsPersistent() && relInstance != "" {
 		b.WriteString(fmt.Sprintf("├── %s/\n", relInstance))
-		b.WriteString("│   ├── memory.md       # Persistent memory (write here to remember)\n")
+		b.WriteString("│   ├── memory.md       # Persistent memory (managed by AddMemory/ForgetMemory)\n")
 		b.WriteString("│   ├── persona.md      # Persistent persona/identity\n")
 		b.WriteString(fmt.Sprintf("│   └── %s/\n", relSessionFromInstance))
 		b.WriteString("│       ├── todos.yaml   # Managed by TodoWrite tool\n")
