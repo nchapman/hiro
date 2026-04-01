@@ -43,14 +43,19 @@ func main() {
 	}
 
 	// Restart loop: the setup API can request a restart when the user picks
-	// worker mode during onboarding. On the second run, the config says
-	// "worker" and the process takes the worker code path.
+	// worker mode during onboarding, or when a worker disconnects from
+	// the cluster. The counter resets after a run lasts long enough to
+	// distinguish a real session from a crash loop.
 	restarts := 0
 	for {
+		start := time.Now()
 		err := run()
 		if err == errRestartRequested {
+			if time.Since(start) > 30*time.Second {
+				restarts = 0 // ran long enough — not a crash loop
+			}
 			restarts++
-			if restarts > 1 {
+			if restarts > 3 {
 				fmt.Fprintf(os.Stderr, "error: too many restarts\n")
 				os.Exit(1)
 			}

@@ -10,11 +10,12 @@ import (
 
 const sessionTTL = 24 * time.Hour
 
-// NeedsSetup returns true if no admin password has been set (first run).
+// NeedsSetup returns true if the minimum configuration is missing.
+// A node is considered set up when it has both a password and a mode.
 func (cp *ControlPlane) NeedsSetup() bool {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
-	return cp.config.Auth.PasswordHash == ""
+	return cp.config.Auth.PasswordHash == "" || cp.config.Cluster.Mode == ""
 }
 
 // PasswordHash returns the bcrypt password hash.

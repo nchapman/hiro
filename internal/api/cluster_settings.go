@@ -88,15 +88,9 @@ func (s *Server) handleClusterReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cp.SetClusterMode("")
-	s.cp.SetClusterLeaderAddr("")
-	s.cp.SetClusterSwarmCode("")
-	s.cp.SetClusterTrackerURL("")
-	s.cp.SetClusterNodeName("")
-	s.cp.ClearAllClusterNodes()
-	if err := s.cp.Save(); err != nil {
-		s.logger.Error("failed to save config after cluster reset", "error", err)
-		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
+	if err := s.cp.Reset(); err != nil {
+		s.logger.Error("failed to reset config", "error", err)
+		http.Error(w, "failed to reset configuration", http.StatusInternalServerError)
 		return
 	}
 

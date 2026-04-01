@@ -838,8 +838,12 @@ func TestAuth_NeedsSetup(t *testing.T) {
 		t.Error("expected NeedsSetup=true initially")
 	}
 	cp.SetPasswordHash("$2a$10$hash")
+	if !cp.NeedsSetup() {
+		t.Error("expected NeedsSetup=true with password but no mode")
+	}
+	cp.SetClusterMode("standalone")
 	if cp.NeedsSetup() {
-		t.Error("expected NeedsSetup=false after SetPasswordHash")
+		t.Error("expected NeedsSetup=false after password + mode")
 	}
 }
 

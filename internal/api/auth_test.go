@@ -29,9 +29,10 @@ func newAuthTestServer(t *testing.T) (*Server, *controlplane.ControlPlane) {
 		t.Fatalf("controlplane.Load: %v", err)
 	}
 
-	// Set password so auth is required.
+	// Set password + mode so setup is considered complete and auth is required.
 	hash, _ := bcrypt.GenerateFromPassword([]byte("testpass1"), bcrypt.MinCost)
 	cp.SetPasswordHash(string(hash))
+	cp.SetClusterMode("standalone")
 	cp.Save()
 
 	srv := NewServer(logger, nil, cp, nil, "")

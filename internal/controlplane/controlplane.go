@@ -177,6 +177,23 @@ func (cp *ControlPlane) hasContent() bool {
 		len(cp.config.Cluster.RevokedNodes) > 0
 }
 
+// Reset wipes all in-memory state and removes the config file from disk.
+// The node returns to a fresh first-run state (onboarding flow).
+func (cp *ControlPlane) Reset() error {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	cp.config = Config{}
+	cp.config.initMaps()
+	cp.signer = nil
+
+	if err := os.Remove(cp.path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing config file: %w", err)
+	}
+	cp.logger.Info("control plane config reset")
+	return nil
+}
+
 // Reload re-reads config.yaml from disk and replaces the in-memory state.
 // If the file is missing or contains invalid YAML, the current state is
 // preserved and a warning is logged (no error returned — the system keeps

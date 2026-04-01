@@ -283,7 +283,7 @@ export default function Setup({ onComplete }: SetupProps) {
                       id: "standalone" as DeployMode,
                       icon: ComputerIcon,
                       title: "Standalone",
-                      desc: "Single node, no remote connections. Maximum privacy.",
+                      desc: "Single node, no remote connections.",
                     },
                     {
                       id: "leader" as DeployMode,
