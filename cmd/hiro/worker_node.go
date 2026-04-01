@@ -247,7 +247,14 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	for {
 		connStatus.Store("connecting")
 		err := ws.Connect(ctx)
-		connStatus.Store("disconnected")
+
+		// Set status based on the disconnect reason before cleanup.
+		if errors.Is(err, cluster.ErrPendingApproval) {
+			connStatus.Store("pending")
+		} else {
+			connStatus.Store("disconnected")
+		}
+
 		// Clean up all local workers from the previous connection
 		// before retrying, to prevent goroutine/resource leaks.
 		bridge.ShutdownAll(context.Background())
@@ -280,7 +287,6 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 			break
 		}
 		if errors.Is(err, cluster.ErrPendingApproval) {
-			connStatus.Store("pending")
 			logger.Info("awaiting approval from leader, will retry...")
 		} else {
 			logger.Warn("disconnected from leader, reconnecting...", "error", err)

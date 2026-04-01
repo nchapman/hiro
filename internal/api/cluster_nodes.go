@@ -88,6 +88,10 @@ func (s *Server) handleDismissNode(w http.ResponseWriter, r *http.Request) {
 // handleListApproved returns all approved nodes from config.
 // GET /api/cluster/approved
 func (s *Server) handleListApproved(w http.ResponseWriter, _ *http.Request) {
+	if s.cp == nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
 	nodes := s.cp.ApprovedNodes()
 	if nodes == nil {
 		writeJSON(w, http.StatusOK, map[string]any{})

@@ -35,11 +35,12 @@ type LeaderStream struct {
 
 // nodeConn represents an active connection to a worker node.
 type nodeConn struct {
-	nodeID   NodeID
-	stream   pb.Cluster_NodeStreamServer
-	done     chan struct{} // closed to force disconnect
-	sendMu   sync.Mutex   // serialize writes to the stream
-	handlers *NodeHandlers
+	nodeID    NodeID
+	stream    pb.Cluster_NodeStreamServer
+	done      chan struct{} // closed to force disconnect
+	closeOnce sync.Once    // prevents double-close panic on done
+	sendMu    sync.Mutex   // serialize writes to the stream
+	handlers  *NodeHandlers
 }
 
 // NodeHandlers holds callbacks for messages received from a node.
@@ -345,12 +346,7 @@ func (s *LeaderStream) DisconnectNode(nodeID NodeID) {
 	conn, ok := s.conns[nodeID]
 	s.mu.Unlock()
 	if ok {
-		select {
-		case <-conn.done:
-			// already closed
-		default:
-			close(conn.done)
-		}
+		conn.closeOnce.Do(func() { close(conn.done) })
 	}
 }
 

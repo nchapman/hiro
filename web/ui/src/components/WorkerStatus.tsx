@@ -55,21 +55,23 @@ export default function WorkerStatus({ onDisconnect }: WorkerStatusProps) {
   const handleDisconnect = async () => {
     if (
       !confirm(
-        "This will remove all cluster configuration and return to setup. Continue?"
+        "This will remove all cluster configuration and restart. Continue?"
       )
     )
       return
 
     setDisconnecting(true)
     try {
-      // Reset the config by calling a reset endpoint or clearing cluster settings.
-      // For now, we'll just call the onDisconnect callback which should trigger
-      // a config reset on the backend.
-      await fetch("/api/settings/cluster/reset", { method: "POST" })
+      const res = await fetch("/api/settings/cluster/reset", { method: "POST" })
+      if (!res.ok) {
+        setDisconnecting(false)
+        return
+      }
+      // Server will restart — poll until it comes back in setup mode.
+      setTimeout(onDisconnect, 3000)
     } catch {
-      // ignore
+      setDisconnecting(false)
     }
-    onDisconnect()
   }
 
   const statusIcon =

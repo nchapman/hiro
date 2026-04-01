@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/nchapman/hiro/internal/cluster"
 )
@@ -77,4 +78,33 @@ func (s *Server) handleGetClusterSettings(w http.ResponseWriter, _ *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleClusterReset clears cluster configuration and triggers a restart.
+// POST /api/settings/cluster/reset
+func (s *Server) handleClusterReset(w http.ResponseWriter, r *http.Request) {
+	if s.cp == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	s.cp.SetClusterMode("")
+	s.cp.SetClusterLeaderAddr("")
+	s.cp.SetClusterSwarmCode("")
+	s.cp.SetClusterTrackerURL("")
+	s.cp.SetClusterNodeName("")
+	if err := s.cp.Save(); err != nil {
+		s.logger.Error("failed to save config after cluster reset", "error", err)
+		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+	if s.requestRestart != nil {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.requestRestart()
+		}()
+	}
 }
