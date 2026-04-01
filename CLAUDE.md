@@ -30,6 +30,24 @@ Run integration tests that hit real APIs (excluded from normal `make test`):
 go test ./internal/agent/... -tags=online -v -count=1
 ```
 
+### E2E Tests
+
+E2E tests (`tests/e2e/`) run against a real Hive server in Docker with a real LLM provider. They require `HIVE_API_KEY` (sourced from `.env`).
+
+```bash
+# Source .env and run e2e tests — builds Docker image, starts server, runs tests, tears down
+set -a; . .env; set +a; make test-online
+
+# Cluster e2e tests (leader + worker topology)
+set -a; . .env; set +a; make test-cluster
+```
+
+Key details:
+- Tests talk to the coordinator via WebSocket, instructing it to use specific tools by name
+- If you rename or split tools, update the prompts in `tests/e2e/e2e_test.go` (e.g. `spawnPersistentAgent` tells the coordinator which tool to call)
+- The `SessionClear` test is known to be flaky due to OpenRouter connection timeouts
+- Tests take ~2-6 minutes depending on LLM latency
+
 Web UI dev server (separate terminal — proxies `/api` and `/ws` to `localhost:8080`):
 ```bash
 cd web/ui && npm run dev
