@@ -58,7 +58,7 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	registry := cluster.NewNodeRegistry()
 	registry.RegisterHome(envOr("HOSTNAME", "leader"))
 
-	pending := cluster.NewPendingRegistry(filepath.Join(rootDir, "pending_nodes.json"))
+	pending := cluster.NewPendingRegistry(filepath.Join(rootDir, "config", "pending_nodes.yaml"))
 	if err := pending.Load(); err != nil {
 		logger.Warn("failed to load pending nodes", "error", err)
 	}

@@ -477,12 +477,11 @@ func TestFilesDelete_AlreadyGone(t *testing.T) {
 func TestFilesDelete_ProtectedPaths(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	for _, name := range []string{"agents", "instances", "skills", "workspace"} {
-		os.Mkdir(filepath.Join(root, name), 0755)
+	for _, name := range []string{"agents", "config", "instances", "skills", "workspace"} {
+		os.MkdirAll(filepath.Join(root, name), 0755)
 	}
-	os.WriteFile(filepath.Join(root, "config.yaml"), []byte("x"), 0644)
 
-	for _, name := range []string{"agents", "instances", "skills", "workspace", "config.yaml"} {
+	for _, name := range []string{"agents", "config", "instances", "skills", "workspace"} {
 		req := httptest.NewRequest("DELETE", "/api/files/file?path="+name, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -933,7 +932,7 @@ func TestResolveFilesPath_NonexistentTarget(t *testing.T) {
 func TestIsProtectedPath(t *testing.T) {
 	root := t.TempDir()
 
-	protected := []string{"agents", "instances", "skills", "workspace", "config.yaml"}
+	protected := []string{"agents", "config", "instances", "skills", "workspace"}
 	for _, p := range protected {
 		if !isProtectedPath(root, filepath.Join(root, p)) {
 			t.Errorf("%q should be protected", p)

@@ -88,7 +88,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("resolving root dir: %w", err)
 	}
-	cpPath := filepath.Join(absRootDir, "config.yaml")
+	cpPath := filepath.Join(absRootDir, "config", "config.yaml")
 
 	// Initialize platform directory structure and seed defaults.
 	if err := platform.Init(rootDir, bootLogger); err != nil {
@@ -277,7 +277,7 @@ func run() error {
 	var mgr *agent.Manager
 
 	// Reload config.yaml when it changes on disk (external edits, coordinator writes).
-	fsWatcher.Subscribe("config.yaml", func(events []watcher.Event) {
+	fsWatcher.Subscribe("config/config.yaml", func(events []watcher.Event) {
 		if err := cp.Reload(); err != nil {
 			logger.Warn("failed to reload config.yaml", "error", err)
 			return

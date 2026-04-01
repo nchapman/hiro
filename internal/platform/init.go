@@ -19,6 +19,7 @@ var defaultAgents embed.FS
 // requiredDirs are the top-level directories that must exist in the platform root.
 var requiredDirs = []string{
 	"agents",
+	"config",
 	"db",
 	"instances",
 	"skills",
@@ -42,7 +43,12 @@ func Init(dir string, logger *slog.Logger) error {
 
 	for _, d := range requiredDirs {
 		path := filepath.Join(dir, d)
-		if err := os.MkdirAll(path, 0775); err != nil {
+		// config/ contains secrets — restrict to owner only.
+		perm := os.FileMode(0775)
+		if d == "config" {
+			perm = 0700
+		}
+		if err := os.MkdirAll(path, perm); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
 		}
 		// agents/ and skills/ are owned by hiro-coordinators with setgid,

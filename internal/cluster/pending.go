@@ -1,12 +1,13 @@
 package cluster
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"sort"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ErrPendingApproval is returned by WorkerStream.Connect when the leader
@@ -19,14 +20,14 @@ var ErrApprovalRevoked = errors.New("approval revoked by leader")
 
 // PendingNode represents a worker that connected but is not yet approved.
 type PendingNode struct {
-	NodeID    string    `json:"node_id"`
-	Name      string    `json:"name"`
-	Addr      string    `json:"addr"`
-	FirstSeen time.Time `json:"first_seen"`
-	LastSeen  time.Time `json:"last_seen"`
+	NodeID    string    `yaml:"node_id" json:"node_id"`
+	Name      string    `yaml:"name" json:"name"`
+	Addr      string    `yaml:"addr" json:"addr"`
+	FirstSeen time.Time `yaml:"first_seen" json:"first_seen"`
+	LastSeen  time.Time `yaml:"last_seen" json:"last_seen"`
 }
 
-// PendingRegistry tracks unapproved worker nodes. It persists to a JSON file
+// PendingRegistry tracks unapproved worker nodes. It persists to a YAML file
 // so pending requests survive leader restarts.
 type PendingRegistry struct {
 	mu       sync.RWMutex
@@ -53,7 +54,7 @@ func (r *PendingRegistry) Load() error {
 	}
 
 	var nodes []*PendingNode
-	if err := json.Unmarshal(data, &nodes); err != nil {
+	if err := yaml.Unmarshal(data, &nodes); err != nil {
 		return err
 	}
 
@@ -145,7 +146,7 @@ func (r *PendingRegistry) saveLocked() error {
 	for _, n := range r.nodes {
 		nodes = append(nodes, n)
 	}
-	data, err := json.MarshalIndent(nodes, "", "  ")
+	data, err := yaml.Marshal(nodes)
 	if err != nil {
 		return err
 	}

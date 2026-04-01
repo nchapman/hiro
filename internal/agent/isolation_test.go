@@ -259,9 +259,9 @@ func fileUID(info os.FileInfo) (fileOwnership, bool) {
 	return fileUIDPlatform(info)
 }
 
-// TestIsolation_ConfigYAMLProtected verifies that config.yaml owned by root
-// with mode 0600 is not readable by agent users. The test creates the file as
-// root, then attempts to read it as an agent UID using a subprocess.
+// TestIsolation_ConfigYAMLProtected verifies that config/config.yaml owned by
+// root with mode 0600 is not readable by agent users. The test creates the file
+// as root, then attempts to read it as an agent UID using a subprocess.
 func TestIsolation_ConfigYAMLProtected(t *testing.T) {
 	grp, err := user.LookupGroup("hiro-agents")
 	if err != nil {
@@ -274,7 +274,9 @@ func TestIsolation_ConfigYAMLProtected(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
+	configDir := filepath.Join(dir, "config")
+	os.MkdirAll(configDir, 0700)
+	configPath := filepath.Join(configDir, "config.yaml")
 
 	// Create config.yaml as root with 0600
 	if err := os.WriteFile(configPath, []byte("secrets:\n  TOKEN: secret123\n"), 0600); err != nil {

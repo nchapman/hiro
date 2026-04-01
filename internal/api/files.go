@@ -77,7 +77,7 @@ var protectedPaths = map[string]bool{
 	"instances":   true,
 	"skills":      true,
 	"workspace":   true,
-	"config.yaml": true,
+	"config":      true,
 }
 
 // isProtectedPath returns true if absPath is a platform-critical path that

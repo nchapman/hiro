@@ -1,8 +1,6 @@
 # Cluster e2e test — run with: make test-cluster
 # Starts a leader and worker node, verifies clustering end-to-end.
-#
-# HIRO_JOIN_TOKEN must be set in the environment before `docker compose up`.
-# The Makefile generates it with `openssl rand -hex 32`.
+# The worker connects and waits for approval; the test approves it via API.
 services:
   leader:
     build: .
@@ -16,7 +14,7 @@ services:
       - HIRO_ROOT=/hiro
     volumes:
       - leader-hiro:/hiro
-      - ./tests/e2e_cluster/leader-config.yaml:/hiro/config.yaml
+      - ./tests/e2e_cluster/leader-config/config.yaml:/hiro/config/config.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 5s
@@ -33,7 +31,6 @@ services:
       - HIRO_ROOT=/hiro
       - HIRO_MODE=worker
       - HIRO_LEADER=leader:8081
-      - HIRO_JOIN_TOKEN=${HIRO_JOIN_TOKEN}
     volumes:
       - worker-hiro:/hiro
 

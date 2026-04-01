@@ -67,11 +67,20 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Set up LLM provider (join token is pre-configured via leader-config.yaml).
+	// Set up LLM provider (leader mode is pre-configured via mounted config.yaml).
 	if err := runSetup(); err != nil {
 		fmt.Fprintf(os.Stderr, "setup failed: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Approve the worker node — it connects and enters pending state.
+	approveCtx, approveCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer approveCancel()
+	if err := approveFirstPendingNode(approveCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "worker approval failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("worker node approved")
 
 	// Wait for coordinator.
 	coordCtx, coordCancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -440,6 +449,8 @@ func runSetup() error {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "e2e-cluster-test-12345",
+		"mode":          "leader",
+		"node_name":     "e2e-leader",
 		"provider_type": provider,
 		"api_key":       apiKey,
 		"default_model": model,
@@ -465,6 +476,49 @@ func runSetup() error {
 		return fmt.Errorf("POST /api/setup: status %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
+}
+
+// approveFirstPendingNode polls the pending nodes endpoint until a node
+// appears, then approves it. This replaces the old join-token flow.
+func approveFirstPendingNode(ctx context.Context) error {
+	for {
+		if ctx.Err() != nil {
+			return fmt.Errorf("timed out waiting for pending node")
+		}
+		resp, err := httpClient.Get(baseURL + "/api/cluster/pending")
+		if err != nil || resp.StatusCode != 200 {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		var nodes []struct {
+			NodeID string `json:"node_id"`
+			Name   string `json:"name"`
+		}
+		json.NewDecoder(resp.Body).Decode(&nodes)
+		resp.Body.Close()
+
+		if len(nodes) == 0 {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		// Approve the first pending node.
+		nodeID := nodes[0].NodeID
+		req, _ := http.NewRequest("POST", fmt.Sprintf("%s/api/cluster/pending/%s/approve", baseURL, nodeID), nil)
+		approveResp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("approving node %s: %w", nodeID, err)
+		}
+		approveResp.Body.Close()
+		if approveResp.StatusCode != 200 {
+			return fmt.Errorf("approving node %s: status %d", nodeID, approveResp.StatusCode)
+		}
+		fmt.Printf("approved node %s (%s)\n", nodes[0].Name, nodeID[:16]+"...")
+		return nil
+	}
 }
 
 func waitForCoordinator(ctx context.Context) (string, error) {
