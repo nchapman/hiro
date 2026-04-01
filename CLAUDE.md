@@ -169,6 +169,7 @@ Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
 5. `agent.md` body (main instructions)
 6. `## Persona` + `persona.md` from instance dir (refines instructions above)
 7. `## Skills` + skill name/description listing (if present)
+8. `## Security` + tool result trust warning (always present)
 
 Skills are re-scanned from disk each turn (like persona and memory), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `Skill`.
 
