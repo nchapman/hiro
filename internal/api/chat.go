@@ -152,7 +152,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		for {
 			var msg ChatMessage
 			err := wsjson.Read(ctx, conn, &msg)
-			userMsgs <- readResult{msg, err}
+			select {
+			case userMsgs <- readResult{msg, err}:
+			case <-ctx.Done():
+				return
+			}
 			if err != nil {
 				return
 			}
