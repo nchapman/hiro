@@ -97,7 +97,7 @@ Effective tools = declared tools ∩ control plane policy ∩ parent's effective
 **Structural tools** bypass this system — they are intrinsic to the agent's mode:
 - `SpawnInstance` is available to all agents.
 - Coordinator tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) are only available to coordinator-mode agents.
-- Persistent tools (`TodoWrite`, `HistorySearch`, `HistoryRecall`) are available to persistent and coordinator agents.
+- Persistent tools (`TodoWrite`, `AddMemory`, `ForgetMemory`, `HistorySearch`, `HistoryRecall`) are available to persistent and coordinator agents.
 
 ### 6. Secrets Management
 

@@ -60,8 +60,8 @@ All run in **worker processes**, dispatched via gRPC.
 | `read.go` | ~120 | Read with offset/limit, 64KB cap |
 | `write.go` | ~100 | Atomic file write (temp+rename), auto-mkdir |
 | `webfetch.go` | ~100 | HTTP fetch, 64KB response cap |
-| `bash_output.go` | ~80 | Background job stdout/stderr |
-| `kill_shell.go` | ~50 | Terminate background job |
+| `task_output.go` | ~80 | Background task stdout/stderr |
+| `task_stop.go` | ~50 | Terminate background task |
 | `schema.go` | ~40 | `RemoteToolNames` registry + `RemoteToolInfos()` for schema extraction |
 | `resolve.go` | ~120 | Path resolution, sandboxing, symlink confinement, atomicWriteFile |
 | `rg.go` | ~60 | Ripgrep detection helper |

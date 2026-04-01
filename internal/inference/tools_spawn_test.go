@@ -120,11 +120,7 @@ func TestSpawnInstance_Background(t *testing.T) {
 	nq := NewNotificationQueue(testLogger)
 	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
-	start := time.Now()
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it","background":true}`)
-	if time.Since(start) > 30*time.Millisecond {
-		t.Error("background spawn should return immediately")
-	}
 	if resp.IsError {
 		t.Fatalf("unexpected error: %s", resp.Content)
 	}

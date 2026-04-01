@@ -115,7 +115,7 @@ func TestE2E_SessionClear(t *testing.T) {
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	cs.chat(ctx, `Send a message to the instance named "lifecycle-clear" telling it: "Write 'favorite_color: purple' to your memory.md file. Then use the todos tool to create one task: 'test session clear'." Report what it said.`)
+	cs.chat(ctx, `Send a message to the instance named "lifecycle-clear" telling it: "Write 'favorite_color: purple' to your memory.md file. Then use the TodoWrite tool to create one task: 'test session clear'." Report what it said.`)
 
 	// Verify memory and todos exist before clear.
 	instDir := instanceDir(t, id)

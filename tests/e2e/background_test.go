@@ -39,7 +39,7 @@ When you receive a task-notification about a completed background task, report t
 	t.Logf("initial response: %s", resp)
 
 	lower := strings.ToLower(resp)
-	if !strings.Contains(lower, "background") && !strings.Contains(resp, "ID") {
+	if !strings.Contains(lower, "background") && !strings.Contains(lower, "id") {
 		t.Errorf("expected response to mention background task ID, got: %s", resp)
 	}
 

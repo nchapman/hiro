@@ -57,6 +57,9 @@ func (c *WorkerClient) Shutdown(ctx context.Context) error {
 // stream ends (worker shutdown, disconnect, or context cancellation).
 // This is a concrete method on WorkerClient, not part of the AgentWorker interface.
 func (c *WorkerClient) WatchJobs(ctx context.Context, logger *slog.Logger) <-chan *pb.JobCompletion {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	ch := make(chan *pb.JobCompletion, 64)
 	go func() {
 		defer close(ch)
