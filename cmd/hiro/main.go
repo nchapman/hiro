@@ -101,6 +101,7 @@ func run() error {
 	// Prune old logs periodically (every hour, 7-day retention).
 	// Only runs on leader nodes — workers don't serve the log UI.
 	pruneCtx, pruneCancel := context.WithCancel(context.Background())
+	defer pruneCancel()
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
@@ -343,7 +344,6 @@ func run() error {
 	}()
 
 	<-ctx.Done()
-	pruneCancel()
 	logger.Info("shutting down...")
 
 	// Drain HTTP connections first so in-flight agent calls complete,
