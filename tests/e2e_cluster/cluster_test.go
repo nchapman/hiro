@@ -17,6 +17,7 @@ package e2e_cluster
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -336,6 +337,48 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 
 	if !strings.Contains(leaderContent, marker) {
 		t.Errorf("file should sync back to leader with marker %q, got %q", marker, leaderContent)
+	}
+}
+
+// TestCluster_RemoteAgentComputesResult spawns an agent on the worker
+// that runs a deterministic computation and verifies the exact result
+// comes back through the leader. This is the strongest test that remote
+// tool execution actually works end-to-end.
+func TestCluster_RemoteAgentComputesResult(t *testing.T) {
+	agentMD := `---
+name: remote-compute-agent
+tools: [Bash]
+---
+
+You are a test agent. Run the exact command given to you. Report ONLY the raw output, nothing else.`
+
+	apiWriteFile(t, "agents/remote-compute-agent/agent.md", agentMD)
+	waitForWorkerFile(t, "/hiro/agents/remote-compute-agent/agent.md", 15*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cs := openChat(t, ctx)
+	defer cs.close()
+
+	// Use a unique marker so we can verify the exact hash.
+	marker := fmt.Sprintf("cluster-compute-%d", time.Now().UnixNano())
+
+	// Compute the expected hash in Go (avoids sha256sum availability on macOS).
+	h := sha256.Sum256([]byte(marker))
+	expectedHash := fmt.Sprintf("%x", h)
+
+	prompt := fmt.Sprintf(`Use ListNodes to find a non-home worker node, then SpawnInstance "remote-compute-agent" on that node in ephemeral mode. Set the node parameter to the worker's ID.
+
+The prompt should be exactly: "Run this bash command and report ONLY the output: echo -n %s | sha256sum | cut -d' ' -f1"
+
+Reply with ONLY the hash output, nothing else.`, marker)
+
+	resp := cs.chat(ctx, prompt)
+	t.Logf("coordinator response: %s", resp)
+
+	if !strings.Contains(resp, expectedHash) {
+		t.Errorf("expected response to contain hash %s, got: %s", expectedHash, resp)
 	}
 }
 
