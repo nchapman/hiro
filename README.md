@@ -7,11 +7,10 @@ A distributed AI agent platform. A single Go binary serves an HTTP API, WebSocke
 ### Docker (recommended)
 
 ```bash
-echo "HIRO_API_KEY=your-api-key" > .env
 docker compose up
 ```
 
-The dashboard is available at `http://localhost:8080`. Omit `HIRO_API_KEY` to run the dashboard without agents.
+Open `http://localhost:8080` to complete setup — you'll configure a password and LLM provider through the onboarding flow. Configuration is stored in `config.yaml` inside the platform root.
 
 Agent state is stored in a Docker volume — it survives container restarts but `docker compose down -v` will destroy it. The port is bound to localhost only; use a reverse proxy to expose it remotely.
 
@@ -21,21 +20,25 @@ Requires Go 1.26.1+ and Node.js 24+.
 
 ```bash
 make build
-HIRO_API_KEY=your-api-key ./hiro
+./hiro
 ```
 
 ## Configuration
 
-All configuration is via environment variables. A `.env` file is loaded automatically.
+On first launch, Hiro starts in setup mode. The dashboard walks you through choosing an LLM provider, entering an API key, and setting an admin password. This is stored in `config.yaml` at the platform root — no environment variables needed for normal operation.
+
+Provider configuration can be updated later through the dashboard settings page.
+
+### Environment Variables
+
+These are optional overrides, not required for normal use:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HIRO_API_KEY` | *(none)* | LLM provider API key (required for agents) |
-| `HIRO_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
-| `HIRO_MODEL` | *(from agent config)* | Override model for all agents |
 | `HIRO_ADDR` | `:8080` | HTTP listen address |
 | `HIRO_ROOT` | `.` | Platform root containing `agents/`, `sessions/`, `skills/`, `workspace/` |
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
+| `HIRO_LOG_LEVEL` | `info` | Log level |
 
 ## How It Works
 

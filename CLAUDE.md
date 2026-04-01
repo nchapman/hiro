@@ -53,16 +53,22 @@ Web UI dev server (separate terminal — proxies `/api` and `/ws` to `localhost:
 cd web/ui && npm run dev
 ```
 
-## Environment Variables
+## Configuration
+
+LLM provider and API key are configured through the web UI onboarding flow on first launch, stored in `config.yaml` at the platform root. Provider settings can be updated later via the dashboard settings page.
+
+### Environment Variables
+
+These are optional overrides, not required for normal operation:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HIRO_API_KEY` | *(none)* | LLM provider API key (required for agents) |
-| `HIRO_PROVIDER` | `anthropic` | LLM provider (`anthropic` or `openrouter`) |
-| `HIRO_MODEL` | *(platform default)* | Override model for all agents |
 | `HIRO_ADDR` | `:8080` | HTTP listen address |
 | `HIRO_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
+| `HIRO_LOG_LEVEL` | `info` | Log level |
+
+E2E tests use `HIRO_API_KEY` in `.env` to provide credentials to the test container — this is a test-only concern, not part of normal operation.
 
 A `.env` file is loaded automatically via godotenv (does not override existing vars).
 
@@ -258,8 +264,8 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started in coordinator mode at bootstrap.
 
 **Bootstrap flow** (`cmd/hiro/main.go`):
-1. Check `HIRO_API_KEY` is set
-2. Create `Manager` with provider/API key
+1. Load `config.yaml` — if no provider is configured, the server starts in setup mode (dashboard shows onboarding)
+2. Once configured, create `Manager` with provider from config
 3. `RestoreInstances()` — resume any persistent agents from prior runs
 4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
 5. If not running, `CreateInstance(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
