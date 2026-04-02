@@ -12,8 +12,7 @@ import (
 )
 
 type settingsResponse struct {
-	DefaultProvider string `json:"default_provider"`
-	DefaultModel    string `json:"default_model"`
+	DefaultModel string `json:"default_model"` // "provider/model" format
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
@@ -22,8 +21,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, settingsResponse{
-		DefaultProvider: s.cp.DefaultProvider(),
-		DefaultModel:    s.cp.DefaultModel(),
+		DefaultModel: s.cp.DefaultModelSpec().String(),
 	})
 }
 
@@ -39,9 +37,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cp.SetDefaultProvider(req.DefaultProvider)
-	s.cp.SetDefaultModel(req.DefaultModel)
-	s.logger.Info("settings updated", "default_provider", req.DefaultProvider, "default_model", req.DefaultModel)
+	spec := models.ParseModelSpec(req.DefaultModel)
+	s.cp.SetDefaultModelSpec(spec)
+	s.logger.Info("settings updated", "default_model", spec.String())
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after settings update", "error", err)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": "saved in memory but failed to persist to disk"})
@@ -102,9 +100,9 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Info("provider configured", "provider", providerType)
 
-	// If this is the only provider, make it the default.
-	if len(s.cp.ConfiguredProviderTypes()) == 1 {
-		s.cp.SetDefaultProvider(providerType)
+	// If this is the only provider and no default model is set, set it as the default provider.
+	if len(s.cp.ConfiguredProviderTypes()) == 1 && s.cp.DefaultModelSpec().IsEmpty() {
+		s.cp.SetDefaultModelSpec(models.ModelSpec{Provider: providerType})
 	}
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after provider update", "error", err)

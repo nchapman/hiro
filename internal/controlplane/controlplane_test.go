@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nchapman/hiro/internal/models"
 )
 
 func testLogger() *slog.Logger {
@@ -554,10 +556,10 @@ func TestProviderCRUD(t *testing.T) {
 		t.Error("expected no openrouter provider")
 	}
 
-	// Delete clears default if matching.
-	cp.SetDefaultProvider("anthropic")
+	// Delete clears default model if matching provider.
+	cp.SetDefaultModelSpec(models.ModelSpec{Provider: "anthropic", Model: "test"})
 	cp.DeleteProvider("anthropic")
-	if cp.DefaultProvider() != "" {
+	if !cp.DefaultModelSpec().IsEmpty() {
 		t.Error("expected default cleared after deleting matching provider")
 	}
 	if cp.IsConfigured() {
@@ -570,7 +572,7 @@ func TestProviderInfo_DefaultProvider(t *testing.T) {
 
 	cp.SetProvider("anthropic", ProviderConfig{APIKey: "sk-ant-111"})
 	cp.SetProvider("openrouter", ProviderConfig{APIKey: "sk-or-222"})
-	cp.SetDefaultProvider("openrouter")
+	cp.SetDefaultModelSpec(models.ModelSpec{Provider: "openrouter", Model: "test-model"})
 
 	pType, apiKey, _, ok := cp.ProviderInfo()
 	if !ok || pType != "openrouter" || apiKey != "sk-or-222" {
@@ -930,15 +932,19 @@ func TestClusterSwarmCode_EnvOverride(t *testing.T) {
 
 // --- Provider getter tests ---
 
-func TestDefaultModel(t *testing.T) {
+func TestDefaultModelSpec(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 
-	if cp.DefaultModel() != "" {
-		t.Error("expected empty default model")
+	if !cp.DefaultModelSpec().IsEmpty() {
+		t.Error("expected empty default model spec")
 	}
-	cp.SetDefaultModel("claude-3-opus")
-	if cp.DefaultModel() != "claude-3-opus" {
-		t.Errorf("unexpected: %s", cp.DefaultModel())
+	cp.SetDefaultModelSpec(models.ModelSpec{Provider: "anthropic", Model: "claude-3-opus"})
+	spec := cp.DefaultModelSpec()
+	if spec.Provider != "anthropic" || spec.Model != "claude-3-opus" {
+		t.Errorf("unexpected: %v", spec)
+	}
+	if spec.String() != "anthropic/claude-3-opus" {
+		t.Errorf("unexpected string: %s", spec.String())
 	}
 }
 

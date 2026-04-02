@@ -3,7 +3,8 @@ package controlplane
 import (
 	"fmt"
 	"sort"
-	"strings"
+
+	"github.com/nchapman/hiro/internal/models"
 )
 
 // IsConfigured returns true if at least one provider with an API key exists.
@@ -18,18 +19,32 @@ func (cp *ControlPlane) IsConfigured() bool {
 	return false
 }
 
-// ProviderInfo returns the default provider's type, API key, and base URL.
-// This is the interface the Manager uses to resolve provider config.
-// Uses DefaultProvider if set, otherwise falls back to the alphabetically
-// first configured provider.
+// DefaultModelSpec returns the parsed default model spec (provider/model).
+func (cp *ControlPlane) DefaultModelSpec() models.ModelSpec {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return models.ParseModelSpec(cp.config.DefaultModel)
+}
+
+// SetDefaultModelSpec sets the global default model as a "provider/model" string.
+func (cp *ControlPlane) SetDefaultModelSpec(spec models.ModelSpec) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.config.DefaultModel = spec.String()
+}
+
+// ProviderInfo resolves the default provider's credentials.
+// If the default model spec includes a provider, uses that. Otherwise
+// falls back to the alphabetically first configured provider.
 func (cp *ControlPlane) ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool) {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 
-	// Use explicit default if set and configured.
-	if dp := cp.config.DefaultProvider; dp != "" {
-		if p, exists := cp.config.Providers[dp]; exists && p.APIKey != "" {
-			return dp, p.APIKey, p.BaseURL, true
+	// Use provider from default model spec if set.
+	spec := models.ParseModelSpec(cp.config.DefaultModel)
+	if spec.Provider != "" {
+		if p, exists := cp.config.Providers[spec.Provider]; exists && p.APIKey != "" {
+			return spec.Provider, p.APIKey, p.BaseURL, true
 		}
 	}
 
@@ -48,36 +63,7 @@ func (cp *ControlPlane) ProviderInfo() (providerType string, apiKey string, base
 	return "", "", "", false
 }
 
-// DefaultProvider returns the default provider type.
-func (cp *ControlPlane) DefaultProvider() string {
-	cp.mu.RLock()
-	defer cp.mu.RUnlock()
-	return cp.config.DefaultProvider
-}
-
-// SetDefaultProvider sets the default provider type.
-func (cp *ControlPlane) SetDefaultProvider(providerType string) {
-	cp.mu.Lock()
-	defer cp.mu.Unlock()
-	cp.config.DefaultProvider = providerType
-}
-
-// DefaultModel returns the global default model override.
-func (cp *ControlPlane) DefaultModel() string {
-	cp.mu.RLock()
-	defer cp.mu.RUnlock()
-	return cp.config.DefaultModel
-}
-
-// SetDefaultModel sets the global default model override.
-func (cp *ControlPlane) SetDefaultModel(model string) {
-	cp.mu.Lock()
-	defer cp.mu.Unlock()
-	cp.config.DefaultModel = model
-}
-
 // ProviderByType returns the API key and base URL for a specific provider type.
-// Used by the Manager when an agent overrides the default provider.
 func (cp *ControlPlane) ProviderByType(providerType string) (apiKey string, baseURL string, ok bool) {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
@@ -125,14 +111,16 @@ func (cp *ControlPlane) SetProvider(providerType string, cfg ProviderConfig) err
 	return nil
 }
 
-// DeleteProvider removes a provider by type.
+// DeleteProvider removes a provider by type. If the default model spec
+// references this provider, the default model is cleared.
 func (cp *ControlPlane) DeleteProvider(providerType string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	delete(cp.config.Providers, providerType)
-	// Clear default if we just deleted it.
-	if cp.config.DefaultProvider == providerType {
-		cp.config.DefaultProvider = ""
+	// Clear default model if it referenced this provider.
+	spec := models.ParseModelSpec(cp.config.DefaultModel)
+	if spec.Provider == providerType {
+		cp.config.DefaultModel = ""
 	}
 }
 
@@ -154,7 +142,11 @@ func (cp *ControlPlane) ListProviders() map[string]ProviderConfig {
 func maskKey(key string) string {
 	const prefixLen, suffixLen = 6, 4
 	if len(key) < prefixLen+suffixLen+1 {
-		return strings.Repeat("*", len(key))
+		masked := make([]byte, len(key))
+		for i := range masked {
+			masked[i] = '*'
+		}
+		return string(masked)
 	}
 	return key[:prefixLen] + "..." + key[len(key)-suffixLen:]
 }

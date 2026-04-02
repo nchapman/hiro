@@ -11,6 +11,7 @@ import (
 
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
+	"github.com/nchapman/hiro/internal/models"
 	"github.com/nchapman/hiro/internal/provider"
 )
 
@@ -101,9 +102,14 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.cp.SetDefaultProvider(req.ProviderType)
 		if req.DefaultModel != "" {
-			s.cp.SetDefaultModel(req.DefaultModel)
+			spec := models.ParseModelSpec(req.DefaultModel)
+			if spec.Provider == "" {
+				spec.Provider = req.ProviderType
+			}
+			s.cp.SetDefaultModelSpec(spec)
+		} else {
+			s.cp.SetDefaultModelSpec(models.ModelSpec{Provider: req.ProviderType})
 		}
 	}
 

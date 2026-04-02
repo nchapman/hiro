@@ -61,8 +61,7 @@ type ClusterConfig struct {
 type Config struct {
 	Auth            AuthConfig                `yaml:"auth,omitempty"`
 	Providers       map[string]ProviderConfig `yaml:"providers,omitempty"`       // keyed by provider type
-	DefaultProvider string                    `yaml:"default_provider,omitempty"` // provider type to use by default
-	DefaultModel    string                    `yaml:"default_model,omitempty"`
+	DefaultModel    string                    `yaml:"default_model,omitempty"` // "provider/model" format
 	Secrets         map[string]string         `yaml:"secrets,omitempty"`
 	Agents          map[string]AgentPolicy    `yaml:"agents,omitempty"`
 	Cluster         ClusterConfig             `yaml:"cluster,omitempty"`
@@ -174,7 +173,6 @@ func (cp *ControlPlane) hasContent() bool {
 	return cp.config.Auth.PasswordHash != "" ||
 		cp.config.Auth.SessionSecret != "" ||
 		len(cp.config.Providers) > 0 ||
-		cp.config.DefaultProvider != "" ||
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
 		len(cp.config.Agents) > 0 ||

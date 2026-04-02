@@ -209,50 +209,83 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 	return allowed
 }
 
-// --- Config resolution and push ---
-
-// resolveProvider returns the default provider type, API key, and base URL.
-func (m *Manager) resolveProvider() (provider, apiKey, baseURL string, err error) {
-	if m.cp == nil {
-		return "", "", "", nil
-	}
-	provider, apiKey, baseURL, ok := m.cp.ProviderInfo()
-	if !ok {
-		return "", "", "", fmt.Errorf("no LLM provider configured")
-	}
-	return provider, apiKey, baseURL, nil
+// resolveModelString is a convenience wrapper around resolveModelSpec
+// that returns just the "provider/model" string. Used in paths that
+// only need the display value (e.g. restore).
+func (m *Manager) resolveModelString(agentModel string) string {
+	spec, _, _, _ := m.resolveModelSpec(agentModel)
+	return spec.String()
 }
 
-// resolveProviderForModel finds which configured provider offers the given model.
-func (m *Manager) resolveProviderForModel(model string) (provider, apiKey, baseURL string, err error) {
+// --- Config resolution and push ---
+
+// resolveModelSpec resolves the model spec using priority:
+// CP default < agent definition < env override (HIRO_MODEL).
+// Then resolves provider credentials from the control plane.
+//
+// Returns the resolved spec, API key, and base URL. If no CP is
+// configured, returns empty values with no error (test mode).
+func (m *Manager) resolveModelSpec(agentModel string) (spec models.ModelSpec, apiKey, baseURL string, err error) {
 	if m.cp == nil {
-		return "", "", "", fmt.Errorf("no control plane configured")
+		// No control plane — test mode. Parse agent model if provided.
+		if agentModel != "" {
+			spec = models.ParseModelSpec(agentModel)
+		}
+		return spec, "", "", nil
 	}
+
+	// 1. CP default.
+	spec = m.cp.DefaultModelSpec()
+
+	// 2. Agent definition override.
+	if agentModel != "" {
+		agentSpec := models.ParseModelSpec(agentModel)
+		spec.Model = agentSpec.Model
+		if agentSpec.Provider != "" {
+			spec.Provider = agentSpec.Provider
+		}
+	}
+
+	// 3. Env override (highest priority).
+	if m.opts.Model != "" {
+		envSpec := models.ParseModelSpec(m.opts.Model)
+		spec.Model = envSpec.Model
+		if envSpec.Provider != "" {
+			spec.Provider = envSpec.Provider
+		}
+	}
+
+	if spec.IsEmpty() {
+		return spec, "", "", nil
+	}
+
+	// Resolve provider credentials.
+	if spec.Provider != "" {
+		apiKey, baseURL, ok := m.cp.ProviderByType(spec.Provider)
+		if !ok {
+			return spec, "", "", fmt.Errorf("provider %q not configured", spec.Provider)
+		}
+		return spec, apiKey, baseURL, nil
+	}
+
+	// Bare model name — search configured providers for a match.
 	for _, pt := range m.cp.ConfiguredProviderTypes() {
 		for _, mi := range models.ModelsForProvider(pt) {
-			if mi.ID == model {
-				key, bu, ok := m.cp.ProviderByType(pt)
+			if mi.ID == spec.Model {
+				apiKey, baseURL, ok := m.cp.ProviderByType(pt)
 				if ok {
-					return pt, key, bu, nil
+					spec.Provider = pt
+					return spec, apiKey, baseURL, nil
 				}
 			}
 		}
 	}
-	return "", "", "", fmt.Errorf("model %q not found in any configured provider", model)
-}
 
-// resolveModel returns the resolved model using the priority:
-// control plane default < agent definition < environment variable override.
-func (m *Manager) resolveModel(agentModel string) string {
-	var model string
-	if m.cp != nil {
-		model = m.cp.DefaultModel()
+	// No match found — fall back to default provider credentials.
+	pt, apiKey, baseURL, ok := m.cp.ProviderInfo()
+	if !ok {
+		return spec, "", "", fmt.Errorf("no LLM provider configured")
 	}
-	if agentModel != "" {
-		model = agentModel
-	}
-	if m.opts.Model != "" {
-		model = m.opts.Model
-	}
-	return model
+	spec.Provider = pt
+	return spec, apiKey, baseURL, nil
 }

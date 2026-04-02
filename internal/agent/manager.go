@@ -7,6 +7,7 @@ import (
 
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/models"
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
@@ -100,7 +101,7 @@ type ControlPlane interface {
 	ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool)
 	ProviderByType(providerType string) (apiKey string, baseURL string, ok bool)
 	ConfiguredProviderTypes() []string
-	DefaultModel() string
+	DefaultModelSpec() models.ModelSpec
 }
 
 // NewManager creates a new agent manager. rootDir is the hiro platform root

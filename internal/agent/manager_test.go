@@ -12,6 +12,7 @@ import (
 
 	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/toolrules"
 	"github.com/nchapman/hiro/internal/uidpool"
@@ -1268,7 +1269,7 @@ func (m *mockCP) ProviderInfo() (string, string, string, bool) {
 }
 func (m *mockCP) ProviderByType(string) (string, string, bool)    { return "", "", false }
 func (m *mockCP) ConfiguredProviderTypes() []string               { return nil }
-func (m *mockCP) DefaultModel() string                            { return "" }
+func (m *mockCP) DefaultModelSpec() models.ModelSpec              { return models.ModelSpec{} }
 
 func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
 	t.Helper()

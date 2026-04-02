@@ -20,9 +20,9 @@ func TestGetSettings(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	// Should have default_provider and default_model keys.
-	if _, ok := resp["default_provider"]; !ok {
-		t.Error("missing default_provider in response")
+	// Should have default_model key (unified provider/model format).
+	if _, ok := resp["default_model"]; !ok {
+		t.Error("missing default_model in response")
 	}
 }
 

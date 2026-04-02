@@ -322,11 +322,10 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	}
 
 	// Resolve provider and model from control plane config.
-	providerName, apiKey, baseURL, err := m.resolveProvider()
+	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel(cfg.Model)
 
 	spawnCfg := ipc.SpawnConfig{
 		InstanceID:     instanceID,
@@ -396,8 +395,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	// Create the inference loop (skipped if no provider — test mode).
 	var loop *inference.Loop
-	if providerName != "" {
-		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(providerName), apiKey, baseURL, model)
+	if modelSpec.Provider != "" {
+		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(modelSpec.Provider), apiKey, baseURL, modelSpec.Model)
 		if err != nil {
 			handle.Kill()
 			cleanup()
@@ -415,8 +414,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
-			Model:          model,
-			Provider:       providerName,
+			Model:          modelSpec.String(),
+			Provider:       modelSpec.Provider,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
@@ -461,7 +460,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			Description: resolvedDesc,
 			ParentID:    parentID,
 			Status:      InstanceStatusRunning,
-			Model:       model,
+			Model:       modelSpec.String(),
 			NodeID:      resolvedNodeID,
 		},
 		agentName:      cfg.Name,

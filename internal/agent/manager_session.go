@@ -48,18 +48,17 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 	}
 
 	if model != "" && model != inst.info.Model {
-		// Find which configured provider owns this model.
-		providerName, apiKey, baseURL, err := m.resolveProviderForModel(model)
+		spec, apiKey, baseURL, err := m.resolveModelSpec(model)
 		if err != nil {
 			return err
 		}
 
-		lm, err := provider.CreateLanguageModel(ctx, provider.Type(providerName), apiKey, baseURL, model)
+		lm, err := provider.CreateLanguageModel(ctx, provider.Type(spec.Provider), apiKey, baseURL, spec.Model)
 		if err != nil {
 			return fmt.Errorf("creating language model %q: %w", model, err)
 		}
-		inst.loop.UpdateModel(lm, model, providerName)
-		inst.info.Model = model
+		inst.loop.UpdateModel(lm, spec.String(), spec.Provider)
+		inst.info.Model = spec.String()
 	}
 
 	if reasoningEffort != nil {
@@ -204,11 +203,10 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		return "", fmt.Errorf("loading agent %q: %w", inst.agentName, err)
 	}
 
-	providerName, apiKey, baseURL, err := m.resolveProvider()
+	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel(cfg.Model)
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
@@ -279,8 +277,8 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	// Create new inference loop.
 	var loop *inference.Loop
-	if providerName != "" {
-		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(providerName), apiKey, baseURL, model)
+	if modelSpec.Provider != "" {
+		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(modelSpec.Provider), apiKey, baseURL, modelSpec.Model)
 		if err != nil {
 			handle.Kill()
 			handle.Close()
@@ -298,8 +296,8 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			AgentDefDir:    m.agentDefDir(cfg.Name),
 			SharedSkillDir: m.sharedSkillsDir(),
 			LM:             lm,
-			Model:          model,
-			Provider:       providerName,
+			Model:          modelSpec.String(),
+			Provider:       modelSpec.Provider,
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
@@ -369,13 +367,13 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 		return
 	}
 
-	providerName, apiKey, baseURL, err := m.resolveProvider()
+	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
 	if err != nil {
-		m.logger.Warn("failed to resolve provider for config push",
+		m.logger.Warn("failed to resolve model for config push",
 			"agent", agentName, "error", err)
 		return
 	}
-	model := m.resolveModel(cfg.Model)
+	model := modelSpec.String()
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
@@ -430,13 +428,13 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 			// Model switch.
 			if model != inst.info.Model {
 				pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(providerName), apiKey, baseURL, model)
+				lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(modelSpec.Provider), apiKey, baseURL, modelSpec.Model)
 				pushCancel()
 				if err != nil {
 					m.logger.Warn("failed to create language model for config push",
 						"agent", agentName, "model", model, "error", err)
 				} else {
-					inst.loop.UpdateModel(lm, model, providerName)
+					inst.loop.UpdateModel(lm, model, modelSpec.Provider)
 					inst.info.Model = model
 				}
 			}
