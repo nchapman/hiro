@@ -108,9 +108,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 				spec.Provider = req.ProviderType
 			}
 			s.cp.SetDefaultModelSpec(spec)
-		} else {
-			s.cp.SetDefaultModelSpec(models.ModelSpec{Provider: req.ProviderType})
 		}
+		// When no model specified, ProviderInfo() resolves the default
+		// provider from the configured providers map.
 	}
 
 	// Apply common config — all validation has passed at this point.

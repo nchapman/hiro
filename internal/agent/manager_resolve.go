@@ -262,7 +262,14 @@ func (m *Manager) resolveModelSpec(agentModel string) (spec models.ModelSpec, ap
 	}
 
 	if spec.IsEmpty() {
-		return spec, "", "", nil
+		// No model specified anywhere — fall back to default provider
+		// credentials. The provider SDK will use its own default model.
+		pt, apiKey, baseURL, ok := m.cp.ProviderInfo()
+		if !ok {
+			return spec, "", "", nil
+		}
+		spec.Provider = pt
+		return spec, apiKey, baseURL, nil
 	}
 
 	// Resolve provider credentials.

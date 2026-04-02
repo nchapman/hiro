@@ -40,11 +40,14 @@ func ParseModelSpec(s string) ModelSpec {
 	}
 }
 
-// String returns the canonical "provider/model" form, or just the model
-// if no provider is specified.
+// String returns the canonical "provider/model" form. Returns just the
+// model if no provider, just the provider if no model, or empty if neither.
 func (ms ModelSpec) String() string {
 	if ms.Provider == "" {
 		return ms.Model
+	}
+	if ms.Model == "" {
+		return ms.Provider
 	}
 	return ms.Provider + "/" + ms.Model
 }

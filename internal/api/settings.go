@@ -100,10 +100,8 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Info("provider configured", "provider", providerType)
 
-	// If this is the only provider and no default model is set, set it as the default provider.
-	if len(s.cp.ConfiguredProviderTypes()) == 1 && s.cp.DefaultModelSpec().IsEmpty() {
-		s.cp.SetDefaultModelSpec(models.ModelSpec{Provider: providerType})
-	}
+	// When this is the only provider and no default model is set,
+	// ProviderInfo() will auto-resolve to this provider.
 	if err := s.cp.Save(); err != nil {
 		s.logger.Warn("failed to save config after provider update", "error", err)
 	}

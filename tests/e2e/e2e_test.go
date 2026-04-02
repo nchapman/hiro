@@ -52,7 +52,7 @@ func TestMain(m *testing.M) {
 
 	// Create HTTP client with cookie jar for authenticated requests.
 	jar, _ := cookiejar.New(nil)
-	httpClient = &http.Client{Jar: jar}
+	httpClient = &http.Client{Jar: jar, Timeout: 30 * time.Second}
 
 	// Wait for server to be healthy (container startup + binary init).
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -177,11 +177,24 @@ func listInstances(t *testing.T) []instanceInfo {
 }
 
 func waitForCoordinator(ctx context.Context) (string, error) {
+	fmt.Printf("waiting for coordinator at %s\n", baseURL)
 	for {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("timed out waiting for coordinator: %w", ctx.Err())
 		}
 		resp, err := httpClient.Get(baseURL + "/api/instances")
+		if err != nil {
+			fmt.Printf("  poll error: %v\n", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			fmt.Printf("  poll status=%d body=%s\n", resp.StatusCode, body)
+			time.Sleep(time.Second)
+			continue
+		}
 		if err == nil && resp.StatusCode == 200 {
 			var instances []instanceInfo
 			if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
