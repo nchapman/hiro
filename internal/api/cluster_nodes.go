@@ -121,11 +121,12 @@ func (s *Server) handleRemoveApproved(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Forcefully disconnect the node if it's currently connected.
+	// DisconnectNode closes the gRPC stream, which causes cleanupNode to call
+	// SetOffline (not Unregister) asynchronously. We must Unregister here
+	// synchronously so the node disappears from the UI immediately.
 	if s.disconnectNode != nil {
 		s.disconnectNode(nodeID)
 	}
-
-	// Remove from the live node registry so it doesn't appear as offline.
 	if s.nodeRegistry != nil {
 		s.nodeRegistry.Unregister(cluster.NodeID(nodeID))
 	}

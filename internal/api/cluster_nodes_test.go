@@ -274,6 +274,29 @@ func TestClusterAPI_RevokeOfflineNode(t *testing.T) {
 	assertNodeAbsentFromSettings(t, srv, "node-off")
 }
 
+func TestClusterAPI_RevokeNeverConnectedNode(t *testing.T) {
+	srv, cp, _, _, _ := newClusterTestServer(t)
+
+	// Approved but never connected — no entry in NodeRegistry.
+	cp.ApproveNode("node-ghost", "Ghost")
+	cp.Save()
+
+	req := authedRequest(t, srv, "DELETE", "/api/cluster/approved/node-ghost", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rec.Code)
+	}
+	if cp.IsNodeApproved("node-ghost") {
+		t.Error("node should not be approved")
+	}
+	if !cp.IsNodeRevoked("node-ghost") {
+		t.Error("node should be revoked")
+	}
+	assertNodeAbsentFromSettings(t, srv, "node-ghost")
+}
+
 // --- Clear Revoked ---
 
 func TestClusterAPI_ClearRevoked(t *testing.T) {
@@ -343,13 +366,13 @@ func TestClusterAPI_Settings_NodeFiltering(t *testing.T) {
 		t.Error("pending node n3 should NOT be in nodes list")
 	}
 
-	// Check approved_nodes map — should only contain n1.
+	// Check approved_nodes map — should contain exactly n1.
 	approved, _ := settings["approved_nodes"].(map[string]any)
+	if len(approved) != 1 {
+		t.Errorf("approved_nodes should have 1 entry, got %d: %v", len(approved), approved)
+	}
 	if _, ok := approved["n1"]; !ok {
 		t.Error("n1 should be in approved_nodes")
-	}
-	if _, ok := approved["n2"]; ok {
-		t.Error("revoked n2 should NOT be in approved_nodes")
 	}
 
 	// Check pending count.

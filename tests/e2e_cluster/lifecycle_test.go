@@ -12,24 +12,28 @@ import (
 	"time"
 )
 
-// revokedNodeID stores the worker's node ID across subtests.
-var revokedNodeID string
-
 // TestCluster_Z_Lifecycle runs after all other cluster tests (alphabetical
 // ordering by file name + Z_ prefix). These tests are destructive — they
 // revoke and restart the worker, so they must run last.
 func TestCluster_Z_Lifecycle(t *testing.T) {
-	t.Run("RevokeConnectedWorker", testRevokeConnectedWorker)
-	t.Run("ReconnectAfterClearRevocation", testReconnectAfterClearRevocation)
+	var nodeID string
+	t.Run("RevokeConnectedWorker", func(t *testing.T) {
+		nodeID = testRevokeConnectedWorker(t)
+	})
+	t.Run("ReconnectAfterClearRevocation", func(t *testing.T) {
+		if nodeID == "" {
+			t.Skip("no node ID from previous subtest")
+		}
+		testReconnectAfterClearRevocation(t, nodeID)
+	})
 }
 
-func testRevokeConnectedWorker(t *testing.T) {
+func testRevokeConnectedWorker(t *testing.T) string {
 	// Step 1: Confirm the worker is online.
 	nodeID := getWorkerNodeID(t)
 	if nodeID == "" {
 		t.Fatal("no worker node found in cluster settings")
 	}
-	revokedNodeID = nodeID
 	t.Logf("worker node ID: %s", nodeID)
 
 	// Step 2: Revoke the worker.
@@ -62,14 +66,10 @@ func testRevokeConnectedWorker(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
+	return nodeID
 }
 
-func testReconnectAfterClearRevocation(t *testing.T) {
-	nodeID := revokedNodeID
-	if nodeID == "" {
-		t.Skip("no node ID from previous subtest")
-	}
-
+func testReconnectAfterClearRevocation(t *testing.T, nodeID string) {
 	// Step 1: Clear the revocation.
 	req, _ := http.NewRequest("DELETE",
 		fmt.Sprintf("%s/api/cluster/revoked/%s", baseURL, nodeID), nil)

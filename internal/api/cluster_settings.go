@@ -53,9 +53,12 @@ func (s *Server) handleGetClusterSettings(w http.ResponseWriter, _ *http.Request
 			}
 			nodeList := make([]nodeInfo, 0, len(nodes))
 			for _, n := range nodes {
+				// Filter non-home nodes by the approved list. When approved
+				// is nil (no nodes have ever been approved), we skip the
+				// filter — the registry will only contain the home node.
 				if !n.IsHome && approved != nil {
 					if _, ok := approved[string(n.ID)]; !ok {
-						continue // skip connected but revoked nodes
+						continue
 					}
 				}
 				nodeList = append(nodeList, nodeInfo{
