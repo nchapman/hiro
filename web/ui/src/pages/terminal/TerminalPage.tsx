@@ -117,6 +117,7 @@ export default function TerminalPage() {
 
       switch (type) {
         case MSG_OUTPUT: {
+          // TerminalInstance buffers internally if xterm isn't ready yet.
           instanceRefs.current.get(sessionId)?.write(payload)
           break
         }

@@ -50,6 +50,28 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
     const containerRef = useRef<HTMLDivElement>(null)
     const termRef = useRef<Terminal | null>(null)
     const fitRef = useRef<FitAddon | null>(null)
+    // Buffer writes that arrive before xterm is initialized.
+    const pendingRef = useRef<Uint8Array[]>([])
+
+    // Expose imperative methods to parent. Writes are buffered until xterm
+    // is ready — the useEffect below flushes pendingRef on init.
+    useImperativeHandle(ref, () => ({
+      write(data: Uint8Array) {
+        if (termRef.current) {
+          termRef.current.write(data)
+        } else {
+          pendingRef.current.push(data)
+        }
+      },
+      writeString(s: string) {
+        if (termRef.current) {
+          termRef.current.write(s)
+        }
+      },
+      fit() {
+        fitRef.current?.fit()
+      },
+    }))
 
     // Create the terminal once on mount.
     useEffect(() => {
@@ -71,6 +93,12 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
 
       termRef.current = term
       fitRef.current = fitAddon
+
+      // Flush any writes that arrived before xterm was ready.
+      for (const chunk of pendingRef.current) {
+        term.write(chunk)
+      }
+      pendingRef.current = []
 
       const dataDisposable = term.onData((data) => {
         onData(sessionId, new TextEncoder().encode(data))
@@ -106,19 +134,6 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
         })
       }
     }, [visible])
-
-    // Expose imperative methods to parent.
-    useImperativeHandle(ref, () => ({
-      write(data: Uint8Array) {
-        termRef.current?.write(data)
-      },
-      writeString(s: string) {
-        termRef.current?.write(s)
-      },
-      fit() {
-        fitRef.current?.fit()
-      },
-    }))
 
     return (
       <div
