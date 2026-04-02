@@ -186,7 +186,7 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 			var instances []instanceInfo
 			if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
 				for _, inst := range instances {
-					if inst.Name == "coordinator" {
+					if inst.Mode == "coordinator" {
 						resp.Body.Close()
 						return inst.ID, nil
 					}
