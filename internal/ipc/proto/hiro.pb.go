@@ -338,6 +338,9 @@ type NodeMessage struct {
 	//	*NodeMessage_FileUpdate
 	//	*NodeMessage_FileSyncAck
 	//	*NodeMessage_JobCompletion
+	//	*NodeMessage_TerminalCreated
+	//	*NodeMessage_TerminalOutput
+	//	*NodeMessage_TerminalExited
 	Msg           isNodeMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -452,6 +455,33 @@ func (x *NodeMessage) GetJobCompletion() *JobCompletionNotify {
 	return nil
 }
 
+func (x *NodeMessage) GetTerminalCreated() *TerminalCreated {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_TerminalCreated); ok {
+			return x.TerminalCreated
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetTerminalOutput() *TerminalOutput {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_TerminalOutput); ok {
+			return x.TerminalOutput
+		}
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetTerminalExited() *TerminalExited {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_TerminalExited); ok {
+			return x.TerminalExited
+		}
+	}
+	return nil
+}
+
 type isNodeMessage_Msg interface {
 	isNodeMessage_Msg()
 }
@@ -488,6 +518,18 @@ type NodeMessage_JobCompletion struct {
 	JobCompletion *JobCompletionNotify `protobuf:"bytes,8,opt,name=job_completion,json=jobCompletion,proto3,oneof"` // worker → leader: background task completed
 }
 
+type NodeMessage_TerminalCreated struct {
+	TerminalCreated *TerminalCreated `protobuf:"bytes,9,opt,name=terminal_created,json=terminalCreated,proto3,oneof"` // worker → leader: terminal session created
+}
+
+type NodeMessage_TerminalOutput struct {
+	TerminalOutput *TerminalOutput `protobuf:"bytes,10,opt,name=terminal_output,json=terminalOutput,proto3,oneof"` // worker → leader: PTY output data
+}
+
+type NodeMessage_TerminalExited struct {
+	TerminalExited *TerminalExited `protobuf:"bytes,11,opt,name=terminal_exited,json=terminalExited,proto3,oneof"` // worker → leader: terminal shell exited
+}
+
 func (*NodeMessage_Register) isNodeMessage_Msg() {}
 
 func (*NodeMessage_SpawnResult) isNodeMessage_Msg() {}
@@ -503,6 +545,12 @@ func (*NodeMessage_FileUpdate) isNodeMessage_Msg() {}
 func (*NodeMessage_FileSyncAck) isNodeMessage_Msg() {}
 
 func (*NodeMessage_JobCompletion) isNodeMessage_Msg() {}
+
+func (*NodeMessage_TerminalCreated) isNodeMessage_Msg() {}
+
+func (*NodeMessage_TerminalOutput) isNodeMessage_Msg() {}
+
+func (*NodeMessage_TerminalExited) isNodeMessage_Msg() {}
 
 type JobCompletionNotify struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -638,6 +686,10 @@ type LeaderMessage struct {
 	//	*LeaderMessage_FileUpdate
 	//	*LeaderMessage_Pending
 	//	*LeaderMessage_Rejected
+	//	*LeaderMessage_CreateTerminal
+	//	*LeaderMessage_TerminalInput
+	//	*LeaderMessage_TerminalResize
+	//	*LeaderMessage_CloseTerminal
 	Msg           isLeaderMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -761,6 +813,42 @@ func (x *LeaderMessage) GetRejected() *NodeRejected {
 	return nil
 }
 
+func (x *LeaderMessage) GetCreateTerminal() *CreateTerminal {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_CreateTerminal); ok {
+			return x.CreateTerminal
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetTerminalInput() *TerminalInput {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_TerminalInput); ok {
+			return x.TerminalInput
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetTerminalResize() *TerminalResize {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_TerminalResize); ok {
+			return x.TerminalResize
+		}
+	}
+	return nil
+}
+
+func (x *LeaderMessage) GetCloseTerminal() *CloseTerminal {
+	if x != nil {
+		if x, ok := x.Msg.(*LeaderMessage_CloseTerminal); ok {
+			return x.CloseTerminal
+		}
+	}
+	return nil
+}
+
 type isLeaderMessage_Msg interface {
 	isLeaderMessage_Msg()
 }
@@ -801,6 +889,22 @@ type LeaderMessage_Rejected struct {
 	Rejected *NodeRejected `protobuf:"bytes,9,opt,name=rejected,proto3,oneof"`
 }
 
+type LeaderMessage_CreateTerminal struct {
+	CreateTerminal *CreateTerminal `protobuf:"bytes,10,opt,name=create_terminal,json=createTerminal,proto3,oneof"` // leader → worker: open terminal PTY
+}
+
+type LeaderMessage_TerminalInput struct {
+	TerminalInput *TerminalInput `protobuf:"bytes,11,opt,name=terminal_input,json=terminalInput,proto3,oneof"` // leader → worker: stdin data
+}
+
+type LeaderMessage_TerminalResize struct {
+	TerminalResize *TerminalResize `protobuf:"bytes,12,opt,name=terminal_resize,json=terminalResize,proto3,oneof"` // leader → worker: resize PTY
+}
+
+type LeaderMessage_CloseTerminal struct {
+	CloseTerminal *CloseTerminal `protobuf:"bytes,13,opt,name=close_terminal,json=closeTerminal,proto3,oneof"` // leader → worker: close terminal
+}
+
 func (*LeaderMessage_Registered) isLeaderMessage_Msg() {}
 
 func (*LeaderMessage_SpawnWorker) isLeaderMessage_Msg() {}
@@ -818,6 +922,14 @@ func (*LeaderMessage_FileUpdate) isLeaderMessage_Msg() {}
 func (*LeaderMessage_Pending) isLeaderMessage_Msg() {}
 
 func (*LeaderMessage_Rejected) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_CreateTerminal) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_TerminalInput) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_TerminalResize) isLeaderMessage_Msg() {}
+
+func (*LeaderMessage_CloseTerminal) isLeaderMessage_Msg() {}
 
 type NodePending struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1635,6 +1747,378 @@ func (x *FileUpdate) GetOriginNode() string {
 	return ""
 }
 
+type CreateTerminal struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // assigned by leader
+	Cols          uint32                 `protobuf:"varint,2,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTerminal) Reset() {
+	*x = CreateTerminal{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTerminal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTerminal) ProtoMessage() {}
+
+func (x *CreateTerminal) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTerminal.ProtoReflect.Descriptor instead.
+func (*CreateTerminal) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *CreateTerminal) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *CreateTerminal) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *CreateTerminal) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type TerminalCreated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"` // non-empty on failure
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminalCreated) Reset() {
+	*x = TerminalCreated{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminalCreated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminalCreated) ProtoMessage() {}
+
+func (x *TerminalCreated) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminalCreated.ProtoReflect.Descriptor instead.
+func (*TerminalCreated) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *TerminalCreated) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TerminalCreated) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type TerminalInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"` // stdin bytes
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminalInput) Reset() {
+	*x = TerminalInput{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminalInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminalInput) ProtoMessage() {}
+
+func (x *TerminalInput) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminalInput.ProtoReflect.Descriptor instead.
+func (*TerminalInput) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *TerminalInput) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TerminalInput) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type TerminalOutput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"` // stdout/stderr bytes
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminalOutput) Reset() {
+	*x = TerminalOutput{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminalOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminalOutput) ProtoMessage() {}
+
+func (x *TerminalOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminalOutput.ProtoReflect.Descriptor instead.
+func (*TerminalOutput) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *TerminalOutput) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TerminalOutput) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type TerminalResize struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Cols          uint32                 `protobuf:"varint,2,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminalResize) Reset() {
+	*x = TerminalResize{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminalResize) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminalResize) ProtoMessage() {}
+
+func (x *TerminalResize) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminalResize.ProtoReflect.Descriptor instead.
+func (*TerminalResize) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *TerminalResize) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TerminalResize) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *TerminalResize) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type CloseTerminal struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseTerminal) Reset() {
+	*x = CloseTerminal{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseTerminal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseTerminal) ProtoMessage() {}
+
+func (x *CloseTerminal) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseTerminal.ProtoReflect.Descriptor instead.
+func (*CloseTerminal) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *CloseTerminal) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type TerminalExited struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExitCode      int32                  `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminalExited) Reset() {
+	*x = TerminalExited{}
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminalExited) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminalExited) ProtoMessage() {}
+
+func (x *TerminalExited) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_ipc_proto_hiro_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminalExited.ProtoReflect.Descriptor instead.
+func (*TerminalExited) Descriptor() ([]byte, []int) {
+	return file_internal_ipc_proto_hiro_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *TerminalExited) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TerminalExited) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
 var File_internal_ipc_proto_hiro_proto protoreflect.FileDescriptor
 
 const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
@@ -1657,7 +2141,7 @@ const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\"\x11\n" +
 	"\x0fShutdownRequest\"\x12\n" +
-	"\x10ShutdownResponse\"\xd9\x03\n" +
+	"\x10ShutdownResponse\"\x9f\x05\n" +
 	"\vNodeMessage\x120\n" +
 	"\bregister\x18\x01 \x01(\v2\x12.hiro.NodeRegisterH\x00R\bregister\x126\n" +
 	"\fspawn_result\x18\x02 \x01(\v2\x11.hiro.SpawnResultH\x00R\vspawnResult\x127\n" +
@@ -1668,7 +2152,11 @@ const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
 	"\vfile_update\x18\x06 \x01(\v2\x10.hiro.FileUpdateH\x00R\n" +
 	"fileUpdate\x127\n" +
 	"\rfile_sync_ack\x18\a \x01(\v2\x11.hiro.FileSyncAckH\x00R\vfileSyncAck\x12B\n" +
-	"\x0ejob_completion\x18\b \x01(\v2\x19.hiro.JobCompletionNotifyH\x00R\rjobCompletionB\x05\n" +
+	"\x0ejob_completion\x18\b \x01(\v2\x19.hiro.JobCompletionNotifyH\x00R\rjobCompletion\x12B\n" +
+	"\x10terminal_created\x18\t \x01(\v2\x15.hiro.TerminalCreatedH\x00R\x0fterminalCreated\x12?\n" +
+	"\x0fterminal_output\x18\n" +
+	" \x01(\v2\x14.hiro.TerminalOutputH\x00R\x0eterminalOutput\x12?\n" +
+	"\x0fterminal_exited\x18\v \x01(\v2\x14.hiro.TerminalExitedH\x00R\x0eterminalExitedB\x05\n" +
 	"\x03msg\"\xbe\x01\n" +
 	"\x13JobCompletionNotify\x12\x1d\n" +
 	"\n" +
@@ -1678,7 +2166,7 @@ const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1b\n" +
 	"\texit_code\x18\x05 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06failed\x18\x06 \x01(\bR\x06failed\"\r\n" +
-	"\vFileSyncAck\"\x83\x04\n" +
+	"\vFileSyncAck\"\x81\x06\n" +
 	"\rLeaderMessage\x126\n" +
 	"\n" +
 	"registered\x18\x01 \x01(\v2\x14.hiro.NodeRegisteredH\x00R\n" +
@@ -1692,7 +2180,12 @@ const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
 	"\vfile_update\x18\a \x01(\v2\x10.hiro.FileUpdateH\x00R\n" +
 	"fileUpdate\x12-\n" +
 	"\apending\x18\b \x01(\v2\x11.hiro.NodePendingH\x00R\apending\x120\n" +
-	"\brejected\x18\t \x01(\v2\x12.hiro.NodeRejectedH\x00R\brejectedB\x05\n" +
+	"\brejected\x18\t \x01(\v2\x12.hiro.NodeRejectedH\x00R\brejected\x12?\n" +
+	"\x0fcreate_terminal\x18\n" +
+	" \x01(\v2\x14.hiro.CreateTerminalH\x00R\x0ecreateTerminal\x12<\n" +
+	"\x0eterminal_input\x18\v \x01(\v2\x13.hiro.TerminalInputH\x00R\rterminalInput\x12?\n" +
+	"\x0fterminal_resize\x18\f \x01(\v2\x14.hiro.TerminalResizeH\x00R\x0eterminalResize\x12<\n" +
+	"\x0eclose_terminal\x18\r \x01(\v2\x13.hiro.CloseTerminalH\x00R\rcloseTerminalB\x05\n" +
 	"\x03msg\"@\n" +
 	"\vNodePending\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
@@ -1765,7 +2258,36 @@ const file_internal_ipc_proto_hiro_proto_rawDesc = "" +
 	"\x04mode\x18\x04 \x01(\rR\x04mode\x12(\n" +
 	"\x10mtime_unix_nanos\x18\x05 \x01(\x03R\x0emtimeUnixNanos\x12\x1f\n" +
 	"\vorigin_node\x18\x06 \x01(\tR\n" +
-	"originNode2\xc8\x01\n" +
+	"originNode\"W\n" +
+	"\x0eCreateTerminal\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04cols\x18\x02 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x03 \x01(\rR\x04rows\"F\n" +
+	"\x0fTerminalCreated\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"B\n" +
+	"\rTerminalInput\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"C\n" +
+	"\x0eTerminalOutput\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"W\n" +
+	"\x0eTerminalResize\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04cols\x18\x02 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x03 \x01(\rR\x04rows\".\n" +
+	"\rCloseTerminal\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"L\n" +
+	"\x0eTerminalExited\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\texit_code\x18\x02 \x01(\x05R\bexitCode2\xc8\x01\n" +
 	"\vAgentWorker\x12B\n" +
 	"\vExecuteTool\x12\x18.hiro.ExecuteToolRequest\x1a\x19.hiro.ExecuteToolResponse\x129\n" +
 	"\bShutdown\x12\x15.hiro.ShutdownRequest\x1a\x16.hiro.ShutdownResponse\x12:\n" +
@@ -1786,7 +2308,7 @@ func file_internal_ipc_proto_hiro_proto_rawDescGZIP() []byte {
 	return file_internal_ipc_proto_hiro_proto_rawDescData
 }
 
-var file_internal_ipc_proto_hiro_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_internal_ipc_proto_hiro_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_internal_ipc_proto_hiro_proto_goTypes = []any{
 	(*WatchJobsRequest)(nil),    // 0: hiro.WatchJobsRequest
 	(*JobCompletion)(nil),       // 1: hiro.JobCompletion
@@ -1812,7 +2334,14 @@ var file_internal_ipc_proto_hiro_proto_goTypes = []any{
 	(*NodeHeartbeat)(nil),       // 21: hiro.NodeHeartbeat
 	(*FileSyncData)(nil),        // 22: hiro.FileSyncData
 	(*FileUpdate)(nil),          // 23: hiro.FileUpdate
-	nil,                         // 24: hiro.SpawnWorker.EffectiveToolsEntry
+	(*CreateTerminal)(nil),      // 24: hiro.CreateTerminal
+	(*TerminalCreated)(nil),     // 25: hiro.TerminalCreated
+	(*TerminalInput)(nil),       // 26: hiro.TerminalInput
+	(*TerminalOutput)(nil),      // 27: hiro.TerminalOutput
+	(*TerminalResize)(nil),      // 28: hiro.TerminalResize
+	(*CloseTerminal)(nil),       // 29: hiro.CloseTerminal
+	(*TerminalExited)(nil),      // 30: hiro.TerminalExited
+	nil,                         // 31: hiro.SpawnWorker.EffectiveToolsEntry
 }
 var file_internal_ipc_proto_hiro_proto_depIdxs = []int32{
 	12, // 0: hiro.NodeMessage.register:type_name -> hiro.NodeRegister
@@ -1823,29 +2352,36 @@ var file_internal_ipc_proto_hiro_proto_depIdxs = []int32{
 	23, // 5: hiro.NodeMessage.file_update:type_name -> hiro.FileUpdate
 	8,  // 6: hiro.NodeMessage.file_sync_ack:type_name -> hiro.FileSyncAck
 	7,  // 7: hiro.NodeMessage.job_completion:type_name -> hiro.JobCompletionNotify
-	13, // 8: hiro.LeaderMessage.registered:type_name -> hiro.NodeRegistered
-	14, // 9: hiro.LeaderMessage.spawn_worker:type_name -> hiro.SpawnWorker
-	19, // 10: hiro.LeaderMessage.execute_tool:type_name -> hiro.ExecuteToolRemote
-	16, // 11: hiro.LeaderMessage.shutdown_worker:type_name -> hiro.ShutdownWorker
-	17, // 12: hiro.LeaderMessage.kill_worker:type_name -> hiro.KillWorker
-	22, // 13: hiro.LeaderMessage.file_sync:type_name -> hiro.FileSyncData
-	23, // 14: hiro.LeaderMessage.file_update:type_name -> hiro.FileUpdate
-	10, // 15: hiro.LeaderMessage.pending:type_name -> hiro.NodePending
-	11, // 16: hiro.LeaderMessage.rejected:type_name -> hiro.NodeRejected
-	24, // 17: hiro.SpawnWorker.effective_tools:type_name -> hiro.SpawnWorker.EffectiveToolsEntry
-	2,  // 18: hiro.AgentWorker.ExecuteTool:input_type -> hiro.ExecuteToolRequest
-	4,  // 19: hiro.AgentWorker.Shutdown:input_type -> hiro.ShutdownRequest
-	0,  // 20: hiro.AgentWorker.WatchJobs:input_type -> hiro.WatchJobsRequest
-	6,  // 21: hiro.Cluster.NodeStream:input_type -> hiro.NodeMessage
-	3,  // 22: hiro.AgentWorker.ExecuteTool:output_type -> hiro.ExecuteToolResponse
-	5,  // 23: hiro.AgentWorker.Shutdown:output_type -> hiro.ShutdownResponse
-	1,  // 24: hiro.AgentWorker.WatchJobs:output_type -> hiro.JobCompletion
-	9,  // 25: hiro.Cluster.NodeStream:output_type -> hiro.LeaderMessage
-	22, // [22:26] is the sub-list for method output_type
-	18, // [18:22] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	25, // 8: hiro.NodeMessage.terminal_created:type_name -> hiro.TerminalCreated
+	27, // 9: hiro.NodeMessage.terminal_output:type_name -> hiro.TerminalOutput
+	30, // 10: hiro.NodeMessage.terminal_exited:type_name -> hiro.TerminalExited
+	13, // 11: hiro.LeaderMessage.registered:type_name -> hiro.NodeRegistered
+	14, // 12: hiro.LeaderMessage.spawn_worker:type_name -> hiro.SpawnWorker
+	19, // 13: hiro.LeaderMessage.execute_tool:type_name -> hiro.ExecuteToolRemote
+	16, // 14: hiro.LeaderMessage.shutdown_worker:type_name -> hiro.ShutdownWorker
+	17, // 15: hiro.LeaderMessage.kill_worker:type_name -> hiro.KillWorker
+	22, // 16: hiro.LeaderMessage.file_sync:type_name -> hiro.FileSyncData
+	23, // 17: hiro.LeaderMessage.file_update:type_name -> hiro.FileUpdate
+	10, // 18: hiro.LeaderMessage.pending:type_name -> hiro.NodePending
+	11, // 19: hiro.LeaderMessage.rejected:type_name -> hiro.NodeRejected
+	24, // 20: hiro.LeaderMessage.create_terminal:type_name -> hiro.CreateTerminal
+	26, // 21: hiro.LeaderMessage.terminal_input:type_name -> hiro.TerminalInput
+	28, // 22: hiro.LeaderMessage.terminal_resize:type_name -> hiro.TerminalResize
+	29, // 23: hiro.LeaderMessage.close_terminal:type_name -> hiro.CloseTerminal
+	31, // 24: hiro.SpawnWorker.effective_tools:type_name -> hiro.SpawnWorker.EffectiveToolsEntry
+	2,  // 25: hiro.AgentWorker.ExecuteTool:input_type -> hiro.ExecuteToolRequest
+	4,  // 26: hiro.AgentWorker.Shutdown:input_type -> hiro.ShutdownRequest
+	0,  // 27: hiro.AgentWorker.WatchJobs:input_type -> hiro.WatchJobsRequest
+	6,  // 28: hiro.Cluster.NodeStream:input_type -> hiro.NodeMessage
+	3,  // 29: hiro.AgentWorker.ExecuteTool:output_type -> hiro.ExecuteToolResponse
+	5,  // 30: hiro.AgentWorker.Shutdown:output_type -> hiro.ShutdownResponse
+	1,  // 31: hiro.AgentWorker.WatchJobs:output_type -> hiro.JobCompletion
+	9,  // 32: hiro.Cluster.NodeStream:output_type -> hiro.LeaderMessage
+	29, // [29:33] is the sub-list for method output_type
+	25, // [25:29] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_internal_ipc_proto_hiro_proto_init() }
@@ -1862,6 +2398,9 @@ func file_internal_ipc_proto_hiro_proto_init() {
 		(*NodeMessage_FileUpdate)(nil),
 		(*NodeMessage_FileSyncAck)(nil),
 		(*NodeMessage_JobCompletion)(nil),
+		(*NodeMessage_TerminalCreated)(nil),
+		(*NodeMessage_TerminalOutput)(nil),
+		(*NodeMessage_TerminalExited)(nil),
 	}
 	file_internal_ipc_proto_hiro_proto_msgTypes[9].OneofWrappers = []any{
 		(*LeaderMessage_Registered)(nil),
@@ -1873,6 +2412,10 @@ func file_internal_ipc_proto_hiro_proto_init() {
 		(*LeaderMessage_FileUpdate)(nil),
 		(*LeaderMessage_Pending)(nil),
 		(*LeaderMessage_Rejected)(nil),
+		(*LeaderMessage_CreateTerminal)(nil),
+		(*LeaderMessage_TerminalInput)(nil),
+		(*LeaderMessage_TerminalResize)(nil),
+		(*LeaderMessage_CloseTerminal)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1880,7 +2423,7 @@ func file_internal_ipc_proto_hiro_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_ipc_proto_hiro_proto_rawDesc), len(file_internal_ipc_proto_hiro_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

@@ -56,7 +56,11 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	clusterAddr := envOr("HIRO_CLUSTER_ADDR", ":8081")
 
 	registry := cluster.NewNodeRegistry()
-	registry.RegisterHome(envOr("HOSTNAME", "leader"))
+	homeName := cp.ClusterNodeName()
+	if homeName == "" {
+		homeName = envOr("HOSTNAME", "leader")
+	}
+	registry.RegisterHome(homeName)
 
 	pending := cluster.NewPendingRegistry(filepath.Join(rootDir, "config", "pending_nodes.yaml"))
 	if err := pending.Load(); err != nil {

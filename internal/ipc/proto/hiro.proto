@@ -69,6 +69,9 @@ message NodeMessage {
     FileUpdate file_update = 6;       // worker → leader: file changed on this node
     FileSyncAck file_sync_ack = 7;    // worker → leader: initial sync received
     JobCompletionNotify job_completion = 8; // worker → leader: background task completed
+    TerminalCreated terminal_created = 9;   // worker → leader: terminal session created
+    TerminalOutput terminal_output = 10;    // worker → leader: PTY output data
+    TerminalExited terminal_exited = 11;    // worker → leader: terminal shell exited
   }
 }
 
@@ -95,6 +98,10 @@ message LeaderMessage {
     FileUpdate file_update = 7;
     NodePending pending = 8;
     NodeRejected rejected = 9;
+    CreateTerminal create_terminal = 10;    // leader → worker: open terminal PTY
+    TerminalInput terminal_input = 11;      // leader → worker: stdin data
+    TerminalResize terminal_resize = 12;    // leader → worker: resize PTY
+    CloseTerminal close_terminal = 13;      // leader → worker: close terminal
   }
 }
 
@@ -188,4 +195,42 @@ message FileUpdate {
   uint32 mode = 4;                 // file permission bits (e.g., 0644)
   int64 mtime_unix_nanos = 5;      // modification time for conflict detection
   string origin_node = 6;          // which node made this change (for conflict files)
+}
+
+// --- Terminal session messages ---
+
+message CreateTerminal {
+  string session_id = 1;           // assigned by leader
+  uint32 cols = 2;
+  uint32 rows = 3;
+}
+
+message TerminalCreated {
+  string session_id = 1;
+  string error = 2;                // non-empty on failure
+}
+
+message TerminalInput {
+  string session_id = 1;
+  bytes data = 2;                  // stdin bytes
+}
+
+message TerminalOutput {
+  string session_id = 1;
+  bytes data = 2;                  // stdout/stderr bytes
+}
+
+message TerminalResize {
+  string session_id = 1;
+  uint32 cols = 2;
+  uint32 rows = 3;
+}
+
+message CloseTerminal {
+  string session_id = 1;
+}
+
+message TerminalExited {
+  string session_id = 1;
+  int32 exit_code = 2;
 }

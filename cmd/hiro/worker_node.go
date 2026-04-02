@@ -250,6 +250,10 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	// even after reconnect replaces it with a fresh instance.
 	defer func() { syncSvc.Stop() }()
 
+	// Set up terminal management for remote terminal sessions from the leader.
+	workerTermMgr := cluster.NewWorkerTerminalManager(ws, rootDir, logger)
+	defer workerTermMgr.Shutdown()
+
 	// Connect to leader with reconnection.
 	for {
 		connStatus.Store("connecting")

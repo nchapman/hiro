@@ -27,7 +27,10 @@ type LeaderService struct {
 
 	fileSync *FileSyncService // for sending file updates to nodes; nil if not configured
 
-	onJobCompletion func(sessionID string, completion *pb.JobCompletionNotify) // called on background task completion
+	onJobCompletion  func(sessionID string, completion *pb.JobCompletionNotify) // called on background task completion
+	onTerminalCreated func(nodeID NodeID, msg *pb.TerminalCreated)
+	onTerminalOutput  func(nodeID NodeID, msg *pb.TerminalOutput)
+	onTerminalExited  func(nodeID NodeID, msg *pb.TerminalExited)
 }
 
 // NewLeaderService creates a new cluster leader service.
@@ -89,6 +92,21 @@ func (s *LeaderService) WireNodeHandlers(nodeID NodeID) {
 		OnJobCompletion: func(_ NodeID, msg *pb.JobCompletionNotify) {
 			if s.onJobCompletion != nil {
 				s.onJobCompletion(msg.SessionId, msg)
+			}
+		},
+		OnTerminalCreated: func(nodeID NodeID, msg *pb.TerminalCreated) {
+			if s.onTerminalCreated != nil {
+				s.onTerminalCreated(nodeID, msg)
+			}
+		},
+		OnTerminalOutput: func(nodeID NodeID, msg *pb.TerminalOutput) {
+			if s.onTerminalOutput != nil {
+				s.onTerminalOutput(nodeID, msg)
+			}
+		},
+		OnTerminalExited: func(nodeID NodeID, msg *pb.TerminalExited) {
+			if s.onTerminalExited != nil {
+				s.onTerminalExited(nodeID, msg)
 			}
 		},
 	})
@@ -235,6 +253,24 @@ func (s *LeaderService) SetJobCompletionHandler(fn func(sessionID string, comple
 	s.mu.Lock()
 	s.onJobCompletion = fn
 	s.mu.Unlock()
+}
+
+// SetTerminalHandlers sets callbacks for terminal messages from worker nodes.
+func (s *LeaderService) SetTerminalHandlers(
+	onCreated func(nodeID NodeID, msg *pb.TerminalCreated),
+	onOutput func(nodeID NodeID, msg *pb.TerminalOutput),
+	onExited func(nodeID NodeID, msg *pb.TerminalExited),
+) {
+	s.mu.Lock()
+	s.onTerminalCreated = onCreated
+	s.onTerminalOutput = onOutput
+	s.onTerminalExited = onExited
+	s.mu.Unlock()
+}
+
+// SendTerminalMessage sends a terminal-related message to a specific node.
+func (s *LeaderService) SendTerminalMessage(nodeID NodeID, msg *pb.LeaderMessage) error {
+	return s.stream.SendToNode(nodeID, msg)
 }
 
 // SetFileSync configures the leader's file sync service. When set, new nodes

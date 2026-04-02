@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/nchapman/hiro/internal/agent"
@@ -38,6 +39,7 @@ type Server struct {
 	pendingRegistry *cluster.PendingRegistry // pending node approval registry (leader mode only)
 	workerStatus    func() string            // returns worker connection status (worker mode only)
 	disconnectNode  func(string)             // forcefully disconnect a node (leader mode only)
+	termSessions   *TerminalSessionManager  // terminal session manager (nil = no terminal)
 	webFS          fs.FS                   // embedded web UI files (nil = no UI serving)
 	rootDir      string                  // platform root directory (for terminal working dir)
 	watcher      *watcher.Watcher        // filesystem watcher for HIRO_ROOT (nil = no watching)
@@ -138,6 +140,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/files/share", s.requireAuth(s.handleShareCreate))
 	s.mux.HandleFunc("GET /api/shared/{token}", s.handleSharedFileInfo)
 	s.mux.HandleFunc("GET /api/shared/{token}/raw", s.handleSharedFileRaw)
+
+	// Terminal API routes (authenticated, read-only — mutations go via WebSocket)
+	s.mux.HandleFunc("GET /api/terminal/sessions", s.requireAuth(s.handleTerminalSessions))
+	s.mux.HandleFunc("GET /api/terminal/nodes", s.requireAuth(s.handleTerminalNodes))
 
 	// WebSocket endpoints
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
@@ -413,6 +419,82 @@ func isLoopbackOrigin(r *http.Request) bool {
 		return true
 	}
 	return false
+}
+
+// InitTerminalSessions creates and starts the terminal session manager.
+// Called after the server is constructed and the root dir is known.
+func (s *Server) InitTerminalSessions() {
+	s.termSessions = NewTerminalSessionManager(s.rootDir, s.logger)
+}
+
+// TerminalSessions returns the terminal session manager (for cluster wiring).
+func (s *Server) TerminalSessions() *TerminalSessionManager {
+	return s.termSessions
+}
+
+// ShutdownTerminalSessions stops all terminal sessions. Called on server shutdown.
+func (s *Server) ShutdownTerminalSessions() {
+	if s.termSessions != nil {
+		s.termSessions.Shutdown()
+	}
+}
+
+// handleTerminalSessions returns the list of active terminal sessions.
+// GET /api/terminal/sessions
+func (s *Server) handleTerminalSessions(w http.ResponseWriter, _ *http.Request) {
+	if s.termSessions == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.termSessions.List())
+}
+
+// handleTerminalNodes returns nodes available for terminal connections.
+// GET /api/terminal/nodes
+func (s *Server) handleTerminalNodes(w http.ResponseWriter, _ *http.Request) {
+	type nodeInfo struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		IsHome bool   `json:"is_home"`
+	}
+
+	var nodes []nodeInfo
+
+	// When the node registry is available (cluster mode), use actual node names.
+	if s.nodeRegistry != nil {
+		for _, n := range s.nodeRegistry.List() {
+			nodes = append(nodes, nodeInfo{
+				ID:     string(n.ID),
+				Name:   n.Name,
+				Status: string(n.Status),
+				IsHome: n.IsHome,
+			})
+		}
+	}
+
+	// Fallback: if no registry or home node wasn't in it, add a default.
+	hasHome := false
+	for _, n := range nodes {
+		if n.IsHome {
+			hasHome = true
+			break
+		}
+	}
+	if !hasHome {
+		name := ""
+		if s.cp != nil {
+			name = s.cp.ClusterNodeName()
+		}
+		if name == "" {
+			name = os.Getenv("HOSTNAME")
+		}
+		if name == "" {
+			name = "local"
+		}
+		nodes = append([]nodeInfo{{ID: "home", Name: name, Status: "online", IsHome: true}}, nodes...)
+	}
+	writeJSON(w, http.StatusOK, nodes)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

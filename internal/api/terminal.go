@@ -3,46 +3,37 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"strconv"
-	"sync/atomic"
-	"syscall"
-	"time"
 
 	"github.com/coder/websocket"
-	"github.com/creack/pty"
+	"github.com/nchapman/hiro/internal/cluster"
 )
 
-// maxTerminalSessions limits concurrent terminal connections.
-const maxTerminalSessions = 5
+// Wire protocol constants for the multiplexed terminal WebSocket.
+const (
+	termMsgOutput  byte = 0x01 // server -> client: PTY output
+	termMsgInput   byte = 0x02 // client -> server: keystrokes
+	termMsgControl byte = 0x03 // bidirectional: JSON control
+)
 
-// activeTerminals tracks the number of active terminal sessions.
-var activeTerminals atomic.Int32
+// sessionIDLen is the fixed width of the session ID field in the binary header.
+const sessionIDLen = 32
 
-// handleTerminal upgrades to a WebSocket and spawns an interactive PTY session.
-// The client sends raw keystrokes as binary frames and resize commands as JSON
-// text frames. The server streams PTY output back as binary frames.
+// handleTerminal upgrades to a WebSocket and serves a multiplexed terminal
+// connection. All terminal sessions share this single WebSocket. The binary
+// protocol uses a fixed 33-byte header (1 byte type + 32 byte session ID)
+// followed by the payload.
 func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
-	// Terminal requires setup to be complete — auth is enforced by requireAuth middleware.
 	if s.cp != nil && s.cp.NeedsSetup() {
 		http.Error(w, "unavailable during setup", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Enforce concurrent session limit (atomic add-then-check to avoid TOCTOU race).
-	if activeTerminals.Add(1) > int32(maxTerminalSessions) {
-		activeTerminals.Add(-1)
-		http.Error(w, "too many terminal sessions", http.StatusServiceUnavailable)
+	if s.termSessions == nil {
+		http.Error(w, "terminal sessions not available", http.StatusServiceUnavailable)
 		return
 	}
-	defer activeTerminals.Add(-1)
-
-	cols, rows := parseTermSize(r)
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{r.Host},
@@ -53,147 +44,232 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 
-	// Allow large pastes (default 32KB is too small for terminal use).
-	conn.SetReadLimit(1 * 1024 * 1024) // 1 MB
-
-	// Find a shell.
-	shell := "/bin/bash"
-	if _, err := exec.LookPath(shell); err != nil {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.Command(shell)
-	cmd.Dir = s.rootDir
-
-	// Optional working directory relative to platform root.
-	if dir := r.URL.Query().Get("dir"); dir != "" {
-		absDir := filepath.Join(s.rootDir, filepath.Clean(dir))
-		// Ensure the resolved path stays within rootDir.
-		if strings.HasPrefix(absDir, s.rootDir+string(filepath.Separator)) || absDir == s.rootDir {
-			if info, err := os.Stat(absDir); err == nil && info.IsDir() {
-				cmd.Dir = absDir
-			}
-		}
-	}
-	cmd.Env = terminalEnv()
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
-	if err != nil {
-		s.logger.Error("failed to start pty", "error", err)
-		conn.Close(websocket.StatusInternalError, "failed to start shell")
-		return
-	}
-	defer ptmx.Close()
+	// Allow large pastes.
+	conn.SetReadLimit(1 * 1024 * 1024)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// Single owner of cmd.Wait — avoids double-call race between
-	// the writePump (shell exits) and cleanup (WebSocket closes).
-	waitDone := make(chan struct{})
-	var exitCode int
-	go func() {
-		_ = cmd.Wait()
-		if cmd.ProcessState != nil {
-			exitCode = cmd.ProcessState.ExitCode()
-		}
-		close(waitDone)
-	}()
+	ts := &termSocket{
+		conn:     conn,
+		ctx:      ctx,
+		cancel:   cancel,
+		server:   s,
+		attached: make(map[string]attachedSub),
+	}
 
-	// Signal that the shell is ready.
-	_ = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"started"}`))
+	// Sync existing sessions to the client.
+	ts.syncSessions()
 
-	// writePump: PTY → WebSocket.
-	// When the shell exits, sends an "exited" control message and cancels the context.
-	go func() {
-		defer cancel()
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := ptmx.Read(buf)
-			if n > 0 {
-				if writeErr := conn.Write(ctx, websocket.MessageBinary, buf[:n]); writeErr != nil {
-					return
-				}
+	// If no sessions exist, auto-create one.
+	sessions := s.termSessions.List()
+	if len(sessions) == 0 {
+		ts.handleCreate(termControlMsg{NodeID: "home", Cols: 80, Rows: 24})
+	}
+
+	// Read loop: client -> server.
+	ts.readLoop()
+
+	// Detach all sessions on disconnect.
+	ts.detachAll()
+}
+
+// termSocket manages a single multiplexed WebSocket connection.
+type termSocket struct {
+	conn     *websocket.Conn
+	ctx      context.Context
+	cancel   context.CancelFunc
+	server   *Server
+	attached map[string]attachedSub // sessionID -> subscriber info
+}
+
+type attachedSub struct {
+	subID  string
+	cancel context.CancelFunc
+}
+
+// resolveNodeName looks up the human-readable name for a node ID.
+func (ts *termSocket) resolveNodeName(nodeID string) string {
+	if nodeID == "home" {
+		// Try the registry first for the configured home name.
+		if ts.server.nodeRegistry != nil {
+			if info, ok := ts.server.nodeRegistry.Get("home"); ok && info.Name != "" {
+				return info.Name
 			}
-			if err != nil {
-				// Shell exited — wait for reap, then notify client.
-				<-waitDone
-				msg := fmt.Sprintf(`{"type":"exited","code":%d}`, exitCode)
-				_ = conn.Write(context.Background(), websocket.MessageText, []byte(msg))
+		}
+		return "local"
+	}
+	if ts.server.nodeRegistry != nil {
+		if info, ok := ts.server.nodeRegistry.Get(cluster.NodeID(nodeID)); ok && info.Name != "" {
+			return info.Name
+		}
+	}
+	return nodeID
+}
+
+// syncSessions sends the current session list and replay data to the client.
+func (ts *termSocket) syncSessions() {
+	sessions := ts.server.termSessions.List()
+	for _, info := range sessions {
+		// Send "created" control message.
+		msg := termControlMsg{
+			Type:      "created",
+			SessionID: info.ID,
+			NodeID:    info.NodeID,
+			NodeName:  ts.resolveNodeName(info.NodeID),
+		}
+		_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(info.ID, msg))
+
+		// Attach and send replay.
+		ts.attachSession(info.ID)
+	}
+}
+
+// attachSession subscribes to a session's output and starts a write pump.
+func (ts *termSocket) attachSession(sessionID string) {
+	subID, ch, replay, exited, exitCode, err := ts.server.termSessions.Attach(sessionID)
+	if err != nil {
+		errMsg := termControlMsg{Type: "error", Message: err.Error()}
+		_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, errMsg))
+		return
+	}
+
+	// Send replay.
+	replayStart := termControlMsg{Type: "replay_start"}
+	_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, replayStart))
+	if len(replay) > 0 {
+		_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalOutput(sessionID, replay))
+	}
+	replayEnd := termControlMsg{Type: "replay_end"}
+	_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, replayEnd))
+
+	// If already exited, send exit message.
+	if exited {
+		code := exitCode
+		exitMsg := termControlMsg{Type: "exited", Code: &code}
+		_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, exitMsg))
+	}
+
+	// Start write pump goroutine for live output.
+	pumpCtx, pumpCancel := context.WithCancel(ts.ctx)
+	ts.attached[sessionID] = attachedSub{subID: subID, cancel: pumpCancel}
+
+	go ts.writePump(pumpCtx, sessionID, ch)
+}
+
+// writePump forwards live output from a session to the WebSocket.
+func (ts *termSocket) writePump(ctx context.Context, sessionID string, ch <-chan sessionEvent) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
 				return
 			}
+			if evt.exited {
+				code := evt.exitCode
+				ctrl := termControlMsg{Type: "exited", Code: &code}
+				_ = ts.conn.Write(ctx, websocket.MessageBinary, marshalControl(sessionID, ctrl))
+				return // session is done; no more events expected
+			}
+			_ = ts.conn.Write(ctx, websocket.MessageBinary, marshalOutput(sessionID, evt.data))
 		}
-	}()
+	}
+}
 
-	// readPump: WebSocket → PTY (binary) or control messages (text).
+// readLoop processes incoming binary frames from the client.
+func (ts *termSocket) readLoop() {
 	for {
-		msgType, data, err := conn.Read(ctx)
+		_, data, err := ts.conn.Read(ts.ctx)
 		if err != nil {
-			break
+			return
 		}
+		if len(data) < 1+sessionIDLen {
+			continue
+		}
+
+		msgType := data[0]
+		sessionID := strings.TrimRight(string(data[1:1+sessionIDLen]), "\x00")
+		payload := data[1+sessionIDLen:]
+
 		switch msgType {
-		case websocket.MessageBinary:
-			_, _ = ptmx.Write(data)
-		case websocket.MessageText:
-			var ctrl struct {
-				Type string `json:"type"`
-				Cols uint16 `json:"cols"`
-				Rows uint16 `json:"rows"`
-			}
-			if json.Unmarshal(data, &ctrl) == nil && ctrl.Type == "resize" {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: ctrl.Rows, Cols: ctrl.Cols})
-			}
-		}
-	}
+		case termMsgInput:
+			_ = ts.server.termSessions.WriteInput(sessionID, payload)
 
-	// Cleanup: terminate process if it hasn't exited yet.
-	select {
-	case <-waitDone:
-		// Already exited.
-	default:
-		_ = cmd.Process.Signal(syscall.SIGHUP)
-		select {
-		case <-waitDone:
-		case <-time.After(3 * time.Second):
-			_ = cmd.Process.Kill()
-			<-waitDone
+		case termMsgControl:
+			var ctrl termControlMsg
+			if json.Unmarshal(payload, &ctrl) != nil {
+				continue
+			}
+			switch ctrl.Type {
+			case "create":
+				ts.handleCreate(ctrl)
+			case "close":
+				ts.handleClose(sessionID)
+			case "resize":
+				_ = ts.server.termSessions.Resize(sessionID, ctrl.Cols, ctrl.Rows)
+			}
 		}
 	}
 }
 
-// terminalEnv builds an explicit environment for the terminal shell.
-// Only essential variables are included — secrets (HIRO_API_KEY, etc.)
-// are deliberately excluded to prevent credential exposure.
-func terminalEnv() []string {
-	env := []string{
-		"TERM=xterm-256color",
-		"LANG=en_US.UTF-8",
-		"LC_ALL=en_US.UTF-8",
+// handleCreate creates a new terminal session and attaches to it.
+func (ts *termSocket) handleCreate(ctrl termControlMsg) {
+	nodeID := ctrl.NodeID
+	if nodeID == "" {
+		nodeID = "home"
 	}
-	// Pass through safe, non-secret variables.
-	for _, key := range []string{"PATH", "HOME", "USER", "SHELL", "EDITOR",
-		"MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR",
-		"MISE_GLOBAL_CONFIG_FILE", "MISE_INSTALL_PATH",
-		"STARSHIP_CONFIG"} {
-		if v := os.Getenv(key); v != "" {
-			env = append(env, key+"="+v)
-		}
+	cols := ctrl.Cols
+	rows := ctrl.Rows
+	if cols == 0 {
+		cols = 80
 	}
-	return env
+	if rows == 0 {
+		rows = 24
+	}
+
+	sess, err := ts.server.termSessions.Create(nodeID, cols, rows)
+	if err != nil {
+		errMsg := termControlMsg{Type: "error", Message: err.Error()}
+		_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl("", errMsg))
+		return
+	}
+
+	// Send "created" to client.
+	msg := termControlMsg{
+		Type:      "created",
+		SessionID: sess.ID,
+		NodeID:    sess.NodeID,
+		NodeName:  ts.resolveNodeName(sess.NodeID),
+	}
+	_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sess.ID, msg))
+
+	// Attach to start streaming.
+	ts.attachSession(sess.ID)
 }
 
-// parseTermSize extracts cols and rows from query params, defaulting to 80x24.
-func parseTermSize(r *http.Request) (cols, rows uint16) {
-	cols, rows = 80, 24
-	if v := r.URL.Query().Get("cols"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 16); err == nil && n > 0 {
-			cols = uint16(n)
-		}
+// handleClose destroys a terminal session.
+func (ts *termSocket) handleClose(sessionID string) {
+	// Detach first.
+	if sub, ok := ts.attached[sessionID]; ok {
+		sub.cancel()
+		ts.server.termSessions.Detach(sessionID, sub.subID)
+		delete(ts.attached, sessionID)
 	}
-	if v := r.URL.Query().Get("rows"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 16); err == nil && n > 0 {
-			rows = uint16(n)
-		}
+	// Close the session (kills PTY).
+	_ = ts.server.termSessions.Close(sessionID)
+
+	// Notify the client.
+	msg := termControlMsg{Type: "closed", SessionID: sessionID}
+	_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, msg))
+}
+
+// detachAll unsubscribes from all sessions without killing them.
+func (ts *termSocket) detachAll() {
+	for sessionID, sub := range ts.attached {
+		sub.cancel()
+		ts.server.termSessions.Detach(sessionID, sub.subID)
 	}
-	return
+	ts.attached = nil
 }

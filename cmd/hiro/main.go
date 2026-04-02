@@ -161,6 +161,7 @@ func run() error {
 	defer cancel()
 
 	srv := api.NewServer(logger, webFS, cp, pdb, absRootDir)
+	srv.InitTerminalSessions()
 	srv.SetWatcher(fsWatcher)
 	srv.SetLogHandler(lh)
 
@@ -271,6 +272,9 @@ func run() error {
 		clusterStarted = true
 		srv.SetNodeRegistry(cs.registry)
 		srv.SetPendingRegistry(cs.pending)
+		if ts := srv.TerminalSessions(); ts != nil {
+			api.WireClusterTerminal(ts, clusterSvc)
+		}
 		srv.SetDisconnectNode(func(nodeID string) {
 			nid := cluster.NodeID(nodeID)
 			clusterSvc.KillWorkersOnNode(nid)
@@ -425,6 +429,7 @@ func run() error {
 	if cs.fileSync != nil {
 		cs.fileSync.Stop()
 	}
+	srv.ShutdownTerminalSessions()
 	if mgr != nil {
 		mgr.Shutdown()
 	}

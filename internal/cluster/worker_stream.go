@@ -35,6 +35,10 @@ type WorkerStream struct {
 	onKillWorker     func(ctx context.Context, msg *pb.KillWorker)
 	onFileSync       func(ctx context.Context, msg *pb.FileSyncData)
 	onFileUpdate     func(ctx context.Context, msg *pb.FileUpdate)
+	onCreateTerminal func(ctx context.Context, msg *pb.CreateTerminal)
+	onTerminalInput  func(ctx context.Context, msg *pb.TerminalInput)
+	onTerminalResize func(ctx context.Context, msg *pb.TerminalResize)
+	onCloseTerminal  func(ctx context.Context, msg *pb.CloseTerminal)
 
 	mu     sync.Mutex
 	stream pb.Cluster_NodeStreamClient
@@ -111,6 +115,26 @@ func (w *WorkerStream) SetOnConnected(fn func()) {
 // SetFileUpdateHandler sets the callback for FileUpdate messages.
 func (w *WorkerStream) SetFileUpdateHandler(fn func(ctx context.Context, msg *pb.FileUpdate)) {
 	w.onFileUpdate = fn
+}
+
+// SetCreateTerminalHandler sets the callback for CreateTerminal commands.
+func (w *WorkerStream) SetCreateTerminalHandler(fn func(ctx context.Context, msg *pb.CreateTerminal)) {
+	w.onCreateTerminal = fn
+}
+
+// SetTerminalInputHandler sets the callback for TerminalInput commands.
+func (w *WorkerStream) SetTerminalInputHandler(fn func(ctx context.Context, msg *pb.TerminalInput)) {
+	w.onTerminalInput = fn
+}
+
+// SetTerminalResizeHandler sets the callback for TerminalResize commands.
+func (w *WorkerStream) SetTerminalResizeHandler(fn func(ctx context.Context, msg *pb.TerminalResize)) {
+	w.onTerminalResize = fn
+}
+
+// SetCloseTerminalHandler sets the callback for CloseTerminal commands.
+func (w *WorkerStream) SetCloseTerminalHandler(fn func(ctx context.Context, msg *pb.CloseTerminal)) {
+	w.onCloseTerminal = fn
 }
 
 // Connect dials the leader, registers, and enters the message loop.
@@ -241,6 +265,34 @@ func (w *WorkerStream) readLoop(ctx context.Context, stream pb.Cluster_NodeStrea
 			if w.onFileUpdate != nil {
 				w.onFileUpdate(ctx, m.FileUpdate)
 			}
+
+		case *pb.LeaderMessage_CreateTerminal:
+			if w.onCreateTerminal != nil {
+				go func() {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					w.onCreateTerminal(ctx, m.CreateTerminal)
+				}()
+			}
+
+		case *pb.LeaderMessage_TerminalInput:
+			if w.onTerminalInput != nil {
+				w.onTerminalInput(ctx, m.TerminalInput)
+			}
+
+		case *pb.LeaderMessage_TerminalResize:
+			if w.onTerminalResize != nil {
+				w.onTerminalResize(ctx, m.TerminalResize)
+			}
+
+		case *pb.LeaderMessage_CloseTerminal:
+			if w.onCloseTerminal != nil {
+				go func() {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					w.onCloseTerminal(ctx, m.CloseTerminal)
+				}()
+			}
 		}
 	}
 }
@@ -307,6 +359,42 @@ func (w *WorkerStream) SendHeartbeat(activeWorkers int32) error {
 		Msg: &pb.NodeMessage_Heartbeat{
 			Heartbeat: &pb.NodeHeartbeat{
 				ActiveWorkers: activeWorkers,
+			},
+		},
+	})
+}
+
+// SendTerminalCreated notifies the leader that a terminal was created (or failed).
+func (w *WorkerStream) SendTerminalCreated(sessionID, errMsg string) error {
+	return w.send(&pb.NodeMessage{
+		Msg: &pb.NodeMessage_TerminalCreated{
+			TerminalCreated: &pb.TerminalCreated{
+				SessionId: sessionID,
+				Error:     errMsg,
+			},
+		},
+	})
+}
+
+// SendTerminalOutput sends terminal PTY output data to the leader.
+func (w *WorkerStream) SendTerminalOutput(sessionID string, data []byte) error {
+	return w.send(&pb.NodeMessage{
+		Msg: &pb.NodeMessage_TerminalOutput{
+			TerminalOutput: &pb.TerminalOutput{
+				SessionId: sessionID,
+				Data:      data,
+			},
+		},
+	})
+}
+
+// SendTerminalExited notifies the leader that a terminal shell exited.
+func (w *WorkerStream) SendTerminalExited(sessionID string, exitCode int32) error {
+	return w.send(&pb.NodeMessage{
+		Msg: &pb.NodeMessage_TerminalExited{
+			TerminalExited: &pb.TerminalExited{
+				SessionId: sessionID,
+				ExitCode:  exitCode,
 			},
 		},
 	})
