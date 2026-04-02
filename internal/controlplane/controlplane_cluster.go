@@ -53,6 +53,37 @@ func (cp *ControlPlane) ClusterSwarmCode() string {
 	return cp.config.Cluster.SwarmCode
 }
 
+// NodeApprovalStatus represents the approval state of a cluster node.
+type NodeApprovalStatus int
+
+const (
+	// NodeStatusPending means the node is neither approved nor revoked.
+	NodeStatusPending NodeApprovalStatus = iota
+	// NodeStatusApproved means the node is in the approved list.
+	NodeStatusApproved
+	// NodeStatusRevoked means the node has been explicitly revoked.
+	NodeStatusRevoked
+)
+
+// NodeApprovalCheck returns the approval status of a node atomically,
+// reading both approved and revoked maps under a single lock. This
+// eliminates the TOCTOU race of checking them separately.
+func (cp *ControlPlane) NodeApprovalCheck(nodeID string) NodeApprovalStatus {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	if cp.config.Cluster.RevokedNodes != nil {
+		if _, ok := cp.config.Cluster.RevokedNodes[nodeID]; ok {
+			return NodeStatusRevoked
+		}
+	}
+	if cp.config.Cluster.ApprovedNodes != nil {
+		if _, ok := cp.config.Cluster.ApprovedNodes[nodeID]; ok {
+			return NodeStatusApproved
+		}
+	}
+	return NodeStatusPending
+}
+
 // IsNodeApproved checks if a node ID exists in the approved nodes map.
 func (cp *ControlPlane) IsNodeApproved(nodeID string) bool {
 	cp.mu.RLock()

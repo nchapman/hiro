@@ -27,9 +27,12 @@ func setupRemoteWorkerTest(t *testing.T) (*cluster.RemoteWorker, pb.Cluster_Node
 	clientID := testIdentityFromSeed(10)
 
 	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
-	leader := cluster.NewLeaderStream(registry, func(nodeID string) bool {
-		return nodeID == nodeIDFromIdentity(clientID)
-	}, nil, pending, logger)
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		if nodeID == nodeIDFromIdentity(clientID) {
+			return cluster.ApprovalGranted
+		}
+		return cluster.ApprovalPending
+	}, pending, logger)
 
 	serverID := testIdentityFromSeed(0)
 	serverCert, err := cluster.TLSCertFromIdentity(serverID)

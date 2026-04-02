@@ -272,7 +272,9 @@ func run() error {
 		srv.SetNodeRegistry(cs.registry)
 		srv.SetPendingRegistry(cs.pending)
 		srv.SetDisconnectNode(func(nodeID string) {
-			cs.leaderStream.DisconnectNode(cluster.NodeID(nodeID))
+			nid := cluster.NodeID(nodeID)
+			clusterSvc.KillWorkersOnNode(nid)
+			cs.leaderStream.DisconnectNode(nid)
 		})
 		return nil
 	}

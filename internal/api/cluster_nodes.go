@@ -52,16 +52,15 @@ func (s *Server) handleApproveNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add to approved nodes in config.
+	// Enforce first, persist second — remove from pending and add to approved
+	// before saving, so the node is never in both lists even if save fails.
+	s.pendingRegistry.Remove(nodeID)
 	s.cp.ApproveNode(nodeID, pending.Name)
 	if err := s.cp.Save(); err != nil {
-		s.logger.Error("failed to save config after approving node", "error", err)
-		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
+		s.logger.Error("node approved in memory but config save failed", "error", err)
+		http.Error(w, "node approved but config save failed; approval may not survive restart", http.StatusInternalServerError)
 		return
 	}
-
-	// Remove from pending.
-	s.pendingRegistry.Remove(nodeID)
 
 	s.logger.Info("node approved", "node_id", nodeID, "name", pending.Name)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

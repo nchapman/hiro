@@ -15,6 +15,18 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+// ApprovalStatus represents the result of an atomic approval check.
+type ApprovalStatus int
+
+const (
+	// ApprovalPending means the node is neither approved nor revoked.
+	ApprovalPending ApprovalStatus = iota
+	// ApprovalGranted means the node is in the approved list.
+	ApprovalGranted
+	// ApprovalRevoked means the node has been explicitly revoked.
+	ApprovalRevoked
+)
+
 // LeaderStream implements the leader side of the Cluster gRPC service.
 // It accepts bidirectional streams from worker nodes, verifies their
 // identity from the mTLS certificate, and manages per-node connections.
@@ -22,8 +34,7 @@ type LeaderStream struct {
 	pb.UnimplementedClusterServer
 
 	registry        *NodeRegistry
-	isApproved      func(nodeID string) bool // returns true if node is approved
-	isRevoked       func(nodeID string) bool // returns true if node was explicitly revoked
+	checkApproval   func(nodeID string) ApprovalStatus // atomic approval check
 	pending         *PendingRegistry
 	onNodeConnected func(nodeID NodeID) // called when a node successfully registers
 	relayAddr       string              // relay server address (for detecting relay connections)
@@ -54,16 +65,15 @@ type NodeHandlers struct {
 }
 
 // NewLeaderStream creates a new leader-side cluster gRPC service.
-// isApproved checks whether a node ID has been approved by the operator.
-// pending tracks unapproved nodes so they can be shown in the dashboard.
-func NewLeaderStream(registry *NodeRegistry, isApproved, isRevoked func(string) bool, pending *PendingRegistry, logger *slog.Logger) *LeaderStream {
+// checkApproval returns the approval status of a node atomically (approved,
+// revoked, or pending) under a single lock, eliminating TOCTOU races.
+func NewLeaderStream(registry *NodeRegistry, checkApproval func(string) ApprovalStatus, pending *PendingRegistry, logger *slog.Logger) *LeaderStream {
 	return &LeaderStream{
-		registry:   registry,
-		isApproved: isApproved,
-		isRevoked:  isRevoked,
-		pending:    pending,
-		logger:     logger,
-		conns:      make(map[NodeID]*nodeConn),
+		registry:      registry,
+		checkApproval: checkApproval,
+		pending:       pending,
+		logger:        logger,
+		conns:         make(map[NodeID]*nodeConn),
 	}
 }
 
@@ -143,18 +153,16 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 		nodeName = nodeName[:128]
 	}
 
-	// Step 3: Check approval / revocation.
-	// Note: isApproved and isRevoked are called separately; there is a brief
-	// window where config could change between checks. A node approved between
-	// the two calls will receive NodePending and succeed on its next retry.
-	if !s.isApproved(string(nodeID)) {
+	// Step 3: Check approval / revocation atomically (single lock acquisition).
+	status := s.checkApproval(string(nodeID))
+
+	if status != ApprovalGranted {
 		truncID := string(nodeID)
 		if len(truncID) > 16 {
 			truncID = truncID[:16] + "..."
 		}
 
-		// Revoked nodes get a rejection — they should stop reconnecting.
-		if s.isRevoked != nil && s.isRevoked(string(nodeID)) {
+		if status == ApprovalRevoked {
 			s.logger.Info("rejected revoked node", "node_id", truncID, "name", nodeName)
 			_ = stream.Send(&pb.LeaderMessage{
 				Msg: &pb.LeaderMessage_Rejected{
@@ -178,7 +186,6 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 			s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)
 		}
 
-		// Tell the worker it's pending (not an error, just not yet approved).
 		_ = stream.Send(&pb.LeaderMessage{
 			Msg: &pb.LeaderMessage_Pending{
 				Pending: &pb.NodePending{
@@ -187,7 +194,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 				},
 			},
 		})
-		return nil // close stream cleanly
+		return nil
 	}
 
 	// Step 4: Approved — register and proceed.

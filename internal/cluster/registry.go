@@ -98,6 +98,17 @@ func (r *NodeRegistry) Unregister(id NodeID) {
 	delete(r.nodes, id)
 }
 
+// ClearRemote removes all non-home nodes from the registry.
+func (r *NodeRegistry) ClearRemote() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, n := range r.nodes {
+		if !n.IsHome {
+			delete(r.nodes, id)
+		}
+	}
+}
+
 // SetOffline marks a node as offline without removing it.
 func (r *NodeRegistry) SetOffline(id NodeID) {
 	r.mu.Lock()

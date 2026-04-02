@@ -41,9 +41,12 @@ func setupApprovalTest(t *testing.T, registry *cluster.NodeRegistry, approvedIDs
 
 	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
 
-	leader := cluster.NewLeaderStream(registry, func(nodeID string) bool {
-		return approvedIDs[nodeID]
-	}, nil, pending, logger)
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		if approvedIDs[nodeID] {
+			return cluster.ApprovalGranted
+		}
+		return cluster.ApprovalPending
+	}, pending, logger)
 
 	serverID := testIdentityFromSeed(0)
 	serverCert, err := cluster.TLSCertFromIdentity(serverID)
@@ -188,10 +191,11 @@ func TestStream_RejectedRevoked(t *testing.T) {
 	revokedIDs := map[string]bool{nodeIDFromIdentity(clientID): true}
 	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
 
-	leader := cluster.NewLeaderStream(registry, func(nodeID string) bool {
-		return false // not approved
-	}, func(nodeID string) bool {
-		return revokedIDs[nodeID]
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		if revokedIDs[nodeID] {
+			return cluster.ApprovalRevoked
+		}
+		return cluster.ApprovalPending
 	}, pending, logger)
 
 	serverID := testIdentityFromSeed(0)

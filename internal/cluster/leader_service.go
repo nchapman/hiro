@@ -354,6 +354,33 @@ func (s *LeaderService) BroadcastFileUpdate(update *pb.FileUpdate) {
 	}
 }
 
+// KillWorkersOnNode sends KillWorker to all active workers on a given node
+// and removes them from the workers map. Called before disconnecting a revoked
+// node to ensure in-flight work is stopped promptly.
+func (s *LeaderService) KillWorkersOnNode(nodeID NodeID) {
+	s.mu.Lock()
+	var toKill []*RemoteWorker
+	var sessionIDs []string
+	for sid, rw := range s.workers {
+		if rw.NodeID() == nodeID {
+			toKill = append(toKill, rw)
+			sessionIDs = append(sessionIDs, sid)
+		}
+	}
+	for _, sid := range sessionIDs {
+		delete(s.workers, sid)
+	}
+	s.mu.Unlock()
+
+	for _, rw := range toKill {
+		rw.Kill()
+		rw.Close()
+	}
+	if len(toKill) > 0 {
+		s.logger.Info("killed workers on disconnected node", "node", nodeID, "count", len(toKill))
+	}
+}
+
 // SpawnRequest contains the information needed to spawn a worker on a remote node.
 type SpawnRequest struct {
 	InstanceID     string

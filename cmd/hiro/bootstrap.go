@@ -63,10 +63,15 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 		logger.Warn("failed to load pending nodes", "error", err)
 	}
 
-	leaderStream := cluster.NewLeaderStream(registry, func(nodeID string) bool {
-		return cp.IsNodeApproved(nodeID)
-	}, func(nodeID string) bool {
-		return cp.IsNodeRevoked(nodeID)
+	leaderStream := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		switch cp.NodeApprovalCheck(nodeID) {
+		case controlplane.NodeStatusApproved:
+			return cluster.ApprovalGranted
+		case controlplane.NodeStatusRevoked:
+			return cluster.ApprovalRevoked
+		default:
+			return cluster.ApprovalPending
+		}
 	}, pending, logger)
 
 	serverTLS := cluster.ServerTLSConfig(tlsCert)

@@ -86,11 +86,12 @@ func (cfg *Config) initMaps() {
 // It is read from config.yaml at startup and written back on shutdown.
 // All access is thread-safe.
 type ControlPlane struct {
-	mu     sync.RWMutex
-	config Config
-	signer *auth.TokenSigner // cached; invalidated on secret rotation
-	path   string
-	logger *slog.Logger
+	mu             sync.RWMutex
+	config         Config
+	signer         *auth.TokenSigner // cached; invalidated on secret rotation
+	path           string
+	logger         *slog.Logger
+	skipNextReload bool // set by Save to suppress the fsnotify-triggered Reload
 }
 
 // Load reads the control plane config from path. If the file does not
@@ -157,6 +158,11 @@ func (cp *ControlPlane) saveUnlocked() error {
 		return fmt.Errorf("writing control plane config: %w", err)
 	}
 
+	// Suppress the fsnotify-triggered Reload that will fire from our own write.
+	// Without this, a concurrent config mutation between Save and Reload would
+	// be lost when Reload replaces in-memory state from disk.
+	cp.skipNextReload = true
+
 	cp.logger.Info("saved control plane config", "path", cp.path)
 	return nil
 }
@@ -199,7 +205,19 @@ func (cp *ControlPlane) Reset() error {
 // preserved and a warning is logged (no error returned — the system keeps
 // running with its current config). The cached TokenSigner is invalidated
 // only if the password hash changed.
+//
+// Reloads triggered by our own Save are skipped to prevent a concurrent
+// in-memory mutation from being clobbered by stale disk state.
 func (cp *ControlPlane) Reload() error {
+	cp.mu.Lock()
+	if cp.skipNextReload {
+		cp.skipNextReload = false
+		cp.mu.Unlock()
+		cp.logger.Debug("skipping self-triggered config reload")
+		return nil
+	}
+	cp.mu.Unlock()
+
 	data, err := os.ReadFile(cp.path)
 	if err != nil {
 		if os.IsNotExist(err) {

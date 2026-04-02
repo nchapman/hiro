@@ -140,6 +140,19 @@ func (r *PendingRegistry) Count() int {
 	return len(r.nodes)
 }
 
+// Clear removes all pending nodes and deletes the backing file.
+func (r *PendingRegistry) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nodes = make(map[string]*PendingNode)
+	os.Remove(r.filePath)
+}
+
+// FilePath returns the path to the backing YAML file.
+func (r *PendingRegistry) FilePath() string {
+	return r.filePath
+}
+
 // saveLocked persists to disk. Caller must hold r.mu.
 func (r *PendingRegistry) saveLocked() error {
 	nodes := make([]*PendingNode, 0, len(r.nodes))

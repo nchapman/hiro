@@ -91,6 +91,21 @@ func (s *Server) handleClusterReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Disconnect all connected nodes before wiping state.
+	if s.nodeRegistry != nil {
+		for _, n := range s.nodeRegistry.List() {
+			if !n.IsHome && s.disconnectNode != nil {
+				s.disconnectNode(string(n.ID))
+			}
+		}
+		s.nodeRegistry.ClearRemote()
+	}
+
+	// Clear pending nodes and their backing file.
+	if s.pendingRegistry != nil {
+		s.pendingRegistry.Clear()
+	}
+
 	if err := s.cp.Reset(); err != nil {
 		s.logger.Error("failed to reset config", "error", err)
 		http.Error(w, "failed to reset configuration", http.StatusInternalServerError)
