@@ -1,6 +1,6 @@
 # Tool Permissions
 
-Hiro uses a layered permission system to control which tools agents can use and how they can use them. Permissions are defined at multiple levels — agent definition, operator config, parent agent, and skill activation — and enforced both at tool registration time (which tools the agent sees) and at call time (whether a specific invocation is allowed).
+Hiro controls which tools agents can use through a layered permission system. Permissions are defined at four levels: agent definition, operator config, parent agent, and skill activation. They are enforced in two phases: at registration time (which tools the agent sees) and at call time (whether a specific invocation is allowed).
 
 ## Quick Reference
 
@@ -30,13 +30,36 @@ Tool rules use the format `Tool(pattern)` where the pattern uses wildcard matchi
 | `Bash` | Allow/deny all Bash usage |
 | `Bash(curl *)` | Only curl commands |
 | `Read(/src/*)` | Only files under /src/ |
-| `SpawnInstance(researcher,coder)` | Only these agent types |
+| `SpawnInstance(researcher,coder)` | Only these agent types (comma-separated list; each item supports wildcards) |
 
 Special characters:
 - `*` matches zero or more of any character
 - `\*` matches a literal asterisk
 - `\\` matches a literal backslash
 - A trailing ` *` is optional: `git *` matches both `git status` and bare `git`
+
+### What Parameter Does Each Rule Match?
+
+Each tool's rules match against a specific parameter from the tool call:
+
+| Tool | Parameter | Notes |
+|---|---|---|
+| `Bash` | `command` | Parsed with a shell AST; see [Bash Command Analysis](#bash-command-analysis) |
+| `Read` | `file_path` | Normalized with `filepath.Clean` |
+| `Write` | `file_path` | Normalized with `filepath.Clean` |
+| `Edit` | `file_path` | Normalized with `filepath.Clean` |
+| `Glob` | `pattern` | |
+| `Grep` | `pattern` | |
+| `WebFetch` | `url` | |
+| `SpawnInstance` | `agent` | Comma-separated list matching |
+| `TaskOutput` | `task_id` | |
+| `TaskStop` | `task_id` | |
+
+### Which Tools Can Be Controlled?
+
+Rules apply to the 9 **remote tools** that execute in worker processes: Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop.
+
+**Structural tools** (SpawnInstance, coordinator tools, memory tools, TodoWrite, Skill, etc.) bypass call-time rule enforcement. They are always available based on the agent's mode. You cannot restrict SpawnInstance or coordinator tools via `disallowed_tools`.
 
 ## Permission Sources
 
@@ -54,8 +77,10 @@ disallowed_tools: [Bash(rm *)]
 ---
 ```
 
-- `allowed_tools` — tools the agent can use (closed by default: no field = no tools)
-- `disallowed_tools` — tools explicitly blocked, even if allowed above
+- `allowed_tools` — tools the agent can use. **Closed by default**: omitting this field means the agent gets no remote tools.
+- `disallowed_tools` — tools explicitly blocked, even if allowed above.
+
+An agent with no `allowed_tools` field can still use structural tools (SpawnInstance, memory, etc.) based on its mode.
 
 ### 2. Operator Config (`config.yaml`)
 
@@ -76,24 +101,43 @@ agents:
 /tools list
 ```
 
+**Changes take effect on the next agent start**, not for currently running instances. To apply new rules to a running agent, stop and restart it.
+
+If no operator override exists for an agent, the agent uses its declared tools without restriction.
+
 ### 3. Parent Agent
 
 When an agent spawns a child, the child inherits the parent's tool restrictions. A child can never gain tools the parent doesn't have.
 
+```
+Parent: allowed_tools: [Bash, Read, Write]
+Child:  allowed_tools: [Bash, Read, Write, Grep]
+Result: [Bash, Read, Write]  (Grep removed — parent doesn't have it)
+```
+
+The parent's parameterized rules and deny rules also propagate to all descendants.
+
 ### 4. Skill Activation
 
-Skills can grant additional tools when activated. A skill's `allowed_tools` are additive — they expand the agent's tool set for the rest of the session:
+Skills can grant additional tools when activated. A skill's `allowed_tools` expand the agent's tool set for the rest of the session:
 
 ```yaml
 # skills/deploy.md
 ---
 name: deploy
-description: Deploy to production
+description: Deploy to Kubernetes
 allowed_tools: [Bash(kubectl *), Bash(helm *)]
 ---
 ```
 
 When the agent calls `Skill("deploy")`, it gains access to `kubectl` and `helm` commands. On session reset (`/clear`), the expansion is reverted.
+
+- **Additive only** — skills grant tools, never restrict existing ones
+- **Session-scoped** — expansion reverts on `/clear` (new session)
+- **Parameterized** — `Bash(kubectl *)` only allows kubectl, not all Bash
+- **Deny rules still apply** — instance-level denies block skill-granted tools
+- **Multiple skills accumulate** — each activated skill adds to the session's tool set
+- **Already-available tools are skipped** — no duplicate registration
 
 ## How Permissions Combine
 
@@ -105,14 +149,17 @@ Which tools the agent sees is determined by **name-based intersection**:
 Effective tools = Agent declared ∩ Operator override ∩ Parent tools
 ```
 
-If any source doesn't include a tool by name, the agent can't use it. Whole-tool deny rules also remove tools from the effective set entirely.
+If any source doesn't include a tool by name, the agent can't use it. Whole-tool deny rules (e.g., `disallowed_tools: [Bash]`) also remove tools from the effective set entirely — the agent never sees them.
+
+Skill-granted tools are added to the session's tool set after the initial intersection, bypassing the intersection (but still subject to deny rules).
 
 ### Call-Time Enforcement
 
 For tools that are visible, parameterized rules are enforced when the tool is actually called. The system uses a **layered model**:
 
-- **Deny rules** from all sources are merged. Any matching deny rule blocks the call.
+- **Deny rules** from all sources are merged. Any matching deny rule blocks the call immediately.
 - **Allow layers** are checked independently per source. Each layer must allow the call (cross-layer AND). Within a layer, any matching rule permits the call (within-layer OR).
+- **Unmatched** — if a layer has no rules for the tool being called, that layer has no opinion and doesn't block. Only layers with rules for the specific tool participate in the decision.
 
 Example with two sources:
 
@@ -122,7 +169,7 @@ Operator: allowed_tools: [Bash(curl *)]
 ```
 
 - `curl https://example.com` — allowed (matches both layers)
-- `git status` — denied (agent allows, operator doesn't)
+- `git status` — denied (agent layer allows, operator layer has Bash rules but none match `git`)
 - `rm -rf /` — denied (neither layer allows)
 
 ### Deny Always Wins
@@ -137,6 +184,15 @@ disallowed_tools: [Bash(git push *)]
 - `git status` — allowed
 - `git push origin main` — denied
 
+### NeedsReview = Denied
+
+Some commands are too complex for static analysis (see [Bash Command Analysis](#bash-command-analysis)). When the checker can't determine if a rule matches, it returns `NeedsReview`. This is **treated as denied** — the system fails closed.
+
+This means commands with `$()` substitutions, backtick expansion, or variable-as-command patterns will be blocked even if the outer command matches an allow rule. For example, with `allowed_tools: [Bash(echo *)]`:
+
+- `echo hello` — allowed
+- `echo $(curl evil.com)` — denied (command substitution makes the call uncertain)
+
 ## Bash Command Analysis
 
 Bash rules use a real shell parser (`mvdan.cc/sh/v3`) to extract commands from all nesting levels. This catches bypass attempts that lexical matching would miss:
@@ -147,19 +203,20 @@ Bash rules use a real shell parser (`mvdan.cc/sh/v3`) to extract commands from a
 | `echo $(rm -rf /)` | **Denied** | Extracted from `$()` |
 | `` echo `rm -rf /` `` | **Denied** | Extracted from backticks |
 | `(rm -rf /)` | **Denied** | Extracted from subshell |
-| `eval "rm -rf /"` | **NeedsReview** | `eval` is a dangerous builtin |
+| `a && rm -rf /` | **Denied** | Both sides of `&&` extracted |
+| `eval "rm -rf /"` | **NeedsReview** | `eval` can execute arbitrary code |
 
-Commands that can't be statically analyzed (variable expansion in command position, ANSI-C quoting, dangerous builtins like `eval`/`exec`/`sudo`) return `NeedsReview`, which is treated as denied.
+### Flagged Commands
 
-### Dangerous Builtins
+These commands are flagged as uncertain because they can execute arbitrary code that can't be statically analyzed:
 
-These commands are flagged as uncertain because they can execute arbitrary code:
+- **Shell evaluation:** `eval`, `exec`, `source`, `.`
+- **Shells:** `bash`, `sh`, `zsh`, `dash`
+- **Command wrappers:** `env`, `xargs`, `nohup`, `nice`, `sudo`, `su`, `doas`, `command`, `builtin`
+- **Script interpreters:** `python`, `python3`, `python2`, `perl`, `ruby`, `node`, `php`, `lua`
+- **Signal hooks:** `trap`
 
-- Shell evaluation: `eval`, `exec`, `source`, `.`
-- Shells: `bash`, `sh`, `zsh`, `dash`
-- Command wrappers: `env`, `xargs`, `nohup`, `nice`, `sudo`, `su`, `doas`, `command`, `builtin`
-- Script interpreters: `python`, `python3`, `python2`, `perl`, `ruby`, `node`, `php`, `lua`
-- Signal hooks: `trap`
+Any command containing these in command position triggers `NeedsReview` (treated as denied).
 
 ### Path Normalization
 
@@ -171,27 +228,6 @@ allowed_tools: [Read(/src/*)]
 
 - `Read(/src/main.go)` — allowed
 - `Read(/src/../etc/passwd)` — denied (normalizes to `/etc/passwd`)
-
-## Skill Tool Expansion
-
-When a skill declares `allowed_tools`, those tools become available to the agent for the rest of the session:
-
-```yaml
-# skills/deploy.md
----
-name: deploy
-description: Deploy to Kubernetes
-allowed_tools: [Bash(kubectl *), Bash(helm *)]
----
-```
-
-Expansion behavior:
-- **Additive only** — skills grant tools, never restrict existing ones
-- **Session-scoped** — expansion reverts on `/clear` (new session)
-- **Parameterized** — `Bash(kubectl *)` only allows kubectl, not all Bash
-- **Deny rules still apply** — instance-level denies block skill-granted tools
-- **Multiple skills accumulate** — each skill adds to the session's tool set
-- **Already-available tools are skipped** — no duplicate registration
 
 ## Frontmatter Reference
 
@@ -212,7 +248,7 @@ max_turns: 50
 |---|---|---|---|
 | `name` | string | required | Agent identifier |
 | `description` | string | optional | Short description |
-| `allowed_tools` | string[] | `nil` (no tools) | Tools the agent can use; supports parameterized rules |
+| `allowed_tools` | string[] | `nil` (no tools) | Remote tools the agent can use; supports parameterized rules |
 | `disallowed_tools` | string[] | `nil` | Tools to deny; checked at call time |
 | `model` | string | CP default | Model override (e.g., `sonnet`, `opus`, full model ID) |
 | `max_turns` | int | 0 (unlimited) | Max agentic turns before forcing final response |
@@ -236,9 +272,8 @@ arguments: [namespace, resource]
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | required | Kebab-case, max 64 chars |
-| `description` | string | required | Max 1024 chars; used for progressive disclosure listing |
-| `allowed_tools` | string[] | `nil` | Tools granted when skill is activated (session-scoped) |
-| `disallowed_tools` | string[] | `nil` | Reserved for future use |
+| `description` | string | required | Max 1024 chars; trigger description for progressive disclosure |
+| `allowed_tools` | string[] | `nil` | Tools granted when skill is activated (session-scoped, additive) |
 | `user_invocable` | bool | unset | Whether users can invoke via `/skill-name` |
 | `model` | string | inherit | Model override when skill runs as sub-agent |
 | `version` | string | optional | Skill version identifier |
@@ -260,32 +295,4 @@ agents:
 | `allowed_tools` | string[] | Override: agent can only use these tools (intersected with agent definition) |
 | `disallowed_tools` | string[] | Additional deny rules (merged with agent definition denies) |
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Tool Permission Flow                      │
-│                                                             │
-│  Agent Definition ──┐                                       │
-│  (allowed_tools,    │    Name-based        Call-time         │
-│   disallowed_tools) ├──→ intersection ──→  enforcement       │
-│                     │    (registration)    (per-call)        │
-│  Operator Config ───┤                         │              │
-│  (allowed_tools,    │    ┌─────────────┐     │              │
-│   disallowed_tools) │    │ Effective    │     ▼              │
-│                     ├──→ │ tool name ───┼──→ Checker         │
-│  Parent Agent ──────┤    │ set          │   ┌──────────┐    │
-│  (inherited rules)  │    └─────────────┘   │ 1. Deny  │    │
-│                     │                       │ 2. Allow │    │
-│  Skill Activation ──┘ (session-scoped,      │ 3. Result│    │
-│  (additive grant)      via PrepareStep)     └──────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Packages
-
-- **`internal/toolrules`** — Rule parsing, wildcard matching, AST-based Bash analysis, tri-state checker
-- **`internal/agent/manager_resolve.go`** — `computeEffectiveTools()`: multi-source intersection, layer construction
-- **`internal/inference/tools.go`** — `proxyTool.checkRules()`: call-time enforcement
-- **`internal/inference/loop.go`** — `expandToolsForSkill()`: session-scoped skill expansion
-- **`internal/controlplane/controlplane_policies.go`** — Operator CRUD for tool policies
+Changes via `/tools set` and `/tools deny` take effect on next agent start.
