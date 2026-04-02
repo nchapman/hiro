@@ -17,7 +17,11 @@ import (
 //go:embed skill.md
 var skillDescription string
 
-func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.Logger) fantasy.AgentTool {
+// SkillExpander is called when a skill with allowed_tools is activated.
+// It expands the session's tool set with the skill's tools.
+type SkillExpander func(skill *config.SkillConfig) error
+
+func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, onExpand SkillExpander, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("Skill",
 		skillDescription,
 		func(ctx context.Context, input struct {
@@ -50,6 +54,15 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, logger *slog.
 			if !isUnderAllowedDir(realPath, allowedDirs) {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("skill %q path is outside allowed directories", input.Name)), nil
+			}
+
+			// Expand session tools if the skill declares allowed_tools.
+			if onExpand != nil && len(skill.AllowedTools) > 0 {
+				if err := onExpand(skill); err != nil {
+					logger.Warn("skill tool expansion failed", "skill", input.Name, "error", err)
+					// Non-fatal: the skill instructions are still useful even
+					// if tool expansion fails.
+				}
 			}
 
 			logger.Info("tool call", "tool", "Skill", "skill", input.Name)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/toolrules"
 
@@ -403,5 +404,206 @@ func TestProxyTool_UnmatchedTool_PassesThrough(t *testing.T) {
 	}
 	if resp.IsError {
 		t.Errorf("Read should pass through when layer only has Bash rules, got: %s", resp.Content)
+	}
+}
+
+// --- Skill tool expansion tests ---
+
+// newTestLoop creates a minimal Loop for testing expandToolsForSkill.
+func newTestLoop(t *testing.T, allowedTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) *Loop {
+	t.Helper()
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	redactor := NewRedactor(nil)
+	proxyTools := buildProxyTools("/tmp", exec, allowedTools, allowLayers, denyRules, redactor, testLogger)
+	return &Loop{
+		workingDir:      "/tmp",
+		executor:        exec,
+		redactor:        redactor,
+		baseDenyRules:   denyRules,
+		baseAllowLayers: allowLayers,
+		tools:           proxyTools,
+		logger:          testLogger,
+	}
+}
+
+func toolNames(l *Loop) map[string]bool {
+	names := make(map[string]bool)
+	for _, t := range l.tools {
+		names[t.Info().Name] = true
+	}
+	return names
+}
+
+func TestExpandToolsForSkill_AddsNewTools(t *testing.T) {
+	// Agent starts with only Read.
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, nil)
+	if toolNames(l)["Bash"] {
+		t.Fatal("Bash should not be available initially")
+	}
+
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "deploy",
+		AllowedTools: []string{"Bash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := toolNames(l)
+	if !names["Bash"] {
+		t.Error("Bash should be available after skill expansion")
+	}
+	if !names["Read"] {
+		t.Error("Read should still be available")
+	}
+	if !l.skillExpanded {
+		t.Error("skillExpanded should be true")
+	}
+}
+
+func TestExpandToolsForSkill_SkipsAlreadyAvailable(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Bash": true, "Read": true}, nil, nil)
+	initialCount := len(l.tools)
+
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "test",
+		AllowedTools: []string{"Bash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No new tools added.
+	if len(l.tools) != initialCount {
+		t.Errorf("expected %d tools (unchanged), got %d", initialCount, len(l.tools))
+	}
+	if l.skillExpanded {
+		t.Error("skillExpanded should be false when no new tools added")
+	}
+}
+
+func TestExpandToolsForSkill_SkipsDeniedTools(t *testing.T) {
+	deny := mustParseRules(t, "Bash")
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, deny)
+
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "test",
+		AllowedTools: []string{"Bash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if toolNames(l)["Bash"] {
+		t.Error("Bash should not be added when wholly denied")
+	}
+}
+
+func TestExpandToolsForSkill_ParameterizedRulesEnforced(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, nil)
+
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "deploy",
+		AllowedTools: []string{"Bash(kubectl *)"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Bash should be available.
+	names := toolNames(l)
+	if !names["Bash"] {
+		t.Fatal("Bash should be available after skill expansion")
+	}
+
+	// Find the Bash proxy tool and test that rules are enforced.
+	for _, tool := range l.tools {
+		if tool.Info().Name == "Bash" {
+			pt := tool.(*proxyTool)
+			// kubectl should be allowed.
+			resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+				ID: "call-1", Name: "Bash",
+				Input: `{"command":"kubectl get pods"}`,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.IsError {
+				t.Errorf("kubectl should be allowed, got: %s", resp.Content)
+			}
+
+			// rm should be denied.
+			resp, err = pt.Run(context.Background(), fantasy.ToolCall{
+				ID: "call-2", Name: "Bash",
+				Input: `{"command":"rm -rf /"}`,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !resp.IsError {
+				t.Error("rm should be denied by parameterized allow rule")
+			}
+			return
+		}
+	}
+	t.Fatal("Bash proxy tool not found")
+}
+
+func TestExpandToolsForSkill_MultipleSkillsAccumulate(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, nil)
+
+	// First skill grants Bash.
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "skill-a",
+		AllowedTools: []string{"Bash(kubectl *)"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second skill grants Write and additional Bash pattern.
+	err = l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "skill-b",
+		AllowedTools: []string{"Write", "Bash(helm *)"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := toolNames(l)
+	if !names["Read"] || !names["Bash"] || !names["Write"] {
+		t.Errorf("expected Read, Bash, Write; got %v", names)
+	}
+
+	// Skill allow layer should have accumulated rules from both skills.
+	if len(l.skillAllowLayer) != 3 {
+		t.Errorf("expected 3 accumulated skill rules, got %d", len(l.skillAllowLayer))
+	}
+}
+
+func TestExpandToolsForSkill_EmptyAllowedTools(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, nil)
+
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "info-only",
+		AllowedTools: nil,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.skillExpanded {
+		t.Error("skillExpanded should be false for empty allowed_tools")
+	}
+}
+
+func TestExpandToolsForSkill_InvalidRule(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, nil)
+
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "bad",
+		AllowedTools: []string{"Bash("},
+	})
+	if err == nil {
+		t.Error("expected error for malformed rule")
 	}
 }

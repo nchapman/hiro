@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openrouter"
 
+	"github.com/nchapman/hiro/internal/agent/tools"
 	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/models"
@@ -80,7 +81,16 @@ type Loop struct {
 	logger         *slog.Logger
 
 	// Tools are stored for agent recreation on model switch.
+	// Updated when skills expand the tool set.
 	tools []fantasy.AgentTool
+
+	// Session-scoped tool expansion from skills. Protected by updateMu.
+	executor       ipc.ToolExecutor       // retained for creating new proxy tools
+	redactor       *Redactor              // retained for creating new proxy tools
+	baseDenyRules  []toolrules.Rule       // instance-level deny rules (immutable)
+	baseAllowLayers [][]toolrules.Rule    // instance-level allow layers (immutable)
+	skillAllowLayer []toolrules.Rule      // accumulated allow rules from activated skills
+	skillExpanded  bool                   // true if any skill has expanded tools this session
 
 	// Per-session model/reasoning config (protected by updateMu).
 	model           string // resolved model ID (e.g. "claude-sonnet-4-20250514")
@@ -159,6 +169,12 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	// Store tools for agent recreation on model switch.
 	l.tools = agentTools
+
+	// Retain construction values for session-scoped skill tool expansion.
+	l.executor = cfg.Executor
+	l.redactor = redactor
+	l.baseDenyRules = cfg.DenyRules
+	l.baseAllowLayers = cfg.AllowLayers
 	l.model = cfg.Model
 	l.provider = cfg.Provider
 
@@ -171,6 +187,104 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	)
 
 	return l, nil
+}
+
+// expandToolsForSkill adds tools granted by a skill's allowed_tools to the
+// session's active tool set. Tools already available are skipped (additive
+// only — skills can't restrict existing tools). Wholly denied tools are
+// also skipped. Parameterized rules are accumulated into a skill allow
+// layer for call-time enforcement.
+//
+// Must be called under no lock — acquires updateMu internally.
+func (l *Loop) expandToolsForSkill(skill *config.SkillConfig) error {
+	if len(skill.AllowedTools) == 0 {
+		return nil
+	}
+
+	rules, err := toolrules.ParseRules(skill.AllowedTools)
+	if err != nil {
+		return fmt.Errorf("parsing skill %q allowed_tools: %w", skill.Name, err)
+	}
+
+	// Build set of tools the skill wants.
+	wantTools := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		wantTools[r.Tool] = true
+	}
+
+	// Build set of tools already available.
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+
+	haveTools := make(map[string]bool, len(l.tools))
+	for _, t := range l.tools {
+		haveTools[t.Info().Name] = true
+	}
+
+	// Build set of wholly denied tools.
+	denied := make(map[string]bool)
+	for _, r := range l.baseDenyRules {
+		if r.IsWholeTool() {
+			denied[r.Tool] = true
+		}
+	}
+
+	// Determine which tools to add.
+	var newToolNames []string
+	for name := range wantTools {
+		if haveTools[name] {
+			continue // already available
+		}
+		if denied[name] {
+			l.logger.Warn("skill requests denied tool, skipping",
+				"skill", skill.Name, "tool", name)
+			continue
+		}
+		if !tools.RemoteToolNames[name] {
+			l.logger.Warn("skill requests non-remote tool, skipping",
+				"skill", skill.Name, "tool", name)
+			continue
+		}
+		newToolNames = append(newToolNames, name)
+	}
+
+	// Accumulate skill rules into a single allow layer.
+	l.skillAllowLayer = append(l.skillAllowLayer, rules...)
+
+	// Build the combined allow layers for skill-granted proxy tools:
+	// base layers + skill layer.
+	skillLayers := make([][]toolrules.Rule, len(l.baseAllowLayers)+1)
+	copy(skillLayers, l.baseAllowLayers)
+	skillLayers[len(skillLayers)-1] = l.skillAllowLayer
+
+	// Create proxy tools for newly granted remote tools.
+	if len(newToolNames) > 0 {
+		newNames := make(map[string]bool, len(newToolNames))
+		for _, n := range newToolNames {
+			newNames[n] = true
+		}
+		for _, info := range tools.RemoteToolInfos(l.workingDir) {
+			if !newNames[info.Name] {
+				continue
+			}
+			l.tools = append(l.tools, &proxyTool{
+				info:        info,
+				executor:    l.executor,
+				redactor:    l.redactor,
+				logger:      l.logger,
+				allowLayers: skillLayers,
+				denyRules:   l.baseDenyRules,
+			})
+		}
+		l.skillExpanded = true
+		l.logger.Info("skill expanded tools",
+			"skill", skill.Name, "new_tools", newToolNames)
+	}
+
+	// If the skill added parameterized rules for tools already in the set,
+	// we don't restrict existing tools — skills are additive only.
+
+	return nil
 }
 
 // Notify pushes a notification into the queue. The session driver (WebSocket
@@ -279,6 +393,12 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 			if l.maxTurns > 0 && opts.StepNumber >= l.maxTurns {
 				result.DisableAllTools = true
 			}
+			// Inject expanded tool set if skills have added tools.
+			l.updateMu.Lock()
+			if l.skillExpanded {
+				result.Tools = l.tools
+			}
+			l.updateMu.Unlock()
 			return ctx, result, nil
 		},
 		OnReasoningStart: func(id string, rc fantasy.ReasoningContent) error {
@@ -641,7 +761,7 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 		if cfg.SharedSkillDir != "" {
 			allowedDirs = append(allowedDirs, cfg.SharedSkillDir)
 		}
-		localTools = append(localTools, buildSkillTool(&cfg.AgentConfig, allowedDirs, l.logger))
+		localTools = append(localTools, buildSkillTool(&cfg.AgentConfig, allowedDirs, l.expandToolsForSkill, l.logger))
 	}
 
 	// Filter by allowed set.
