@@ -30,7 +30,7 @@ type ProviderConfig struct {
 
 // AgentPolicy defines operator-level overrides for a named agent.
 type AgentPolicy struct {
-	Tools     []string `yaml:"tools,omitempty"`
+	AllowedTools     []string `yaml:"allowed_tools,omitempty"`
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
 }
 

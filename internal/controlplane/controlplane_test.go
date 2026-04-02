@@ -30,7 +30,7 @@ func TestLoadExistingFile(t *testing.T) {
   DB_URL: "postgres://localhost"
 agents:
   researcher:
-    tools: [Read, Grep]
+    allowed_tools: [Read, Grep]
 `
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)

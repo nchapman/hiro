@@ -1108,7 +1108,7 @@ func TestManager_EffectiveTools(t *testing.T) {
 	writeAgentMD(t, dir, "tooled", `---
 name: tooled
 model: fake-model
-tools:
+allowed_tools:
   - Bash
   - Read
   - Write
@@ -1134,7 +1134,7 @@ func TestManager_EffectiveTools_Parameterized(t *testing.T) {
 	writeAgentMD(t, dir, "restricted", `---
 name: restricted
 model: fake-model
-tools:
+allowed_tools:
   - Bash(curl *)
   - Read
 disallowed_tools:
@@ -1176,7 +1176,7 @@ func TestManager_EffectiveTools_WholeDenyRemovesTool(t *testing.T) {
 	writeAgentMD(t, dir, "nodeny", `---
 name: nodeny
 model: fake-model
-tools:
+allowed_tools:
   - Bash
   - Read
   - Write
@@ -1204,7 +1204,7 @@ func TestManager_EffectiveTools_WholeToolStrippedWhenParameterized(t *testing.T)
 	writeAgentMD(t, dir, "mixed", `---
 name: mixed
 model: fake-model
-tools:
+allowed_tools:
   - Bash
   - Bash(curl *)
   - Read
@@ -1360,7 +1360,7 @@ func TestManager_CoordinatorTools_InSpawnConfig(t *testing.T) {
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
-tools: [Bash]
+allowed_tools: [Bash]
 ---
 Coordinator.`)
 
@@ -1389,7 +1389,7 @@ func TestManager_CoordinatorGroups_InSpawnConfig(t *testing.T) {
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
-tools: [Bash]
+allowed_tools: [Bash]
 ---
 Coordinator.`)
 
@@ -1422,7 +1422,7 @@ func TestManager_CoordinatorMode_NoGroupConfigured(t *testing.T) {
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
-tools: [Bash]
+allowed_tools: [Bash]
 ---
 Coordinator.`)
 
@@ -1448,7 +1448,7 @@ func TestManager_NonCoordinator_NoCoordinatorGroup(t *testing.T) {
 	writeAgentMD(t, dir, "worker", `---
 name: worker
 model: fake-model
-tools: [Bash]
+allowed_tools: [Bash]
 ---
 Worker.`)
 
@@ -1473,7 +1473,7 @@ func TestManager_EphemeralAgent_NoCoordinatorTools(t *testing.T) {
 	writeAgentMD(t, dir, "worker", `---
 name: worker
 model: fake-model
-tools: [Bash]
+allowed_tools: [Bash]
 ---
 Worker.`)
 
@@ -1516,7 +1516,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 
 	agentDir := filepath.Join(dir, "agents", "worker")
 	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\ntools: [Bash, Read]\n---\nWork."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\nallowed_tools: [Bash, Read]\n---\nWork."), 0644)
 
 	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "", "", "")
 	if err != nil {
@@ -1524,7 +1524,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	}
 
 	// Update agent.md
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\ntools: [Bash, Read, Grep]\n---\nUpdated work."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\nallowed_tools: [Bash, Read, Grep]\n---\nUpdated work."), 0644)
 	mgr.pushConfigUpdate("worker")
 
 	// Verify the description was updated in-memory.
@@ -1597,7 +1597,7 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 		agentDir := filepath.Join(dir, "agents", name)
 		os.MkdirAll(agentDir, 0755)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ndescription: old\ntools: [Bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: old\nallowed_tools: [Bash]\n---\nDo stuff."), 0644)
 	}
 
 	idA, err := mgr.CreateInstance(t.Context(), "alpha", "", "persistent", "", "", "")
@@ -1613,7 +1613,7 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 	for _, name := range []string{"alpha", "beta"} {
 		agentDir := filepath.Join(dir, "agents", name)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ndescription: updated\ntools: [Bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: updated\nallowed_tools: [Bash]\n---\nDo stuff."), 0644)
 	}
 
 	mgr.PushConfigUpdateAll()

@@ -209,7 +209,7 @@ func (m AgentMode) IsPersistent() bool {
 type AgentConfig struct {
 	Name          string
 	Description   string
-	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
+	AllowedTools []string // from frontmatter "allowed_tools"; nil = no built-in tools (closed by default)
 	DisallowedTools []string // from frontmatter "disallowed_tools"; deny rules checked at call time
 	Model           string   // from frontmatter "model"; per-agent model override
 	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
@@ -263,7 +263,7 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	agent := AgentConfig{
 		Name:          parsed.Frontmatter.String("name"),
 		Description:   parsed.Frontmatter.String("description"),
-		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
+		AllowedTools: parsed.Frontmatter.StringSlice("allowed_tools"),
 		DisallowedTools: parsed.Frontmatter.StringSlice("disallowed_tools"),
 		Model:           parsed.Frontmatter.String("model"),
 		MaxTurns:         parsed.Frontmatter.Int("max_turns"),

@@ -11,7 +11,7 @@ func (cp *ControlPlane) AgentTools(name string) (tools []string, ok bool) {
 	if !exists {
 		return nil, false
 	}
-	return policy.Tools, true
+	return policy.AllowedTools, true
 }
 
 // SetAgentTools sets the operator allow-tool override for a named agent.
@@ -20,7 +20,7 @@ func (cp *ControlPlane) SetAgentTools(name string, tools []string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	policy := cp.config.Agents[name]
-	policy.Tools = tools
+	policy.AllowedTools = tools
 	cp.config.Agents[name] = policy
 }
 
@@ -30,7 +30,7 @@ func (cp *ControlPlane) ClearAgentTools(name string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	policy := cp.config.Agents[name]
-	policy.Tools = nil
+	policy.AllowedTools = nil
 	if len(policy.DisallowedTools) == 0 {
 		delete(cp.config.Agents, name)
 	} else {
@@ -66,7 +66,7 @@ func (cp *ControlPlane) ClearAgentDisallowedTools(name string) {
 	defer cp.mu.Unlock()
 	policy := cp.config.Agents[name]
 	policy.DisallowedTools = nil
-	if len(policy.Tools) == 0 {
+	if len(policy.AllowedTools) == 0 {
 		delete(cp.config.Agents, name)
 	} else {
 		cp.config.Agents[name] = policy

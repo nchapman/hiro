@@ -164,8 +164,8 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		for _, name := range names {
 			p := policies[name]
 			fmt.Fprintf(&b, "  %s:\n", name)
-			if len(p.Tools) > 0 {
-				fmt.Fprintf(&b, "    allow: %s\n", strings.Join(p.Tools, ", "))
+			if len(p.AllowedTools) > 0 {
+				fmt.Fprintf(&b, "    allow: %s\n", strings.Join(p.AllowedTools, ", "))
 			}
 			if len(p.DisallowedTools) > 0 {
 				fmt.Fprintf(&b, "    deny:  %s\n", strings.Join(p.DisallowedTools, ", "))

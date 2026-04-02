@@ -36,8 +36,8 @@ var persistentTools = []string{
 func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string) (effective map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, err error) {
 	// Parse agent's declared tools as rules.
 	var agentAllow []toolrules.Rule
-	if cfg.DeclaredTools != nil {
-		agentAllow, err = toolrules.ParseRules(cfg.DeclaredTools)
+	if cfg.AllowedTools != nil {
+		agentAllow, err = toolrules.ParseRules(cfg.AllowedTools)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("parsing agent tool rules: %w", err)
 		}
