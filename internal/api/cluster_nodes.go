@@ -125,6 +125,11 @@ func (s *Server) handleRemoveApproved(w http.ResponseWriter, r *http.Request) {
 		s.disconnectNode(nodeID)
 	}
 
+	// Remove from the live node registry so it doesn't appear as offline.
+	if s.nodeRegistry != nil {
+		s.nodeRegistry.Unregister(cluster.NodeID(nodeID))
+	}
+
 	s.logger.Info("node revoked", "node_id", nodeID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
