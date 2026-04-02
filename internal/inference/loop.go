@@ -248,6 +248,12 @@ func (l *Loop) expandToolsForSkill(skill *config.SkillConfig) error {
 		newToolNames = append(newToolNames, name)
 	}
 
+	// Only accumulate rules and create proxies if there are new tools to add.
+	// Skills are additive only — they don't restrict existing tools.
+	if len(newToolNames) == 0 {
+		return nil
+	}
+
 	// Accumulate skill rules into a single allow layer.
 	l.skillAllowLayer = append(l.skillAllowLayer, rules...)
 
@@ -258,7 +264,7 @@ func (l *Loop) expandToolsForSkill(skill *config.SkillConfig) error {
 	skillLayers[len(skillLayers)-1] = l.skillAllowLayer
 
 	// Create proxy tools for newly granted remote tools.
-	if len(newToolNames) > 0 {
+	{
 		newNames := make(map[string]bool, len(newToolNames))
 		for _, n := range newToolNames {
 			newNames[n] = true
@@ -280,9 +286,6 @@ func (l *Loop) expandToolsForSkill(skill *config.SkillConfig) error {
 		l.logger.Info("skill expanded tools",
 			"skill", skill.Name, "new_tools", newToolNames)
 	}
-
-	// If the skill added parameterized rules for tools already in the set,
-	// we don't restrict existing tools — skills are additive only.
 
 	return nil
 }
@@ -598,11 +601,13 @@ func (l *Loop) UpdateToolRules(allowed map[string]bool, allowLayers [][]toolrule
 	l.skillAllowLayer = nil
 	l.skillExpanded = false
 
-	// Recreate agent with updated tools.
-	l.agent = fantasy.NewAgent(l.lm,
-		fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
-		fantasy.WithTools(l.tools...),
-	)
+	// Recreate agent with updated tools (skip if no LM, e.g. test mode).
+	if l.lm != nil {
+		l.agent = fantasy.NewAgent(l.lm,
+			fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
+			fantasy.WithTools(l.tools...),
+		)
+	}
 }
 
 // SetReasoningEffort sets the reasoning effort level for subsequent calls.

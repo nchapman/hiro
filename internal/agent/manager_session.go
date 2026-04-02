@@ -217,9 +217,16 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			hasSkills = true
 		}
 	}
-	allowedTools := buildAllowedToolsMap(inst.effectiveTools, inst.info.Mode, hasSkills)
-	allowLayers := inst.allowLayers
-	denyRules := inst.denyRules
+	// Recompute effective tools from current config (agent.md + CP + parent).
+	// This picks up any permission changes since the instance was created.
+	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, inst.info.ParentID)
+	if err != nil {
+		return "", fmt.Errorf("computing effective tools: %w", err)
+	}
+	inst.effectiveTools = effectiveTools
+	inst.allowLayers = allowLayers
+	inst.denyRules = denyRules
+	allowedTools := buildAllowedToolsMap(effectiveTools, inst.info.Mode, hasSkills)
 
 	spawnCtx := m.ctx // persistent instances always use manager context
 
