@@ -134,6 +134,8 @@ var toolStatusMessages = map[string]string{
 	"ListInstances":   "Listing instances",
 	"ListNodes":       "Listing nodes",
 	"SendMessage":     "Messaging instance",
+	"AddMemory":      "Saving memory",
+	"ForgetMemory":   "Forgetting memory",
 	"TodoWrite":      "Updating tasks",
 	"HistorySearch":  "Searching history for {{query}}",
 	"HistoryRecall":  "Recalling summary",
