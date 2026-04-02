@@ -17,6 +17,7 @@ require (
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.47.0
+	mvdan.cc/sh/v3 v3.13.0
 )
 
 require (
