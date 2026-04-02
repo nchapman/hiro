@@ -27,11 +27,9 @@ export default function SettingsPage() {
   const [providerTypes, setProviderTypes] = useState<ProviderTypeInfo[]>([])
   const [providers, setProviders] = useState<Record<string, ProviderInfo>>({})
   const [settings, setSettings] = useState<Settings>({
-    default_provider: "",
     default_model: "",
   })
   const [savedSettings, setSavedSettings] = useState<Settings>({
-    default_provider: "",
     default_model: "",
   })
 
@@ -80,7 +78,7 @@ export default function SettingsPage() {
 
   const handleProvidersChanged = useCallback(() => {
     fetchProviders()
-    fetchSettings() // default_provider may have been auto-set
+    fetchSettings() // default_model may have been auto-set
   }, [fetchProviders, fetchSettings])
 
   return (

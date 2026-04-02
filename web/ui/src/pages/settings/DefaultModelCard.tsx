@@ -20,8 +20,20 @@ import {
 import type { ModelInfo } from "@/lib/chat-types"
 
 export interface Settings {
-  default_provider: string
-  default_model: string
+  default_model: string // "provider/model" format from API
+}
+
+/** Split "provider/model" into [provider, model]. Bare model → ["", model]. */
+export function parseModelSpec(spec: string): [string, string] {
+  const i = spec.indexOf("/")
+  if (i < 0) return ["", spec]
+  return [spec.slice(0, i), spec.slice(i + 1)]
+}
+
+/** Join provider + model into "provider/model". Bare model → just model. */
+export function formatModelSpec(provider: string, model: string): string {
+  if (!provider) return model
+  return `${provider}/${model}`
 }
 
 interface DefaultModelCardProps {
@@ -44,23 +56,24 @@ export default function DefaultModelCard({
 }: DefaultModelCardProps) {
   const [defaultModels, setDefaultModels] = useState<ModelInfo[]>([])
 
+  // Derive provider and model from the unified spec for the dropdowns.
+  const [selectedProvider, selectedModel] = parseModelSpec(settings.default_model)
+
   const providerLabel = (type: string) => providerItems[type] ?? type
 
   // Fetch models when the selected default provider changes.
   useEffect(() => {
-    if (!settings.default_provider) {
+    if (!selectedProvider) {
       setDefaultModels([])
       return
     }
-    fetch(`/api/models?provider=${encodeURIComponent(settings.default_provider)}`)
+    fetch(`/api/models?provider=${encodeURIComponent(selectedProvider)}`)
       .then((res) => (res.ok ? res.json() : []))
       .then((data: ModelInfo[]) => setDefaultModels(data ?? []))
       .catch(() => setDefaultModels([]))
-  }, [settings.default_provider])
+  }, [selectedProvider])
 
-  const settingsChanged =
-    settings.default_provider !== savedSettings.default_provider ||
-    settings.default_model !== savedSettings.default_model
+  const settingsChanged = settings.default_model !== savedSettings.default_model
 
   const handleSave = async () => {
     try {
@@ -87,13 +100,11 @@ export default function DefaultModelCard({
           <div className="flex flex-col gap-2">
             <Label>Provider</Label>
             <Select
-              value={settings.default_provider}
+              value={selectedProvider}
               onValueChange={(v) => {
                 if (v)
                   onSettingsChange({
-                    ...settings,
-                    default_provider: v,
-                    default_model: "",
+                    default_model: formatModelSpec(v, ""),
                   })
               }}
               items={providerItems}
@@ -113,10 +124,12 @@ export default function DefaultModelCard({
           <div className="flex flex-1 flex-col gap-2">
             <Label>Model</Label>
             <Select
-              value={settings.default_model}
+              value={selectedModel}
               onValueChange={(v) => {
                 if (v)
-                  onSettingsChange({ ...settings, default_model: v })
+                  onSettingsChange({
+                    default_model: formatModelSpec(selectedProvider, v),
+                  })
               }}
               items={Object.fromEntries(
                 defaultModels.map((m) => [m.id, m.name || m.id])

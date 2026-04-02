@@ -243,6 +243,10 @@ func (m *Manager) resolveModelSpec(agentModel string) (spec models.ModelSpec, ap
 		spec.Model = agentSpec.Model
 		if agentSpec.Provider != "" {
 			spec.Provider = agentSpec.Provider
+		} else {
+			// Bare model name — clear inherited provider so the
+			// fallback search resolves the correct provider.
+			spec.Provider = ""
 		}
 	}
 
@@ -252,6 +256,8 @@ func (m *Manager) resolveModelSpec(agentModel string) (spec models.ModelSpec, ap
 		spec.Model = envSpec.Model
 		if envSpec.Provider != "" {
 			spec.Provider = envSpec.Provider
+		} else {
+			spec.Provider = ""
 		}
 	}
 
