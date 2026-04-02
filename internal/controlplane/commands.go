@@ -118,7 +118,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 			return fmt.Sprintf("Invalid rule: %v", err), false, nil
 		}
 		cp.SetAgentTools(agentName, toolList)
-		return fmt.Sprintf("Allow rules for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
+		return fmt.Sprintf("Allow rules for %q set to: %s\n\nTakes effect immediately on running agents.", agentName, strings.Join(toolList, ", ")), true, nil
 
 	case "deny":
 		if len(args) < 2 {
@@ -133,7 +133,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 			return fmt.Sprintf("Invalid rule: %v", err), false, nil
 		}
 		cp.SetAgentDisallowedTools(agentName, toolList)
-		return fmt.Sprintf("Deny rules for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
+		return fmt.Sprintf("Deny rules for %q set to: %s\n\nTakes effect immediately on running agents.", agentName, strings.Join(toolList, ", ")), true, nil
 
 	case "rm", "remove", "clear":
 		if len(args) < 1 {

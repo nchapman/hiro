@@ -572,6 +572,39 @@ func (l *Loop) UpdateModel(lm fantasy.LanguageModel, model, provider string) {
 	)
 }
 
+// UpdateToolRules rebuilds the proxy tool set with new allow/deny rules.
+// Preserves local (structural) tools. Resets any session-scoped skill
+// expansions since the base rules have changed. Recreates the fantasy
+// agent so changes take effect on the next Chat() call.
+func (l *Loop) UpdateToolRules(allowed map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) {
+	l.updateMu.Lock()
+	defer l.updateMu.Unlock()
+
+	// Rebuild proxy tools with new rules.
+	proxyTools := buildProxyTools(l.workingDir, l.executor, allowed, allowLayers, denyRules, l.redactor, l.logger)
+
+	// Preserve local (structural) tools — they bypass permission filtering.
+	var newTools []fantasy.AgentTool
+	newTools = append(newTools, proxyTools...)
+	for _, t := range l.tools {
+		if _, isProxy := t.(*proxyTool); !isProxy {
+			newTools = append(newTools, t)
+		}
+	}
+
+	l.tools = newTools
+	l.baseDenyRules = denyRules
+	l.baseAllowLayers = allowLayers
+	l.skillAllowLayer = nil
+	l.skillExpanded = false
+
+	// Recreate agent with updated tools.
+	l.agent = fantasy.NewAgent(l.lm,
+		fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
+		fantasy.WithTools(l.tools...),
+	)
+}
+
 // SetReasoningEffort sets the reasoning effort level for subsequent calls.
 // An empty string disables reasoning.
 func (l *Loop) SetReasoningEffort(effort string) {

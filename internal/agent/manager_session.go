@@ -405,19 +405,36 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 			inst.mu.Unlock()
 			continue
 		}
-		// Model switch requires a live loop; description is always updated.
-		if inst.loop != nil && model != inst.info.Model {
-			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(providerName), apiKey, baseURL, model)
-			pushCancel()
+
+		if inst.loop != nil {
+			// Recompute effective tools from updated config.
+			effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, t.parentID)
 			if err != nil {
-				m.logger.Warn("failed to create language model for config push",
-					"agent", agentName, "model", model, "error", err)
+				m.logger.Warn("failed to recompute tools for config push",
+					"agent", agentName, "instance", t.id, "error", err)
 			} else {
-				inst.loop.UpdateModel(lm, model, providerName)
-				inst.info.Model = model
+				allowedTools := buildAllowedToolsMap(effectiveTools, t.mode, hasSkills)
+				inst.effectiveTools = effectiveTools
+				inst.allowLayers = allowLayers
+				inst.denyRules = denyRules
+				inst.loop.UpdateToolRules(allowedTools, allowLayers, denyRules)
+			}
+
+			// Model switch.
+			if model != inst.info.Model {
+				pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(providerName), apiKey, baseURL, model)
+				pushCancel()
+				if err != nil {
+					m.logger.Warn("failed to create language model for config push",
+						"agent", agentName, "model", model, "error", err)
+				} else {
+					inst.loop.UpdateModel(lm, model, providerName)
+					inst.info.Model = model
+				}
 			}
 		}
+
 		inst.info.Description = cfg.Description
 		inst.mu.Unlock()
 

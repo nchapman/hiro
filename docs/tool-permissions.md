@@ -101,7 +101,7 @@ agents:
 /tools list
 ```
 
-**Changes take effect on the next agent start**, not for currently running instances. To apply new rules to a running agent, stop and restart it.
+Changes take effect immediately on running agents — the filesystem watcher detects config.yaml changes and pushes updated tool rules to all affected instances.
 
 If no operator override exists for an agent, the agent uses its declared tools without restriction.
 
@@ -295,4 +295,4 @@ agents:
 | `allowed_tools` | string[] | Override: agent can only use these tools (intersected with agent definition) |
 | `disallowed_tools` | string[] | Additional deny rules (merged with agent definition denies) |
 
-Changes via `/tools set` and `/tools deny` take effect on next agent start.
+Changes via `/tools set` and `/tools deny` take effect immediately on running agents.
