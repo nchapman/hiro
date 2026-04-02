@@ -92,22 +92,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply common config
-	s.cp.SetPasswordHash(string(hash))
-	s.cp.SetClusterMode(req.Mode)
-
-	// Save node name (all modes).
-	nodeName := req.NodeName
-	if nodeName == "" {
-		if h, err := os.Hostname(); err == nil {
-			nodeName = h
-		}
-	}
-	if nodeName != "" {
-		s.cp.SetClusterNodeName(nodeName)
-	}
-
-	// Apply provider config (standalone + leader)
+	// Validate provider config before mutating any state, so a bad provider
+	// type doesn't leave the control plane in a half-configured state.
 	if req.Mode != "worker" {
 		if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
 			APIKey: req.APIKey,
@@ -121,12 +107,31 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply common config — all validation has passed at this point.
+	s.cp.SetPasswordHash(string(hash))
+	s.cp.SetClusterMode(req.Mode)
+
+	nodeName := req.NodeName
+	if nodeName == "" {
+		if h, err := os.Hostname(); err == nil {
+			nodeName = h
+		}
+	}
+	if nodeName != "" {
+		s.cp.SetClusterNodeName(nodeName)
+	}
+
 	// Apply mode-specific cluster config
 	resp := map[string]any{"ok": true}
 
 	switch req.Mode {
 	case "leader":
-		swarmCode := cluster.GenerateSwarmCode()
+		swarmCode, err := cluster.GenerateSwarmCode()
+		if err != nil {
+			s.logger.Error("failed to generate swarm code", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		s.cp.SetClusterTrackerURL(defaultTrackerURL)
 		s.cp.SetClusterSwarmCode(swarmCode)
 		resp["swarm_code"] = swarmCode

@@ -230,8 +230,8 @@ export default function App() {
           const newNodes = data.filter((n) => !knownPendingIds.current.has(n.node_id))
           knownPendingIds.current = currentIds
 
-          if (newNodes.length > 0) {
-            // Dismiss any existing toast and show an updated one.
+          if (count > 0 && (newNodes.length > 0 || pendingToastId.current !== null)) {
+            // Show or update the toast whenever there are pending nodes.
             if (pendingToastId.current !== null) {
               toast.dismiss(pendingToastId.current)
             }
@@ -264,6 +264,8 @@ export default function App() {
         toast.dismiss(pendingToastId.current)
         pendingToastId.current = null
       }
+      setPendingNodeCount(0)
+      knownPendingIds.current = new Set()
     }
   }, [appState.kind, clusterMode, navigate])
 

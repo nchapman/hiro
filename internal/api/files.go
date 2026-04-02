@@ -87,7 +87,16 @@ func isProtectedPath(rootDir, absPath string) bool {
 	if err != nil {
 		return false
 	}
-	return protectedPaths[rel]
+	// Protect exact top-level dirs and anything under config/ (contains secrets).
+	if protectedPaths[rel] {
+		return true
+	}
+	for p := rel; p != "." && p != ""; p = filepath.Dir(p) {
+		if p == "config" {
+			return true
+		}
+	}
+	return false
 }
 
 type treeEntry struct {

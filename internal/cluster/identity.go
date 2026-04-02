@@ -21,7 +21,7 @@ type NodeIdentity struct {
 	NodeID     string // hex(sha256(public_key))
 }
 
-// LoadOrCreateIdentity loads the node's Ed25519 identity from rootDir/identity.key,
+// LoadOrCreateIdentity loads the node's Ed25519 identity from rootDir/config/identity.key,
 // or generates a new one if it doesn't exist. The file stores the 32-byte seed.
 func LoadOrCreateIdentity(rootDir string) (*NodeIdentity, error) {
 	path := filepath.Join(rootDir, identityFile)

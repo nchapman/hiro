@@ -176,11 +176,24 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 		}
 
 		// Not approved and not revoked — add to pending list.
-		_, isNew := s.pending.AddOrUpdate(PendingNode{
+		ok, isNew := s.pending.AddOrUpdate(PendingNode{
 			NodeID: string(nodeID),
 			Name:   nodeName,
 			Addr:   peerAddr,
 		})
+
+		if !ok {
+			s.logger.Warn("pending registry full, rejecting node", "node_id", truncID)
+			_ = stream.Send(&pb.LeaderMessage{
+				Msg: &pb.LeaderMessage_Rejected{
+					Rejected: &pb.NodeRejected{
+						NodeId: string(nodeID),
+						Reason: "pending node limit reached; dismiss or approve existing nodes first",
+					},
+				},
+			})
+			return nil
+		}
 
 		if isNew {
 			s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)

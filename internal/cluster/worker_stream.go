@@ -47,7 +47,7 @@ type WorkerStreamConfig struct {
 	LeaderAddr string
 	NodeName   string
 	Capacity   int32
-	TLSConfig  *tls.Config                                              // if set, use mTLS; otherwise plaintext
+	TLSConfig  *tls.Config                                              // required — mTLS is mandatory for cluster connections
 	DialFunc   func(ctx context.Context, addr string) (net.Conn, error) // optional custom dialer (e.g. relay)
 	Logger     *slog.Logger
 }

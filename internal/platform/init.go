@@ -51,6 +51,13 @@ func Init(dir string, logger *slog.Logger) error {
 		if err := os.MkdirAll(path, perm); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
 		}
+		// MkdirAll won't tighten perms on existing dirs. Ensure config/ is
+		// always restricted, even on upgrades from older installs.
+		if d == "config" {
+			if err := os.Chmod(path, 0700); err != nil {
+				logger.Warn("failed to tighten config directory permissions", "error", err)
+			}
+		}
 		// agents/ and skills/ are owned by hiro-coordinators with setgid,
 		// so coordinator agents can write and others get read-only access.
 		// Also walk existing subdirectories to handle upgrades from
