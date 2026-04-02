@@ -124,15 +124,21 @@ func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
 
 	m.mu.RLock()
 	inst, ok := m.instances[instanceID]
-	// Bail out if the instance was removed, stopped, or if the handle was
-	// cleared by NewSession (which nils handle before shutting down the old
-	// worker to prevent this goroutine from interfering with the new session).
-	stale := !ok || inst.info.Status == InstanceStatusStopped || inst.handle == nil
 	var name string
 	if ok {
-		name = inst.info.Name
+		name = inst.agentName
 	}
 	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	// Check under inst.mu (which guards handle and status) whether this
+	// exit was intentional. NewSession nils the handle before killing the
+	// old worker; softStop sets status to stopped.
+	inst.mu.Lock()
+	stale := inst.info.Status == InstanceStatusStopped || inst.handle == nil
+	inst.mu.Unlock()
 	if stale {
 		return
 	}

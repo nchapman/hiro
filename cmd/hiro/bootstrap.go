@@ -150,7 +150,7 @@ func bootstrapCoordinator(ctx context.Context, mgr *agent.Manager, logger *slog.
 	}
 
 	// No coordinator at all — create one.
-	leaderID, err := mgr.CreateInstance(ctx, "coordinator", "", "coordinator", "")
+	leaderID, err := mgr.CreateInstance(ctx, "coordinator", "", "coordinator", "", "Hiro", "")
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Info("no coordinator agent defined, skipping")

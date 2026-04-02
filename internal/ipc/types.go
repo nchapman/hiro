@@ -5,11 +5,13 @@ package ipc
 import "time"
 
 // InstanceInfo describes an agent instance for external consumers.
+// Name and Description are resolved: persona.md frontmatter overrides
+// the agent definition defaults.
 type InstanceInfo struct {
 	ID          string
-	Name        string
+	Name        string // resolved: persona name > agent definition name
 	Mode        string
-	Description string
+	Description string // resolved: persona description > agent definition description
 	ParentID    string
 	Status      string // "running" or "stopped"
 	Model       string // resolved model ID (e.g. "claude-sonnet-4-20250514")

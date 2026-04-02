@@ -28,7 +28,9 @@ type HostManager interface {
 
 	// CreateInstance creates and starts a new child instance in the given mode.
 	// nodeID targets a specific cluster node ("" or "home" for local).
-	CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID NodeID) (string, error)
+	// displayName and displayDesc override the agent definition name/description
+	// in persona.md frontmatter (pass "" to use defaults).
+	CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID NodeID, displayName, displayDesc string) (string, error)
 
 	// SendMessage sends a message to a running instance and returns the response.
 	SendMessage(ctx context.Context, instanceID, message string, onEvent func(ChatEvent) error) (string, error)

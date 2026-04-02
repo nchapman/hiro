@@ -95,7 +95,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 		return ErrInstanceNotStopped
 	}
 
-	name := inst.info.Name
+	name := inst.agentName
 	parentID := inst.info.ParentID
 	mode := inst.info.Mode
 
@@ -123,7 +123,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	if sessionID == "" {
 		sessionID = uuid.Must(uuid.NewV7()).String()
 	}
-	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID); err != nil {
+	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID, "", ""); err != nil {
 		// Re-register as stopped so the instance remains visible.
 		m.reregisterStopped(instanceID, inst)
 		return err
@@ -150,10 +150,11 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		return "", fmt.Errorf("instance %q is stopped", instanceID)
 	}
 
-	// Capture old handle so we can shut it down concurrently with the new spawn.
-	// Nil it out so the old watchWorker goroutine bails instead of tearing down
-	// the instance.
+	// Capture old handle so we can shut it down after the new spawn.
+	// Nil it out so the old watchWorker goroutine sees handle == nil and
+	// bails instead of tearing down the instance.
 	oldHandle := inst.handle
+	inst.handle = nil
 	oldSession := inst.activeSession
 
 	// Mark the old session as stopped in DB.
@@ -178,7 +179,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		if err := m.pdb.CreateSession(platformdb.Session{
 			ID:         newSessionID,
 			InstanceID: instanceID,
-			AgentName:  inst.info.Name,
+			AgentName:  inst.agentName,
 			Mode:       string(inst.info.Mode),
 		}); err != nil {
 			return "", fmt.Errorf("creating session in db: %w", err)
@@ -198,9 +199,9 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	}
 
 	// Reload agent config and resolve provider.
-	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.info.Name))
+	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.agentName))
 	if err != nil {
-		return "", fmt.Errorf("loading agent %q: %w", inst.info.Name, err)
+		return "", fmt.Errorf("loading agent %q: %w", inst.agentName, err)
 	}
 
 	providerName, apiKey, baseURL, err := m.resolveProvider()
@@ -272,6 +273,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(providerName), apiKey, baseURL, model)
 		if err != nil {
 			handle.Kill()
+			handle.Close()
 			return failStopped(fmt.Errorf("creating language model for %q: %w", cfg.Name, err))
 		}
 
@@ -301,6 +303,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		})
 		if err != nil {
 			handle.Kill()
+			handle.Close()
 			return failStopped(fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err))
 		}
 	}
@@ -321,7 +324,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	m.logger.Info("new session created",
 		"instance", instanceID,
 		"session", newSessionID,
-		"agent", inst.info.Name,
+		"agent", inst.agentName,
 	)
 
 	return newSessionID, nil
@@ -379,7 +382,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	m.mu.RLock()
 	var targets []pushTarget
 	for id, inst := range m.instances {
-		if inst.info.Name == agentName && inst.info.Status == InstanceStatusRunning {
+		if inst.agentName == agentName && inst.info.Status == InstanceStatusRunning {
 			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode, currentModel: inst.info.Model})
 		}
 	}
@@ -423,7 +426,7 @@ func (m *Manager) PushConfigUpdateAll() {
 	names := make(map[string]bool)
 	for _, inst := range m.instances {
 		if inst.info.Status == InstanceStatusRunning {
-			names[inst.info.Name] = true
+			names[inst.agentName] = true
 		}
 	}
 	m.mu.RUnlock()

@@ -24,7 +24,9 @@ import (
 // parentInstanceID tracks lineage; pass "" for top-level instances.
 // mode is a string to satisfy the ipc.HostManager interface boundary; it must
 // be one of "persistent", "ephemeral", or "coordinator".
-func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID ipc.NodeID) (string, error) {
+// displayName and displayDesc override the agent definition name/description
+// in persona.md frontmatter (pass "" to use defaults).
+func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID ipc.NodeID, displayName, displayDesc string) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
 	}
@@ -45,7 +47,7 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("creating instance", "instance_id", instanceID, "agent", name, "mode", mode)
-	id, err2 := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID)
+	id, err2 := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID, displayName, displayDesc)
 	if err2 != nil {
 		m.logger.Error("instance creation failed", "instance_id", instanceID, "agent", name, "error", err2)
 	}
@@ -70,7 +72,7 @@ func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentI
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("spawning ephemeral", "instance_id", instanceID, "agent", agentName)
-	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID)
+	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID, "", "")
 	if err != nil {
 		return "", err
 	}
@@ -201,7 +203,7 @@ func (m *Manager) Shutdown() {
 // startInstance creates instance and session directories, spawns a worker process,
 // and registers the instance in the manager. nodeID targets a specific cluster
 // node ("" or "home" for local execution).
-func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID) (string, error) {
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc string) (string, error) {
 	// Create instance directory with instance-level state.
 	instDir := m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
@@ -212,11 +214,21 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	// Seed instance-level state files so agents can discover them.
 	if dirIsNew {
-		for _, name := range []string{"persona.md", "memory.md"} {
-			path := filepath.Join(instDir, name)
-			if err := os.WriteFile(path, nil, 0600); err != nil {
-				return "", fmt.Errorf("creating %s: %w", name, err)
+		if mode.IsPersistent() && (displayName != "" || displayDesc != "") {
+			// Seed persona.md with name/description frontmatter.
+			if err := config.WritePersonaFile(instDir, displayName, displayDesc, ""); err != nil {
+				return "", fmt.Errorf("creating persona.md: %w", err)
 			}
+		} else {
+			// Seed empty persona.md.
+			if err := os.WriteFile(filepath.Join(instDir, "persona.md"), nil, 0600); err != nil {
+				return "", fmt.Errorf("creating persona.md: %w", err)
+			}
+		}
+		// Seed empty memory.md.
+		memPath := filepath.Join(instDir, "memory.md")
+		if err := os.WriteFile(memPath, nil, 0600); err != nil {
+			return "", fmt.Errorf("creating memory.md: %w", err)
 		}
 	}
 
@@ -425,17 +437,28 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		resolvedNodeID = ipc.HomeNodeID
 	}
 
+	// Resolve display name/description: persona frontmatter overrides agent definition.
+	resolvedName := cfg.Name
+	if displayName != "" {
+		resolvedName = displayName
+	}
+	resolvedDesc := cfg.Description
+	if displayDesc != "" {
+		resolvedDesc = displayDesc
+	}
+
 	inst := &instance{
 		info: InstanceInfo{
 			ID:          instanceID,
-			Name:        cfg.Name,
+			Name:        resolvedName,
 			Mode:        mode,
-			Description: cfg.Description,
+			Description: resolvedDesc,
 			ParentID:    parentID,
 			Status:      InstanceStatusRunning,
 			Model:       model,
 			NodeID:      resolvedNodeID,
 		},
+		agentName:      cfg.Name,
 		activeSession:  sessionID,
 		worker:         handle.Worker,
 		handle:         handle,

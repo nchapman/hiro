@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
 )
@@ -26,25 +27,33 @@ var ErrInstanceNotFound = errors.New("instance not found")
 var ErrInstanceNotStopped = errors.New("instance is not stopped")
 
 // GetInstance returns info about an instance (running or stopped).
+// Name and Description are resolved from persona.md frontmatter.
 func (m *Manager) GetInstance(instanceID string) (InstanceInfo, bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	inst, ok := m.instances[instanceID]
 	if !ok {
+		m.mu.RUnlock()
 		return InstanceInfo{}, false
 	}
-	return inst.info, true
+	info := inst.info
+	m.mu.RUnlock()
+
+	infos := []InstanceInfo{info}
+	m.enrichPersonaNames(infos)
+	return infos[0], true
 }
 
 // ListInstances returns a snapshot of all instances (running and stopped) sorted by creation order.
 // Instance IDs are UUIDv7 (time-ordered), so lexicographic sort gives creation order.
 func (m *Manager) ListInstances() []InstanceInfo {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	result := make([]InstanceInfo, 0, len(m.instances))
 	for _, inst := range m.instances {
 		result = append(result, inst.info)
 	}
+	m.mu.RUnlock()
+
+	m.enrichPersonaNames(result)
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
@@ -52,23 +61,49 @@ func (m *Manager) ListInstances() []InstanceInfo {
 // ListChildInstances returns a snapshot of instances that are direct children of callerInstanceID.
 func (m *Manager) ListChildInstances(callerInstanceID string) []ipc.InstanceInfo {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	childIDs := m.children[callerInstanceID]
-	result := make([]ipc.InstanceInfo, 0, len(childIDs))
+	infos := make([]InstanceInfo, 0, len(childIDs))
 	for _, cid := range childIDs {
 		if inst, ok := m.instances[cid]; ok {
-			result = append(result, ipc.InstanceInfo{
-				ID:          inst.info.ID,
-				Name:        inst.info.Name,
-				Mode:        string(inst.info.Mode),
-				Description: inst.info.Description,
-				ParentID:    inst.info.ParentID,
-				Status:      string(inst.info.Status),
-				Model:       inst.info.Model,
-			})
+			infos = append(infos, inst.info)
 		}
 	}
+	m.mu.RUnlock()
+
+	m.enrichPersonaNames(infos)
+
+	result := make([]ipc.InstanceInfo, 0, len(infos))
+	for _, info := range infos {
+		result = append(result, ipc.InstanceInfo{
+			ID:          info.ID,
+			Name:        info.Name,
+			Mode:        string(info.Mode),
+			Description: info.Description,
+			ParentID:    info.ParentID,
+			Status:      string(info.Status),
+			Model:       info.Model,
+		})
+	}
 	return result
+}
+
+// enrichPersonaNames reads persona.md for each instance and overrides
+// Name/Description from frontmatter when present.
+func (m *Manager) enrichPersonaNames(infos []InstanceInfo) {
+	for i := range infos {
+		pd, err := config.ReadPersonaFile(m.instanceDir(infos[i].ID))
+		if err != nil {
+			m.logger.Debug("could not read persona.md for name enrichment",
+				"instance", infos[i].ID, "error", err)
+			continue
+		}
+		if pd.Name != "" {
+			infos[i].Name = pd.Name
+		}
+		if pd.Description != "" {
+			infos[i].Description = pd.Description
+		}
+	}
 }
 
 // GetHistory returns recent messages from the active session of a persistent instance.
@@ -158,7 +193,7 @@ func (m *Manager) InstanceByAgentName(name string) (id string, running bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for iid, inst := range m.instances {
-		if inst.info.Name == name {
+		if inst.agentName == name {
 			if inst.info.Status == InstanceStatusRunning {
 				return iid, true
 			}

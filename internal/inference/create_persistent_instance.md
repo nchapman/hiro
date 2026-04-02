@@ -5,6 +5,8 @@ Create a long-lived agent instance with its own memory, todos, and conversation 
 
 The instance is created and returns its ID immediately — it does not run a prompt. Use SendMessage to communicate with it.
 
+Use `name` and `description` to give the instance a meaningful identity (e.g. name: "Backend Lead", description: "Owns the API service rewrite"). These are stored in persona.md frontmatter and shown in listings and the dashboard. If omitted, the agent definition's name and description are used.
+
 When to create a persistent instance:
 - You need an ongoing collaborator that accumulates context over time
 - The agent will handle multiple related tasks across separate interactions

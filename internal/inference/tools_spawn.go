@@ -130,9 +130,11 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 	return fantasy.NewAgentTool("CreatePersistentInstance",
 		createPersistentInstanceDescription,
 		func(ctx context.Context, input struct {
-			Agent string `json:"agent" description:"Agent definition name (directory under agents/)."`
-			Mode  string `json:"mode"  description:"'persistent' (default) or 'coordinator'." default:"persistent"`
-			Node  string `json:"node"  description:"Target node name. Omit for local."`
+			Agent       string `json:"agent"       description:"Agent definition name (directory under agents/)."`
+			Name        string `json:"name"        description:"Display name for this instance. Defaults to the agent definition name."`
+			Description string `json:"description" description:"Display description for this instance. Defaults to the agent definition description."`
+			Mode        string `json:"mode"        description:"'persistent' (default) or 'coordinator'." default:"persistent"`
+			Node        string `json:"node"        description:"Target node name. Omit for local."`
 		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -154,15 +156,19 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 			callerID := callerIDFromContext(ctx)
 			nodeID := ipc.NodeID(input.Node)
 
-			logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode)
+			logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode, "name", input.Name)
 
-			id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID)
+			id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID, input.Name, input.Description)
 			if err != nil {
 				logger.Warn("CreatePersistentInstance failed", "agent", input.Agent, "mode", mode, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create instance: %v", err)), nil
 			}
+			displayLabel := input.Name
+			if displayLabel == "" {
+				displayLabel = input.Agent
+			}
 			return fantasy.NewTextResponse(
-				fmt.Sprintf("Instance created from %q with ID: %s (mode: %s). Use SendMessage to communicate with it.", input.Agent, id, mode)), nil
+				fmt.Sprintf("Instance %q created from %q with ID: %s (mode: %s). Use SendMessage to communicate with it.", displayLabel, input.Agent, id, mode)), nil
 		},
 	)
 }

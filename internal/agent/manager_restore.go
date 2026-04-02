@@ -48,6 +48,8 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 
 		if dbInst.Status == "stopped" {
+			// Store agent definition defaults; enrichPersonaNames resolves
+			// persona overrides at list time (same as running instances).
 			inst := &instance{
 				info: InstanceInfo{
 					ID:          dbInst.ID,
@@ -58,6 +60,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 					Status:      InstanceStatusStopped,
 					Model:       m.resolveModel(),
 				},
+				agentName: cfg.Name,
 			}
 			m.mu.Lock()
 			m.instances[dbInst.ID] = inst
@@ -95,7 +98,8 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			m.logger.Info("creating new session (no previous session found)",
 				"instance", dbInst.ID, "session", sessionID, "agent", dbInst.AgentName)
 		}
-		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode, ipc.HomeNodeID)
+		// Pass empty display name/desc — startInstance reads persona.md for existing instances.
+		_, err = m.startInstance(ctx, dbInst.ID, sessionID, cfg, dbInst.ParentID, mode, ipc.HomeNodeID, "", "")
 		if err != nil {
 			m.logger.Warn("failed to restore instance",
 				"id", dbInst.ID, "agent", dbInst.AgentName, "error", err)

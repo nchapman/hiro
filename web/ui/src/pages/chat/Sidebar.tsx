@@ -23,7 +23,7 @@ export default function Sidebar({
     <aside className="flex h-full w-56 min-w-56 flex-col border-r bg-card">
       <div className="flex h-12 items-center border-b px-4">
         <span className="font-heading text-sm font-medium">
-          hiro
+          Chat
         </span>
       </div>
       <div className="px-4 pt-3 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">

@@ -532,10 +532,10 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 	todos := ""
 	// Persona and memory are instance-level state.
 	if l.instanceDir != "" {
-		if p, err := config.ReadPersonaFile(l.instanceDir); err != nil {
+		if pd, err := config.ReadPersonaFile(l.instanceDir); err != nil {
 			l.logger.Warn("could not read persona.md", "error", err)
 		} else {
-			persona = p
+			persona = pd.ForPrompt()
 		}
 		if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
 			l.logger.Warn("could not read memory.md", "error", err)

@@ -22,14 +22,16 @@ const (
 )
 
 // InstanceInfo describes an agent instance for external consumers.
+// Name and Description come from the agent definition but are overridden
+// by persona.md frontmatter when present (resolved at listing time).
 type InstanceInfo struct {
 	ID          string
-	Name        string
+	Name        string // resolved: persona name > agent definition name
 	Mode        config.AgentMode
-	Description string
-	ParentID    string         // empty for top-level instances
+	Description string // resolved: persona description > agent definition description
+	ParentID    string // empty for top-level instances
 	Status      InstanceStatus
-	Model       string         // resolved model ID
+	Model       string     // resolved model ID
 	NodeID      ipc.NodeID // which node this instance runs on
 }
 
@@ -54,6 +56,7 @@ type WorkerFactory func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle
 type instance struct {
 	mu             sync.Mutex // serializes calls through the worker
 	info           InstanceInfo
+	agentName      string             // agent definition name (immutable, for config loading)
 	activeSession  string             // current session ID
 	worker         ipc.AgentWorker
 	handle         *WorkerHandle
