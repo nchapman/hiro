@@ -182,7 +182,10 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("timed out waiting for coordinator: %w", ctx.Err())
 		}
-		resp, err := httpClient.Get(baseURL + "/api/instances")
+		reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+		req, _ := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/api/instances", nil)
+		resp, err := httpClient.Do(req)
+		reqCancel()
 		if err != nil {
 			fmt.Printf("  poll error: %v\n", err)
 			time.Sleep(time.Second)
@@ -195,20 +198,17 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 			time.Sleep(time.Second)
 			continue
 		}
-		if err == nil && resp.StatusCode == 200 {
-			var instances []instanceInfo
-			if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
-				for _, inst := range instances {
-					if inst.Mode == "coordinator" {
-						resp.Body.Close()
-						return inst.ID, nil
-					}
+		var instances []instanceInfo
+		if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
+			for _, inst := range instances {
+				if inst.Mode == "coordinator" {
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					return inst.ID, nil
 				}
 			}
-			resp.Body.Close()
-		} else if resp != nil {
-			resp.Body.Close()
 		}
+		resp.Body.Close()
 		time.Sleep(time.Second)
 	}
 }
@@ -382,12 +382,12 @@ func deleteInstance(t *testing.T, instanceID string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-// findInstance searches the instance list for an instance with the given agent name.
+// findInstance searches the instance list for an instance with the given ID.
 // Returns the instance info and true if found, zero value and false otherwise.
-func findInstance(t *testing.T, name string) (instanceInfo, bool) {
+func findInstance(t *testing.T, id string) (instanceInfo, bool) {
 	t.Helper()
 	for _, inst := range listInstances(t) {
-		if inst.Name == name {
+		if inst.ID == id {
 			return inst, true
 		}
 	}
@@ -401,7 +401,7 @@ func spawnPersistentAgent(t *testing.T, ctx context.Context, name string) string
 
 	containerWriteFile(t, fmt.Sprintf("/hiro/agents/%s/agent.md", name), fmt.Sprintf(`---
 name: %s
-tools: [Read, Write, Edit, Glob, Grep, Bash]
+allowed_tools: [Read, Write, Edit, Glob, Grep, Bash]
 ---
 
 You are a test agent. Be concise.`, name))
@@ -417,9 +417,9 @@ You are a test agent. Be concise.`, name))
 
 	cs.chat(ctx, fmt.Sprintf(`Use CreatePersistentInstance with agent "%s". Then use SendMessage to send it "Acknowledge you are ready." Do not use any other tools.`, name))
 
-	// Find the new instance (not in the snapshot).
+	// Find the new instance (not in the snapshot, child of coordinator).
 	for _, inst := range listInstances(t) {
-		if !before[inst.ID] && inst.Name == name {
+		if !before[inst.ID] && inst.Mode == "persistent" && inst.ParentID == coordinatorID {
 			return inst.ID
 		}
 	}

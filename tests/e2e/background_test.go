@@ -17,7 +17,7 @@ func TestE2E_BackgroundTaskCompletion(t *testing.T) {
 	// Create a persistent agent with bash + task tools.
 	containerWriteFile(t, "/hiro/agents/bg-test/agent.md", `---
 name: bg-test
-tools: [Bash, TaskOutput, TaskStop]
+allowed_tools: [Bash, TaskOutput, TaskStop]
 ---
 
 You are a test agent. Be concise.
@@ -63,7 +63,7 @@ func TestE2E_BackgroundTaskOutput(t *testing.T) {
 	// Use a persistent agent so we can do multi-turn interaction.
 	containerWriteFile(t, "/hiro/agents/taskout-test/agent.md", `---
 name: taskout-test
-tools: [Bash, TaskOutput, TaskStop]
+allowed_tools: [Bash, TaskOutput, TaskStop]
 ---
 
 You are a test agent. Be concise. Follow instructions exactly.`)

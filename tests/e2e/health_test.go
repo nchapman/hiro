@@ -38,11 +38,8 @@ func TestE2E_ListInstances(t *testing.T) {
 
 	found := false
 	for _, inst := range instances {
-		if inst.Name == "coordinator" {
+		if inst.Mode == "coordinator" {
 			found = true
-			if inst.Mode != "coordinator" {
-				t.Errorf("coordinator mode: expected coordinator, got %q", inst.Mode)
-			}
 			break
 		}
 	}

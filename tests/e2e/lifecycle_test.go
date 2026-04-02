@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,7 +30,7 @@ func TestE2E_InstanceStopStart(t *testing.T) {
 	}
 
 	// Verify it's stopped in the instance list.
-	inst, ok := findInstance(t, "lifecycle-stop-start")
+	inst, ok := findInstance(t, id)
 	if !ok {
 		t.Fatal("instance disappeared after stop")
 	}
@@ -44,7 +45,7 @@ func TestE2E_InstanceStopStart(t *testing.T) {
 	}
 
 	// Verify it's running.
-	inst, ok = findInstance(t, "lifecycle-stop-start")
+	inst, ok = findInstance(t, id)
 	if !ok {
 		t.Fatal("instance disappeared after start")
 	}
@@ -93,12 +94,20 @@ func TestE2E_RootProtection(t *testing.T) {
 	}
 
 	// Coordinator should still be running.
-	inst, ok := findInstance(t, "coordinator")
-	if !ok {
+	var coordInst instanceInfo
+	coordFound := false
+	for _, inst := range listInstances(t) {
+		if inst.Mode == "coordinator" {
+			coordInst = inst
+			coordFound = true
+			break
+		}
+	}
+	if !coordFound {
 		t.Fatal("coordinator disappeared")
 	}
-	if inst.Status != "running" {
-		t.Errorf("coordinator status: expected running, got %q", inst.Status)
+	if coordInst.Status != "running" {
+		t.Errorf("coordinator status: expected running, got %q", coordInst.Status)
 	}
 }
 
@@ -115,7 +124,7 @@ func TestE2E_SessionClear(t *testing.T) {
 	cs := openChat(t, ctx, "")
 	defer cs.close()
 
-	cs.chat(ctx, `Send a message to the instance named "lifecycle-clear" telling it: "Write 'favorite_color: purple' to your memory.md file. Then use the TodoWrite tool to create one task: 'test session clear'." Report what it said.`)
+	cs.chat(ctx, fmt.Sprintf(`Use SendMessage to send this to instance ID "%s": "Write 'favorite_color: purple' to your memory.md file. Then use the TodoWrite tool to create one task: 'test session clear'." Report what it said.`, id))
 
 	// Verify memory and todos exist before clear.
 	instDir := instanceDir(t, id)

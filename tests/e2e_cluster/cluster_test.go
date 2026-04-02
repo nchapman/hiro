@@ -163,7 +163,7 @@ func TestCluster_FileSyncWorkerToLeader(t *testing.T) {
 	// Ensure the writer agent definition exists on the leader.
 	agentMD := `---
 name: sync-writer-agent
-tools: [Bash, Write]
+allowed_tools: [Bash, Write]
 ---
 
 You are a test agent. Write files as instructed. Be concise.`
@@ -214,7 +214,7 @@ Set the node parameter to the worker node's ID. Tell me the result.`, marker)
 func TestCluster_AgentDefinitionSyncsToWorker(t *testing.T) {
 	agentMD := `---
 name: remote-worker-agent
-tools: [Bash, Read, Write]
+allowed_tools: [Bash, Read, Write]
 ---
 
 You are a test agent. When asked, run the command given and report the output. Be concise.`
@@ -232,7 +232,7 @@ func TestCluster_SpawnAgentOnWorkerNode(t *testing.T) {
 	// Ensure the agent definition exists on the leader.
 	agentMD := `---
 name: remote-exec-agent
-tools: [Bash, Read, Write]
+allowed_tools: [Bash, Read, Write]
 ---
 
 You are a test agent running on a remote node. Execute commands as asked. Be concise.`
@@ -276,7 +276,7 @@ Important: when calling SpawnInstance, set the "node" parameter to the worker no
 func TestCluster_RemoteAgentWritesFile(t *testing.T) {
 	agentMD := `---
 name: remote-writer-agent
-tools: [Bash, Write]
+allowed_tools: [Bash, Write]
 ---
 
 You are a test agent. Write files as instructed. Use relative paths from your working directory. Be concise.`
@@ -347,7 +347,7 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 func TestCluster_RemoteAgentComputesResult(t *testing.T) {
 	agentMD := `---
 name: remote-compute-agent
-tools: [Bash]
+allowed_tools: [Bash]
 ---
 
 You are a test agent. Run the exact command given to you. Report ONLY the raw output, nothing else.`
@@ -569,22 +569,33 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		resp, err := httpClient.Get(baseURL + "/api/instances")
-		if err == nil && resp.StatusCode == 200 {
-			var instances []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			}
-			json.NewDecoder(resp.Body).Decode(&instances)
+		reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+		req, _ := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/api/instances", nil)
+		resp, err := httpClient.Do(req)
+		reqCancel()
+		if err != nil {
+			fmt.Printf("  coordinator poll error: %v\n", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if resp.StatusCode != 200 {
 			resp.Body.Close()
+			time.Sleep(time.Second)
+			continue
+		}
+		var instances []struct {
+			ID   string `json:"id"`
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
 			for _, inst := range instances {
-				if inst.Name == "coordinator" {
+				if inst.Mode == "coordinator" {
+					resp.Body.Close()
 					return inst.ID, nil
 				}
 			}
-		} else if resp != nil {
-			resp.Body.Close()
 		}
+		resp.Body.Close()
 		time.Sleep(time.Second)
 	}
 }

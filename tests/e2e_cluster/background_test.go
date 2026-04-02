@@ -18,7 +18,7 @@ func TestCluster_RemoteBackgroundTaskNotification(t *testing.T) {
 	// Write agent definition with bash + task tools.
 	agentMD := `---
 name: remote-bg-agent
-tools: [Bash, TaskOutput, TaskStop]
+allowed_tools: [Bash, TaskOutput, TaskStop]
 ---
 
 You are a test agent running on a remote node. Be concise.
