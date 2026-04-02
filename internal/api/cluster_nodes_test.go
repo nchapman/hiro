@@ -274,6 +274,52 @@ func TestClusterAPI_RevokeOfflineNode(t *testing.T) {
 	assertNodeAbsentFromSettings(t, srv, "node-off")
 }
 
+func TestClusterAPI_RevokeDisconnectsBeforeSave(t *testing.T) {
+	srv, cp, nr, _, disconnected := newClusterTestServer(t)
+
+	cp.ApproveNode("node-save-fail", "FailWorker")
+	cp.Save()
+	nr.Register("node-save-fail", "FailWorker", 4, "10.0.0.8:8081", "direct")
+
+	// Get auth token before making config dir unwritable.
+	token := loginAndGetToken(t, srv)
+
+	// Make the config path unwritable to force a save failure.
+	os.Chmod(filepath.Dir(cp.Path()), 0400)
+	t.Cleanup(func() { os.Chmod(filepath.Dir(cp.Path()), 0700) })
+
+	req := httptest.NewRequest("DELETE", "/api/cluster/approved/node-save-fail", nil)
+	req.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	// Save fails → 500, but the node must still be disconnected and unregistered.
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500 (save failure)", rec.Code)
+	}
+
+	// Node was disconnected despite save failure.
+	found := false
+	for _, id := range *disconnected {
+		if id == "node-save-fail" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("disconnectNode should be called even when save fails")
+	}
+
+	// Node was unregistered despite save failure.
+	if _, ok := nr.Get("node-save-fail"); ok {
+		t.Error("node should be unregistered even when save fails")
+	}
+
+	// In-memory revocation is enforced.
+	if cp.IsNodeApproved("node-save-fail") {
+		t.Error("node should not be approved in memory")
+	}
+}
+
 func TestClusterAPI_RevokeNeverConnectedNode(t *testing.T) {
 	srv, cp, _, _, _ := newClusterTestServer(t)
 

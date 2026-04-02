@@ -114,21 +114,24 @@ func (s *Server) handleRemoveApproved(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cp.RevokeNode(nodeID)
-	if err := s.cp.Save(); err != nil {
-		s.logger.Error("failed to save config after revoking node", "error", err)
-		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
-		return
-	}
 
-	// Forcefully disconnect the node if it's currently connected.
-	// DisconnectNode closes the gRPC stream, which causes cleanupNode to call
-	// SetOffline (not Unregister) asynchronously. We must Unregister here
-	// synchronously so the node disappears from the UI immediately.
+	// Always enforce revocation immediately — disconnect and unregister before
+	// attempting to persist. A revoked node must not stay connected even if the
+	// config write fails. DisconnectNode closes the gRPC stream, which causes
+	// cleanupNode to call SetOffline (not Unregister) asynchronously. We call
+	// Unregister here synchronously so the node disappears from the UI immediately.
 	if s.disconnectNode != nil {
 		s.disconnectNode(nodeID)
 	}
 	if s.nodeRegistry != nil {
 		s.nodeRegistry.Unregister(cluster.NodeID(nodeID))
+	}
+
+	if err := s.cp.Save(); err != nil {
+		s.logger.Error("node revoked and disconnected but config save failed — revocation will not survive restart",
+			"node_id", nodeID, "error", err)
+		http.Error(w, "node disconnected but config save failed; revocation may not survive restart", http.StatusInternalServerError)
+		return
 	}
 
 	s.logger.Info("node revoked", "node_id", nodeID)
