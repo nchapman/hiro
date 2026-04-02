@@ -1137,7 +1137,7 @@ model: fake-model
 tools:
   - Bash(curl *)
   - Read
-disallowedTools:
+disallowed_tools:
   - Bash(curl *--upload*)
 ---
 Agent with parameterized tools.`)
@@ -1180,7 +1180,7 @@ tools:
   - Bash
   - Read
   - Write
-disallowedTools:
+disallowed_tools:
   - Write
 ---
 Agent where Write is fully denied.`)

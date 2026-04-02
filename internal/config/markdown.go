@@ -57,6 +57,25 @@ func (f Frontmatter) StringSlice(key string) []string {
 	return result
 }
 
+// Bool returns a frontmatter value as a *bool, or nil if missing.
+// Handles both YAML booleans (true/false) and string representations ("true"/"false").
+func (f Frontmatter) Bool(key string) *bool {
+	v, ok := f[key]
+	if !ok {
+		return nil
+	}
+	var b bool
+	switch val := v.(type) {
+	case bool:
+		b = val
+	case string:
+		b = val == "true"
+	default:
+		return nil
+	}
+	return &b
+}
+
 // Int returns a frontmatter value as an int, or 0 if missing/wrong type.
 // YAML unmarshals small numbers as int, so we handle that directly.
 func (f Frontmatter) Int(key string) int {
@@ -191,9 +210,9 @@ type AgentConfig struct {
 	Name          string
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
-	DisallowedTools []string // from frontmatter "disallowedTools"; deny rules checked at call time
+	DisallowedTools []string // from frontmatter "disallowed_tools"; deny rules checked at call time
 	Model           string   // from frontmatter "model"; per-agent model override
-	MaxTurns        int      // from frontmatter "maxTurns"; max agentic turns (0 = unlimited)
+	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
 	Prompt        string   // the markdown body — the agent's operating instructions
 	Skills        []SkillConfig
 }
@@ -202,6 +221,13 @@ type AgentConfig struct {
 type SkillConfig struct {
 	Name          string
 	Description   string
+	WhenToUse     string            // from "when_to_use"; detailed usage scenarios
+	AllowedTools  []string          // from "allowed_tools"; tools this skill can invoke
+	UserInvocable *bool             // from "user_invocable"; whether users can type /skill-name (nil = unset)
+	Model         string            // from "model"; model override for this skill
+	Version       string            // from "version"; skill version identifier
+	ArgumentHint  string            // from "argument_hint"; hint text for command arguments
+	Arguments     []string          // from "arguments"; named parameters for substitution
 	Prompt        string            // the markdown body — instructions for this skill
 	Path          string            // absolute path to the skill file (for progressive disclosure)
 	License       string            // optional: license identifier (e.g. MIT, Apache-2.0)
@@ -238,9 +264,9 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		Name:          parsed.Frontmatter.String("name"),
 		Description:   parsed.Frontmatter.String("description"),
 		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
-		DisallowedTools: parsed.Frontmatter.StringSlice("disallowedTools"),
+		DisallowedTools: parsed.Frontmatter.StringSlice("disallowed_tools"),
 		Model:           parsed.Frontmatter.String("model"),
-		MaxTurns:         parsed.Frontmatter.Int("maxTurns"),
+		MaxTurns:         parsed.Frontmatter.Int("max_turns"),
 		Prompt:           parsed.Body,
 	}
 
@@ -359,6 +385,13 @@ func loadSkillFile(path string) (SkillConfig, error) {
 	skill := SkillConfig{
 		Name:          parsed.Frontmatter.String("name"),
 		Description:   parsed.Frontmatter.String("description"),
+		WhenToUse:     parsed.Frontmatter.String("when_to_use"),
+		AllowedTools:  parsed.Frontmatter.StringSlice("allowed_tools"),
+		UserInvocable: parsed.Frontmatter.Bool("user_invocable"),
+		Model:         parsed.Frontmatter.String("model"),
+		Version:       parsed.Frontmatter.String("version"),
+		ArgumentHint:  parsed.Frontmatter.String("argument_hint"),
+		Arguments:     parsed.Frontmatter.StringSlice("arguments"),
 		Prompt:        parsed.Body,
 		Path:          absPath,
 		License:       parsed.Frontmatter.String("license"),
