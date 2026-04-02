@@ -7,9 +7,8 @@ import (
 )
 
 // HandleCommand parses and executes a slash command. Returns a
-// human-readable result string. If the input is not a recognized
-// command, returns an error — the caller should fall through to the
-// agent rather than displaying an error to the user.
+// human-readable result string. Returns an error if the command is
+// unrecognized or the sub-command is invalid.
 func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 	input = strings.TrimPrefix(input, "/")
 	parts := strings.Fields(input)
@@ -31,6 +30,8 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 	var mutated bool
 	var err error
 	switch noun {
+	case "help":
+		return cp.handleHelp()
 	case "secrets":
 		result, mutated, err = cp.handleSecrets(verb, args)
 	case "tools":
@@ -202,6 +203,23 @@ func (cp *ControlPlane) handleCluster(verb string, _ []string) (string, bool, er
 	default:
 		return "", false, fmt.Errorf("unknown cluster command: %s", verb)
 	}
+}
+
+// handleHelp returns a list of all slash commands. Note: /clear is handled by
+// the WebSocket layer (chat.go), not by HandleCommand. Update this text if
+// commands are added to either location.
+func (cp *ControlPlane) handleHelp() (string, error) {
+	return `Available commands:
+
+/help                          Show this help
+/clear                         Start a new session
+/secrets list                  List secret names
+/secrets set NAME=VALUE        Set a secret
+/secrets rm NAME               Remove a secret
+/tools list [AGENT]            List tool overrides
+/tools set AGENT tool1,tool2   Set tool override for agent
+/tools rm AGENT                Clear tool override
+/cluster                       Show cluster status`, nil
 }
 
 // parseToolList parses tool names from args. Tools can be comma-separated

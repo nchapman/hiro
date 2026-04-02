@@ -227,16 +227,50 @@ func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, in
 	}
 
 	// Intercept slash commands before processing attachments.
-	if s.cmdHandler != nil && strings.HasPrefix(msg.Content, "/") {
-		result, err := s.cmdHandler.HandleCommand(msg.Content)
-		if err == nil {
-			// Recognized command — send result directly, don't forward to agent.
-			if writeErr := wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: result}); writeErr != nil {
-				return writeErr
-			}
+	if strings.HasPrefix(msg.Content, "/") {
+		trimmed := strings.TrimPrefix(msg.Content, "/")
+		cmd := strings.Fields(trimmed)
+		if len(cmd) == 0 {
+			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Type /help for available commands."})
 			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
 		}
-		// Unrecognized command — fall through to agent as normal message.
+
+		// /clear — start a new session (handled here because it needs the manager).
+		// Send the clear message immediately so the UI resets instantly;
+		// NewSession (which tears down the old worker and spawns a new one)
+		// runs in the background.
+		if cmd[0] == "clear" {
+			if s.hasManager() {
+				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "clear"})
+				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+				go func() {
+					if _, err := s.manager.NewSession(instanceID); err != nil {
+						s.logger.Warn("failed to create new session after /clear", "instance_id", instanceID, "error", err)
+						_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "Session reset failed: " + err.Error()})
+					}
+				}()
+				return nil
+			}
+			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "No instance manager available."})
+			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+		}
+
+		if s.cmdHandler != nil {
+			result, err := s.cmdHandler.HandleCommand(msg.Content)
+			if err == nil {
+				if writeErr := wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: result}); writeErr != nil {
+					return writeErr
+				}
+				return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+			}
+			// Surface the specific error (e.g. "unknown secrets command: badverb").
+			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: err.Error() + "\nType /help for available commands."})
+			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+		}
+
+		// No command handler — show generic error.
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: fmt.Sprintf("Unknown command: %s\nType /help for available commands.", cmd[0])})
+		return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
 	}
 
 	// Decode attachments into fantasy.FileParts.

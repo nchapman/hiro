@@ -150,22 +150,15 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		return "", fmt.Errorf("instance %q is stopped", instanceID)
 	}
 
-	// Capture and nil out handle before shutdown so the old watchWorker
-	// goroutine sees nil and bails out instead of tearing down the instance.
+	// Capture old handle so we can shut it down concurrently with the new spawn.
+	// Nil it out so the old watchWorker goroutine bails instead of tearing down
+	// the instance.
 	oldHandle := inst.handle
-	inst.worker = nil
-	inst.handle = nil
-	inst.loop = nil
-
-	// Shut down the old worker (blocks until exit).
-	m.shutdownHandle(oldHandle)
-	if oldHandle != nil {
-		oldHandle.Close()
-	}
+	oldSession := inst.activeSession
 
 	// Mark the old session as stopped in DB.
-	if m.pdb != nil && inst.activeSession != "" {
-		m.pdb.UpdateSessionStatus(inst.activeSession, "stopped")
+	if m.pdb != nil && oldSession != "" {
+		m.pdb.UpdateSessionStatus(oldSession, "stopped")
 	}
 
 	// Create new session directory.
@@ -240,9 +233,22 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		Groups:         inst.groups,
 	}
 
+	// Shut down old worker concurrently while spawning the new one.
+	// Different socket paths and session dirs, so no resource conflicts.
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		m.shutdownHandle(oldHandle)
+		if oldHandle != nil {
+			// Close directly (not cleanupWorker) — the UID is retained
+			// and reused by the new session for this same instance.
+			oldHandle.Close()
+		}
+	}()
+
 	// failStopped marks the instance as stopped on spawn/loop failure.
-	// The old worker is already dead, so there's nothing to recover to.
 	failStopped := func(err error) (string, error) {
+		<-shutdownDone // wait for old worker cleanup before marking stopped
 		inst.info.Status = InstanceStatusStopped
 		m.setInstanceStatus(instanceID, "stopped")
 		os.RemoveAll(sessDir)
@@ -299,6 +305,11 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		}
 	}
 
+	// Wait for old worker to finish before swapping, so the old watchWorker
+	// goroutine sees nil handle and bails cleanly.
+	<-shutdownDone
+
+	// Swap — inst.loop goes directly from old to new.
 	inst.activeSession = newSessionID
 	inst.worker = handle.Worker
 	inst.handle = handle

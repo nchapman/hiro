@@ -334,6 +334,15 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             },
           ])
           break
+        case "clear":
+          // Session was cleared — reset message state.
+          setMessages([])
+          setUsage(null)
+          streamingMsgId.current = null
+          setStreaming(false)
+          if (session?.id) sessionCache.current.delete(session.id)
+          onSessionsChanged()
+          break
         case "error":
           streamingMsgId.current = null
           setStreaming(false)
@@ -354,15 +363,19 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
   const handleSend = useCallback(
     (text: string, wireAttachments: ChatAttachment[] | undefined, displayAttachments: MessageAttachment[]) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: text,
-          attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
-        },
-      ])
+      // Don't render a user bubble for slash commands — the server
+      // responds with a system message instead.
+      if (!text.startsWith("/")) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: text,
+            attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
+          },
+        ])
+      }
       setStreaming(true)
       send({ type: "message", content: text, attachments: wireAttachments })
     },
@@ -517,9 +530,9 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
                 {msg.role === "assistant" && <AssistantMessage message={msg} />}
                 {msg.role === "system" && (
                   <div className="flex justify-center">
-                    <Badge variant="outline">
+                    <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground whitespace-pre font-mono">
                       {msg.content}
-                    </Badge>
+                    </div>
                   </div>
                 )}
               </div>
