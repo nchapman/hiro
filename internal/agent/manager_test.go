@@ -13,6 +13,7 @@ import (
 	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/ipc"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/toolrules"
 	"github.com/nchapman/hiro/internal/uidpool"
 )
 
@@ -1244,6 +1245,226 @@ Agent with both whole-tool and parameterized Bash.`)
 	}
 	if !hasRead {
 		t.Error("Read should remain in the layer")
+	}
+}
+
+// --- computeEffectiveTools with CP and parent ---
+
+// mockCP implements ControlPlane for testing tool intersection.
+type mockCP struct {
+	tools     map[string][]string // agent name → allowed tools
+	denyTools map[string][]string // agent name → disallowed tools
+}
+
+func (m *mockCP) AgentTools(name string) ([]string, bool) {
+	t, ok := m.tools[name]
+	return t, ok
+}
+func (m *mockCP) AgentDisallowedTools(name string) []string { return m.denyTools[name] }
+func (m *mockCP) SecretNames() []string                     { return nil }
+func (m *mockCP) SecretEnv() []string                       { return nil }
+func (m *mockCP) ProviderInfo() (string, string, string, bool) {
+	return "", "", "", false
+}
+func (m *mockCP) ProviderByType(string) (string, string, bool)    { return "", "", false }
+func (m *mockCP) ConfiguredProviderTypes() []string               { return nil }
+func (m *mockCP) DefaultModel() string                            { return "" }
+
+func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
+	t.Helper()
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	mgr := NewManager(t.Context(), dir, Options{
+		WorkingDir: dir,
+	}, cp, logger, testWorkerFactory("ok"), nil, nil)
+	return mgr, dir
+}
+
+func TestComputeEffectiveTools_CPIntersection(t *testing.T) {
+	cp := &mockCP{
+		tools: map[string][]string{
+			"restricted": {"Read", "Grep"},
+		},
+	}
+	mgr, dir := setupTestManagerWithCP(t, cp)
+	writeAgentMD(t, dir, "restricted", `---
+name: restricted
+allowed_tools: [Bash, Read, Grep, Write]
+---
+Restricted agent.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("restricted"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Only Read and Grep survive intersection.
+	if effective["Bash"] || effective["Write"] {
+		t.Error("Bash and Write should be removed by CP intersection")
+	}
+	if !effective["Read"] || !effective["Grep"] {
+		t.Error("Read and Grep should survive CP intersection")
+	}
+}
+
+func TestComputeEffectiveTools_CPNoOverride(t *testing.T) {
+	cp := &mockCP{tools: map[string][]string{}} // no override for this agent
+	mgr, dir := setupTestManagerWithCP(t, cp)
+	writeAgentMD(t, dir, "free", `---
+name: free
+allowed_tools: [Bash, Read, Write]
+---
+Free agent.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("free"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// All tools pass through when CP has no override.
+	if !effective["Bash"] || !effective["Read"] || !effective["Write"] {
+		t.Errorf("all tools should pass through with no CP override, got %v", effective)
+	}
+}
+
+func TestComputeEffectiveTools_CPDenyRulesMerged(t *testing.T) {
+	cp := &mockCP{
+		denyTools: map[string][]string{
+			"worker": {"Bash(sudo *)"},
+		},
+	}
+	mgr, dir := setupTestManagerWithCP(t, cp)
+	writeAgentMD(t, dir, "worker", `---
+name: worker
+allowed_tools: [Bash, Read]
+disallowed_tools: [Bash(rm *)]
+---
+Worker.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("worker"))
+	_, _, denyRules, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have 2 deny rules: rm from agent + sudo from CP.
+	if len(denyRules) != 2 {
+		t.Fatalf("expected 2 deny rules (agent + CP), got %d", len(denyRules))
+	}
+	patterns := map[string]bool{}
+	for _, r := range denyRules {
+		patterns[r.Pattern] = true
+	}
+	if !patterns["rm *"] || !patterns["sudo *"] {
+		t.Errorf("expected rm * and sudo * deny patterns, got %v", denyRules)
+	}
+}
+
+func TestComputeEffectiveTools_CPParameterizedIntersection(t *testing.T) {
+	// Agent allows curl and git, CP only allows curl.
+	cp := &mockCP{
+		tools: map[string][]string{
+			"agent": {"Bash(curl *)"},
+		},
+	}
+	mgr, dir := setupTestManagerWithCP(t, cp)
+	writeAgentMD(t, dir, "agent", `---
+name: agent
+allowed_tools: [Bash(curl *), Bash(git *)]
+---
+Agent.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("agent"))
+	effective, allowLayers, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Bash should be in effective set (both mention it).
+	if !effective["Bash"] {
+		t.Fatal("Bash should be in effective set")
+	}
+
+	// Should have 2 allow layers (agent + CP), both with parameterized rules.
+	if len(allowLayers) != 2 {
+		t.Fatalf("expected 2 allow layers, got %d", len(allowLayers))
+	}
+}
+
+func TestComputeEffectiveTools_ParentInheritance(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "child", `---
+name: child
+allowed_tools: [Bash, Read, Write, Grep]
+---
+Child.`)
+
+	// Simulate a parent with restricted tools.
+	parentID := "parent-123"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{
+		effectiveTools: map[string]bool{"Bash": true, "Read": true},
+		allowLayers:    nil,
+		denyRules:      nil,
+	}
+	mgr.mu.Unlock()
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("child"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Only Bash and Read survive (parent doesn't have Write or Grep).
+	if !effective["Bash"] || !effective["Read"] {
+		t.Error("Bash and Read should survive parent intersection")
+	}
+	if effective["Write"] || effective["Grep"] {
+		t.Error("Write and Grep should be removed by parent intersection")
+	}
+}
+
+func TestComputeEffectiveTools_ParentDenyRulesInherited(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "child", `---
+name: child
+allowed_tools: [Bash, Read]
+---
+Child.`)
+
+	parentID := "parent-456"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{
+		effectiveTools: map[string]bool{"Bash": true, "Read": true},
+		denyRules:      []toolrules.Rule{{Tool: "Bash", Pattern: "rm *"}},
+	}
+	mgr.mu.Unlock()
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("child"))
+	_, _, denyRules, err := mgr.computeEffectiveTools(cfg, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(denyRules) != 1 || denyRules[0].Pattern != "rm *" {
+		t.Errorf("expected parent deny rule inherited, got %v", denyRules)
+	}
+}
+
+func TestComputeEffectiveTools_ParseError(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "bad", `---
+name: bad
+allowed_tools: ["Bash("]
+---
+Bad.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("bad"))
+	_, _, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err == nil {
+		t.Error("expected error for malformed rule")
 	}
 }
 

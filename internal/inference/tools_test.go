@@ -409,13 +409,13 @@ func TestProxyTool_UnmatchedTool_PassesThrough(t *testing.T) {
 
 // --- Skill tool expansion tests ---
 
-// newTestLoop creates a minimal Loop for testing expandToolsForSkill.
+// newTestLoop creates a minimal Loop for testing expandToolsForSkill and UpdateToolRules.
 func newTestLoop(t *testing.T, allowedTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) *Loop {
 	t.Helper()
 	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
 	redactor := NewRedactor(nil)
 	proxyTools := buildProxyTools("/tmp", exec, allowedTools, allowLayers, denyRules, redactor, testLogger)
-	return &Loop{
+	l := &Loop{
 		workingDir:      "/tmp",
 		executor:        exec,
 		redactor:        redactor,
@@ -424,6 +424,9 @@ func newTestLoop(t *testing.T, allowedTools map[string]bool, allowLayers [][]too
 		tools:           proxyTools,
 		logger:          testLogger,
 	}
+	// Create a minimal agent so UpdateToolRules can recreate it.
+	l.agent = fantasy.NewAgent(nil, fantasy.WithTools(proxyTools...))
+	return l
 }
 
 func toolNames(l *Loop) map[string]bool {
@@ -606,4 +609,195 @@ func TestExpandToolsForSkill_InvalidRule(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for malformed rule")
 	}
+}
+
+// --- NeedsReview / complex command tests ---
+
+func TestProxyTool_NeedsReview_DenyWithEval(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:      fantasy.ToolInfo{Name: "Bash"},
+		executor:  exec,
+		logger:    testLogger,
+		denyRules: mustParseRules(t, "Bash(rm *)"),
+	}
+
+	// eval makes the command uncertain — NeedsReview → denied.
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID: "call-1", Name: "Bash",
+		Input: `{"command":"eval \"rm -rf /\""}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsError {
+		t.Fatal("eval should trigger NeedsReview → denied")
+	}
+	if !strings.Contains(resp.Content, "complex") {
+		t.Errorf("expected complexity message, got: %s", resp.Content)
+	}
+}
+
+func TestProxyTool_NeedsReview_AllowWithVariableCommand(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Bash"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{mustParseRules(t, "Bash(echo *)")},
+	}
+
+	// Variable in command position → uncertain → NeedsReview → denied.
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID: "call-1", Name: "Bash",
+		Input: `{"command":"$CMD hello"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsError {
+		t.Fatal("variable command should trigger NeedsReview → denied")
+	}
+}
+
+func TestProxyTool_EmptyInput(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Bash"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{mustParseRules(t, "Bash(echo *)")},
+	}
+
+	// Empty input — allow layer has Bash rules, empty command won't match → denied.
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID: "call-1", Name: "Bash",
+		Input: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsError {
+		t.Fatal("empty command should be denied when allow rules exist")
+	}
+}
+
+// --- UpdateToolRules tests ---
+
+func TestUpdateToolRules_RebuildProxyTools(t *testing.T) {
+	// Start with Bash and Read.
+	l := newTestLoop(t, map[string]bool{"Bash": true, "Read": true}, nil, nil)
+	if !toolNames(l)["Bash"] || !toolNames(l)["Read"] {
+		t.Fatal("expected Bash and Read initially")
+	}
+
+	// Update to only Read.
+	l.UpdateToolRules(
+		map[string]bool{"Read": true},
+		nil, nil,
+	)
+
+	names := toolNames(l)
+	if names["Bash"] {
+		t.Error("Bash should be removed after UpdateToolRules")
+	}
+	if !names["Read"] {
+		t.Error("Read should remain after UpdateToolRules")
+	}
+}
+
+func TestUpdateToolRules_PreservesLocalTools(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Bash": true}, nil, nil)
+
+	// Add a fake local tool.
+	localTool := fantasy.NewAgentTool("FakeLocal", "test", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	l.tools = append(l.tools, localTool)
+
+	// Update tool rules — should preserve local tools.
+	l.UpdateToolRules(
+		map[string]bool{"Read": true},
+		nil, nil,
+	)
+
+	names := toolNames(l)
+	if !names["FakeLocal"] {
+		t.Error("local tools should be preserved by UpdateToolRules")
+	}
+	if names["Bash"] {
+		t.Error("Bash should be removed")
+	}
+	if !names["Read"] {
+		t.Error("Read should be added")
+	}
+}
+
+func TestUpdateToolRules_ResetsSkillExpansion(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Read": true}, nil, nil)
+
+	// Expand via skill.
+	err := l.expandToolsForSkill(&config.SkillConfig{
+		Name:         "test",
+		AllowedTools: []string{"Bash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !l.skillExpanded {
+		t.Fatal("skill should be expanded")
+	}
+	if !toolNames(l)["Bash"] {
+		t.Fatal("Bash should be available after skill expansion")
+	}
+
+	// UpdateToolRules resets skill expansion.
+	l.UpdateToolRules(
+		map[string]bool{"Read": true},
+		nil, nil,
+	)
+
+	if l.skillExpanded {
+		t.Error("skillExpanded should be reset")
+	}
+	if len(l.skillAllowLayer) != 0 {
+		t.Error("skillAllowLayer should be cleared")
+	}
+	if toolNames(l)["Bash"] {
+		t.Error("Bash from skill expansion should be removed after UpdateToolRules")
+	}
+}
+
+func TestUpdateToolRules_WithDenyRules(t *testing.T) {
+	l := newTestLoop(t, map[string]bool{"Bash": true, "Read": true}, nil, nil)
+
+	deny := mustParseRules(t, "Bash(rm *)")
+	l.UpdateToolRules(
+		map[string]bool{"Bash": true, "Read": true},
+		nil, deny,
+	)
+
+	// Bash should still be visible but rm should be denied at call time.
+	if !toolNames(l)["Bash"] {
+		t.Fatal("Bash should be visible")
+	}
+
+	// Find the Bash proxy and verify deny rules are applied.
+	for _, tool := range l.tools {
+		if tool.Info().Name == "Bash" {
+			pt := tool.(*proxyTool)
+			resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+				ID: "call-1", Name: "Bash",
+				Input: `{"command":"rm -rf /"}`,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !resp.IsError {
+				t.Error("rm should be denied after UpdateToolRules with deny rule")
+			}
+			return
+		}
+	}
+	t.Fatal("Bash proxy not found")
 }
