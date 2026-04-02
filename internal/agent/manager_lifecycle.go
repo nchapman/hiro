@@ -326,7 +326,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel()
+	model := m.resolveModel(cfg.Model)
 
 	spawnCfg := ipc.SpawnConfig{
 		InstanceID:     instanceID,
@@ -422,6 +422,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AllowedTools:   allowedTools,
 			AllowLayers:    allowLayers,
 			DenyRules:      denyRules,
+			MaxTurns:       cfg.MaxTurns,
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,

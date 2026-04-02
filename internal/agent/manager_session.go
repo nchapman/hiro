@@ -208,7 +208,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	model := m.resolveModel()
+	model := m.resolveModel(cfg.Model)
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
@@ -298,6 +298,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			AllowedTools:   allowedTools,
 			AllowLayers:    allowLayers,
 			DenyRules:      denyRules,
+			MaxTurns:       cfg.MaxTurns,
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
@@ -367,7 +368,7 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 			"agent", agentName, "error", err)
 		return
 	}
-	model := m.resolveModel()
+	model := m.resolveModel(cfg.Model)
 
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {

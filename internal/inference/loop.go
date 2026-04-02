@@ -39,6 +39,7 @@ type LoopConfig struct {
 	AllowedTools   map[string]bool        // nil = unrestricted
 	AllowLayers    [][]toolrules.Rule     // per-source allow rules for call-time enforcement
 	DenyRules      []toolrules.Rule       // merged deny rules from all sources
+	MaxTurns       int                    // max agentic turns; 0 = unlimited
 	HasSkills      bool
 	SecretNamesFn  func() []string
 	SecretEnvFn    func() []string
@@ -72,6 +73,7 @@ type Loop struct {
 	agentDefDir    string
 	sharedSkillDir string
 	agentConfig    config.AgentConfig
+	maxTurns       int // max agentic turns; 0 = unlimited
 	lm             fantasy.LanguageModel
 	pdb            *platformdb.DB
 	secretNamesFn  func() []string
@@ -139,6 +141,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		agentDefDir:    cfg.AgentDefDir,
 		sharedSkillDir: cfg.SharedSkillDir,
 		agentConfig:    cfg.AgentConfig,
+		maxTurns:       cfg.MaxTurns,
 		lm:             cfg.LM,
 		pdb:            cfg.PDB,
 		secretNamesFn:  cfg.SecretNamesFn,
@@ -266,11 +269,17 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 		Messages:        messages,
 		ProviderOptions: providerOpts,
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
+			var result fantasy.PrepareStepResult
 			if opts.StepNumber == 0 {
 				sp := l.currentSystemPrompt()
-				return ctx, fantasy.PrepareStepResult{System: &sp}, nil
+				result.System = &sp
 			}
-			return ctx, fantasy.PrepareStepResult{}, nil
+			// Enforce maxTurns: disable all tools after the limit so the
+			// model must produce a final text response.
+			if l.maxTurns > 0 && opts.StepNumber >= l.maxTurns {
+				result.DisableAllTools = true
+			}
+			return ctx, result, nil
 		},
 		OnReasoningStart: func(id string, rc fantasy.ReasoningContent) error {
 			return emit(ipc.ChatEvent{Type: "reasoning_start"})

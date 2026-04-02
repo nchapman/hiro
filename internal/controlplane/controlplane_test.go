@@ -944,69 +944,69 @@ func TestDefaultModel(t *testing.T) {
 
 // --- Deny tools tests ---
 
-func TestAgentDenyToolsCRUD(t *testing.T) {
+func TestAgentDisallowedToolsCRUD(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 
-	if dt := cp.AgentDenyTools("worker"); len(dt) != 0 {
+	if dt := cp.AgentDisallowedTools("worker"); len(dt) != 0 {
 		t.Errorf("expected no deny tools initially, got %v", dt)
 	}
 
-	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)", "Bash(sudo *)"})
-	dt := cp.AgentDenyTools("worker")
+	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)", "Bash(sudo *)"})
+	dt := cp.AgentDisallowedTools("worker")
 	if len(dt) != 2 || dt[0] != "Bash(rm *)" {
 		t.Errorf("expected 2 deny tools, got %v", dt)
 	}
 
 	// Allow tools should be independent.
 	cp.SetAgentTools("worker", []string{"Bash", "Read"})
-	dt = cp.AgentDenyTools("worker")
+	dt = cp.AgentDisallowedTools("worker")
 	if len(dt) != 2 {
 		t.Errorf("SetAgentTools should not affect deny tools, got %v", dt)
 	}
 
 	// Clear deny tools preserves allow.
-	cp.ClearAgentDenyTools("worker")
-	if dt := cp.AgentDenyTools("worker"); len(dt) != 0 {
+	cp.ClearAgentDisallowedTools("worker")
+	if dt := cp.AgentDisallowedTools("worker"); len(dt) != 0 {
 		t.Errorf("expected no deny tools after clear, got %v", dt)
 	}
 	tools, ok := cp.AgentTools("worker")
 	if !ok || len(tools) != 2 {
-		t.Errorf("allow tools should survive ClearAgentDenyTools, got %v ok=%v", tools, ok)
+		t.Errorf("allow tools should survive ClearAgentDisallowedTools, got %v ok=%v", tools, ok)
 	}
 }
 
-func TestSetAgentTools_PreservesDenyTools(t *testing.T) {
+func TestSetAgentTools_PreservesDisallowedTools(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
 	cp.SetAgentTools("worker", []string{"Bash"})
 
-	dt := cp.AgentDenyTools("worker")
+	dt := cp.AgentDisallowedTools("worker")
 	if len(dt) != 1 || dt[0] != "Bash(rm *)" {
 		t.Errorf("deny tools should be preserved by SetAgentTools, got %v", dt)
 	}
 }
 
-func TestClearAgentTools_PreservesDenyTools(t *testing.T) {
+func TestClearAgentTools_PreservesDisallowedTools(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 	cp.SetAgentTools("worker", []string{"Bash"})
-	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
 
 	cp.ClearAgentTools("worker")
 
 	// Policy should still exist because deny tools remain.
-	dt := cp.AgentDenyTools("worker")
+	dt := cp.AgentDisallowedTools("worker")
 	if len(dt) != 1 {
 		t.Errorf("deny tools should survive ClearAgentTools, got %v", dt)
 	}
 }
 
-func TestDenyToolsSaveRoundtrip(t *testing.T) {
+func TestDisallowedToolsSaveRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
 	cp, _ := Load(path, testLogger())
 	cp.SetAgentTools("worker", []string{"Bash", "Read"})
-	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
 	if err := cp.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -1015,7 +1015,7 @@ func TestDenyToolsSaveRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dt := cp2.AgentDenyTools("worker")
+	dt := cp2.AgentDisallowedTools("worker")
 	if len(dt) != 1 || dt[0] != "Bash(rm *)" {
 		t.Errorf("deny tools should roundtrip, got %v", dt)
 	}
@@ -1036,7 +1036,7 @@ func TestCommandToolsDeny(t *testing.T) {
 		t.Errorf("unexpected result: %s", result)
 	}
 
-	dt := cp.AgentDenyTools("researcher")
+	dt := cp.AgentDisallowedTools("researcher")
 	if len(dt) != 2 {
 		t.Errorf("expected 2 deny tools, got %v", dt)
 	}
@@ -1045,7 +1045,7 @@ func TestCommandToolsDeny(t *testing.T) {
 func TestCommandToolsRm_ClearsBoth(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 	cp.SetAgentTools("worker", []string{"Bash"})
-	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
 
 	_, err := cp.HandleCommand("/tools rm worker")
 	if err != nil {
@@ -1056,7 +1056,7 @@ func TestCommandToolsRm_ClearsBoth(t *testing.T) {
 	if ok {
 		t.Error("expected no allow tools after rm")
 	}
-	if dt := cp.AgentDenyTools("worker"); len(dt) != 0 {
+	if dt := cp.AgentDisallowedTools("worker"); len(dt) != 0 {
 		t.Errorf("expected no deny tools after rm, got %v", dt)
 	}
 }

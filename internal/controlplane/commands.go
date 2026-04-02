@@ -132,7 +132,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		if _, err := toolrules.ParseRules(toolList); err != nil {
 			return fmt.Sprintf("Invalid rule: %v", err), false, nil
 		}
-		cp.SetAgentDenyTools(agentName, toolList)
+		cp.SetAgentDisallowedTools(agentName, toolList)
 		return fmt.Sprintf("Deny rules for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
 
 	case "rm", "remove", "clear":
@@ -141,7 +141,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		}
 		agentName := args[0]
 		cp.ClearAgentTools(agentName)
-		cp.ClearAgentDenyTools(agentName)
+		cp.ClearAgentDisallowedTools(agentName)
 		return fmt.Sprintf("Tool overrides for %q cleared. Agent will use its declared tools.", agentName), true, nil
 
 	case "list", "ls":
@@ -167,8 +167,8 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 			if len(p.Tools) > 0 {
 				fmt.Fprintf(&b, "    allow: %s\n", strings.Join(p.Tools, ", "))
 			}
-			if len(p.DenyTools) > 0 {
-				fmt.Fprintf(&b, "    deny:  %s\n", strings.Join(p.DenyTools, ", "))
+			if len(p.DisallowedTools) > 0 {
+				fmt.Fprintf(&b, "    deny:  %s\n", strings.Join(p.DisallowedTools, ", "))
 			}
 		}
 		return strings.TrimRight(b.String(), "\n"), false, nil
@@ -184,7 +184,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 // formatToolPolicy returns a human-readable summary of an agent's tool policy.
 func (cp *ControlPlane) formatToolPolicy(agentName string) string {
 	tools, hasTools := cp.AgentTools(agentName)
-	denyTools := cp.AgentDenyTools(agentName)
+	denyTools := cp.AgentDisallowedTools(agentName)
 	if !hasTools && len(denyTools) == 0 {
 		return fmt.Sprintf("No tool override for %q. Agent uses its declared tools.", agentName)
 	}

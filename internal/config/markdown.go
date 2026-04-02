@@ -57,6 +57,22 @@ func (f Frontmatter) StringSlice(key string) []string {
 	return result
 }
 
+// Int returns a frontmatter value as an int, or 0 if missing/wrong type.
+// YAML unmarshals small numbers as int, so we handle that directly.
+func (f Frontmatter) Int(key string) int {
+	v, ok := f[key]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	}
+	return 0
+}
+
 // StringMap returns a frontmatter value as a map[string]string, or nil if missing/wrong type.
 func (f Frontmatter) StringMap(key string) map[string]string {
 	v, ok := f[key]
@@ -175,7 +191,9 @@ type AgentConfig struct {
 	Name          string
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
-	DenyTools     []string // from frontmatter "deny_tools" field; deny rules checked at call time
+	DisallowedTools []string // from frontmatter "disallowedTools"; deny rules checked at call time
+	Model           string   // from frontmatter "model"; per-agent model override
+	MaxTurns        int      // from frontmatter "maxTurns"; max agentic turns (0 = unlimited)
 	Prompt        string   // the markdown body — the agent's operating instructions
 	Skills        []SkillConfig
 }
@@ -220,8 +238,10 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		Name:          parsed.Frontmatter.String("name"),
 		Description:   parsed.Frontmatter.String("description"),
 		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
-		DenyTools:     parsed.Frontmatter.StringSlice("deny_tools"),
-		Prompt:        parsed.Body,
+		DisallowedTools: parsed.Frontmatter.StringSlice("disallowedTools"),
+		Model:           parsed.Frontmatter.String("model"),
+		MaxTurns:         parsed.Frontmatter.Int("maxTurns"),
+		Prompt:           parsed.Body,
 	}
 
 	if agent.Name == "" {

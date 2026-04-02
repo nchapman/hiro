@@ -44,8 +44,8 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 	}
 
 	// Parse agent's deny rules.
-	if len(cfg.DenyTools) > 0 {
-		agentDeny, parseErr := toolrules.ParseRules(cfg.DenyTools)
+	if len(cfg.DisallowedTools) > 0 {
+		agentDeny, parseErr := toolrules.ParseRules(cfg.DisallowedTools)
 		if parseErr != nil {
 			return nil, nil, nil, fmt.Errorf("parsing agent deny rules: %w", parseErr)
 		}
@@ -85,7 +85,7 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 		}
 
 		// Control plane deny rules.
-		if cpDenyStrs := m.cp.AgentDenyTools(cfg.Name); len(cpDenyStrs) > 0 {
+		if cpDenyStrs := m.cp.AgentDisallowedTools(cfg.Name); len(cpDenyStrs) > 0 {
 			cpDeny, parseErr := toolrules.ParseRules(cpDenyStrs)
 			if parseErr != nil {
 				return nil, nil, nil, fmt.Errorf("parsing control plane deny rules: %w", parseErr)
@@ -241,12 +241,15 @@ func (m *Manager) resolveProviderForModel(model string) (provider, apiKey, baseU
 	return "", "", "", fmt.Errorf("model %q not found in any configured provider", model)
 }
 
-// resolveModel returns the resolved model from the control plane default
-// or the environment variable override.
-func (m *Manager) resolveModel() string {
+// resolveModel returns the resolved model using the priority:
+// control plane default < agent definition < environment variable override.
+func (m *Manager) resolveModel(agentModel string) string {
 	var model string
 	if m.cp != nil {
 		model = m.cp.DefaultModel()
+	}
+	if agentModel != "" {
+		model = agentModel
 	}
 	if m.opts.Model != "" {
 		model = m.opts.Model

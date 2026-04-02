@@ -94,7 +94,7 @@ type Manager struct {
 // Defined here to avoid a direct dependency on the controlplane package.
 type ControlPlane interface {
 	AgentTools(name string) (tools []string, ok bool)
-	AgentDenyTools(name string) []string
+	AgentDisallowedTools(name string) []string
 	SecretNames() []string
 	SecretEnv() []string
 	ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool)

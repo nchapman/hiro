@@ -31,41 +31,41 @@ func (cp *ControlPlane) ClearAgentTools(name string) {
 	defer cp.mu.Unlock()
 	policy := cp.config.Agents[name]
 	policy.Tools = nil
-	if len(policy.DenyTools) == 0 {
+	if len(policy.DisallowedTools) == 0 {
 		delete(cp.config.Agents, name)
 	} else {
 		cp.config.Agents[name] = policy
 	}
 }
 
-// AgentDenyTools returns the operator-defined deny rules for the named agent.
-func (cp *ControlPlane) AgentDenyTools(name string) []string {
+// AgentDisallowedTools returns the operator-defined deny rules for the named agent.
+func (cp *ControlPlane) AgentDisallowedTools(name string) []string {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 	policy, exists := cp.config.Agents[name]
 	if !exists {
 		return nil
 	}
-	return policy.DenyTools
+	return policy.DisallowedTools
 }
 
-// SetAgentDenyTools sets the operator deny-tool rules for a named agent.
+// SetAgentDisallowedTools sets the operator deny-tool rules for a named agent.
 // Preserves any existing allow rules.
-func (cp *ControlPlane) SetAgentDenyTools(name string, denyTools []string) {
+func (cp *ControlPlane) SetAgentDisallowedTools(name string, denyTools []string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	policy := cp.config.Agents[name]
-	policy.DenyTools = denyTools
+	policy.DisallowedTools = denyTools
 	cp.config.Agents[name] = policy
 }
 
-// ClearAgentDenyTools removes the operator deny-tool rules for a named agent.
+// ClearAgentDisallowedTools removes the operator deny-tool rules for a named agent.
 // Preserves any existing allow rules. If no fields remain, the policy is removed.
-func (cp *ControlPlane) ClearAgentDenyTools(name string) {
+func (cp *ControlPlane) ClearAgentDisallowedTools(name string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	policy := cp.config.Agents[name]
-	policy.DenyTools = nil
+	policy.DisallowedTools = nil
 	if len(policy.Tools) == 0 {
 		delete(cp.config.Agents, name)
 	} else {
