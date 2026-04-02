@@ -1,6 +1,6 @@
 //go:build e2e_cluster
 
-// Package e2e_cluster contains end-to-end tests for Hive's leader-worker
+// Package e2e_cluster contains end-to-end tests for Hiro's leader-worker
 // clustering. Tests verify the full flow: worker connects to leader,
 // files sync bidirectionally, coordinator spawns agents on the worker
 // node, and those agents execute tools remotely with results flowing
@@ -17,6 +17,7 @@ package e2e_cluster
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,11 +68,20 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Set up LLM provider (join token is pre-configured via leader-config.yaml).
+	// Set up LLM provider (leader mode is pre-configured via mounted config.yaml).
 	if err := runSetup(); err != nil {
 		fmt.Fprintf(os.Stderr, "setup failed: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Approve the worker node — it connects and enters pending state.
+	approveCtx, approveCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer approveCancel()
+	if err := approveFirstPendingNode(approveCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "worker approval failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("worker node approved")
 
 	// Wait for coordinator.
 	coordCtx, coordCancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -330,6 +340,48 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 	}
 }
 
+// TestCluster_RemoteAgentComputesResult spawns an agent on the worker
+// that runs a deterministic computation and verifies the exact result
+// comes back through the leader. This is the strongest test that remote
+// tool execution actually works end-to-end.
+func TestCluster_RemoteAgentComputesResult(t *testing.T) {
+	agentMD := `---
+name: remote-compute-agent
+tools: [Bash]
+---
+
+You are a test agent. Run the exact command given to you. Report ONLY the raw output, nothing else.`
+
+	apiWriteFile(t, "agents/remote-compute-agent/agent.md", agentMD)
+	waitForWorkerFile(t, "/hiro/agents/remote-compute-agent/agent.md", 15*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cs := openChat(t, ctx)
+	defer cs.close()
+
+	// Use a unique marker so we can verify the exact hash.
+	marker := fmt.Sprintf("cluster-compute-%d", time.Now().UnixNano())
+
+	// Compute the expected hash in Go (avoids sha256sum availability on macOS).
+	h := sha256.Sum256([]byte(marker))
+	expectedHash := fmt.Sprintf("%x", h)
+
+	prompt := fmt.Sprintf(`Use ListNodes to find a non-home worker node, then SpawnInstance "remote-compute-agent" on that node in ephemeral mode. Set the node parameter to the worker's ID.
+
+The prompt should be exactly: "Run this bash command and report ONLY the output: echo -n %s | sha256sum | cut -d' ' -f1"
+
+Reply with ONLY the hash output, nothing else.`, marker)
+
+	resp := cs.chat(ctx, prompt)
+	t.Logf("coordinator response: %s", resp)
+
+	if !strings.Contains(resp, expectedHash) {
+		t.Errorf("expected response to contain hash %s, got: %s", expectedHash, resp)
+	}
+}
+
 // --- WebSocket chat client ---
 
 type chatMessage struct {
@@ -440,6 +492,8 @@ func runSetup() error {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "e2e-cluster-test-12345",
+		"mode":          "leader",
+		"node_name":     "e2e-leader",
 		"provider_type": provider,
 		"api_key":       apiKey,
 		"default_model": model,
@@ -465,6 +519,49 @@ func runSetup() error {
 		return fmt.Errorf("POST /api/setup: status %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
+}
+
+// approveFirstPendingNode polls the pending nodes endpoint until a node
+// appears, then approves it. This replaces the old join-token flow.
+func approveFirstPendingNode(ctx context.Context) error {
+	for {
+		if ctx.Err() != nil {
+			return fmt.Errorf("timed out waiting for pending node")
+		}
+		resp, err := httpClient.Get(baseURL + "/api/cluster/pending")
+		if err != nil || resp.StatusCode != 200 {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		var nodes []struct {
+			NodeID string `json:"node_id"`
+			Name   string `json:"name"`
+		}
+		json.NewDecoder(resp.Body).Decode(&nodes)
+		resp.Body.Close()
+
+		if len(nodes) == 0 {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		// Approve the first pending node.
+		nodeID := nodes[0].NodeID
+		req, _ := http.NewRequest("POST", fmt.Sprintf("%s/api/cluster/pending/%s/approve", baseURL, nodeID), nil)
+		approveResp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("approving node %s: %w", nodeID, err)
+		}
+		approveResp.Body.Close()
+		if approveResp.StatusCode != 200 {
+			return fmt.Errorf("approving node %s: status %d", nodeID, approveResp.StatusCode)
+		}
+		fmt.Printf("approved node %s (%s)\n", nodes[0].Name, nodeID[:16]+"...")
+		return nil
+	}
 }
 
 func waitForCoordinator(ctx context.Context) (string, error) {

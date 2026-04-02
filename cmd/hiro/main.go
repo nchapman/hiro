@@ -28,6 +28,10 @@ import (
 	"github.com/nchapman/hiro/web"
 )
 
+// errRestartRequested is returned by run() when the setup API requests a
+// process restart (e.g. after switching to worker mode during onboarding).
+var errRestartRequested = fmt.Errorf("restart requested")
+
 func main() {
 	// Dispatch subcommand: "hiro agent" runs an agent worker process.
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
@@ -38,9 +42,30 @@ func main() {
 		return
 	}
 
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+	// Restart loop: the setup API can request a restart when the user picks
+	// worker mode during onboarding, or when a worker disconnects from
+	// the cluster. The counter resets after a run lasts long enough to
+	// distinguish a real session from a crash loop.
+	restarts := 0
+	for {
+		start := time.Now()
+		err := run()
+		if err == errRestartRequested {
+			if time.Since(start) > 30*time.Second {
+				restarts = 0 // ran long enough — not a crash loop
+			}
+			restarts++
+			if restarts > 3 {
+				fmt.Fprintf(os.Stderr, "error: too many restarts\n")
+				os.Exit(1)
+			}
+			continue
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 }
 
@@ -68,7 +93,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("resolving root dir: %w", err)
 	}
-	cpPath := filepath.Join(absRootDir, "config.yaml")
+	cpPath := filepath.Join(absRootDir, "config", "config.yaml")
 
 	// Initialize platform directory structure and seed defaults.
 	if err := platform.Init(rootDir, bootLogger); err != nil {
@@ -139,103 +164,119 @@ func run() error {
 	srv.SetWatcher(fsWatcher)
 	srv.SetLogHandler(lh)
 
-	// Set up node identity (Ed25519 keypair + mTLS certificate).
-	identity, tlsCert, err := setupNodeIdentity(absRootDir, logger)
-	if err != nil {
-		return err
-	}
-
-	// Start cluster gRPC server for worker node connections.
-	cs, err := setupClusterServer(absRootDir, tlsCert, cp, logger)
-	if err != nil {
-		return err
-	}
-	clusterSvc := cs.service
-
-	// Start tracker discovery announcements if configured.
+	// Cluster state — only populated for leader mode.
+	var cs clusterState
+	var clusterSvc *cluster.LeaderService
 	discoveryCtx, discoveryCancel := context.WithCancel(ctx)
 	defer discoveryCancel()
-	var relayLis *cluster.ChannelListener // closed on shutdown if set
-	if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
-		swarmCode := cp.ClusterSwarmCode()
-		if swarmCode == "" {
-			return fmt.Errorf("cluster.swarm_code (or HIRO_SWARM_CODE) is required when tracker_url is set")
+	var relayLis *cluster.ChannelListener
+
+	// startCluster boots the cluster gRPC server, identity, and tracker discovery.
+	// Called at startup for existing leader configs, or by the setup API when the
+	// user picks leader mode during onboarding. Idempotent.
+	clusterStarted := false
+	startCluster := func() error {
+		if clusterStarted {
+			return nil
 		}
 
-		// Parse gRPC port from cluster address.
-		_, portStr, _ := net.SplitHostPort(cs.listener.Addr().String())
-		grpcPort, err := strconv.Atoi(portStr)
+		identity, tlsCert, err := setupNodeIdentity(absRootDir, logger)
 		if err != nil {
-			return fmt.Errorf("parsing gRPC port %q: %w", portStr, err)
+			return err
 		}
 
-		nodeName := cp.ClusterNodeName()
-		if nodeName == "" {
-			nodeName = envOr("HOSTNAME", "leader")
+		cs, err = setupClusterServer(absRootDir, tlsCert, cp, logger)
+		if err != nil {
+			return err
 		}
+		clusterSvc = cs.service
 
-		dc := cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
-			TrackerURL:     trackerURL,
-			SwarmCode:      swarmCode,
-			Role:           "leader",
-			GRPCPort:       grpcPort,
-			Identity:       identity,
-			TLSFingerprint: cluster.TLSFingerprint(tlsCert),
-			NodeName:       nodeName,
-			Logger:         logger,
-		})
+		// Start tracker discovery if configured.
+		if trackerURL := cp.ClusterTrackerURL(); trackerURL != "" {
+			swarmCode := cp.ClusterSwarmCode()
+			if swarmCode == "" {
+				return fmt.Errorf("cluster.swarm_code (or HIRO_SWARM_CODE) is required when tracker_url is set")
+			}
 
-		go dc.Run(discoveryCtx)
-		logger.Info("tracker discovery started", "tracker", trackerURL, "role", "leader")
+			_, portStr, _ := net.SplitHostPort(cs.listener.Addr().String())
+			grpcPort, err := strconv.Atoi(portStr)
+			if err != nil {
+				return fmt.Errorf("parsing gRPC port %q: %w", portStr, err)
+			}
 
-		// Create a shared listener for relayed connections. gRPC's Serve()
-		// is called once and accepts connections as they arrive via Enqueue().
-		relayLis = cluster.NewChannelListener(cs.listener.Addr())
-		go cs.grpcServer.Serve(relayLis)
+			nodeName := cp.ClusterNodeName()
+			if nodeName == "" {
+				nodeName = envOr("HOSTNAME", "leader")
+			}
 
-		// After first announce, check if we're reachable. If not, register
-		// with the relay so workers can reach us through it.
-		go func() {
-			// Poll until we have our public IP from the tracker.
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
-			for dc.YourIP() == "" {
-				select {
-				case <-ticker.C:
-				case <-discoveryCtx.Done():
+			dc := cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
+				TrackerURL:     trackerURL,
+				SwarmCode:      swarmCode,
+				Role:           "leader",
+				GRPCPort:       grpcPort,
+				Identity:       identity,
+				TLSFingerprint: cluster.TLSFingerprint(tlsCert),
+				NodeName:       nodeName,
+				Logger:         logger,
+			})
+
+			go dc.Run(discoveryCtx)
+			logger.Info("tracker discovery started", "tracker", trackerURL, "role", "leader")
+
+			relayLis = cluster.NewChannelListener(cs.listener.Addr())
+			go cs.grpcServer.Serve(relayLis)
+
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for dc.YourIP() == "" {
+					select {
+					case <-ticker.C:
+					case <-discoveryCtx.Done():
+						return
+					}
+				}
+
+				publicAddr := fmt.Sprintf("%s:%d", dc.YourIP(), grpcPort)
+				if cluster.SelfTestReachability(publicAddr, tlsCert) {
+					logger.Info("leader is publicly reachable", "addr", publicAddr)
 					return
 				}
-			}
 
-			publicAddr := fmt.Sprintf("%s:%d", dc.YourIP(), grpcPort)
-			if cluster.SelfTestReachability(publicAddr, tlsCert) {
-				logger.Info("leader is publicly reachable", "addr", publicAddr)
-				return
-			}
+				relayURL := dc.RelayURL()
+				if relayURL == "" {
+					logger.Warn("leader is NOT publicly reachable and no relay is configured",
+						"addr", publicAddr)
+					return
+				}
 
-			relayURL := dc.RelayURL()
-			if relayURL == "" {
-				logger.Warn("leader is NOT publicly reachable and no relay is configured",
-					"addr", publicAddr)
-				return
-			}
+				logger.Info("leader is NOT publicly reachable, connecting to relay",
+					"addr", publicAddr, "relay", relayURL)
 
-			logger.Info("leader is NOT publicly reachable, connecting to relay",
-				"addr", publicAddr, "relay", relayURL)
+				cs.leaderStream.SetRelayAddr(relayURL)
 
-			rc := cluster.NewRelayClient(cluster.RelayConfig{
-				RelayAddr: relayURL,
-				SwarmCode: swarmCode,
-				Identity:  identity,
-				Logger:    logger,
-			})
+				rc := cluster.NewRelayClient(cluster.RelayConfig{
+					RelayAddr: relayURL,
+					SwarmCode: swarmCode,
+					Identity:  identity,
+					Logger:    logger,
+				})
 
-			// Relayed connections feed into the shared gRPC listener.
-			// The gRPC server handles mTLS on each connection.
-			rc.Run(discoveryCtx, func(conn net.Conn) {
-				relayLis.Enqueue(conn)
-			})
-		}()
+				rc.Run(discoveryCtx, func(conn net.Conn) {
+					relayLis.Enqueue(conn)
+				})
+			}()
+		}
+
+		clusterStarted = true
+		srv.SetNodeRegistry(cs.registry)
+		srv.SetPendingRegistry(cs.pending)
+		srv.SetDisconnectNode(func(nodeID string) {
+			nid := cluster.NodeID(nodeID)
+			clusterSvc.KillWorkersOnNode(nid)
+			cs.leaderStream.DisconnectNode(nid)
+		})
+		return nil
 	}
 
 	// Shared state for the manager lifecycle — the manager can be started
@@ -243,9 +284,7 @@ func run() error {
 	var mgr *agent.Manager
 
 	// Reload config.yaml when it changes on disk (external edits, coordinator writes).
-	// After reloading, push resolved config to all running agents since provider,
-	// model defaults, or tool policies may have changed.
-	fsWatcher.Subscribe("config.yaml", func(events []watcher.Event) {
+	fsWatcher.Subscribe("config/config.yaml", func(events []watcher.Event) {
 		if err := cp.Reload(); err != nil {
 			logger.Warn("failed to reload config.yaml", "error", err)
 			return
@@ -256,7 +295,7 @@ func run() error {
 	})
 
 	// startManager boots the agent manager and coordinator.
-	// It is idempotent — calling it when a manager already exists is a no-op.
+	// Idempotent — calling it when a manager already exists is a no-op.
 	startManager := func() error {
 		if mgr != nil {
 			return nil // already started
@@ -265,7 +304,7 @@ func run() error {
 			return fmt.Errorf("no LLM provider configured")
 		}
 
-		// Detect Unix user isolation: enabled iff the hiro-agents group exists.
+		// Detect Unix user isolation.
 		var pool *uidpool.Pool
 		if grp, err := user.LookupGroup("hiro-agents"); err == nil {
 			gid, err := strconv.ParseUint(grp.Gid, 10, 32)
@@ -275,7 +314,6 @@ func run() error {
 			pool = uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
 			logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
 
-			// Detect hiro-coordinators group for agents/ and skills/ write access.
 			if coordGrp, err := user.LookupGroup("hiro-coordinators"); err == nil {
 				coordGID, err := strconv.ParseUint(coordGrp.Gid, 10, 32)
 				if err != nil {
@@ -289,17 +327,16 @@ func run() error {
 		mgr = agent.NewManager(ctx, rootDir, agent.Options{
 			WorkingDir: absRootDir,
 		}, cp, logger, nil, pool, pdb)
-		mgr.SetClusterService(clusterSvc)
+		if clusterSvc != nil {
+			mgr.SetClusterService(clusterSvc)
+		}
 
-		// Watch agent definitions for config changes and push to running agents.
 		mgr.WatchAgentDefinitions(fsWatcher)
 
-		// Restore any persistent instances from previous run
 		if err := mgr.RestoreInstances(ctx); err != nil {
 			logger.Warn("failed to restore some agent instances", "error", err)
 		}
 
-		// Ensure the coordinator agent is running.
 		leaderID, err := bootstrapCoordinator(ctx, mgr, logger)
 		if err != nil {
 			return err
@@ -316,10 +353,27 @@ func run() error {
 		return nil
 	}
 
-	// Expose the startManager callback so the setup API can trigger it.
-	srv.SetStartManager(startManager)
+	// Restart channel: the setup API signals this when the user picks worker
+	// mode during onboarding, triggering a clean shutdown + re-run.
+	restartCh := make(chan struct{}, 1)
 
-	// Start agent manager if a provider is already configured.
+	// Expose callbacks so the setup API can trigger them.
+	srv.SetStartManager(startManager)
+	srv.SetStartCluster(startCluster)
+	srv.SetRestartFunc(func() {
+		select {
+		case restartCh <- struct{}{}:
+		default:
+		}
+	})
+
+	// Boot cluster + manager if already configured.
+	mode := cp.ClusterMode()
+	if mode == "leader" {
+		if err := startCluster(); err != nil {
+			return fmt.Errorf("starting cluster: %w", err)
+		}
+	}
 	if cp.IsConfigured() {
 		if err := startManager(); err != nil {
 			return fmt.Errorf("starting agent manager: %w", err)
@@ -336,35 +390,48 @@ func run() error {
 	}
 
 	go func() {
-		logger.Info("hiro starting", "addr", listenAddr, "cluster", cs.listener.Addr())
+		clusterInfo := ""
+		if clusterStarted {
+			clusterInfo = cs.listener.Addr().String()
+		}
+		logger.Info("hiro starting", "addr", listenAddr, "mode", mode, "cluster", clusterInfo)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "error", err)
 			cancel()
 		}
 	}()
 
-	<-ctx.Done()
-	logger.Info("shutting down...")
+	// Wait for shutdown signal or restart request.
+	var runErr error
+	select {
+	case <-ctx.Done():
+		logger.Info("shutting down...")
+	case <-restartCh:
+		logger.Info("restarting for mode change...")
+		runErr = errRestartRequested
+	}
 
-	// Drain HTTP connections first so in-flight agent calls complete,
-	// then shut down the agent manager and gRPC server.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	err = httpServer.Shutdown(shutdownCtx)
+	_ = httpServer.Shutdown(shutdownCtx)
 	discoveryCancel()
 	if relayLis != nil {
 		relayLis.Close()
 	}
-	cs.grpcServer.GracefulStop()
-	cs.fileSync.Stop()
+	if cs.grpcServer != nil {
+		cs.grpcServer.GracefulStop()
+	}
+	if cs.fileSync != nil {
+		cs.fileSync.Stop()
+	}
 	if mgr != nil {
 		mgr.Shutdown()
 	}
 	if saveErr := cp.Save(); saveErr != nil {
 		logger.Error("failed to save control plane config", "error", saveErr)
 	}
-	return err
+	return runErr
 }
 
 func envOr(key, fallback string) string {

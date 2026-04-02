@@ -1,5 +1,5 @@
 // Package transport defines the wire protocol for communication between
-// leader and worker agents in a Hive swarm.
+// leader and worker agents in a Hiro swarm.
 package transport
 
 import "time"

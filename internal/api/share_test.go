@@ -91,19 +91,20 @@ func TestHandleShareCreate(t *testing.T) {
 	}
 }
 
-func TestHandleShareCreate_ConfigYamlBlocked(t *testing.T) {
+func TestHandleShareCreate_ConfigDirBlocked(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 	root := t.TempDir()
 	srv.rootDir = root
-	os.WriteFile(filepath.Join(root, "config.yaml"), []byte("secrets: {}"), 0600)
+	os.MkdirAll(filepath.Join(root, "config"), 0700)
+	os.WriteFile(filepath.Join(root, "config", "config.yaml"), []byte("secrets: {}"), 0600)
 
-	body, _ := json.Marshal(map[string]string{"path": "config.yaml"})
+	body, _ := json.Marshal(map[string]string{"path": "config/config.yaml"})
 	req := authedRequest(t, srv, "POST", "/api/files/share", body)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
 	if rec.Code == http.StatusOK {
-		t.Error("expected config.yaml sharing to be blocked")
+		t.Error("expected config directory sharing to be blocked")
 	}
 }
 

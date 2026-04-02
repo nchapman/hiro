@@ -3,8 +3,11 @@ package cluster_test
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -13,18 +16,7 @@ import (
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 )
-
-const bufSize = 1024 * 1024
-
-func validToken(token string) string {
-	if token == "valid-token" {
-		return "test-worker"
-	}
-	return ""
-}
 
 // testIdentityFromSeed creates a deterministic identity for testing.
 func testIdentityFromSeed(seed byte) *cluster.NodeIdentity {
@@ -32,33 +24,29 @@ func testIdentityFromSeed(seed byte) *cluster.NodeIdentity {
 	s[0] = seed
 	priv := ed25519.NewKeyFromSeed(s)
 	pub := priv.Public().(ed25519.PublicKey)
-	return &cluster.NodeIdentity{PrivateKey: priv, PublicKey: pub, NodeID: "test-node"}
+	hash := sha256.Sum256(pub)
+	return &cluster.NodeIdentity{PrivateKey: priv, PublicKey: pub, NodeID: hex.EncodeToString(hash[:])}
 }
 
-// setupClusterTest creates a bufconn-based leader gRPC server and returns
-// a dialer function for worker clients to connect through.
-func setupClusterTest(t *testing.T, registry *cluster.NodeRegistry) (*cluster.LeaderStream, func(context.Context, string) (net.Conn, error)) {
-	t.Helper()
-	logger := slog.Default()
-	leader := cluster.NewLeaderStream(registry, validToken, logger)
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer()
-	leader.Register(srv)
-	go srv.Serve(lis)
-	t.Cleanup(srv.Stop)
-
-	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
-		return lis.DialContext(ctx)
-	}
-	return leader, dialer
+// nodeIDFromIdentity derives the node ID from an identity (same as LeaderStream does).
+func nodeIDFromIdentity(id *cluster.NodeIdentity) string {
+	return id.NodeID
 }
 
-// setupClusterTestTLS creates a real TCP-based leader gRPC server with mTLS.
-func setupClusterTestTLS(t *testing.T, registry *cluster.NodeRegistry) (*cluster.LeaderStream, string, *cluster.NodeIdentity) {
+// setupApprovalTest creates an mTLS-based leader gRPC server with approval-based auth.
+// approvedIDs is the set of node IDs that are pre-approved.
+func setupApprovalTest(t *testing.T, registry *cluster.NodeRegistry, approvedIDs map[string]bool) (*cluster.LeaderStream, string, *cluster.NodeIdentity, *cluster.PendingRegistry) {
 	t.Helper()
 	logger := slog.Default()
-	leader := cluster.NewLeaderStream(registry, validToken, logger)
+
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
+
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		if approvedIDs[nodeID] {
+			return cluster.ApprovalGranted
+		}
+		return cluster.ApprovalPending
+	}, pending, logger)
 
 	serverID := testIdentityFromSeed(0)
 	serverCert, err := cluster.TLSCertFromIdentity(serverID)
@@ -77,179 +65,206 @@ func setupClusterTestTLS(t *testing.T, registry *cluster.NodeRegistry) (*cluster
 	go srv.Serve(lis)
 	t.Cleanup(srv.Stop)
 
-	return leader, lis.Addr().String(), serverID
+	return leader, lis.Addr().String(), serverID, pending
 }
 
-func connectWorker(t *testing.T, ctx context.Context, dialer func(context.Context, string) (net.Conn, error), name string) *cluster.WorkerStream {
-	t.Helper()
-	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
-		LeaderAddr: "passthrough:///bufconn",
-		NodeName:   name,
-		JoinToken:  "valid-token",
-		Capacity:   4,
-		Logger:     slog.Default(),
-	})
-	return ws
-}
-
-func TestStream_Registration(t *testing.T) {
+func TestStream_ApprovedRegistration(t *testing.T) {
 	registry := cluster.NewNodeRegistry()
-	_, dialer := setupClusterTest(t, registry)
+	clientID := testIdentityFromSeed(1)
+
+	// Pre-approve the client identity.
+	approved := map[string]bool{nodeIDFromIdentity(clientID): true}
+	_, addr, serverID, pending := setupApprovalTest(t, registry, approved)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	ws := connectWorker(t, ctx, dialer, "test-node")
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
 
-	// Connect in background — it blocks on the message loop.
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "approved-node",
+		Capacity:   4,
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
+	})
+
 	var connectErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// Override the gRPC dial to use bufconn.
-		conn, err := grpc.NewClient("passthrough:///bufconn",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		if err != nil {
-			connectErr = err
-			return
-		}
-		defer conn.Close()
-
-		client := pb.NewClusterClient(conn)
-		stream, err := client.NodeStream(ctx)
-		if err != nil {
-			connectErr = err
-			return
-		}
-
-		// Send registration.
-		err = stream.Send(&pb.NodeMessage{
-			Msg: &pb.NodeMessage_Register{
-				Register: &pb.NodeRegister{
-					NodeName:  "test-node",
-					JoinToken: "valid-token",
-					Capacity:  4,
-				},
-			},
-		})
-		if err != nil {
-			connectErr = err
-			return
-		}
-
-		// Wait for confirmation.
-		resp, err := stream.Recv()
-		if err != nil {
-			connectErr = err
-			return
-		}
-
-		reg := resp.GetRegistered()
-		if reg == nil {
-			connectErr = err
-			return
-		}
-
-		_ = ws // appease unused var
-		if reg.NodeId == "" {
-			t.Error("expected non-empty node ID")
-		}
-
-		// Cancel to exit.
-		cancel()
-
-		// Drain the stream.
-		for {
-			_, err := stream.Recv()
-			if err != nil {
-				break
-			}
-		}
+		connectErr = ws.Connect(ctx)
 	}()
 
-	wg.Wait()
-	if connectErr != nil {
-		t.Fatalf("connection error: %v", connectErr)
-	}
-
-	// Verify node was registered.
-	nodes := registry.List()
-	found := false
-	for _, n := range nodes {
-		if n.Name == "test-node" {
-			found = true
-			if n.Capacity != 4 {
-				t.Errorf("expected capacity 4, got %d", n.Capacity)
+	// Wait for registration to appear in registry.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		nodes := registry.List()
+		for _, n := range nodes {
+			if n.Name == "approved-node" {
+				if n.Capacity != 4 {
+					t.Errorf("expected capacity 4, got %d", n.Capacity)
+				}
+				// Node ID should be the identity-derived ID, not random.
+				if string(n.ID) != nodeIDFromIdentity(clientID) {
+					t.Errorf("node ID = %q, want %q", n.ID, nodeIDFromIdentity(clientID))
+				}
+				// Should not be in pending.
+				if pending.Count() != 0 {
+					t.Error("approved node should not be in pending list")
+				}
+				cancel()
+				wg.Wait()
+				return
 			}
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if !found {
-		t.Error("test-node not found in registry")
+
+	cancel()
+	wg.Wait()
+	if connectErr != nil {
+		t.Fatalf("connect error: %v", connectErr)
 	}
+	t.Fatal("approved-node never appeared in registry")
 }
 
-func TestStream_InvalidToken(t *testing.T) {
+func TestStream_PendingApproval(t *testing.T) {
 	registry := cluster.NewNodeRegistry()
-	_, dialer := setupClusterTest(t, registry)
+	clientID := testIdentityFromSeed(1)
+
+	// Do NOT approve the client.
+	approved := map[string]bool{}
+	_, addr, serverID, pending := setupApprovalTest(t, registry, approved)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient("passthrough:///bufconn",
-		grpc.WithContextDialer(dialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatal(err)
 	}
-	defer conn.Close()
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
 
-	client := pb.NewClusterClient(conn)
-	stream, err := client.NodeStream(ctx)
-	if err != nil {
-		t.Fatalf("open stream: %v", err)
-	}
-
-	// Send registration with bad token.
-	err = stream.Send(&pb.NodeMessage{
-		Msg: &pb.NodeMessage_Register{
-			Register: &pb.NodeRegister{
-				NodeName:  "bad-node",
-				JoinToken: "wrong-token",
-				Capacity:  1,
-			},
-		},
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "unapproved-node",
+		Capacity:   2,
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
+
+	err = ws.Connect(ctx)
+	if err != cluster.ErrPendingApproval {
+		t.Fatalf("expected ErrPendingApproval, got %v", err)
 	}
 
-	// Should get an error on recv (server closes stream).
-	_, err = stream.Recv()
-	if err == nil {
-		t.Fatal("expected error for invalid token")
-	}
-
-	// Node should not be registered.
+	// Node should NOT be in the registry.
 	if registry.Len() != 0 {
-		t.Error("expected no nodes registered")
+		t.Error("unapproved node should not be registered")
+	}
+
+	// Node SHOULD be in the pending list.
+	nodes := pending.List()
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 pending node, got %d", len(nodes))
+	}
+	if nodes[0].NodeID != nodeIDFromIdentity(clientID) {
+		t.Errorf("pending node ID = %q, want %q", nodes[0].NodeID, nodeIDFromIdentity(clientID))
+	}
+	if nodes[0].Name != "unapproved-node" {
+		t.Errorf("pending node name = %q, want %q", nodes[0].Name, "unapproved-node")
+	}
+}
+
+func TestStream_RejectedRevoked(t *testing.T) {
+	registry := cluster.NewNodeRegistry()
+	clientID := testIdentityFromSeed(1)
+	logger := slog.Default()
+
+	// Mark the node as revoked (not approved, but explicitly revoked).
+	revokedIDs := map[string]bool{nodeIDFromIdentity(clientID): true}
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
+
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		if revokedIDs[nodeID] {
+			return cluster.ApprovalRevoked
+		}
+		return cluster.ApprovalPending
+	}, pending, logger)
+
+	serverID := testIdentityFromSeed(0)
+	serverCert, err := cluster.TLSCertFromIdentity(serverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTLS := cluster.ServerTLSConfig(serverCert)
+	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
+	leader.Register(srv)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	addr := lis.Addr().String()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
+
+	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
+		LeaderAddr: addr,
+		NodeName:   "revoked-node",
+		Capacity:   2,
+		TLSConfig:  clientTLS,
+		Logger:     slog.Default(),
+	})
+
+	err = ws.Connect(ctx)
+	if err != cluster.ErrApprovalRevoked {
+		t.Fatalf("expected ErrApprovalRevoked, got %v", err)
+	}
+
+	// Node should NOT be in the registry.
+	if registry.Len() != 0 {
+		t.Error("revoked node should not be registered")
+	}
+
+	// Node should NOT be in the pending list (revoked nodes are silently rejected).
+	if pending.Count() != 0 {
+		t.Error("revoked node should not be added to pending list")
 	}
 }
 
 func TestStream_ToolExecution(t *testing.T) {
 	registry := cluster.NewNodeRegistry()
-	leader, dialer := setupClusterTest(t, registry)
+	clientID := testIdentityFromSeed(1)
+	approved := map[string]bool{nodeIDFromIdentity(clientID): true}
+	leader, addr, serverID, _ := setupApprovalTest(t, registry, approved)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient("passthrough:///bufconn",
-		grpc.WithContextDialer(dialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -265,8 +280,7 @@ func TestStream_ToolExecution(t *testing.T) {
 	if err := stream.Send(&pb.NodeMessage{
 		Msg: &pb.NodeMessage_Register{
 			Register: &pb.NodeRegister{
-				NodeName:  "tool-node",
-				JoinToken: "valid-token",
+				NodeName: "tool-node",
 			},
 		},
 	}); err != nil {
@@ -293,7 +307,6 @@ func TestStream_ToolExecution(t *testing.T) {
 			}
 			if et := msg.GetExecuteTool(); et != nil {
 				toolReceived = et
-				// Send result back.
 				stream.Send(&pb.NodeMessage{
 					Msg: &pb.NodeMessage_ToolResult{
 						ToolResult: &pb.NodeToolResult{
@@ -307,10 +320,8 @@ func TestStream_ToolExecution(t *testing.T) {
 		}
 	}()
 
-	// Give the goroutine time to start reading.
 	time.Sleep(50 * time.Millisecond)
 
-	// Leader sends a tool execution request.
 	var resultReceived *pb.NodeToolResult
 	var resultMu sync.Mutex
 	resultCh := make(chan struct{}, 1)
@@ -338,7 +349,6 @@ func TestStream_ToolExecution(t *testing.T) {
 		t.Fatalf("send execute tool: %v", err)
 	}
 
-	// Wait for result.
 	select {
 	case <-resultCh:
 	case <-ctx.Done():
@@ -367,76 +377,15 @@ func TestStream_ToolExecution(t *testing.T) {
 	nodeWg.Wait()
 }
 
-// TestStream_mTLS_Registration tests the full registration flow over mTLS
-// using real TCP connections (not bufconn). This exercises the same code
-// path as production: TLS handshake → gRPC stream → registration → confirmation.
-func TestStream_mTLS_Registration(t *testing.T) {
-	registry := cluster.NewNodeRegistry()
-	leader, addr, serverID := setupClusterTestTLS(t, registry)
-	_ = leader
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	// Create a worker identity and TLS cert.
-	clientID := testIdentityFromSeed(1)
-	clientCert, err := cluster.TLSCertFromIdentity(clientID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Connect with mTLS, pinning the server's public key.
-	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
-
-	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
-		LeaderAddr: addr,
-		NodeName:   "mtls-node",
-		JoinToken:  "valid-token",
-		Capacity:   2,
-		TLSConfig:  clientTLS,
-		Logger:     slog.Default(),
-	})
-
-	var connectErr error
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		connectErr = ws.Connect(ctx)
-	}()
-
-	// Wait for registration to appear in registry.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		nodes := registry.List()
-		for _, n := range nodes {
-			if n.Name == "mtls-node" {
-				cancel() // success — stop the connection
-				wg.Wait()
-				return
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	cancel()
-	wg.Wait()
-	if connectErr != nil {
-		t.Fatalf("connect error: %v", connectErr)
-	}
-	t.Fatal("mtls-node never appeared in registry")
-}
-
-// TestStream_mTLS_WrongServerKey verifies that a worker rejects a leader
-// whose public key doesn't match what the tracker reported.
 func TestStream_mTLS_WrongServerKey(t *testing.T) {
 	registry := cluster.NewNodeRegistry()
-	_, addr, _ := setupClusterTestTLS(t, registry)
+	clientID := testIdentityFromSeed(1)
+	approved := map[string]bool{nodeIDFromIdentity(clientID): true}
+	_, addr, _, _ := setupApprovalTest(t, registry, approved)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	clientID := testIdentityFromSeed(1)
 	clientCert, err := cluster.TLSCertFromIdentity(clientID)
 	if err != nil {
 		t.Fatal(err)
@@ -449,7 +398,6 @@ func TestStream_mTLS_WrongServerKey(t *testing.T) {
 	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
 		LeaderAddr: addr,
 		NodeName:   "wrong-key-node",
-		JoinToken:  "valid-token",
 		TLSConfig:  clientTLS,
 		Logger:     slog.Default(),
 	})
@@ -459,35 +407,31 @@ func TestStream_mTLS_WrongServerKey(t *testing.T) {
 		t.Fatal("expected connection to fail with wrong server key")
 	}
 
-	// Should not have registered.
 	if registry.Len() != 0 {
 		t.Error("node should not have registered with wrong key")
 	}
 }
 
-// TestStream_mTLS_NoPinning verifies that workers without pubkey pinning
-// (direct leader_addr mode) still connect successfully over mTLS.
 func TestStream_mTLS_NoPinning(t *testing.T) {
 	registry := cluster.NewNodeRegistry()
-	leader, addr, _ := setupClusterTestTLS(t, registry)
-	_ = leader
+	clientID := testIdentityFromSeed(2)
+	approved := map[string]bool{nodeIDFromIdentity(clientID): true}
+	_, addr, _, _ := setupApprovalTest(t, registry, approved)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	clientID := testIdentityFromSeed(2)
 	clientCert, err := cluster.TLSCertFromIdentity(clientID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// No pinning — nil expectedPubKey. Direct leader_addr mode.
+	// No pinning — nil expectedPubKey.
 	clientTLS := cluster.ClientTLSConfig(clientCert, nil)
 
 	ws := cluster.NewWorkerStream(cluster.WorkerStreamConfig{
 		LeaderAddr: addr,
 		NodeName:   "no-pin-node",
-		JoinToken:  "valid-token",
 		Capacity:   1,
 		TLSConfig:  clientTLS,
 		Logger:     slog.Default(),

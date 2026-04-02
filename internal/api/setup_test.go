@@ -34,6 +34,7 @@ func TestSetup_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "testpass123",
+		"mode":          "standalone",
 		"provider_type": "anthropic",
 		"api_key":       "sk-test-key-12345",
 	})
@@ -68,6 +69,44 @@ func TestSetup_Success(t *testing.T) {
 	}
 }
 
+func TestSetup_Leader(t *testing.T) {
+	srv := newSetupServer(t)
+
+	body, _ := json.Marshal(map[string]string{
+		"password":      "testpass123",
+		"mode":          "leader",
+		"provider_type": "anthropic",
+		"api_key":       "sk-test-key-12345",
+	})
+	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	swarmCode, ok := resp["swarm_code"].(string)
+	if !ok || swarmCode == "" {
+		t.Errorf("expected non-empty swarm_code in response, got: %v", resp)
+	}
+	t.Logf("response: %v", resp)
+
+	// Cluster config should be set.
+	if srv.cp.ClusterSwarmCode() != swarmCode {
+		t.Errorf("swarm code mismatch: config=%q response=%q", srv.cp.ClusterSwarmCode(), swarmCode)
+	}
+	if srv.cp.ClusterMode() != "leader" {
+		t.Errorf("expected mode=leader, got %q", srv.cp.ClusterMode())
+	}
+}
+
 func TestSetup_ShortPassword(t *testing.T) {
 	srv := newSetupServer(t)
 
@@ -91,6 +130,7 @@ func TestSetup_MissingFields(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"password": "longpassword",
+		"mode":     "standalone",
 	})
 	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -107,6 +147,7 @@ func TestSetup_AlreadyComplete(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "testpass123",
+		"mode":          "standalone",
 		"provider_type": "anthropic",
 		"api_key":       "sk-test-key",
 	})
@@ -125,6 +166,7 @@ func TestSetup_CrossOriginBlocked(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "testpass123",
+		"mode":          "standalone",
 		"provider_type": "anthropic",
 		"api_key":       "sk-test-key",
 	})

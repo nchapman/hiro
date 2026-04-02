@@ -99,6 +99,8 @@ func runSetup() error {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":      "e2e-test-password-12345",
+		"mode":          "standalone",
+		"node_name":     "e2e-test",
 		"provider_type": provider,
 		"api_key":       apiKey,
 		"default_model": model,

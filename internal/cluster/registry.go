@@ -33,6 +33,8 @@ type NodeInfo struct {
 	Name        string     `json:"name"`
 	Status      NodeStatus `json:"status"`
 	IsHome      bool       `json:"is_home"`
+	Addr        string     `json:"addr,omitempty"`  // peer address (ip:port)
+	Via         string     `json:"via,omitempty"`    // "direct" or "relay"
 	ConnectedAt time.Time  `json:"connected_at"`
 	LastSeen    time.Time  `json:"last_seen"`
 	Capacity    int        `json:"capacity"`     // max concurrent workers, 0 = unlimited
@@ -69,7 +71,7 @@ func (r *NodeRegistry) RegisterHome(name string) {
 
 // Register adds or updates a remote node. Returns an error if the ID
 // conflicts with the home node.
-func (r *NodeRegistry) Register(id NodeID, name string, capacity int) error {
+func (r *NodeRegistry) Register(id NodeID, name string, capacity int, addr string, via string) error {
 	if id == HomeNodeID {
 		return fmt.Errorf("cannot register node with reserved ID %q", HomeNodeID)
 	}
@@ -80,6 +82,8 @@ func (r *NodeRegistry) Register(id NodeID, name string, capacity int) error {
 		ID:          id,
 		Name:        name,
 		Status:      NodeOnline,
+		Addr:        addr,
+		Via:         via,
 		ConnectedAt: now,
 		LastSeen:    now,
 		Capacity:    capacity,
@@ -92,6 +96,17 @@ func (r *NodeRegistry) Unregister(id NodeID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.nodes, id)
+}
+
+// ClearRemote removes all non-home nodes from the registry.
+func (r *NodeRegistry) ClearRemote() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, n := range r.nodes {
+		if !n.IsHome {
+			delete(r.nodes, id)
+		}
+	}
 }
 
 // SetOffline marks a node as offline without removing it.

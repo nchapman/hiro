@@ -58,6 +58,7 @@ func TestLoadOrCreateIdentity_LoadsExisting(t *testing.T) {
 
 func TestLoadOrCreateIdentity_CorruptFile(t *testing.T) {
 	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "config"), 0700)
 	os.WriteFile(filepath.Join(dir, identityFile), []byte("too short"), 0600)
 
 	_, err := LoadOrCreateIdentity(dir)

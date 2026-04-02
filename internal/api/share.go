@@ -92,9 +92,9 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Block sharing config.yaml (contains secrets).
-	if body.Path == "config.yaml" {
-		http.Error(w, "config.yaml cannot be shared", http.StatusForbidden)
+	// Block sharing anything in the config directory (contains secrets).
+	if body.Path == "config" || strings.HasPrefix(body.Path, "config/") {
+		http.Error(w, "config directory cannot be shared", http.StatusForbidden)
 		return
 	}
 

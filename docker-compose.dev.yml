@@ -1,0 +1,52 @@
+# Dev cluster — boot fresh nodes for interactive testing.
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Then onboard each node through the web UI:
+#   - Node 1 (leader): http://localhost:8080
+#   - Node 2 (worker): http://localhost:8082
+#   - Node 3 (worker): http://localhost:8084
+#
+# All nodes start unconfigured — pick a mode during onboarding.
+# To test approval: onboard node1 as leader, node2/node3 as workers,
+# then approve them from node1's settings page.
+services:
+  node1:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    environment:
+      - HIRO_ADDR=:8080
+      - HIRO_CLUSTER_ADDR=:8081
+      - HIRO_ROOT=/hiro
+    volumes:
+      - node1:/hiro
+
+  node2:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      - HIRO_ADDR=:8080
+      - HIRO_ROOT=/hiro
+    volumes:
+      - node2:/hiro
+
+  node3:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8084:8080"
+    environment:
+      - HIRO_ADDR=:8080
+      - HIRO_ROOT=/hiro
+    volumes:
+      - node3:/hiro
+
+volumes:
+  node1:
+  node2:
+  node3:

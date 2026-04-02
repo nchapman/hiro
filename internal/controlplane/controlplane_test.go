@@ -678,129 +678,99 @@ func TestSetProvider_Validation(t *testing.T) {
 
 // --- Cluster command tests ---
 
-func TestCommandClusterTokenCreate(t *testing.T) {
+func TestCommandClusterStatus(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	cp, _ := Load(path, testLogger())
 
-	result, err := cp.HandleCommand("/cluster token create")
+	result, err := cp.HandleCommand("/cluster")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "default") || !strings.Contains(result, "created") {
+	if !strings.Contains(result, "not configured") {
 		t.Errorf("unexpected result: %s", result)
 	}
 
-	tokens := cp.ClusterJoinTokens()
-	if _, ok := tokens["default"]; !ok {
-		t.Error("expected 'default' token to exist")
-	}
-
-	// Verify persisted to disk.
-	data, err := os.ReadFile(path)
+	// Set mode and verify status output.
+	cp.SetClusterMode("leader")
+	cp.SetClusterSwarmCode("test-1234")
+	result, err = cp.HandleCommand("/cluster")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "join_tokens") {
-		t.Error("expected join_tokens in config.yaml")
-	}
-}
-
-func TestCommandClusterTokenCreateNamed(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	result, err := cp.HandleCommand("/cluster token create worker-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "worker-1") {
+	if !strings.Contains(result, "leader") || !strings.Contains(result, "test-1234") {
 		t.Errorf("unexpected result: %s", result)
-	}
-
-	tokens := cp.ClusterJoinTokens()
-	if _, ok := tokens["worker-1"]; !ok {
-		t.Error("expected 'worker-1' token to exist")
-	}
-}
-
-func TestCommandClusterTokenRevoke(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetClusterJoinToken("test", "abc123")
-
-	result, err := cp.HandleCommand("/cluster token revoke test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "revoked") {
-		t.Errorf("unexpected result: %s", result)
-	}
-
-	tokens := cp.ClusterJoinTokens()
-	if tokens != nil {
-		if _, ok := tokens["test"]; ok {
-			t.Error("expected token to be revoked")
-		}
-	}
-}
-
-func TestCommandClusterTokenList(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetClusterJoinToken("node-a", "abcdef1234567890abcdef1234567890")
-
-	result, err := cp.HandleCommand("/cluster token list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "node-a") {
-		t.Errorf("expected token name in output: %s", result)
-	}
-	// Token should be masked.
-	if strings.Contains(result, "abcdef1234567890abcdef1234567890") {
-		t.Error("full token should not appear in list output")
-	}
-	if !strings.Contains(result, "...") {
-		t.Error("expected masked token with '...'")
-	}
-}
-
-func TestCommandClusterTokenListEmpty(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	result, err := cp.HandleCommand("/cluster token list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "No join tokens") {
-		t.Errorf("expected empty message, got: %s", result)
 	}
 }
 
 // --- Cluster config tests ---
 
-func TestValidateJoinToken(t *testing.T) {
+func TestApproveNode(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetClusterJoinToken("worker-1", "secret-token-1")
-	cp.SetClusterJoinToken("worker-2", "secret-token-2")
 
-	// Valid token returns name.
-	if name := cp.ValidateJoinToken("secret-token-1"); name != "worker-1" {
-		t.Errorf("expected 'worker-1', got %q", name)
-	}
-	if name := cp.ValidateJoinToken("secret-token-2"); name != "worker-2" {
-		t.Errorf("expected 'worker-2', got %q", name)
+	// Initially no approved nodes.
+	if cp.IsNodeApproved("node-abc") {
+		t.Error("node should not be approved initially")
 	}
 
-	// Invalid token returns empty.
-	if name := cp.ValidateJoinToken("wrong-token"); name != "" {
-		t.Errorf("expected empty string for invalid token, got %q", name)
+	// Approve a node.
+	cp.ApproveNode("node-abc", "worker-1")
+	if !cp.IsNodeApproved("node-abc") {
+		t.Error("node should be approved after ApproveNode")
+	}
+
+	// Check the returned map.
+	nodes := cp.ApprovedNodes()
+	if n, ok := nodes["node-abc"]; !ok {
+		t.Error("expected node in approved map")
+	} else if n.Name != "worker-1" {
+		t.Errorf("name = %q, want worker-1", n.Name)
+	}
+
+	// Revoke and verify.
+	cp.RevokeNode("node-abc")
+	if cp.IsNodeApproved("node-abc") {
+		t.Error("node should not be approved after revocation")
+	}
+	if !cp.IsNodeRevoked("node-abc") {
+		t.Error("node should be in revoked list after revocation")
+	}
+
+	// Clear revocation and verify.
+	cp.ClearRevokedNode("node-abc")
+	if cp.IsNodeRevoked("node-abc") {
+		t.Error("node should not be revoked after clearing")
+	}
+}
+
+func TestApprovedNodes_Copy(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.ApproveNode("a", "node-a")
+
+	nodes := cp.ApprovedNodes()
+	nodes["b"] = ApprovedNode{Name: "node-b"} // modify the copy
+
+	// Original should be unaffected.
+	nodes2 := cp.ApprovedNodes()
+	if _, ok := nodes2["b"]; ok {
+		t.Error("modifying returned map should not affect ControlPlane")
+	}
+}
+
+func TestApprovedNodes_NilWhenEmpty(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	nodes := cp.ApprovedNodes()
+	if nodes != nil {
+		t.Errorf("expected nil for no approved nodes, got %v", nodes)
 	}
 }
 
 func TestClusterMode_Default(t *testing.T) {
 	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
 
-	if mode := cp.ClusterMode(); mode != "leader" {
-		t.Errorf("expected 'leader' default, got %q", mode)
+	if mode := cp.ClusterMode(); mode != "" {
+		t.Errorf("expected empty default (unconfigured), got %q", mode)
 	}
 
 	cp.SetClusterMode("worker")
@@ -831,28 +801,6 @@ func TestClusterTrackerURL_EnvOverride(t *testing.T) {
 	}
 }
 
-func TestClusterJoinTokens_Copy(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetClusterJoinToken("a", "token-a")
-
-	tokens := cp.ClusterJoinTokens()
-	tokens["b"] = "token-b" // modify the copy
-
-	// Original should be unaffected.
-	tokens2 := cp.ClusterJoinTokens()
-	if _, ok := tokens2["b"]; ok {
-		t.Error("modifying returned map should not affect ControlPlane")
-	}
-}
-
-func TestClusterJoinTokens_NilWhenEmpty(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	tokens := cp.ClusterJoinTokens()
-	if tokens != nil {
-		t.Errorf("expected nil for no tokens, got %v", tokens)
-	}
-}
 
 // --- Error path tests ---
 
@@ -890,8 +838,12 @@ func TestAuth_NeedsSetup(t *testing.T) {
 		t.Error("expected NeedsSetup=true initially")
 	}
 	cp.SetPasswordHash("$2a$10$hash")
+	if !cp.NeedsSetup() {
+		t.Error("expected NeedsSetup=true with password but no mode")
+	}
+	cp.SetClusterMode("standalone")
 	if cp.NeedsSetup() {
-		t.Error("expected NeedsSetup=false after SetPasswordHash")
+		t.Error("expected NeedsSetup=false after password + mode")
 	}
 }
 
@@ -944,7 +896,6 @@ func TestClusterGetters(t *testing.T) {
 	os.WriteFile(path, []byte(`cluster:
   mode: worker
   leader_addr: "leader:9090"
-  join_token: "tok123"
   node_name: "node-1"
   swarm_code: "swarm42"
 `), 0600)
@@ -956,9 +907,6 @@ func TestClusterGetters(t *testing.T) {
 
 	if v := cp.ClusterLeaderAddr(); v != "leader:9090" {
 		t.Errorf("ClusterLeaderAddr() = %q", v)
-	}
-	if v := cp.ClusterJoinToken(); v != "tok123" {
-		t.Errorf("ClusterJoinToken() = %q", v)
 	}
 	if v := cp.ClusterNodeName(); v != "node-1" {
 		t.Errorf("ClusterNodeName() = %q", v)

@@ -18,14 +18,14 @@ test-isolation:
 	docker run --rm --init hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
 
 test-online:
-	@if [ -z "$$HIVE_API_KEY" ]; then echo "HIVE_API_KEY must be set"; exit 1; fi
+	@if [ -z "$$HIRO_API_KEY" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
 	@# Build production image and start hiro server
 	docker compose -f docker-compose.yml -f docker-compose.e2e.yml build hiro-e2e
 	docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d hiro-e2e
 	@# Discover the mapped port and run e2e tests on the host
 	@PORT=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml port hiro-e2e 8080 | cut -d: -f2); \
-	HIVE_E2E_URL=http://localhost:$$PORT \
-	HIVE_E2E_CONTAINER=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml ps -q hiro-e2e) \
+	HIRO_E2E_URL=http://localhost:$$PORT \
+	HIRO_E2E_CONTAINER=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml ps -q hiro-e2e) \
 	go test ./tests/e2e/... -tags=e2e -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	docker compose -f docker-compose.yml -f docker-compose.e2e.yml down -v; \
@@ -33,23 +33,18 @@ test-online:
 
 test-cluster:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-	if [ -z "$$HIVE_API_KEY" ]; then echo "HIVE_API_KEY must be set (via env or .env)"; exit 1; fi; \
-	TOKEN=$$(openssl rand -hex 32); \
-	echo "cluster:" > tests/e2e_cluster/leader-config.yaml; \
-	echo "  mode: leader" >> tests/e2e_cluster/leader-config.yaml; \
-	echo "  join_tokens:" >> tests/e2e_cluster/leader-config.yaml; \
-	echo "    e2e-worker: $$TOKEN" >> tests/e2e_cluster/leader-config.yaml; \
-	echo "Generated join token for cluster e2e test"; \
+	if [ -z "$$HIRO_API_KEY" ]; then echo "HIRO_API_KEY must be set (via env or .env)"; exit 1; fi; \
+	mkdir -p tests/e2e_cluster/leader-config; \
+	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
 	docker compose -f docker-compose.cluster.yml build; \
-	export HIVE_JOIN_TOKEN=$$TOKEN; \
 	docker compose -f docker-compose.cluster.yml up -d; \
 	sleep 3; \
 	PORT=$$(docker compose -f docker-compose.cluster.yml port leader 8080 | cut -d: -f2); \
 	LEADER_ID=$$(docker compose -f docker-compose.cluster.yml ps -q leader); \
 	WORKER_ID=$$(docker compose -f docker-compose.cluster.yml ps -q worker); \
-	HIVE_E2E_URL=http://localhost:$$PORT \
-	HIVE_LEADER_CONTAINER=$$LEADER_ID \
-	HIVE_WORKER_CONTAINER=$$WORKER_ID \
+	HIRO_E2E_URL=http://localhost:$$PORT \
+	HIRO_LEADER_CONTAINER=$$LEADER_ID \
+	HIRO_WORKER_CONTAINER=$$WORKER_ID \
 	go test ./tests/e2e_cluster/... -tags=e2e_cluster -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	echo "=== LEADER LOGS ==="; \
@@ -57,31 +52,26 @@ test-cluster:
 	echo "=== WORKER LOGS ==="; \
 	docker compose -f docker-compose.cluster.yml logs worker --tail=50; \
 	docker compose -f docker-compose.cluster.yml down -v; \
-	rm -f tests/e2e_cluster/leader-config.yaml; \
+	rm -rf tests/e2e_cluster/leader-config; \
 	exit $$EXIT
 
 test-cluster-relay:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-	if [ -z "$$HIVE_API_KEY" ]; then echo "HIVE_API_KEY must be set (via env or .env)"; exit 1; fi; \
-	TOKEN=$$(openssl rand -hex 32); \
+	if [ -z "$$HIRO_API_KEY" ]; then echo "HIRO_API_KEY must be set (via env or .env)"; exit 1; fi; \
 	SWARM=$$(openssl rand -hex 16); \
-	echo "cluster:" > tests/e2e_cluster/leader-config.yaml; \
-	echo "  mode: leader" >> tests/e2e_cluster/leader-config.yaml; \
-	echo "  join_tokens:" >> tests/e2e_cluster/leader-config.yaml; \
-	echo "    e2e-worker: $$TOKEN" >> tests/e2e_cluster/leader-config.yaml; \
-	echo "Generated join token and swarm code for relay cluster e2e test"; \
+	mkdir -p tests/e2e_cluster/leader-config; \
+	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
 	docker compose -f docker-compose.cluster-relay.yml build; \
-	export HIVE_JOIN_TOKEN=$$TOKEN; \
-	export HIVE_SWARM_CODE=$$SWARM; \
+	export HIRO_SWARM_CODE=$$SWARM; \
 	docker compose -f docker-compose.cluster-relay.yml up -d; \
 	echo "Waiting for leader + relay registration..."; \
 	sleep 15; \
 	PORT=$$(docker compose -f docker-compose.cluster-relay.yml port leader 8080 | cut -d: -f2); \
 	LEADER_ID=$$(docker compose -f docker-compose.cluster-relay.yml ps -q leader); \
 	WORKER_ID=$$(docker compose -f docker-compose.cluster-relay.yml ps -q worker); \
-	HIVE_E2E_URL=http://localhost:$$PORT \
-	HIVE_LEADER_CONTAINER=$$LEADER_ID \
-	HIVE_WORKER_CONTAINER=$$WORKER_ID \
+	HIRO_E2E_URL=http://localhost:$$PORT \
+	HIRO_LEADER_CONTAINER=$$LEADER_ID \
+	HIRO_WORKER_CONTAINER=$$WORKER_ID \
 	go test ./tests/e2e_cluster/... -tags=e2e_cluster -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	echo "=== LEADER LOGS ==="; \
@@ -89,7 +79,7 @@ test-cluster-relay:
 	echo "=== WORKER LOGS ==="; \
 	docker compose -f docker-compose.cluster-relay.yml logs worker --tail=50; \
 	docker compose -f docker-compose.cluster-relay.yml down -v; \
-	rm -f tests/e2e_cluster/leader-config.yaml; \
+	rm -rf tests/e2e_cluster/leader-config; \
 	exit $$EXIT
 
 check:

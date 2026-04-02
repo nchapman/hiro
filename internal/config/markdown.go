@@ -1,5 +1,5 @@
 // Package config handles parsing markdown files with YAML frontmatter
-// into agent configurations, skill definitions, and other Hive types.
+// into agent configurations, skill definitions, and other Hiro types.
 package config
 
 import (

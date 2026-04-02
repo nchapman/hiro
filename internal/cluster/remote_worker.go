@@ -47,6 +47,11 @@ func NewRemoteWorker(leader *LeaderStream, nodeID NodeID, sessionID string) *Rem
 	return rw
 }
 
+// NodeID returns the ID of the node this worker is running on.
+func (rw *RemoteWorker) NodeID() NodeID {
+	return rw.nodeID
+}
+
 // SetSecretEnvFn sets the function that provides secret env vars.
 // Secrets are sent with each ExecuteTool call.
 func (rw *RemoteWorker) SetSecretEnvFn(fn func() []string) {

@@ -109,7 +109,7 @@ func buildEnvironmentSection(env EnvInfo) string {
 		b.WriteString("│       └── tmp/          # Temporary files\n")
 	}
 
-	b.WriteString("└── config.yaml         # Platform config (not agent-accessible)\n")
+	b.WriteString("└── config/             # Platform config (not agent-accessible)\n")
 	b.WriteString("```\n")
 
 	if env.Mode.IsPersistent() && env.InstanceDir != "" {

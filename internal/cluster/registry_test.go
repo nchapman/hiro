@@ -35,7 +35,7 @@ func TestRegisterHome(t *testing.T) {
 
 func TestRegisterRemoteNode(t *testing.T) {
 	r := NewNodeRegistry()
-	err := r.Register("gpu-box", "GPU Box", 4)
+	err := r.Register("gpu-box", "GPU Box", 4, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRegisterRemoteNode(t *testing.T) {
 
 func TestRegisterReservedHomeID(t *testing.T) {
 	r := NewNodeRegistry()
-	err := r.Register(HomeNodeID, "impostor", 0)
+	err := r.Register(HomeNodeID, "impostor", 0, "", "")
 	if err == nil {
 		t.Fatal("expected error when registering with home ID")
 	}
@@ -65,7 +65,7 @@ func TestRegisterReservedHomeID(t *testing.T) {
 
 func TestUnregister(t *testing.T) {
 	r := NewNodeRegistry()
-	_ = r.Register("node-1", "Node 1", 0)
+	_ = r.Register("node-1", "Node 1", 0, "", "")
 	r.Unregister("node-1")
 
 	_, ok := r.Get("node-1")
@@ -79,7 +79,7 @@ func TestUnregister(t *testing.T) {
 
 func TestSetOffline(t *testing.T) {
 	r := NewNodeRegistry()
-	_ = r.Register("node-1", "Node 1", 0)
+	_ = r.Register("node-1", "Node 1", 0, "", "")
 	r.SetOffline("node-1")
 
 	node, _ := r.Get("node-1")
@@ -90,7 +90,7 @@ func TestSetOffline(t *testing.T) {
 
 func TestTouch(t *testing.T) {
 	r := NewNodeRegistry()
-	_ = r.Register("node-1", "Node 1", 0)
+	_ = r.Register("node-1", "Node 1", 0, "", "")
 	node1, _ := r.Get("node-1")
 	firstSeen := node1.LastSeen
 
@@ -103,9 +103,9 @@ func TestTouch(t *testing.T) {
 
 func TestListOrder(t *testing.T) {
 	r := NewNodeRegistry()
-	_ = r.Register("beta", "Beta", 0)
+	_ = r.Register("beta", "Beta", 0, "", "")
 	r.RegisterHome("leader")
-	_ = r.Register("alpha", "Alpha", 0)
+	_ = r.Register("alpha", "Alpha", 0, "", "")
 
 	list := r.List()
 	if len(list) != 3 {
@@ -119,8 +119,8 @@ func TestListOrder(t *testing.T) {
 func TestOnlineNodes(t *testing.T) {
 	r := NewNodeRegistry()
 	r.RegisterHome("leader")
-	_ = r.Register("node-1", "Node 1", 0)
-	_ = r.Register("node-2", "Node 2", 0)
+	_ = r.Register("node-1", "Node 1", 0, "", "")
+	_ = r.Register("node-2", "Node 2", 0, "", "")
 	r.SetOffline("node-2")
 
 	online := r.OnlineNodes()
@@ -131,7 +131,7 @@ func TestOnlineNodes(t *testing.T) {
 
 func TestActiveCount(t *testing.T) {
 	r := NewNodeRegistry()
-	_ = r.Register("node-1", "Node 1", 0)
+	_ = r.Register("node-1", "Node 1", 0, "", "")
 
 	r.IncrementActive("node-1")
 	r.IncrementActive("node-1")

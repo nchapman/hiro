@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"google.golang.org/grpc"
@@ -21,11 +22,13 @@ import (
 
 // clusterState bundles all cluster infrastructure created at startup.
 type clusterState struct {
-	grpcServer *grpc.Server
-	service    *cluster.LeaderService
-	fileSync   *cluster.FileSyncService
-	listener   net.Listener
-	registry   *cluster.NodeRegistry
+	grpcServer   *grpc.Server
+	service      *cluster.LeaderService
+	leaderStream *cluster.LeaderStream
+	fileSync     *cluster.FileSyncService
+	listener     net.Listener
+	registry     *cluster.NodeRegistry
+	pending      *cluster.PendingRegistry
 }
 
 // setupNodeIdentity loads or creates the node's Ed25519 keypair and derives
@@ -55,9 +58,21 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	registry := cluster.NewNodeRegistry()
 	registry.RegisterHome(envOr("HOSTNAME", "leader"))
 
-	leaderStream := cluster.NewLeaderStream(registry, func(token string) string {
-		return cp.ValidateJoinToken(token)
-	}, logger)
+	pending := cluster.NewPendingRegistry(filepath.Join(rootDir, "config", "pending_nodes.yaml"))
+	if err := pending.Load(); err != nil {
+		logger.Warn("failed to load pending nodes", "error", err)
+	}
+
+	leaderStream := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		switch cp.NodeApprovalCheck(nodeID) {
+		case controlplane.NodeStatusApproved:
+			return cluster.ApprovalGranted
+		case controlplane.NodeStatusRevoked:
+			return cluster.ApprovalRevoked
+		default:
+			return cluster.ApprovalPending
+		}
+	}, pending, logger)
 
 	serverTLS := cluster.ServerTLSConfig(tlsCert)
 	grpcSrv := grpc.NewServer(
@@ -103,11 +118,13 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	}()
 
 	return clusterState{
-		grpcServer: grpcSrv,
-		service:    svc,
-		fileSync:   fileSync,
-		listener:   lis,
-		registry:   registry,
+		grpcServer:   grpcSrv,
+		service:      svc,
+		leaderStream: leaderStream,
+		fileSync:     fileSync,
+		listener:     lis,
+		registry:     registry,
+		pending:      pending,
 	}, nil
 }
 

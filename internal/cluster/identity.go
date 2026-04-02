@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-const identityFile = "identity.key"
+const identityFile = "config/identity.key"
 
 // NodeIdentity holds an Ed25519 keypair used for tracker announcements
 // and future cryptographic operations (e.g., WireGuard key derivation).
@@ -21,7 +21,7 @@ type NodeIdentity struct {
 	NodeID     string // hex(sha256(public_key))
 }
 
-// LoadOrCreateIdentity loads the node's Ed25519 identity from rootDir/identity.key,
+// LoadOrCreateIdentity loads the node's Ed25519 identity from rootDir/config/identity.key,
 // or generates a new one if it doesn't exist. The file stores the 32-byte seed.
 func LoadOrCreateIdentity(rootDir string) (*NodeIdentity, error) {
 	path := filepath.Join(rootDir, identityFile)
@@ -42,6 +42,11 @@ func LoadOrCreateIdentity(rootDir string) (*NodeIdentity, error) {
 	seed = make([]byte, ed25519.SeedSize)
 	if _, err := rand.Read(seed); err != nil {
 		return nil, fmt.Errorf("generating identity seed: %w", err)
+	}
+
+	// Ensure config directory exists.
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, fmt.Errorf("creating config directory: %w", err)
 	}
 
 	// Write with restrictive permissions — this is a private key.

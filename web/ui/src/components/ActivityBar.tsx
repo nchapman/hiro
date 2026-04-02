@@ -25,6 +25,7 @@ interface ActivityBarProps {
   activity: Activity
   onActivityChange: (activity: Activity) => void
   onLogout: () => void
+  pendingNodeCount?: number
 }
 
 const themeIcons = {
@@ -46,6 +47,7 @@ export default function ActivityBar({
   activity,
   onActivityChange,
   onLogout,
+  pendingNodeCount = 0,
 }: ActivityBarProps) {
   const { theme, setTheme } = useTheme()
   const themeIcon = themeIcons[theme]
@@ -64,15 +66,24 @@ export default function ActivityBar({
             <TooltipTrigger
               onClick={() => onActivityChange(id)}
               className={cn(
-                "inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors",
+                "relative inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors",
                 activity === id
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
               )}
             >
               <HugeiconsIcon icon={icon} className="h-5 w-5" />
+              {id === "settings" && pendingNodeCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+                  {pendingNodeCount}
+                </span>
+              )}
             </TooltipTrigger>
-            <TooltipContent side="right">{label}</TooltipContent>
+            <TooltipContent side="right">
+              {id === "settings" && pendingNodeCount > 0
+                ? `Settings (${pendingNodeCount} pending)`
+                : label}
+            </TooltipContent>
           </Tooltip>
         ))}
       </div>

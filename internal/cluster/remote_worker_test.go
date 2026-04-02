@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -13,34 +14,51 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/grpc/credentials"
 )
 
-// setupRemoteWorkerTest sets up a leader + connected node and returns
+// setupRemoteWorkerTest sets up a leader + connected node over mTLS and returns
 // a RemoteWorker that can execute tools on the node.
 func setupRemoteWorkerTest(t *testing.T) (*cluster.RemoteWorker, pb.Cluster_NodeStreamClient, *cluster.LeaderStream) {
 	t.Helper()
 
 	registry := cluster.NewNodeRegistry()
 	logger := slog.Default()
-	leader := cluster.NewLeaderStream(registry, validToken, logger)
+	clientID := testIdentityFromSeed(10)
 
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer()
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
+	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
+		if nodeID == nodeIDFromIdentity(clientID) {
+			return cluster.ApprovalGranted
+		}
+		return cluster.ApprovalPending
+	}, pending, logger)
+
+	serverID := testIdentityFromSeed(0)
+	serverCert, err := cluster.TLSCertFromIdentity(serverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serverTLS := cluster.ServerTLSConfig(serverCert)
+	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
 	leader.Register(srv)
+
+	lis, lisErr := net.Listen("tcp", "127.0.0.1:0")
+	if lisErr != nil {
+		t.Fatal(lisErr)
+	}
 	go srv.Serve(lis)
 	t.Cleanup(srv.Stop)
 
-	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
-		return lis.DialContext(ctx)
+	// Connect with mTLS.
+	clientCert, err := cluster.TLSCertFromIdentity(clientID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	clientTLS := cluster.ClientTLSConfig(clientCert, serverID.PublicKey)
 
-	// Connect a node.
-	conn, err := grpc.NewClient("passthrough:///bufconn",
-		grpc.WithContextDialer(dialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -56,8 +74,7 @@ func setupRemoteWorkerTest(t *testing.T) (*cluster.RemoteWorker, pb.Cluster_Node
 	if err := stream.Send(&pb.NodeMessage{
 		Msg: &pb.NodeMessage_Register{
 			Register: &pb.NodeRegister{
-				NodeName:  "rw-node",
-				JoinToken: "valid-token",
+				NodeName: "rw-node",
 			},
 		},
 	}); err != nil {

@@ -55,7 +55,7 @@ cd web/ui && npm run dev
 
 ## Configuration
 
-LLM provider and API key are configured through the web UI onboarding flow on first launch, stored in `config.yaml` at the platform root. Provider settings can be updated later via the dashboard settings page.
+LLM provider and API key are configured through the web UI onboarding flow on first launch, stored in `config/config.yaml`. Provider settings can be updated later via the dashboard settings page.
 
 ### Environment Variables
 
@@ -85,7 +85,7 @@ Control Plane Process (hiro)
 ├── Unified database (db/hiro.db — instances, sessions, messages, usage)
 ├── System prompt assembly, context management, compaction
 ├── Local tools: memory, todos, history, spawn, coordinator, skills
-├── Secrets + tool policies (config.yaml)
+├── Secrets + tool policies (config/config.yaml)
 ├── Process registry + instance lifecycle
 └── Spawns: hiro agent (one worker per instance)
 
@@ -97,7 +97,7 @@ Agent Worker Process (hiro agent)
 
 **Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
 
-**Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. `config.yaml` is `0600` root-owned, unreadable by agents.
+**Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. The `config/` directory is `0700` root-owned, unreadable by agents.
 
 **Group-based access control**: Two Unix groups control filesystem access:
 - `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
@@ -189,7 +189,7 @@ Skills are re-scanned from disk each turn (like persona and memory), so runtime-
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
 - **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes.
-- **`internal/controlplane`** — Operator-level config (secrets, tool policies). Read from `config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
+- **`internal/controlplane`** — Operator-level config (secrets, tool policies). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, memory/todos persistence.
 - **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
 - **`internal/transport`** — Wire protocol (WebSocket JSON envelopes) for leader↔worker communication.
@@ -264,7 +264,7 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started in coordinator mode at bootstrap.
 
 **Bootstrap flow** (`cmd/hiro/main.go`):
-1. Load `config.yaml` — if no provider is configured, the server starts in setup mode (dashboard shows onboarding)
+1. Load `config/config.yaml` — if no provider is configured, the server starts in setup mode (dashboard shows onboarding)
 2. Once configured, create `Manager` with provider from config
 3. `RestoreInstances()` — resume any persistent agents from prior runs
 4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
@@ -276,7 +276,7 @@ Coordinator mode gives persistent-agent capabilities (memory, todos, history) pl
 
 The control plane (`internal/controlplane`) manages operator-level configuration that agents cannot access or modify.
 
-**Config file:** `config.yaml` at platform root. Read at startup into Go memory. Written back on shutdown. During runtime, Go memory is authoritative.
+**Config file:** `config/config.yaml`. Read at startup into Go memory. Written back on shutdown. During runtime, Go memory is authoritative.
 
 ```yaml
 secrets:
@@ -333,4 +333,4 @@ Coordinator tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstanc
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config.yaml` is root-only (`0600`). Coordinator agents get `hiro-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).
+- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Coordinator agents get `hiro-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).

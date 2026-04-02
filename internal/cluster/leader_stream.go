@@ -1,27 +1,45 @@
 package cluster
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"sync"
 
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+)
+
+// ApprovalStatus represents the result of an atomic approval check.
+type ApprovalStatus int
+
+const (
+	// ApprovalPending means the node is neither approved nor revoked.
+	ApprovalPending ApprovalStatus = iota
+	// ApprovalGranted means the node is in the approved list.
+	ApprovalGranted
+	// ApprovalRevoked means the node has been explicitly revoked.
+	ApprovalRevoked
 )
 
 // LeaderStream implements the leader side of the Cluster gRPC service.
-// It accepts bidirectional streams from worker nodes, validates
-// registration, and manages per-node connections.
+// It accepts bidirectional streams from worker nodes, verifies their
+// identity from the mTLS certificate, and manages per-node connections.
 type LeaderStream struct {
 	pb.UnimplementedClusterServer
 
-	registry       *NodeRegistry
-	validateToken  func(token string) string // returns token name or "" if invalid
-	onNodeConnected func(nodeID NodeID)       // called when a node successfully registers
-	logger         *slog.Logger
+	registry        *NodeRegistry
+	checkApproval   func(nodeID string) ApprovalStatus // atomic approval check
+	pending         *PendingRegistry
+	onNodeConnected func(nodeID NodeID) // called when a node successfully registers
+	relayAddr       string              // relay server address (for detecting relay connections)
+	relayIPs        map[string]bool     // resolved relay IPs (for matching peer addrs)
+	logger          *slog.Logger
 
 	mu    sync.Mutex
 	conns map[NodeID]*nodeConn // node ID → active connection
@@ -29,29 +47,62 @@ type LeaderStream struct {
 
 // nodeConn represents an active connection to a worker node.
 type nodeConn struct {
-	nodeID   NodeID
-	stream   pb.Cluster_NodeStreamServer
-	sendMu   sync.Mutex // serialize writes to the stream
-	handlers *NodeHandlers
+	nodeID    NodeID
+	stream    pb.Cluster_NodeStreamServer
+	done      chan struct{} // closed to force disconnect
+	closeOnce sync.Once    // prevents double-close panic on done
+	sendMu    sync.Mutex   // serialize writes to the stream
+	handlers  *NodeHandlers
 }
 
 // NodeHandlers holds callbacks for messages received from a node.
 type NodeHandlers struct {
-	OnSpawnResult    func(nodeID NodeID, msg *pb.SpawnResult)
-	OnToolResult     func(nodeID NodeID, msg *pb.NodeToolResult)
-	OnWorkerExited   func(nodeID NodeID, msg *pb.WorkerExited)
-	OnFileUpdate     func(nodeID NodeID, msg *pb.FileUpdate)
-	OnJobCompletion  func(nodeID NodeID, msg *pb.JobCompletionNotify)
+	OnSpawnResult   func(nodeID NodeID, msg *pb.SpawnResult)
+	OnToolResult    func(nodeID NodeID, msg *pb.NodeToolResult)
+	OnWorkerExited  func(nodeID NodeID, msg *pb.WorkerExited)
+	OnFileUpdate    func(nodeID NodeID, msg *pb.FileUpdate)
+	OnJobCompletion func(nodeID NodeID, msg *pb.JobCompletionNotify)
 }
 
 // NewLeaderStream creates a new leader-side cluster gRPC service.
-func NewLeaderStream(registry *NodeRegistry, validateToken func(string) string, logger *slog.Logger) *LeaderStream {
+// checkApproval returns the approval status of a node atomically (approved,
+// revoked, or pending) under a single lock, eliminating TOCTOU races.
+func NewLeaderStream(registry *NodeRegistry, checkApproval func(string) ApprovalStatus, pending *PendingRegistry, logger *slog.Logger) *LeaderStream {
 	return &LeaderStream{
 		registry:      registry,
-		validateToken: validateToken,
+		checkApproval: checkApproval,
+		pending:       pending,
 		logger:        logger,
 		conns:         make(map[NodeID]*nodeConn),
 	}
+}
+
+// SetRelayAddr sets the relay server address for detecting relay connections.
+// Resolves hostname to IPs so we can match against peer addresses.
+func (s *LeaderStream) SetRelayAddr(addr string) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		s.mu.Lock()
+		s.relayAddr = addr
+		s.mu.Unlock()
+		return
+	}
+	// Resolve hostname to IPs for reliable comparison with peer addrs.
+	ips, err := net.LookupHost(host)
+	if err != nil || len(ips) == 0 {
+		s.mu.Lock()
+		s.relayAddr = addr
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Lock()
+	s.relayIPs = make(map[string]bool, len(ips))
+	for _, ip := range ips {
+		s.relayIPs[ip] = true
+	}
+	s.relayAddr = addr
+	s.mu.Unlock()
+	s.logger.Info("relay address resolved", "addr", addr, "ips", ips)
 }
 
 // SetOnNodeConnected sets a callback invoked when a node successfully registers.
@@ -65,41 +116,125 @@ func (s *LeaderStream) Register(registrar grpc.ServiceRegistrar) {
 }
 
 // NodeStream handles a bidirectional stream from a worker node.
-// The first message must be a NodeRegister. After successful registration,
-// the node enters a message loop handling tool results, spawn results,
-// heartbeats, and worker exit notifications.
+// It extracts the worker's identity from the mTLS certificate, checks
+// approval status, and either accepts the node or adds it to the pending list.
 func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
-	// First message must be registration.
+	// Step 1: Extract worker identity from mTLS certificate.
+	p, ok := peer.FromContext(stream.Context())
+	if !ok {
+		return fmt.Errorf("no peer info in context")
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return fmt.Errorf("no TLS info in peer")
+	}
+	pubKey, err := PubKeyFromCert(tlsInfo.State)
+	if err != nil {
+		return fmt.Errorf("extracting public key from peer cert: %w", err)
+	}
+	hash := sha256.Sum256(pubKey)
+	nodeID := NodeID(hex.EncodeToString(hash[:]))
+
+	peerAddr := p.Addr.String()
+
+	// Step 2: Receive registration message (for node name and capacity).
 	msg, err := stream.Recv()
 	if err != nil {
 		return fmt.Errorf("receiving registration: %w", err)
 	}
-
 	reg := msg.GetRegister()
 	if reg == nil {
 		return fmt.Errorf("first message must be NodeRegister")
 	}
 
-	// Validate token.
-	tokenName := s.validateToken(reg.JoinToken)
-	if tokenName == "" {
-		return fmt.Errorf("invalid join token")
+	// Sanitize node name to prevent oversized values in logs and storage.
+	nodeName := reg.NodeName
+	if len(nodeName) > 128 {
+		nodeName = nodeName[:128]
 	}
 
-	// Generate unique node ID with random suffix to prevent collisions
-	// on reconnect or duplicate names.
-	suffix := make([]byte, 4)
-	if _, err := rand.Read(suffix); err != nil {
-		return fmt.Errorf("generating node ID: %w", err)
+	// Step 3: Check approval / revocation atomically (single lock acquisition).
+	status := s.checkApproval(string(nodeID))
+
+	if status != ApprovalGranted {
+		truncID := string(nodeID)
+		if len(truncID) > 16 {
+			truncID = truncID[:16] + "..."
+		}
+
+		if status == ApprovalRevoked {
+			s.logger.Info("rejected revoked node", "node_id", truncID, "name", nodeName)
+			_ = stream.Send(&pb.LeaderMessage{
+				Msg: &pb.LeaderMessage_Rejected{
+					Rejected: &pb.NodeRejected{
+						NodeId: string(nodeID),
+						Reason: "approval revoked by leader operator",
+					},
+				},
+			})
+			return nil
+		}
+
+		// Not approved and not revoked — add to pending list.
+		ok, isNew := s.pending.AddOrUpdate(PendingNode{
+			NodeID: string(nodeID),
+			Name:   nodeName,
+			Addr:   peerAddr,
+		})
+
+		if !ok {
+			s.logger.Warn("pending registry full, rejecting node", "node_id", truncID)
+			_ = stream.Send(&pb.LeaderMessage{
+				Msg: &pb.LeaderMessage_Rejected{
+					Rejected: &pb.NodeRejected{
+						NodeId: string(nodeID),
+						Reason: "pending node limit reached; dismiss or approve existing nodes first",
+					},
+				},
+			})
+			return nil
+		}
+
+		if isNew {
+			s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)
+		}
+
+		_ = stream.Send(&pb.LeaderMessage{
+			Msg: &pb.LeaderMessage_Pending{
+				Pending: &pb.NodePending{
+					NodeId:  string(nodeID),
+					Message: "awaiting approval from leader operator",
+				},
+			},
+		})
+		return nil
 	}
-	nodeID := NodeID(fmt.Sprintf("node-%s-%s", reg.NodeName, hex.EncodeToString(suffix)))
-	if err := s.registry.Register(nodeID, reg.NodeName, int(reg.Capacity)); err != nil {
+
+	// Step 4: Approved — register and proceed.
+	// Remove from pending if it was there (approved while worker was retrying).
+	s.pending.Remove(string(nodeID))
+
+	// Detect relay vs direct connection by checking if peer IP matches relay.
+	via := "direct"
+	s.mu.Lock()
+	hasRelay := s.relayAddr != ""
+	relayIPs := s.relayIPs
+	s.mu.Unlock()
+	if hasRelay {
+		peerHost, _, _ := net.SplitHostPort(peerAddr)
+		if relayIPs[peerHost] {
+			via = "relay"
+		}
+	}
+
+	if err := s.registry.Register(nodeID, nodeName, int(reg.Capacity), peerAddr, via); err != nil {
 		return fmt.Errorf("registering node: %w", err)
 	}
 
 	conn := &nodeConn{
 		nodeID:   nodeID,
 		stream:   stream,
+		done:     make(chan struct{}),
 		handlers: &NodeHandlers{},
 	}
 
@@ -107,7 +242,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	s.conns[nodeID] = conn
 	s.mu.Unlock()
 
-	s.logger.Info("node registered", "node_id", nodeID, "name", reg.NodeName, "capacity", reg.Capacity, "token", tokenName)
+	s.logger.Info("node registered", "node_id", nodeID, "name", nodeName, "capacity", reg.Capacity)
 
 	// Send registration confirmation before notifying the service layer.
 	// The node must receive Registered before any other messages (FileSync, etc.).
@@ -139,48 +274,73 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 }
 
 // readLoop processes incoming messages from a node.
+// Exits when the stream errors or the conn.done channel is closed.
 func (s *LeaderStream) readLoop(conn *nodeConn) error {
-	for {
-		msg, err := conn.stream.Recv()
-		if err != nil {
-			return err
+	type recvResult struct {
+		msg *pb.NodeMessage
+		err error
+	}
+	// Buffer of 2 ensures the recv goroutine never blocks on a send after
+	// readLoop exits via the done channel — at most one result is in-flight
+	// when done fires, plus the goroutine may send one more before Recv
+	// unblocks from the stream context cancellation.
+	ch := make(chan recvResult, 2)
+
+	go func() {
+		for {
+			msg, err := conn.stream.Recv()
+			ch <- recvResult{msg, err}
+			if err != nil {
+				return
+			}
 		}
+	}()
 
-		// Snapshot handlers under lock so reads are safe against
-		// concurrent SetHandlers calls.
-		s.mu.Lock()
-		h := conn.handlers
-		s.mu.Unlock()
-
-		s.registry.Touch(conn.nodeID)
-
-		switch m := msg.Msg.(type) {
-		case *pb.NodeMessage_SpawnResult:
-			if h.OnSpawnResult != nil {
-				h.OnSpawnResult(conn.nodeID, m.SpawnResult)
+	for {
+		select {
+		case <-conn.done:
+			return fmt.Errorf("node disconnected by leader")
+		case r := <-ch:
+			if r.err != nil {
+				return r.err
 			}
 
-		case *pb.NodeMessage_ToolResult:
-			if h.OnToolResult != nil {
-				h.OnToolResult(conn.nodeID, m.ToolResult)
-			}
+			// Snapshot handlers under lock so reads are safe against
+			// concurrent SetHandlers calls.
+			s.mu.Lock()
+			h := conn.handlers
+			s.mu.Unlock()
 
-		case *pb.NodeMessage_Heartbeat:
-			// Touch already called above.
+			s.registry.Touch(conn.nodeID)
 
-		case *pb.NodeMessage_WorkerExited:
-			if h.OnWorkerExited != nil {
-				h.OnWorkerExited(conn.nodeID, m.WorkerExited)
-			}
+			switch m := r.msg.Msg.(type) {
+			case *pb.NodeMessage_SpawnResult:
+				if h.OnSpawnResult != nil {
+					h.OnSpawnResult(conn.nodeID, m.SpawnResult)
+				}
 
-		case *pb.NodeMessage_FileUpdate:
-			if h.OnFileUpdate != nil {
-				h.OnFileUpdate(conn.nodeID, m.FileUpdate)
-			}
+			case *pb.NodeMessage_ToolResult:
+				if h.OnToolResult != nil {
+					h.OnToolResult(conn.nodeID, m.ToolResult)
+				}
 
-		case *pb.NodeMessage_JobCompletion:
-			if h.OnJobCompletion != nil {
-				h.OnJobCompletion(conn.nodeID, m.JobCompletion)
+			case *pb.NodeMessage_Heartbeat:
+				// Touch already called above.
+
+			case *pb.NodeMessage_WorkerExited:
+				if h.OnWorkerExited != nil {
+					h.OnWorkerExited(conn.nodeID, m.WorkerExited)
+				}
+
+			case *pb.NodeMessage_FileUpdate:
+				if h.OnFileUpdate != nil {
+					h.OnFileUpdate(conn.nodeID, m.FileUpdate)
+				}
+
+			case *pb.NodeMessage_JobCompletion:
+				if h.OnJobCompletion != nil {
+					h.OnJobCompletion(conn.nodeID, m.JobCompletion)
+				}
 			}
 		}
 	}
@@ -219,6 +379,17 @@ func (s *LeaderStream) SetHandlers(nodeID NodeID, handlers *NodeHandlers) {
 	defer s.mu.Unlock()
 	if conn, ok := s.conns[nodeID]; ok {
 		conn.handlers = handlers
+	}
+}
+
+// DisconnectNode forcefully disconnects a node by closing its done channel.
+// The readLoop will exit and cleanup will run.
+func (s *LeaderStream) DisconnectNode(nodeID NodeID) {
+	s.mu.Lock()
+	conn, ok := s.conns[nodeID]
+	s.mu.Unlock()
+	if ok {
+		conn.closeOnce.Do(func() { close(conn.done) })
 	}
 }
 

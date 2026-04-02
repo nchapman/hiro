@@ -330,3 +330,40 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 		"relay_url", announceResp.RelayURL,
 	)
 }
+
+// SwarmCheckResult is the result of a one-shot swarm validation.
+type SwarmCheckResult struct {
+	LeaderFound bool   `json:"leader_found"`
+	LeaderName  string `json:"leader_name,omitempty"`
+}
+
+// CheckSwarm performs a one-shot tracker query to verify a leader exists
+// in the given swarm. Uses the node's real identity for the announce.
+func CheckSwarm(ctx context.Context, trackerURL, swarmCode string, identity *NodeIdentity, logger *slog.Logger) (*SwarmCheckResult, error) {
+	dc := NewDiscoveryClient(DiscoveryConfig{
+		TrackerURL: trackerURL,
+		SwarmCode:  swarmCode,
+		Role:       "worker",
+		GRPCPort:   0,
+		Identity:   identity,
+		NodeName:   "probe",
+		Logger:     logger,
+	})
+
+	dc.announce(ctx)
+
+	leader := dc.Leader()
+	if leader == nil {
+		return &SwarmCheckResult{LeaderFound: false}, nil
+	}
+
+	name := leader.NodeID
+	if len(name) > 12 {
+		name = name[:12]
+	}
+
+	return &SwarmCheckResult{
+		LeaderFound: true,
+		LeaderName:  name,
+	}, nil
+}

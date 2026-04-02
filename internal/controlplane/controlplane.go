@@ -33,15 +33,27 @@ type AgentPolicy struct {
 	Tools []string `yaml:"tools,omitempty"`
 }
 
+// ApprovedNode represents a worker node that has been approved to join the cluster.
+type ApprovedNode struct {
+	Name       string `yaml:"name" json:"name"`
+	ApprovedAt string `yaml:"approved_at" json:"approved_at"` // RFC3339 timestamp
+}
+
+// RevokedNode represents a worker node whose approval has been explicitly revoked.
+type RevokedNode struct {
+	Name      string `yaml:"name" json:"name"`
+	RevokedAt string `yaml:"revoked_at" json:"revoked_at"` // RFC3339 timestamp
+}
+
 // ClusterConfig holds settings for leader-worker clustering.
 type ClusterConfig struct {
-	Mode       string            `yaml:"mode,omitempty"`        // "leader" (default) or "worker"
-	LeaderAddr string            `yaml:"leader_addr,omitempty"` // gRPC address for worker→leader connection
-	JoinToken  string            `yaml:"join_token,omitempty"`  // auth token (worker mode)
-	NodeName   string            `yaml:"node_name,omitempty"`   // human-friendly node name
-	JoinTokens map[string]string `yaml:"join_tokens,omitempty"` // named tokens for node auth (leader mode)
-	TrackerURL string            `yaml:"tracker_url,omitempty"` // discovery tracker URL (e.g. https://discover.hellohiro.ai)
-	SwarmCode  string            `yaml:"swarm_code,omitempty"`  // shared swarm code for tracker discovery
+	Mode          string                  `yaml:"mode,omitempty"`           // "standalone", "leader", or "worker"
+	LeaderAddr    string                  `yaml:"leader_addr,omitempty"`    // gRPC address for worker→leader connection
+	NodeName      string                  `yaml:"node_name,omitempty"`     // human-friendly node name
+	TrackerURL    string                  `yaml:"tracker_url,omitempty"`   // discovery tracker URL (e.g. https://discover.hellohiro.ai)
+	SwarmCode     string                  `yaml:"swarm_code,omitempty"`    // shared swarm code for tracker discovery
+	ApprovedNodes map[string]ApprovedNode `yaml:"approved_nodes,omitempty"` // keyed by NodeID (hex sha256 of pubkey)
+	RevokedNodes  map[string]RevokedNode `yaml:"revoked_nodes,omitempty"`  // keyed by NodeID — explicitly revoked
 }
 
 // Config is the on-disk representation of the control plane state.
@@ -55,10 +67,9 @@ type Config struct {
 	Cluster         ClusterConfig             `yaml:"cluster,omitempty"`
 }
 
-// initMaps ensures all map fields are non-nil. JoinTokens is intentionally
-// excluded — it is lazily initialised in SetClusterJoinToken so that
-// ClusterJoinTokens() returns nil when no tokens exist, signaling
-// "not configured" to callers.
+// initMaps ensures all map fields are non-nil. ApprovedNodes is intentionally
+// excluded — it is lazily initialised in ApproveNode so that
+// ApprovedNodes() returns nil when no nodes are approved.
 func (cfg *Config) initMaps() {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderConfig)
@@ -75,11 +86,12 @@ func (cfg *Config) initMaps() {
 // It is read from config.yaml at startup and written back on shutdown.
 // All access is thread-safe.
 type ControlPlane struct {
-	mu     sync.RWMutex
-	config Config
-	signer *auth.TokenSigner // cached; invalidated on secret rotation
-	path   string
-	logger *slog.Logger
+	mu             sync.RWMutex
+	config         Config
+	signer         *auth.TokenSigner // cached; invalidated on secret rotation
+	path           string
+	logger         *slog.Logger
+	skipNextReload bool // set by Save to suppress the fsnotify-triggered Reload
 }
 
 // Load reads the control plane config from path. If the file does not
@@ -146,6 +158,11 @@ func (cp *ControlPlane) saveUnlocked() error {
 		return fmt.Errorf("writing control plane config: %w", err)
 	}
 
+	// Suppress the fsnotify-triggered Reload that will fire from our own write.
+	// Without this, a concurrent config mutation between Save and Reload would
+	// be lost when Reload replaces in-memory state from disk.
+	cp.skipNextReload = true
+
 	cp.logger.Info("saved control plane config", "path", cp.path)
 	return nil
 }
@@ -162,7 +179,25 @@ func (cp *ControlPlane) hasContent() bool {
 		len(cp.config.Agents) > 0 ||
 		cp.config.Cluster.Mode != "" ||
 		cp.config.Cluster.TrackerURL != "" ||
-		len(cp.config.Cluster.JoinTokens) > 0
+		len(cp.config.Cluster.ApprovedNodes) > 0 ||
+		len(cp.config.Cluster.RevokedNodes) > 0
+}
+
+// Reset wipes all in-memory state and removes the config file from disk.
+// The node returns to a fresh first-run state (onboarding flow).
+func (cp *ControlPlane) Reset() error {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	cp.config = Config{}
+	cp.config.initMaps()
+	cp.signer = nil
+
+	if err := os.Remove(cp.path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing config file: %w", err)
+	}
+	cp.logger.Info("control plane config reset")
+	return nil
 }
 
 // Reload re-reads config.yaml from disk and replaces the in-memory state.
@@ -170,7 +205,19 @@ func (cp *ControlPlane) hasContent() bool {
 // preserved and a warning is logged (no error returned — the system keeps
 // running with its current config). The cached TokenSigner is invalidated
 // only if the password hash changed.
+//
+// Reloads triggered by our own Save are skipped to prevent a concurrent
+// in-memory mutation from being clobbered by stale disk state.
 func (cp *ControlPlane) Reload() error {
+	cp.mu.Lock()
+	if cp.skipNextReload {
+		cp.skipNextReload = false
+		cp.mu.Unlock()
+		cp.logger.Debug("skipping self-triggered config reload")
+		return nil
+	}
+	cp.mu.Unlock()
+
 	data, err := os.ReadFile(cp.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -190,9 +237,9 @@ func (cp *ControlPlane) Reload() error {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 
-	// Invalidate signer if either the password hash or session secret changed.
-	// This covers both password rotation (which changes the hash) and manual
-	// session secret rotation (e.g., emergency session invalidation).
+	// Invalidate signer if the password hash or session secret changed on disk.
+	// This covers password rotation (external edit), manual secret rotation
+	// (emergency session invalidation), and SetPasswordHash which clears both.
 	if cfg.Auth.PasswordHash != cp.config.Auth.PasswordHash ||
 		cfg.Auth.SessionSecret != cp.config.Auth.SessionSecret {
 		cp.signer = nil

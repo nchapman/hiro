@@ -12,7 +12,6 @@ import (
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // WorkerStream is the worker-node side of the cluster connection.
@@ -21,11 +20,13 @@ import (
 type WorkerStream struct {
 	leaderAddr string
 	nodeName   string
-	joinToken  string
 	capacity   int32
 	tlsConfig  *tls.Config
 	dialFunc   func(ctx context.Context, addr string) (net.Conn, error)
 	logger     *slog.Logger
+
+	// Lifecycle callbacks.
+	onConnected func() // called after successful registration with leader
 
 	// Handlers for incoming commands from the leader.
 	onSpawnWorker    func(ctx context.Context, msg *pb.SpawnWorker)
@@ -45,9 +46,8 @@ type WorkerStream struct {
 type WorkerStreamConfig struct {
 	LeaderAddr string
 	NodeName   string
-	JoinToken  string
 	Capacity   int32
-	TLSConfig  *tls.Config                                              // if set, use mTLS; otherwise plaintext
+	TLSConfig  *tls.Config                                              // required — mTLS is mandatory for cluster connections
 	DialFunc   func(ctx context.Context, addr string) (net.Conn, error) // optional custom dialer (e.g. relay)
 	Logger     *slog.Logger
 }
@@ -57,7 +57,6 @@ func NewWorkerStream(cfg WorkerStreamConfig) *WorkerStream {
 	return &WorkerStream{
 		leaderAddr: cfg.LeaderAddr,
 		nodeName:   cfg.NodeName,
-		joinToken:  cfg.JoinToken,
 		capacity:   cfg.Capacity,
 		tlsConfig:  cfg.TLSConfig,
 		dialFunc:   cfg.DialFunc,
@@ -104,6 +103,11 @@ func (w *WorkerStream) SetFileSyncHandler(fn func(ctx context.Context, msg *pb.F
 	w.onFileSync = fn
 }
 
+// SetOnConnected sets a callback invoked after successful registration with the leader.
+func (w *WorkerStream) SetOnConnected(fn func()) {
+	w.onConnected = fn
+}
+
 // SetFileUpdateHandler sets the callback for FileUpdate messages.
 func (w *WorkerStream) SetFileUpdateHandler(fn func(ctx context.Context, msg *pb.FileUpdate)) {
 	w.onFileUpdate = fn
@@ -112,12 +116,10 @@ func (w *WorkerStream) SetFileUpdateHandler(fn func(ctx context.Context, msg *pb
 // Connect dials the leader, registers, and enters the message loop.
 // Blocks until the context is cancelled or the connection drops.
 func (w *WorkerStream) Connect(ctx context.Context) error {
-	var creds credentials.TransportCredentials
-	if w.tlsConfig != nil {
-		creds = credentials.NewTLS(w.tlsConfig)
-	} else {
-		creds = insecure.NewCredentials()
+	if w.tlsConfig == nil {
+		return fmt.Errorf("TLS config is required for cluster connections")
 	}
+	creds := credentials.NewTLS(w.tlsConfig)
 
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
 	if w.dialFunc != nil {
@@ -144,26 +146,34 @@ func (w *WorkerStream) Connect(ctx context.Context) error {
 	if err := w.send(&pb.NodeMessage{
 		Msg: &pb.NodeMessage_Register{
 			Register: &pb.NodeRegister{
-				NodeName:  w.nodeName,
-				JoinToken: w.joinToken,
-				Capacity:  w.capacity,
+				NodeName: w.nodeName,
+				Capacity: w.capacity,
 			},
 		},
 	}); err != nil {
 		return fmt.Errorf("sending registration: %w", err)
 	}
 
-	// Wait for registration confirmation.
+	// Wait for registration response — could be accepted or pending approval.
 	msg, err := stream.Recv()
 	if err != nil {
 		return fmt.Errorf("receiving registration response: %w", err)
 	}
-	reg := msg.GetRegistered()
-	if reg == nil {
-		return fmt.Errorf("expected NodeRegistered, got %T", msg.Msg)
+	switch resp := msg.Msg.(type) {
+	case *pb.LeaderMessage_Registered:
+		w.nodeID = resp.Registered.NodeId
+		w.logger.Info("registered with leader", "node_id", w.nodeID, "leader", w.leaderAddr)
+		if w.onConnected != nil {
+			w.onConnected()
+		}
+	case *pb.LeaderMessage_Pending:
+		return ErrPendingApproval
+	case *pb.LeaderMessage_Rejected:
+		w.logger.Warn("rejected by leader", "reason", resp.Rejected.Reason)
+		return ErrApprovalRevoked
+	default:
+		return fmt.Errorf("expected NodeRegistered or NodePending, got %T", msg.Msg)
 	}
-	w.nodeID = reg.NodeId
-	w.logger.Info("registered with leader", "node_id", w.nodeID, "leader", w.leaderAddr)
 
 	// Enter message loop.
 	return w.readLoop(ctx, stream)
