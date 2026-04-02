@@ -248,6 +248,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	}()
 
 	// failStopped marks the instance as stopped on spawn/loop failure.
+	// inst.mu is already held by the caller (NewSession defers it).
 	failStopped := func(err error) (string, error) {
 		<-shutdownDone // wait for old worker cleanup before marking stopped
 		inst.info.Status = InstanceStatusStopped

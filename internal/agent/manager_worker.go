@@ -109,8 +109,11 @@ func (m *Manager) softStop(id string) {
 // reregisterStopped puts an instance back into the registry as stopped.
 // Used when StartInstance fails after unregistering.
 func (m *Manager) reregisterStopped(id string, inst *instance) {
-	m.mu.Lock()
+	inst.mu.Lock()
 	inst.info.Status = InstanceStatusStopped
+	inst.mu.Unlock()
+
+	m.mu.Lock()
 	m.instances[id] = inst
 	if inst.info.ParentID != "" {
 		m.children[inst.info.ParentID] = append(m.children[inst.info.ParentID], id)
