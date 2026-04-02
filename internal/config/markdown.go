@@ -175,6 +175,7 @@ type AgentConfig struct {
 	Name          string
 	Description   string
 	DeclaredTools []string // from frontmatter "tools" field; nil = no built-in tools (closed by default)
+	DenyTools     []string // from frontmatter "deny_tools" field; deny rules checked at call time
 	Prompt        string   // the markdown body — the agent's operating instructions
 	Skills        []SkillConfig
 }
@@ -219,6 +220,7 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		Name:          parsed.Frontmatter.String("name"),
 		Description:   parsed.Frontmatter.String("description"),
 		DeclaredTools: parsed.Frontmatter.StringSlice("tools"),
+		DenyTools:     parsed.Frontmatter.StringSlice("deny_tools"),
 		Prompt:        parsed.Body,
 	}
 

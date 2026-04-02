@@ -14,19 +14,63 @@ func (cp *ControlPlane) AgentTools(name string) (tools []string, ok bool) {
 	return policy.Tools, true
 }
 
-// SetAgentTools sets the operator tool override for a named agent.
+// SetAgentTools sets the operator allow-tool override for a named agent.
+// Preserves any existing deny rules.
 func (cp *ControlPlane) SetAgentTools(name string, tools []string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	cp.config.Agents[name] = AgentPolicy{Tools: tools}
+	policy := cp.config.Agents[name]
+	policy.Tools = tools
+	cp.config.Agents[name] = policy
 }
 
-// ClearAgentTools removes the operator tool override for a named agent,
-// reverting it to its declared tools from agent.md.
+// ClearAgentTools removes the operator allow-tool override for a named agent.
+// Preserves any existing deny rules. If no fields remain, the policy is removed.
 func (cp *ControlPlane) ClearAgentTools(name string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	delete(cp.config.Agents, name)
+	policy := cp.config.Agents[name]
+	policy.Tools = nil
+	if len(policy.DenyTools) == 0 {
+		delete(cp.config.Agents, name)
+	} else {
+		cp.config.Agents[name] = policy
+	}
+}
+
+// AgentDenyTools returns the operator-defined deny rules for the named agent.
+func (cp *ControlPlane) AgentDenyTools(name string) []string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	policy, exists := cp.config.Agents[name]
+	if !exists {
+		return nil
+	}
+	return policy.DenyTools
+}
+
+// SetAgentDenyTools sets the operator deny-tool rules for a named agent.
+// Preserves any existing allow rules.
+func (cp *ControlPlane) SetAgentDenyTools(name string, denyTools []string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	policy := cp.config.Agents[name]
+	policy.DenyTools = denyTools
+	cp.config.Agents[name] = policy
+}
+
+// ClearAgentDenyTools removes the operator deny-tool rules for a named agent.
+// Preserves any existing allow rules. If no fields remain, the policy is removed.
+func (cp *ControlPlane) ClearAgentDenyTools(name string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	policy := cp.config.Agents[name]
+	policy.DenyTools = nil
+	if len(policy.Tools) == 0 {
+		delete(cp.config.Agents, name)
+	} else {
+		cp.config.Agents[name] = policy
+	}
 }
 
 // AllPolicies returns a copy of all agent policies for display.

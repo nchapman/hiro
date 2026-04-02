@@ -19,6 +19,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/toolrules"
 )
 
 // LoopConfig holds all configuration needed to create a Loop.
@@ -36,6 +37,8 @@ type LoopConfig struct {
 	Executor       ipc.ToolExecutor       // worker's tool executor (for remote tools)
 	PDB            *platformdb.DB         // nil for ephemeral
 	AllowedTools   map[string]bool        // nil = unrestricted
+	AllowLayers    [][]toolrules.Rule     // per-source allow rules for call-time enforcement
+	DenyRules      []toolrules.Rule       // merged deny rules from all sources
 	HasSkills      bool
 	SecretNamesFn  func() []string
 	SecretEnvFn    func() []string
@@ -145,7 +148,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	// Build tool set: remote proxy tools + local tools.
 	redactor := NewRedactor(cfg.SecretEnvFn)
-	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, redactor, l.logger)
+	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, cfg.AllowLayers, cfg.DenyRules, redactor, l.logger)
 
 	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, coordinator tools, Skill.
 	localTools := l.buildLocalTools(cfg)

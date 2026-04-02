@@ -267,7 +267,10 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	}
 
 	// Compute effective tool set: declared tools ∩ control plane ∩ parent caps.
-	effectiveTools := m.computeEffectiveTools(cfg, parentID)
+	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, parentID)
+	if err != nil {
+		return "", err
+	}
 	hasSkills := len(cfg.Skills) > 0
 	if !hasSkills {
 		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
@@ -417,6 +420,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
+			AllowLayers:    allowLayers,
+			DenyRules:      denyRules,
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,
@@ -465,6 +470,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		loop:           loop,
 		notifications:  notifications,
 		effectiveTools: effectiveTools,
+		allowLayers:    allowLayers,
+		denyRules:      denyRules,
 		uid:            uid,
 		gid:            gid,
 		groups:         groups,

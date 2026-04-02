@@ -4,9 +4,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/toolrules"
 
 	"charm.land/fantasy"
 )
@@ -113,7 +115,7 @@ func TestProxyTool_RedactsSecrets(t *testing.T) {
 func TestBuildProxyTools_RespectsAllowlist(t *testing.T) {
 	exec := &fakeExecutor{}
 	allowed := map[string]bool{"Bash": true, "Read": true}
-	proxies := buildProxyTools("/tmp", exec, allowed, nil, testLogger)
+	proxies := buildProxyTools("/tmp", exec, allowed, nil, nil, nil, testLogger)
 
 	names := make(map[string]bool)
 	for _, p := range proxies {
@@ -132,9 +134,274 @@ func TestBuildProxyTools_RespectsAllowlist(t *testing.T) {
 
 func TestBuildProxyTools_NilAllowlist(t *testing.T) {
 	exec := &fakeExecutor{}
-	proxies := buildProxyTools("/tmp", exec, nil, nil, testLogger)
+	proxies := buildProxyTools("/tmp", exec, nil, nil, nil, nil, testLogger)
 
 	if len(proxies) != len(RemoteTools) {
 		t.Errorf("nil allowlist should include all %d remote tools, got %d", len(RemoteTools), len(proxies))
+	}
+}
+
+// --- Tool rule enforcement tests ---
+
+func mustParseRules(t *testing.T, ss ...string) []toolrules.Rule {
+	t.Helper()
+	rules, err := toolrules.ParseRules(ss)
+	if err != nil {
+		t.Fatalf("ParseRules(%v): %v", ss, err)
+	}
+	return rules
+}
+
+func TestProxyTool_DenyRule_BlocksCall(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:      fantasy.ToolInfo{Name: "Bash"},
+		executor:  exec,
+		logger:    testLogger,
+		denyRules: mustParseRules(t, "Bash(rm *)"),
+	}
+
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"rm -rf /"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.IsError {
+		t.Fatal("expected error response for denied call")
+	}
+	if !strings.Contains(resp.Content, "denied") {
+		t.Errorf("expected denial message, got %q", resp.Content)
+	}
+	// Executor should NOT have been called.
+	if exec.lastName != "" {
+		t.Error("executor should not have been called for denied tool call")
+	}
+}
+
+func TestProxyTool_DenyRule_AllowsNonMatching(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:      fantasy.ToolInfo{Name: "Bash"},
+		executor:  exec,
+		logger:    testLogger,
+		denyRules: mustParseRules(t, "Bash(rm *)"),
+	}
+
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"curl https://example.com"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("expected success, got error: %s", resp.Content)
+	}
+}
+
+func TestProxyTool_AllowLayer_BlocksNonMatching(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Bash"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{mustParseRules(t, "Bash(curl *)")},
+	}
+
+	// Non-matching command should be denied.
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"rm -rf /"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.IsError {
+		t.Fatal("expected error response for call not matching allow rules")
+	}
+}
+
+func TestProxyTool_AllowLayer_AllowsMatching(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Bash"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{mustParseRules(t, "Bash(curl *)")},
+	}
+
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"curl https://example.com"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("expected success, got error: %s", resp.Content)
+	}
+}
+
+func TestProxyTool_MultiLayerIntersection(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	// Agent allows curl and git, CP allows only curl.
+	// Intersection: only curl should work.
+	agentLayer := mustParseRules(t, "Bash(curl *)", "Bash(git *)")
+	cpLayer := mustParseRules(t, "Bash(curl *)")
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Bash"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{agentLayer, cpLayer},
+	}
+
+	// curl should be allowed (matches both layers).
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"curl https://example.com"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("curl should be allowed, got: %s", resp.Content)
+	}
+
+	// git should be denied (agent allows, CP doesn't).
+	exec.lastName = "" // reset
+	resp, err = pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-2",
+		Name:  "Bash",
+		Input: `{"command":"git status"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.IsError {
+		t.Fatal("git should be denied by CP layer")
+	}
+}
+
+func TestProxyTool_DenyOverridesAllow(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Bash"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{mustParseRules(t, "Bash(git *)")},
+		denyRules:   mustParseRules(t, "Bash(git push *)"),
+	}
+
+	// git status should be allowed.
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"git status"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("git status should be allowed, got: %s", resp.Content)
+	}
+
+	// git push should be denied (deny overrides allow).
+	resp, err = pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-2",
+		Name:  "Bash",
+		Input: `{"command":"git push origin main"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.IsError {
+		t.Fatal("git push should be denied")
+	}
+}
+
+func TestProxyTool_NoRules_PassesThrough(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	pt := &proxyTool{
+		info:     fantasy.ToolInfo{Name: "Bash"},
+		executor: exec,
+		logger:   testLogger,
+	}
+
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Bash",
+		Input: `{"command":"anything"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("no rules should mean no restriction, got: %s", resp.Content)
+	}
+}
+
+func TestProxyTool_ReadDenyPath(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "file contents"}}
+	pt := &proxyTool{
+		info:      fantasy.ToolInfo{Name: "Read"},
+		executor:  exec,
+		logger:    testLogger,
+		denyRules: mustParseRules(t, "Read(/etc/*)"),
+	}
+
+	// Allowed path.
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Read",
+		Input: `{"file_path":"/src/main.go"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("/src/main.go should be allowed, got: %s", resp.Content)
+	}
+
+	// Denied path.
+	resp, err = pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-2",
+		Name:  "Read",
+		Input: `{"file_path":"/etc/passwd"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.IsError {
+		t.Fatal("/etc/passwd should be denied")
+	}
+}
+
+func TestProxyTool_UnmatchedTool_PassesThrough(t *testing.T) {
+	exec := &fakeExecutor{result: ipc.ToolResult{Content: "ok"}}
+	// Only Bash rules — Read should pass through unaffected.
+	pt := &proxyTool{
+		info:        fantasy.ToolInfo{Name: "Read"},
+		executor:    exec,
+		logger:      testLogger,
+		allowLayers: [][]toolrules.Rule{mustParseRules(t, "Bash(curl *)")},
+	}
+
+	resp, err := pt.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Read",
+		Input: `{"file_path":"/src/main.go"}`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.IsError {
+		t.Errorf("Read should pass through when layer only has Bash rules, got: %s", resp.Content)
 	}
 }

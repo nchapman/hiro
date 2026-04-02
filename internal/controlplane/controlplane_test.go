@@ -942,3 +942,183 @@ func TestDefaultModel(t *testing.T) {
 	}
 }
 
+// --- Deny tools tests ---
+
+func TestAgentDenyToolsCRUD(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	if dt := cp.AgentDenyTools("worker"); len(dt) != 0 {
+		t.Errorf("expected no deny tools initially, got %v", dt)
+	}
+
+	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)", "Bash(sudo *)"})
+	dt := cp.AgentDenyTools("worker")
+	if len(dt) != 2 || dt[0] != "Bash(rm *)" {
+		t.Errorf("expected 2 deny tools, got %v", dt)
+	}
+
+	// Allow tools should be independent.
+	cp.SetAgentTools("worker", []string{"Bash", "Read"})
+	dt = cp.AgentDenyTools("worker")
+	if len(dt) != 2 {
+		t.Errorf("SetAgentTools should not affect deny tools, got %v", dt)
+	}
+
+	// Clear deny tools preserves allow.
+	cp.ClearAgentDenyTools("worker")
+	if dt := cp.AgentDenyTools("worker"); len(dt) != 0 {
+		t.Errorf("expected no deny tools after clear, got %v", dt)
+	}
+	tools, ok := cp.AgentTools("worker")
+	if !ok || len(tools) != 2 {
+		t.Errorf("allow tools should survive ClearAgentDenyTools, got %v ok=%v", tools, ok)
+	}
+}
+
+func TestSetAgentTools_PreservesDenyTools(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+	cp.SetAgentTools("worker", []string{"Bash"})
+
+	dt := cp.AgentDenyTools("worker")
+	if len(dt) != 1 || dt[0] != "Bash(rm *)" {
+		t.Errorf("deny tools should be preserved by SetAgentTools, got %v", dt)
+	}
+}
+
+func TestClearAgentTools_PreservesDenyTools(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetAgentTools("worker", []string{"Bash"})
+	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+
+	cp.ClearAgentTools("worker")
+
+	// Policy should still exist because deny tools remain.
+	dt := cp.AgentDenyTools("worker")
+	if len(dt) != 1 {
+		t.Errorf("deny tools should survive ClearAgentTools, got %v", dt)
+	}
+}
+
+func TestDenyToolsSaveRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cp, _ := Load(path, testLogger())
+	cp.SetAgentTools("worker", []string{"Bash", "Read"})
+	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+	if err := cp.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	cp2, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dt := cp2.AgentDenyTools("worker")
+	if len(dt) != 1 || dt[0] != "Bash(rm *)" {
+		t.Errorf("deny tools should roundtrip, got %v", dt)
+	}
+	tools, ok := cp2.AgentTools("worker")
+	if !ok || len(tools) != 2 {
+		t.Errorf("allow tools should roundtrip, got %v", tools)
+	}
+}
+
+func TestCommandToolsDeny(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	result, err := cp.HandleCommand("/tools deny researcher Bash(rm *),Bash(sudo *)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "researcher") {
+		t.Errorf("unexpected result: %s", result)
+	}
+
+	dt := cp.AgentDenyTools("researcher")
+	if len(dt) != 2 {
+		t.Errorf("expected 2 deny tools, got %v", dt)
+	}
+}
+
+func TestCommandToolsRm_ClearsBoth(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetAgentTools("worker", []string{"Bash"})
+	cp.SetAgentDenyTools("worker", []string{"Bash(rm *)"})
+
+	_, err := cp.HandleCommand("/tools rm worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, ok := cp.AgentTools("worker")
+	if ok {
+		t.Error("expected no allow tools after rm")
+	}
+	if dt := cp.AgentDenyTools("worker"); len(dt) != 0 {
+		t.Errorf("expected no deny tools after rm, got %v", dt)
+	}
+}
+
+// --- parseToolList tests ---
+
+func TestParseToolList_SimpleCommas(t *testing.T) {
+	result := parseToolList([]string{"Bash,Read,Write"})
+	if len(result) != 3 || result[0] != "Bash" || result[1] != "Read" || result[2] != "Write" {
+		t.Errorf("expected [Bash Read Write], got %v", result)
+	}
+}
+
+func TestParseToolList_PreservesParentheses(t *testing.T) {
+	// "Bash(curl *),Read" should stay as two items, not split inside parens.
+	result := parseToolList([]string{"Bash(curl", "*),Read"})
+	if len(result) != 2 || result[0] != "Bash(curl *)" || result[1] != "Read" {
+		t.Errorf("expected [Bash(curl *) Read], got %v", result)
+	}
+}
+
+func TestParseToolList_CommaInsideParens(t *testing.T) {
+	// SpawnInstance(worker,researcher) — comma inside parens should not split.
+	result := parseToolList([]string{"SpawnInstance(worker,researcher),Read"})
+	if len(result) != 2 || result[0] != "SpawnInstance(worker,researcher)" || result[1] != "Read" {
+		t.Errorf("expected [SpawnInstance(worker,researcher) Read], got %v", result)
+	}
+}
+
+func TestCommandToolsSet_RejectsMalformedRules(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	result, err := cp.HandleCommand("/tools set researcher Bash(")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Invalid rule") {
+		t.Errorf("expected invalid rule error, got: %s", result)
+	}
+	// Should not have set anything.
+	if _, ok := cp.AgentTools("researcher"); ok {
+		t.Error("malformed rule should not be stored")
+	}
+}
+
+func TestCommandToolsDeny_RejectsMalformedRules(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	result, err := cp.HandleCommand("/tools deny researcher Bash()")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Invalid rule") {
+		t.Errorf("expected invalid rule error, got: %s", result)
+	}
+}
+
+func TestParseToolList_SpaceSeparatedArgs(t *testing.T) {
+	// When shell splits "Bash(curl *)" into ["Bash(curl", "*)"]
+	result := parseToolList([]string{"Bash(curl", "*)"})
+	if len(result) != 1 || result[0] != "Bash(curl *)" {
+		t.Errorf("expected [Bash(curl *)], got %v", result)
+	}
+}
+

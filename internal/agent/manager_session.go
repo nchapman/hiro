@@ -218,6 +218,8 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		}
 	}
 	allowedTools := buildAllowedToolsMap(inst.effectiveTools, inst.info.Mode, hasSkills)
+	allowLayers := inst.allowLayers
+	denyRules := inst.denyRules
 
 	spawnCtx := m.ctx // persistent instances always use manager context
 
@@ -294,6 +296,8 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			Executor:       handle.Worker,
 			PDB:            m.pdb,
 			AllowedTools:   allowedTools,
+			AllowLayers:    allowLayers,
+			DenyRules:      denyRules,
 			HasSkills:      hasSkills,
 			SecretNamesFn:  m.SecretNames,
 			SecretEnvFn:    m.SecretEnv,

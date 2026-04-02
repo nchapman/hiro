@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/nchapman/hiro/internal/toolrules"
 )
 
 // HandleCommand parses and executes a slash command. Returns a
@@ -112,8 +114,26 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		if len(toolList) == 0 {
 			return "Usage: /tools set <agent> <tool1,tool2,...>", false, nil
 		}
+		if _, err := toolrules.ParseRules(toolList); err != nil {
+			return fmt.Sprintf("Invalid rule: %v", err), false, nil
+		}
 		cp.SetAgentTools(agentName, toolList)
-		return fmt.Sprintf("Tools for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
+		return fmt.Sprintf("Allow rules for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
+
+	case "deny":
+		if len(args) < 2 {
+			return "Usage: /tools deny <agent> <rule1,rule2,...>", false, nil
+		}
+		agentName := args[0]
+		toolList := parseToolList(args[1:])
+		if len(toolList) == 0 {
+			return "Usage: /tools deny <agent> <rule1,rule2,...>", false, nil
+		}
+		if _, err := toolrules.ParseRules(toolList); err != nil {
+			return fmt.Sprintf("Invalid rule: %v", err), false, nil
+		}
+		cp.SetAgentDenyTools(agentName, toolList)
+		return fmt.Sprintf("Deny rules for %q set to: %s\n\nNote: takes effect on next agent start, not for running agents.", agentName, strings.Join(toolList, ", ")), true, nil
 
 	case "rm", "remove", "clear":
 		if len(args) < 1 {
@@ -121,16 +141,12 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		}
 		agentName := args[0]
 		cp.ClearAgentTools(agentName)
-		return fmt.Sprintf("Tool override for %q cleared. Agent will use its declared tools.", agentName), true, nil
+		cp.ClearAgentDenyTools(agentName)
+		return fmt.Sprintf("Tool overrides for %q cleared. Agent will use its declared tools.", agentName), true, nil
 
 	case "list", "ls":
 		if len(args) > 0 {
-			agentName := args[0]
-			tools, ok := cp.AgentTools(agentName)
-			if !ok {
-				return fmt.Sprintf("No tool override for %q. Agent uses its declared tools.", agentName), false, nil
-			}
-			return fmt.Sprintf("Tool override for %q: %s", agentName, strings.Join(tools, ", ")), false, nil
+			return cp.formatToolPolicy(args[0]), false, nil
 		}
 		policies := cp.AllPolicies()
 		if len(policies) == 0 {
@@ -146,16 +162,41 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		var b strings.Builder
 		b.WriteString("Tool overrides:\n")
 		for _, name := range names {
-			fmt.Fprintf(&b, "  %s: %s\n", name, strings.Join(policies[name].Tools, ", "))
+			p := policies[name]
+			fmt.Fprintf(&b, "  %s:\n", name)
+			if len(p.Tools) > 0 {
+				fmt.Fprintf(&b, "    allow: %s\n", strings.Join(p.Tools, ", "))
+			}
+			if len(p.DenyTools) > 0 {
+				fmt.Fprintf(&b, "    deny:  %s\n", strings.Join(p.DenyTools, ", "))
+			}
 		}
 		return strings.TrimRight(b.String(), "\n"), false, nil
 
 	case "":
-		return "Usage: /tools <set|rm|list>", false, nil
+		return "Usage: /tools <set|deny|rm|list>", false, nil
 
 	default:
 		return "", false, fmt.Errorf("unknown tools command: %s", verb)
 	}
+}
+
+// formatToolPolicy returns a human-readable summary of an agent's tool policy.
+func (cp *ControlPlane) formatToolPolicy(agentName string) string {
+	tools, hasTools := cp.AgentTools(agentName)
+	denyTools := cp.AgentDenyTools(agentName)
+	if !hasTools && len(denyTools) == 0 {
+		return fmt.Sprintf("No tool override for %q. Agent uses its declared tools.", agentName)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Tool overrides for %q:", agentName)
+	if hasTools {
+		fmt.Fprintf(&b, "\n  allow: %s", strings.Join(tools, ", "))
+	}
+	if len(denyTools) > 0 {
+		fmt.Fprintf(&b, "\n  deny:  %s", strings.Join(denyTools, ", "))
+	}
+	return b.String()
 }
 
 // parseKeyValue parses "NAME=VALUE" or "NAME" "VALUE" from args.
@@ -211,28 +252,48 @@ func (cp *ControlPlane) handleCluster(verb string, _ []string) (string, bool, er
 func (cp *ControlPlane) handleHelp() (string, error) {
 	return `Available commands:
 
-/help                          Show this help
-/clear                         Start a new session
-/secrets list                  List secret names
-/secrets set NAME=VALUE        Set a secret
-/secrets rm NAME               Remove a secret
-/tools list [AGENT]            List tool overrides
-/tools set AGENT tool1,tool2   Set tool override for agent
-/tools rm AGENT                Clear tool override
-/cluster                       Show cluster status`, nil
+/help                              Show this help
+/clear                             Start a new session
+/secrets list                      List secret names
+/secrets set NAME=VALUE            Set a secret
+/secrets rm NAME                   Remove a secret
+/tools list [AGENT]                List tool overrides
+/tools set AGENT rule1,rule2       Set allow rules (e.g. Bash(curl *),Read)
+/tools deny AGENT rule1,rule2      Set deny rules (e.g. Bash(rm *))
+/tools rm AGENT                    Clear all tool overrides
+/cluster                           Show cluster status`, nil
 }
 
-// parseToolList parses tool names from args. Tools can be comma-separated
-// in a single arg or space-separated across args.
+// parseToolList parses tool rules from args. Rules can be comma-separated
+// or space-separated. Commas inside parentheses are preserved (e.g.,
+// "SpawnInstance(worker,researcher)" stays as one rule).
 func parseToolList(args []string) []string {
-	var tools []string
-	for _, arg := range args {
-		for _, t := range strings.Split(arg, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				tools = append(tools, t)
+	// Rejoin into a single string so that space-separated args recombine
+	// parameterized rules like "Bash(curl" and "*)".
+	raw := strings.Join(args, " ")
+
+	var result []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(raw); i++ {
+		switch raw[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				if t := strings.TrimSpace(raw[start:i]); t != "" {
+					result = append(result, t)
+				}
+				start = i + 1
 			}
 		}
 	}
-	return tools
+	if t := strings.TrimSpace(raw[start:]); t != "" {
+		result = append(result, t)
+	}
+	return result
 }

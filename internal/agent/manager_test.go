@@ -1116,13 +1116,134 @@ tools:
 Agent with tools.`)
 
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("tooled"))
-	effective := mgr.computeEffectiveTools(cfg, "")
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatalf("computeEffectiveTools: %v", err)
+	}
 
 	if !effective["Bash"] || !effective["Read"] || !effective["Write"] {
 		t.Errorf("effective tools should include all declared tools, got %v", effective)
 	}
 	if effective["Glob"] {
 		t.Error("Glob should not be in effective tools (not declared)")
+	}
+}
+
+func TestManager_EffectiveTools_Parameterized(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "restricted", `---
+name: restricted
+model: fake-model
+tools:
+  - Bash(curl *)
+  - Read
+deny_tools:
+  - Bash(curl *--upload*)
+---
+Agent with parameterized tools.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("restricted"))
+	effective, allowLayers, denyRules, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatalf("computeEffectiveTools: %v", err)
+	}
+
+	// Tool names should be in the effective set.
+	if !effective["Bash"] || !effective["Read"] {
+		t.Errorf("effective tools should include Bash and Read, got %v", effective)
+	}
+
+	// Should have an allow layer (Bash has parameterized rule).
+	if len(allowLayers) != 1 {
+		t.Fatalf("expected 1 allow layer, got %d", len(allowLayers))
+	}
+	// Allow layer should have 2 rules (Bash(curl *) and Read).
+	if len(allowLayers[0]) != 2 {
+		t.Errorf("expected 2 rules in allow layer, got %d", len(allowLayers[0]))
+	}
+
+	// Should have 1 deny rule.
+	if len(denyRules) != 1 {
+		t.Fatalf("expected 1 deny rule, got %d", len(denyRules))
+	}
+	if denyRules[0].Tool != "Bash" || denyRules[0].Pattern != "curl *--upload*" {
+		t.Errorf("unexpected deny rule: %v", denyRules[0])
+	}
+}
+
+func TestManager_EffectiveTools_WholeDenyRemovesTool(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "nodeny", `---
+name: nodeny
+model: fake-model
+tools:
+  - Bash
+  - Read
+  - Write
+deny_tools:
+  - Write
+---
+Agent where Write is fully denied.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("nodeny"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatalf("computeEffectiveTools: %v", err)
+	}
+
+	if effective["Write"] {
+		t.Error("Write should be removed from effective set by whole-tool deny")
+	}
+	if !effective["Bash"] || !effective["Read"] {
+		t.Error("Bash and Read should remain in effective set")
+	}
+}
+
+func TestManager_EffectiveTools_WholeToolStrippedWhenParameterized(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "mixed", `---
+name: mixed
+model: fake-model
+tools:
+  - Bash
+  - Bash(curl *)
+  - Read
+---
+Agent with both whole-tool and parameterized Bash.`)
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("mixed"))
+	_, allowLayers, _, err := mgr.computeEffectiveTools(cfg, "")
+	if err != nil {
+		t.Fatalf("computeEffectiveTools: %v", err)
+	}
+
+	if len(allowLayers) != 1 {
+		t.Fatalf("expected 1 allow layer, got %d", len(allowLayers))
+	}
+
+	// The layer should NOT contain whole-tool Bash (it would nullify Bash(curl *)).
+	for _, r := range allowLayers[0] {
+		if r.Tool == "Bash" && r.IsWholeTool() {
+			t.Error("whole-tool Bash should be stripped when Bash(curl *) exists in same layer")
+		}
+	}
+
+	// Should still contain Bash(curl *) and Read.
+	hasBashCurl := false
+	hasRead := false
+	for _, r := range allowLayers[0] {
+		if r.Tool == "Bash" && r.Pattern == "curl *" {
+			hasBashCurl = true
+		}
+		if r.Tool == "Read" && r.IsWholeTool() {
+			hasRead = true
+		}
+	}
+	if !hasBashCurl {
+		t.Error("Bash(curl *) should remain in the layer")
+	}
+	if !hasRead {
+		t.Error("Read should remain in the layer")
 	}
 }
 

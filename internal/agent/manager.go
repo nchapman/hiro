@@ -10,6 +10,7 @@ import (
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/toolrules"
 	"github.com/nchapman/hiro/internal/uidpool"
 )
 
@@ -63,6 +64,8 @@ type instance struct {
 	loop           *inference.Loop    // inference loop (runs in control plane)
 	notifications  *inference.NotificationQueue // instance-level; survives loop recreation
 	effectiveTools map[string]bool    // built-in tools this instance is allowed; nil = unrestricted
+	allowLayers    [][]toolrules.Rule // per-source allow rules for call-time enforcement
+	denyRules      []toolrules.Rule   // merged deny rules from all sources
 	uid            uint32             // isolated UID (0 = no isolation)
 	gid            uint32             // isolated GID
 	groups         []uint32           // supplementary groups (includes hiro-coordinators for coordinators)
@@ -91,6 +94,7 @@ type Manager struct {
 // Defined here to avoid a direct dependency on the controlplane package.
 type ControlPlane interface {
 	AgentTools(name string) (tools []string, ok bool)
+	AgentDenyTools(name string) []string
 	SecretNames() []string
 	SecretEnv() []string
 	ProviderInfo() (providerType string, apiKey string, baseURL string, ok bool)

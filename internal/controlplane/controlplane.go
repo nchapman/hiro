@@ -30,7 +30,8 @@ type ProviderConfig struct {
 
 // AgentPolicy defines operator-level overrides for a named agent.
 type AgentPolicy struct {
-	Tools []string `yaml:"tools,omitempty"`
+	Tools     []string `yaml:"tools,omitempty"`
+	DenyTools []string `yaml:"deny_tools,omitempty"`
 }
 
 // ApprovedNode represents a worker node that has been approved to join the cluster.
