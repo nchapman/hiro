@@ -100,7 +100,7 @@ func drainWithTimeout(t *testing.T, nq *NotificationQueue, timeout time.Duration
 func TestSpawnInstance_Sync(t *testing.T) {
 	mgr := &fakeHostManager{spawnResult: "done"}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it"}`)
 	if resp.IsError {
@@ -120,7 +120,7 @@ func TestSpawnInstance_Background(t *testing.T) {
 		spawnDelay:  50 * time.Millisecond,
 	}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it","background":true}`)
 	if resp.IsError {
@@ -152,7 +152,7 @@ func TestSpawnInstance_Background(t *testing.T) {
 func TestSpawnInstance_BackgroundError(t *testing.T) {
 	mgr := &fakeHostManager{spawnErr: context.DeadlineExceeded}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it","background":true}`)
 	if resp.IsError {
@@ -171,7 +171,7 @@ func TestSpawnInstance_BackgroundError(t *testing.T) {
 func TestSpawnInstance_SyncError(t *testing.T) {
 	mgr := &fakeHostManager{spawnErr: context.DeadlineExceeded}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it"}`)
 	if !resp.IsError {
@@ -185,7 +185,7 @@ func TestSpawnInstance_SyncError(t *testing.T) {
 func TestSpawnInstance_EmptyAgent(t *testing.T) {
 	mgr := &fakeHostManager{}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
 	resp := runTool(t, tool, `{"agent":"","prompt":"do it"}`)
 	if !resp.IsError {
@@ -196,7 +196,7 @@ func TestSpawnInstance_EmptyAgent(t *testing.T) {
 func TestSpawnInstance_EmptyPrompt(t *testing.T) {
 	mgr := &fakeHostManager{}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":""}`)
 	if !resp.IsError {
@@ -208,7 +208,7 @@ func TestSpawnInstance_EmptyPrompt(t *testing.T) {
 
 func TestCreatePersistentInstance_Default(t *testing.T) {
 	mgr := &fakeHostManager{createResult: "inst-123"}
-	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"researcher"}`)
 	if resp.IsError {
@@ -226,7 +226,7 @@ func TestCreatePersistentInstance_Default(t *testing.T) {
 
 func TestCreatePersistentInstance_AlwaysPersistent(t *testing.T) {
 	mgr := &fakeHostManager{createResult: "inst-456"}
-	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"manager"}`)
 	if resp.IsError {
@@ -241,7 +241,7 @@ func TestCreatePersistentInstance_AlwaysPersistent(t *testing.T) {
 
 func TestCreatePersistentInstance_EmptyAgent(t *testing.T) {
 	mgr := &fakeHostManager{}
-	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
 
 	resp := runTool(t, tool, `{"agent":""}`)
 	if !resp.IsError {
@@ -249,64 +249,256 @@ func TestCreatePersistentInstance_EmptyAgent(t *testing.T) {
 	}
 }
 
-func TestBuildAgentListingContext_WithAgents(t *testing.T) {
+func TestAgentListingProvider_InitialAnnouncement(t *testing.T) {
 	mgr := &fakeHostManager{
 		agentDefs: []ipc.AgentDef{
 			{Name: "assistant", Description: "General-purpose agent."},
 			{Name: "critic", Description: "Review agent."},
 		},
 	}
-	ctx := buildAgentListingContext(mgr)
-	if ctx == nil {
-		t.Fatal("expected non-nil context")
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	// No prior history → full announcement.
+	dr := provider(tools, nil)
+	if dr == nil {
+		t.Fatal("expected initial delta result")
 	}
-	if ctx.Heading != "Agents" {
-		t.Errorf("expected heading 'Agents', got %q", ctx.Heading)
-	}
-	if !strings.Contains(ctx.Content, "**assistant**") {
+	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	if !strings.Contains(text, "**assistant**") {
 		t.Error("expected assistant in listing")
 	}
-	if !strings.Contains(ctx.Content, "**critic**") {
+	if !strings.Contains(text, "**critic**") {
 		t.Error("expected critic in listing")
 	}
+	if !strings.Contains(text, "<system-reminder>") {
+		t.Error("expected system-reminder wrapper")
+	}
 }
 
-func TestBuildAgentListingContext_NoAgents(t *testing.T) {
+func TestAgentListingProvider_NoChangeNoMessage(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "Helper."},
+		},
+	}
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	// First call: initial announcement.
+	dr := provider(tools, nil)
+	if dr == nil {
+		t.Fatal("expected initial announcement")
+	}
+
+	// Second call with prior delta in history: nothing changed.
+	history := []fantasy.Message{dr.Message}
+	dr2 := provider(tools, history)
+	if dr2 != nil {
+		t.Error("expected nil when nothing changed (cache should be preserved)")
+	}
+}
+
+func TestAgentListingProvider_DeltaOnAdd(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "Helper."},
+		},
+	}
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	// Initial announcement.
+	dr := provider(tools, nil)
+	history := []fantasy.Message{dr.Message}
+
+	// Add an agent at runtime.
+	mgr.agentDefs = append(mgr.agentDefs, ipc.AgentDef{Name: "expert", Description: "Investigator."})
+
+	dr2 := provider(tools, history)
+	if dr2 == nil {
+		t.Fatal("expected delta for new agent")
+	}
+	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	if !strings.Contains(text, "expert") {
+		t.Error("expected expert in delta")
+	}
+	// Should be a delta, not a full re-announcement.
+	if strings.Contains(text, "assistant") {
+		t.Error("delta should only mention new agents, not existing ones")
+	}
+}
+
+func TestAgentListingProvider_DeltaOnRemove(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "Helper."},
+			{Name: "expert", Description: "Investigator."},
+		},
+	}
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	dr := provider(tools, nil)
+	history := []fantasy.Message{dr.Message}
+
+	// Remove expert.
+	mgr.agentDefs = mgr.agentDefs[:1]
+
+	dr2 := provider(tools, history)
+	if dr2 == nil {
+		t.Fatal("expected delta for removed agent")
+	}
+	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	if !strings.Contains(text, "no longer available") {
+		t.Error("expected removal notice")
+	}
+	if !strings.Contains(text, "expert") {
+		t.Error("expected expert in removal list")
+	}
+}
+
+func TestAgentListingProvider_CompactionResets(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "Helper."},
+		},
+	}
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	// Initial announcement.
+	dr := provider(tools, nil)
+	if dr == nil {
+		t.Fatal("expected initial announcement")
+	}
+
+	// Simulate compaction: history is now empty (deltas removed).
+	dr2 := provider(tools, nil)
+	if dr2 == nil {
+		t.Fatal("expected full re-announcement after compaction")
+	}
+}
+
+func TestAgentListingProvider_NoSpawnTool(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "Helper."},
+		},
+	}
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{"Read": true, "Bash": true}
+	if dr := provider(tools, nil); dr != nil {
+		t.Error("expected nil when SpawnInstance not in active tools")
+	}
+}
+
+func TestAgentListingProvider_NoAgents(t *testing.T) {
 	mgr := &fakeHostManager{}
-	ctx := buildAgentListingContext(mgr)
-	if ctx != nil {
-		t.Error("expected nil context when no agents defined")
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+	if dr := provider(tools, nil); dr != nil {
+		t.Error("expected nil when no agents defined")
 	}
 }
 
-func TestSpawnTool_CarriesContext(t *testing.T) {
+func TestAgentListingProvider_SimultaneousAddAndRemove(t *testing.T) {
 	mgr := &fakeHostManager{
 		agentDefs: []ipc.AgentDef{
-			{Name: "expert", Description: "Deep investigator."},
+			{Name: "assistant", Description: "Helper."},
+			{Name: "expert", Description: "Investigator."},
 		},
 	}
-	agentCtx := buildAgentListingContext(mgr)
-	tool := buildSpawnTool(mgr, NewNotificationQueue(testLogger), "session-1", agentCtx, testLogger)
-	if tool.Context == nil {
-		t.Fatal("SpawnInstance tool should carry agent listing context")
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	dr := provider(tools, nil)
+	history := []fantasy.Message{dr.Message}
+
+	// Replace expert with critic (remove + add in same turn).
+	mgr.agentDefs = []ipc.AgentDef{
+		{Name: "assistant", Description: "Helper."},
+		{Name: "critic", Description: "Reviewer."},
 	}
-	if tool.Context.Heading != "Agents" {
-		t.Errorf("expected heading 'Agents', got %q", tool.Context.Heading)
+	dr2 := provider(tools, history)
+	if dr2 == nil {
+		t.Fatal("expected delta for add+remove")
+	}
+	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	if !strings.Contains(text, "critic") {
+		t.Error("expected critic in new agents")
+	}
+	if !strings.Contains(text, "expert") {
+		t.Error("expected expert in removed agents")
 	}
 }
 
-func TestCreatePersistentInstanceTool_CarriesContext(t *testing.T) {
+func TestAgentListingProvider_AllAgentsRemoved(t *testing.T) {
 	mgr := &fakeHostManager{
 		agentDefs: []ipc.AgentDef{
-			{Name: "assistant", Description: "General-purpose agent."},
+			{Name: "assistant", Description: "Helper."},
 		},
 	}
-	agentCtx := buildAgentListingContext(mgr)
-	tool := buildCreatePersistentInstanceTool(mgr, agentCtx, testLogger)
-	if tool.Context == nil {
-		t.Fatal("CreatePersistentInstance tool should carry agent listing context")
+	provider := AgentListingProvider(mgr)
+	tools := map[string]bool{SpawnToolName: true}
+
+	dr := provider(tools, nil)
+	history := []fantasy.Message{dr.Message}
+
+	// All agents removed.
+	mgr.agentDefs = nil
+	dr2 := provider(tools, history)
+	if dr2 == nil {
+		t.Fatal("expected delta for removal")
 	}
-	if tool.Context != agentCtx {
-		t.Error("both spawn tools should share the same context pointer")
+	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	if !strings.Contains(text, "no longer available") {
+		t.Error("expected removal notice")
+	}
+}
+
+func TestAgentListingProvider_CreatePersistentToolOnly(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "Helper."},
+		},
+	}
+	provider := AgentListingProvider(mgr)
+	// Only CreatePersistentInstance, no SpawnInstance.
+	tools := map[string]bool{CreatePersistentToolName: true}
+	dr := provider(tools, nil)
+	if dr == nil {
+		t.Error("expected announcement when CreatePersistentInstance is available")
+	}
+}
+
+func TestRenderAgentListing_InitialSorted(t *testing.T) {
+	defs := []ipc.AgentDef{
+		{Name: "critic", Description: "Reviewer."},
+		{Name: "assistant", Description: "Helper."},
+	}
+	text := renderAgentListing(defs, []string{"assistant", "critic"}, nil, true)
+	// Defs order should be preserved (they come pre-sorted from ListAgentDefs).
+	criticIdx := strings.Index(text, "critic")
+	assistantIdx := strings.Index(text, "assistant")
+	if criticIdx < 0 || assistantIdx < 0 {
+		t.Fatal("expected both agents in listing")
+	}
+}
+
+func TestRenderAgentListing_DeltaShowsOnlyChanges(t *testing.T) {
+	defs := []ipc.AgentDef{
+		{Name: "assistant", Description: "Helper."},
+		{Name: "expert", Description: "Investigator."},
+	}
+	text := renderAgentListing(defs, []string{"expert"}, []string{"critic"}, false)
+	if !strings.Contains(text, "expert") {
+		t.Error("expected expert in new agents")
+	}
+	if strings.Contains(text, "assistant") {
+		t.Error("should not mention existing agents in delta")
+	}
+	if !strings.Contains(text, "critic") {
+		t.Error("expected critic in removed list")
 	}
 }

@@ -350,6 +350,9 @@ func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance,
 		Notifications:  inst.notifications,
 		Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 		HostManager:    m,
+		ContextProviders: []inference.ContextProvider{
+			inference.AgentListingProvider(m),
+		},
 	}, modelSpec, apiKey, baseURL)
 	if err != nil {
 		handle.Kill()

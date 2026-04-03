@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"charm.land/fantasy"
@@ -55,30 +56,101 @@ func (s *ScopedManager) checkDescendant(targetID string) error {
 	return nil
 }
 
+// Tool name constants used for registration and provider filtering.
+const (
+	SpawnToolName            = "SpawnInstance"
+	CreatePersistentToolName = "CreatePersistentInstance"
+)
+
 // --- Spawn tool (ephemeral) ---
 
-// buildAgentListingContext builds the ToolContext for the agent listing,
-// or nil if no agents are defined. Shared by SpawnInstance and
-// CreatePersistentInstance — collectToolContext deduplicates by heading.
-func buildAgentListingContext(mgr ipc.HostManager) *ToolContext {
-	defs := mgr.ListAgentDefs()
-	if len(defs) == 0 {
-		return nil
-	}
-	var b strings.Builder
-	b.WriteString("Descriptions are triggers — they tell you when to use each agent and what context to provide.\n\n")
-	for _, d := range defs {
-		fmt.Fprintf(&b, "- **%s**: %s\n", d.Name, d.Description)
-	}
-	return &ToolContext{
-		Heading: "Agents",
-		Content: b.String(),
+// AgentListingProvider returns a ContextProvider that announces available
+// agents as a <system-reminder> delta message. Only emits when the agent set
+// changes compared to what was previously announced in the conversation.
+func AgentListingProvider(mgr ipc.HostManager) ContextProvider {
+	return func(activeTools map[string]bool, history []fantasy.Message) *DeltaResult {
+		if !activeTools[SpawnToolName] && !activeTools[CreatePersistentToolName] {
+			return nil
+		}
+
+		// Reconstruct announced set from prior deltas.
+		announced := replayAnnounced("agents", history)
+
+		// Get current state.
+		defs := mgr.ListAgentDefs()
+		current := make(map[string]bool, len(defs))
+		for _, d := range defs {
+			current[d.Name] = true
+		}
+
+		// Compute diff.
+		var added, removed []string
+		for name := range current {
+			if !announced[name] {
+				added = append(added, name)
+			}
+		}
+		for name := range announced {
+			if !current[name] {
+				removed = append(removed, name)
+			}
+		}
+
+		// Nothing changed → no new message.
+		if len(added) == 0 && len(removed) == 0 {
+			return nil
+		}
+
+		// Render the message text.
+		isInitial := len(announced) == 0
+		text := renderAgentListing(defs, added, removed, isInitial)
+
+		return &DeltaResult{
+			Message: buildDeltaMessage(text, "agents", added, removed),
+		}
 	}
 }
 
-func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessionID string, agentCtx *ToolContext, logger *slog.Logger) Tool {
+// renderAgentListing produces the human-readable text for the agent listing delta.
+func renderAgentListing(defs []ipc.AgentDef, added, removed []string, isInitial bool) string {
+	var b strings.Builder
+	if isInitial {
+		b.WriteString("Available agents (descriptions tell you when to use each and what context to provide):\n\n")
+		for _, d := range defs {
+			fmt.Fprintf(&b, "- **%s**: %s\n", d.Name, d.Description)
+		}
+		return b.String()
+	}
+	if len(added) > 0 {
+		b.WriteString("New agents available:\n\n")
+		addedSet := make(map[string]bool, len(added))
+		for _, name := range added {
+			addedSet[name] = true
+		}
+		for _, d := range defs {
+			if addedSet[d.Name] {
+				fmt.Fprintf(&b, "- **%s**: %s\n", d.Name, d.Description)
+			}
+		}
+	}
+	if len(removed) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		sorted := make([]string, len(removed))
+		copy(sorted, removed)
+		sort.Strings(sorted)
+		b.WriteString("Agents no longer available:\n")
+		for _, name := range sorted {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+	}
+	return b.String()
+}
+
+func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessionID string, logger *slog.Logger) Tool {
 	return Tool{
-		AgentTool: fantasy.NewAgentTool("SpawnInstance",
+		AgentTool: fantasy.NewAgentTool(SpawnToolName,
 			spawnInstanceDescription,
 			func(ctx context.Context, input struct {
 				Agent      string `json:"agent"      description:"Agent definition name (directory under agents/)."`
@@ -111,7 +183,6 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 				return fantasy.NewTextResponse(truncateResult(result)), nil
 			},
 		),
-		Context: agentCtx,
 	}
 }
 
@@ -149,9 +220,9 @@ func launchBackgroundSpawn(ctx context.Context, mgr ipc.HostManager, notificatio
 
 // --- CreatePersistentInstance tool ---
 
-func buildCreatePersistentInstanceTool(mgr ipc.HostManager, agentCtx *ToolContext, logger *slog.Logger) Tool {
+func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger) Tool {
 	return Tool{
-		AgentTool: fantasy.NewAgentTool("CreatePersistentInstance",
+		AgentTool: fantasy.NewAgentTool(CreatePersistentToolName,
 			createPersistentInstanceDescription,
 			func(ctx context.Context, input struct {
 				Agent       string `json:"agent"       description:"Agent definition name (directory under agents/)."`
@@ -184,7 +255,6 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, agentCtx *ToolContex
 					fmt.Sprintf("Instance %q created from %q with ID: %s (mode: %s). Use SendMessage to communicate with it.", displayLabel, input.Agent, id, mode)), nil
 			},
 		),
-		Context: agentCtx,
 	}
 }
 

@@ -572,6 +572,9 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 		Notifications:  notifications,
 		Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 		HostManager:    m,
+		ContextProviders: []inference.ContextProvider{
+			inference.AgentListingProvider(m),
+		},
 	}
 }
 

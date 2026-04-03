@@ -63,6 +63,10 @@ type LoopConfig struct {
 	// for spawn/management tools. This avoids a circular dependency
 	// by using the HostManager interface.
 	HostManager ipc.HostManager
+
+	// ContextProviders produce dynamic per-turn context injected as
+	// <system-reminder> messages via PrepareStep.
+	ContextProviders []ContextProvider
 }
 
 // Loop runs the fantasy agent loop for a single session.
@@ -85,7 +89,8 @@ type Loop struct {
 
 	// Tools are stored for agent recreation on model switch.
 	// Updated when skills expand the tool set.
-	tools []Tool
+	tools            []Tool
+	contextProviders []ContextProvider
 
 	// Session-scoped tool expansion from skills. Protected by updateMu.
 	executor        ipc.ToolExecutor   // retained for creating new proxy tools
@@ -169,12 +174,13 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, management tools, Skill.
 	localTools := l.buildLocalTools(cfg)
 
-	// Merge: wrap proxy tools (no context) + local tools (may have context).
+	// Merge: wrap proxy tools + local tools.
 	allTools := wrapAll(proxyTools)
 	allTools = append(allTools, localTools...)
 
-	// Store tools for agent recreation on model switch.
+	// Store tools and context providers.
 	l.tools = allTools
+	l.contextProviders = cfg.ContextProviders
 
 	// Retain construction values for session-scoped skill tool expansion.
 	l.executor = cfg.Executor
@@ -341,6 +347,10 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 	l.updateMu.Unlock()
 
 	messages := l.assembleMessages(ctx, agentModel, lm, providerOpts)
+
+	// Compute and persist context deltas (agent listing, etc.).
+	// On subsequent turns with no changes, no messages are emitted — cache preserved.
+	messages = l.applyContextDeltas(ctx, messages)
 
 	emit := func(evt ipc.ChatEvent) error {
 		if onEvent != nil {
@@ -709,6 +719,51 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 	}
 }
 
+// activeToolNames returns the names of tools currently available to this agent.
+func (l *Loop) activeToolNames() map[string]bool {
+	l.updateMu.Lock()
+	current := l.tools
+	l.updateMu.Unlock()
+	names := make(map[string]bool, len(current))
+	for _, t := range current {
+		names[t.Info().Name] = true
+	}
+	return names
+}
+
+// applyContextDeltas computes context deltas, persists them, and appends
+// them to the message list. Delta messages are stored as meta=true so they're
+// visible to the model but hidden from the user transcript.
+//
+// Delta messages may be compacted away or evicted by the token budget on
+// future turns. This is intentional — replayAnnounced produces an empty or
+// partial set, triggering a re-announcement. The system is self-healing.
+func (l *Loop) applyContextDeltas(ctx context.Context, messages []fantasy.Message) []fantasy.Message {
+	deltas := computeDeltas(l.contextProviders, l.activeToolNames(), messages)
+	if len(deltas) == 0 {
+		return messages
+	}
+	var persisted []fantasy.Message
+	if l.mode.IsPersistent() && l.pdb != nil {
+		for _, dm := range deltas {
+			raw := marshalMessage(dm)
+			text := extractText(dm)
+			tokens := EstimateTokens(text)
+			if _, err := l.pdb.AppendMessage(ctx, l.sessionID, "user", text, raw, tokens, true); err != nil {
+				l.logger.Warn("failed to persist context delta, skipping injection", "error", err)
+				continue // don't show the model something that wasn't persisted
+			}
+			persisted = append(persisted, dm)
+		}
+	} else {
+		l.ephemeralMu.Lock()
+		l.ephemeralMsgs = append(l.ephemeralMsgs, deltas...)
+		l.ephemeralMu.Unlock()
+		persisted = deltas
+	}
+	return append(messages, persisted...)
+}
+
 // currentSystemPrompt rebuilds the system prompt from config and disk.
 // Acquires updateMu to snapshot agentConfig. Safe to call from Chat's
 // PrepareStep callback. Must NOT be called while updateMu is held —
@@ -740,7 +795,7 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		SessionDir:  l.sessionDir,
 		Mode:        l.mode,
 	}
-	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames, collectToolContext(l.tools))
+	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames)
 }
 
 // readInstanceState reads persona and memory from the instance directory.
@@ -805,9 +860,8 @@ func (l *Loop) reloadAgentDefinition(cfg *config.AgentConfig) {
 }
 
 // buildLocalTools creates tools that run in the control plane process.
-// Tools may carry ToolContext that contributes dynamic sections to the
-// system prompt. Context is collected after AllowedTools filtering via
-// collectToolContext, so only tools the agent can actually use contribute.
+// This includes persistent-only tools (todos, memory, history), spawn and
+// management tools, and the Skill tool. Results are filtered by AllowedTools.
 func (l *Loop) buildLocalTools(cfg LoopConfig) []Tool {
 	var localTools []Tool
 
@@ -824,10 +878,9 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []Tool {
 	}
 
 	if cfg.HostManager != nil {
-		agentCtx := buildAgentListingContext(cfg.HostManager)
 		localTools = append(localTools,
-			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, agentCtx, l.logger),
-			buildCreatePersistentInstanceTool(cfg.HostManager, agentCtx, l.logger))
+			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger),
+			buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
 		localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 	}
 
