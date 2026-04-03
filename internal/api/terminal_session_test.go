@@ -321,8 +321,8 @@ func TestApplyDefaultSize(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name              string
-		cols, rows        uint16
+		name               string
+		cols, rows         uint16
 		wantCols, wantRows uint16
 	}{
 		{"both zero", 0, 0, defaultTermCols, defaultTermRows},
@@ -385,7 +385,7 @@ func TestGenerateSessionID(t *testing.T) {
 
 	// Verify it's valid hex.
 	for _, c := range id {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Fatalf("non-hex character %q in session ID %q", c, id)
 		}
 	}

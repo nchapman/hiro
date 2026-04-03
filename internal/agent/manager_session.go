@@ -157,12 +157,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	inst.handle = nil
 	oldSession := inst.activeSession
 
-	// Mark the old session as stopped in DB.
-	if m.pdb != nil && oldSession != "" {
-		if err := m.pdb.UpdateSessionStatus(context.Background(), oldSession, "stopped"); err != nil {
-			m.logger.Warn("failed to mark old session as stopped", "session", oldSession, "error", err)
-		}
-	}
+	m.markSessionStopped(oldSession)
 
 	// Create new session directory.
 	newSessionID := uuid.Must(uuid.NewV7()).String()
@@ -177,7 +172,6 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", newSessionID)
 
-	// Reload agent config, resolve tools and provider.
 	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
@@ -235,6 +229,15 @@ func (m *Manager) failNewSession(shutdownDone <-chan struct{}, instanceID, sessi
 		}
 	}
 	return "", err
+}
+
+// markSessionStopped updates the old session status in the DB. Best-effort.
+func (m *Manager) markSessionStopped(sessionID string) {
+	if m.pdb != nil && sessionID != "" {
+		if err := m.pdb.UpdateSessionStatus(context.Background(), sessionID, "stopped"); err != nil {
+			m.logger.Warn("failed to mark old session as stopped", "session", sessionID, "error", err)
+		}
+	}
 }
 
 // chownDir recursively chowns a directory to the given uid/gid.

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -91,7 +92,7 @@ func TestChannelListener_Close(t *testing.T) {
 
 	// Accept after close should return error.
 	_, err := cl.Accept()
-	if err != net.ErrClosed {
+	if !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("expected net.ErrClosed, got %v", err)
 	}
 

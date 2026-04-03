@@ -11,7 +11,7 @@ func TestRecordTurnUsage_AutoIncrementsTurn(t *testing.T) {
 	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Record 3 separate turns.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		d.RecordTurnUsage(ctx, []UsageEvent{
 			{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 100, Cost: 0.01},
 		})

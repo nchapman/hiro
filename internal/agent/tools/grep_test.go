@@ -452,7 +452,7 @@ func TestGrep_ContentMode_HeadLimit(t *testing.T) {
 	dir := t.TempDir()
 	var content strings.Builder
 	for i := range 300 {
-		content.WriteString(fmt.Sprintf("findme line %d\n", i))
+		fmt.Fprintf(&content, "findme line %d\n", i)
 	}
 	os.WriteFile(filepath.Join(dir, "big.txt"), []byte(content.String()), 0o644)
 
@@ -573,12 +573,13 @@ func TestGrepContentFallback(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Should not have line numbers like "  1: "
+	lineNumRe := regexp.MustCompile(`^\d+:`)
 	for _, line := range strings.Split(resp.Content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasSuffix(line, ":") {
 			continue
 		}
-		if matched, _ := regexp.MatchString(`^\d+:`, line); matched {
+		if lineNumRe.MatchString(line) {
 			t.Errorf("expected no line numbers, but got %q", line)
 		}
 	}
@@ -674,7 +675,7 @@ func TestGrepContentFallback_Pagination(t *testing.T) {
 	dir := t.TempDir()
 	var content strings.Builder
 	for i := range 300 {
-		content.WriteString(fmt.Sprintf("findme line %d\n", i))
+		fmt.Fprintf(&content, "findme line %d\n", i)
 	}
 	os.WriteFile(filepath.Join(dir, "big.txt"), []byte(content.String()), 0o644)
 

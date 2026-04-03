@@ -289,7 +289,7 @@ func TestFormatBashResult(t *testing.T) {
 			},
 		},
 		{
-			name:  "no output",
+			name: "no output",
 			check: func(t *testing.T, content string) {
 				if !strings.Contains(content, "no output") {
 					t.Errorf("expected '(no output)', got %q", content)

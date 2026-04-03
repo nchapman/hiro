@@ -233,7 +233,7 @@ func TestReplaceContextItems(t *testing.T) {
 	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Add 4 messages.
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		d.AppendMessage(ctx, "s1", "user", "msg", "{}", 100)
 	}
 
@@ -290,7 +290,7 @@ func TestOldestMessageContextItems_TokenLimit(t *testing.T) {
 	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Add 5 messages of 100 tokens each.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		d.AppendMessage(ctx, "s1", "user", "msg", "{}", 100)
 	}
 
@@ -460,7 +460,7 @@ func TestSearch_LimitApplied(t *testing.T) {
 	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Create several messages matching "alpha".
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		d.AppendMessage(ctx, "s1", "user", "alpha content here", "{}", 10)
 	}
 

@@ -76,8 +76,8 @@ func (cp *ControlPlane) handleSecrets(verb string, args []string) (string, bool,
 		if !ok {
 			return "Usage: /secrets set NAME=VALUE", false, nil
 		}
-		if err := cp.SetSecret(name, value); err != nil {
-			return err.Error(), false, nil
+		if setErr := cp.SetSecret(name, value); setErr != nil {
+			return setErr.Error(), false, nil //nolint:nilerr // error reported as user-facing message
 		}
 		return fmt.Sprintf("Secret %q set.", name), true, nil
 

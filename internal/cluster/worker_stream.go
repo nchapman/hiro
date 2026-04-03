@@ -270,8 +270,9 @@ func runConcurrent[T any](ctx context.Context, sem chan struct{}, handler func(c
 	go func() {
 		sem <- struct{}{}
 		defer func() {
+			const stackBufSize = 4096
 			if r := recover(); r != nil {
-				buf := make([]byte, 4096)
+				buf := make([]byte, stackBufSize)
 				n := runtime.Stack(buf, false)
 				slog.Error("handler panicked in worker stream", "panic", r, "stack", string(buf[:n]))
 			}

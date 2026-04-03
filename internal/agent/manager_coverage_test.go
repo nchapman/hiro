@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -278,7 +279,7 @@ func TestGetHistory_Ephemeral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load agent dir: %v", err)
 	}
-	id, err := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "")
+	id, _ := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "")
 
 	msgs, err := mgr.GetHistory(t.Context(), id, 10)
 	if err != nil {
@@ -536,7 +537,7 @@ func TestStartInstance_NotStopped(t *testing.T) {
 	}
 
 	err = mgr.StartInstance(t.Context(), id)
-	if err != ErrInstanceNotStopped {
+	if !errors.Is(err, ErrInstanceNotStopped) {
 		t.Errorf("expected ErrInstanceNotStopped, got %v", err)
 	}
 }
