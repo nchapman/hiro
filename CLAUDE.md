@@ -9,15 +9,22 @@ Hiro is a distributed AI agent platform written in Go. A single binary serves an
 ## Build & Dev Commands
 
 ```bash
-make build        # Build web UI + Go binary (outputs ./hiro)
-make build-dev    # Build Go binary without web UI (uses -tags dev)
-make test            # Run tests in Docker (builds test container)
-make test-local      # Run tests locally (no Docker, uses mock workers)
-make test-isolation  # Run UID isolation tests in Docker (requires user pool)
-make check           # test + go vet (in Docker)
-make web          # Build web UI only (cd web/ui && npm install && npm run build)
-make docker       # Docker build
-make proto        # Regenerate protobuf (requires protoc)
+make build               # Build web UI + Go binary (outputs ./hiro)
+make build-dev           # Build Go binary without web UI (uses -tags dev)
+make web                 # Build web UI only (cd web/ui && npm install && npm run build)
+make test                # Run tests in Docker (builds test container)
+make test-local          # Run tests locally (no Docker, uses mock workers)
+make test-isolation      # Run UID isolation tests in Docker (requires user pool)
+make test-online         # E2E tests against real LLM in Docker (requires HIRO_API_KEY)
+make test-cluster        # Cluster e2e tests: leader + worker topology (requires HIRO_API_KEY)
+make test-cluster-relay  # Cluster e2e tests via relay server (requires HIRO_API_KEY)
+make check               # test + go vet (in Docker)
+make lint                # Run golangci-lint (must pass before committing)
+make docker              # Docker build (docker compose build)
+make docker-up           # Start Docker containers (docker compose up)
+make docker-down         # Stop Docker containers (docker compose down)
+make proto               # Regenerate protobuf (requires protoc)
+make clean               # Remove binary and web/ui/dist
 ```
 
 Run a single test:
