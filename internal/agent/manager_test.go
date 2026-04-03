@@ -818,6 +818,285 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	}
 }
 
+func TestManager_Restore_ParentChildHierarchy(t *testing.T) {
+	// Stopped parent and stopped child should both restore and maintain lineage.
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "parent-agent", `---
+name: parent-agent
+allowed_tools: [Bash]
+---
+Parent.`)
+	writeAgentMD(t, dir, "child-agent", `---
+name: child-agent
+allowed_tools: [Bash]
+---
+Child.`)
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	parentID, _ := mgr1.CreateInstance(ctx, "parent-agent", "", "persistent", "", "", "")
+	childID, _ := mgr1.CreateInstance(ctx, "child-agent", parentID, "persistent", "", "", "")
+	mgr1.StopInstance(childID)
+	mgr1.StopInstance(parentID)
+	mgr1.Shutdown()
+
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	if err := mgr2.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	parentInfo, ok := mgr2.GetInstance(parentID)
+	if !ok {
+		t.Fatal("parent not restored")
+	}
+	if parentInfo.Status != InstanceStatusStopped {
+		t.Errorf("parent status = %q, want stopped", parentInfo.Status)
+	}
+
+	childInfo, ok := mgr2.GetInstance(childID)
+	if !ok {
+		t.Fatal("child not restored")
+	}
+	if childInfo.ParentID != parentID {
+		t.Errorf("child parent = %q, want %q", childInfo.ParentID, parentID)
+	}
+}
+
+func TestManager_Restore_StoppedGroupInheritance(t *testing.T) {
+	// Stopped child should only get groups held by its stopped parent.
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Coordinator.`)
+	writeAgentMD(t, dir, "worker", `---
+name: worker
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Worker that also wants hiro-coordinators.`)
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	pool1 := uidpool.New(10000, 10000, 64)
+	pool1.SetGroupGID("hiro-coordinators", 10001)
+	factory1, _ := capturingWorkerFactory("hello")
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+
+	parentID, _ := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "")
+	childID, _ := mgr1.CreateInstance(ctx, "worker", parentID, "persistent", "", "", "")
+	mgr1.StopInstance(childID)
+	mgr1.StopInstance(parentID)
+	mgr1.Shutdown()
+
+	// Restore with fresh pool — both stopped, child should inherit parent's groups.
+	pool2 := uidpool.New(10000, 10000, 64)
+	pool2.SetGroupGID("hiro-coordinators", 10001)
+	factory2, configs2 := capturingWorkerFactory("hello")
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	if err := mgr2.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// Now start the child — it should get hiro-coordinators (parent has it).
+	if err := mgr2.StartInstance(ctx, childID); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+
+	if len(*configs2) != 1 {
+		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
+	}
+	childCfg := (*configs2)[0]
+	groupSet := make(map[uint32]bool)
+	for _, g := range childCfg.Groups {
+		groupSet[g] = true
+	}
+	if !groupSet[10001] {
+		t.Error("restored child should have hiro-coordinators (parent has it)")
+	}
+}
+
+func TestManager_Restore_StoppedGroupEscalationBlocked(t *testing.T) {
+	// Stopped child with groups NOT held by stopped parent should be denied.
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "unpriv", `---
+name: unpriv
+allowed_tools: [Bash]
+---
+No groups.`)
+	writeAgentMD(t, dir, "wants-groups", `---
+name: wants-groups
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Wants escalation.`)
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	pool1 := uidpool.New(10000, 10000, 64)
+	pool1.SetGroupGID("hiro-coordinators", 10001)
+	factory1, _ := capturingWorkerFactory("hello")
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+
+	parentID, _ := mgr1.CreateInstance(ctx, "unpriv", "", "persistent", "", "", "")
+	childID, _ := mgr1.CreateInstance(ctx, "wants-groups", parentID, "persistent", "", "", "")
+	mgr1.StopInstance(childID)
+	mgr1.StopInstance(parentID)
+	mgr1.Shutdown()
+
+	// Restore with fresh pool.
+	pool2 := uidpool.New(10000, 10000, 64)
+	pool2.SetGroupGID("hiro-coordinators", 10001)
+	factory2, configs2 := capturingWorkerFactory("hello")
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	if err := mgr2.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// Start the child — should NOT get hiro-coordinators (parent doesn't have it).
+	if err := mgr2.StartInstance(ctx, childID); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+
+	if len(*configs2) != 1 {
+		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
+	}
+	childCfg := (*configs2)[0]
+	for _, g := range childCfg.Groups {
+		if g == 10001 {
+			t.Error("restored child should NOT have hiro-coordinators (parent doesn't have it)")
+		}
+	}
+}
+
+func TestManager_Restore_RunningInstanceGroups(t *testing.T) {
+	// Running instance should be restored with correct groups via startInstance.
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Coordinator.`)
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	pool1 := uidpool.New(10000, 10000, 64)
+	pool1.SetGroupGID("hiro-coordinators", 10001)
+	factory1, _ := capturingWorkerFactory("hello")
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "")
+	mgr1.Shutdown()
+
+	// Restore — running instances go through startInstance.
+	pool2 := uidpool.New(10000, 10000, 64)
+	pool2.SetGroupGID("hiro-coordinators", 10001)
+	factory2, configs2 := capturingWorkerFactory("hello")
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	if err := mgr2.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if len(*configs2) != 1 {
+		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
+	}
+	cfg := (*configs2)[0]
+	groupSet := make(map[uint32]bool)
+	for _, g := range cfg.Groups {
+		groupSet[g] = true
+	}
+	if !groupSet[10001] {
+		t.Error("restored running instance should have hiro-coordinators")
+	}
+}
+
+func TestManager_Restore_EphemeralCleaned(t *testing.T) {
+	// Ephemeral instances in the DB should be cleaned up on restore.
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	// Manually insert an ephemeral instance into the DB.
+	pdb.CreateInstance(platformdb.Instance{
+		ID:        "eph-orphan",
+		AgentName: "test-agent",
+		Mode:      "ephemeral",
+	})
+
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	if err := mgr.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// Ephemeral should have been cleaned from DB.
+	_, err := pdb.GetInstance("eph-orphan")
+	if err == nil {
+		t.Error("ephemeral instance should have been cleaned from DB")
+	}
+}
+
+func TestManager_Restore_MissingAgentDefSkipped(t *testing.T) {
+	// Instance with missing agent definition should be skipped, not crash.
+	dir := t.TempDir()
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	// Insert a persistent instance for a non-existent agent.
+	pdb.CreateInstance(platformdb.Instance{
+		ID:        "orphan-inst",
+		AgentName: "deleted-agent",
+		Mode:      "persistent",
+	})
+
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	if err := mgr.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore should not fail: %v", err)
+	}
+
+	// Instance should not be registered (agent def is missing).
+	if _, ok := mgr.GetInstance("orphan-inst"); ok {
+		t.Error("instance with missing agent def should not be restored")
+	}
+}
+
+func TestManager_Restore_MissingInstanceDirCleaned(t *testing.T) {
+	// Running instance with missing dir should be cleaned from DB.
+	dir := t.TempDir()
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+	pdb := openTestPDB(t, dir)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := t.Context()
+
+	// Insert a running persistent instance but don't create the instance dir.
+	pdb.CreateInstance(platformdb.Instance{
+		ID:        "no-dir-inst",
+		AgentName: "test-agent",
+		Mode:      "persistent",
+		Status:    "running",
+	})
+
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	if err := mgr.RestoreInstances(ctx); err != nil {
+		t.Fatalf("restore should not fail: %v", err)
+	}
+
+	// Instance should have been removed from DB.
+	_, err := pdb.GetInstance("no-dir-inst")
+	if err == nil {
+		t.Error("running instance with missing dir should have been cleaned from DB")
+	}
+}
+
 func TestManager_SpawnSession_NoLoop(t *testing.T) {
 	// SpawnSession calls SendMessage internally which requires a loop.
 	// Without a provider, this fails gracefully.
