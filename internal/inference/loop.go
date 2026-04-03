@@ -85,7 +85,7 @@ type Loop struct {
 
 	// Tools are stored for agent recreation on model switch.
 	// Updated when skills expand the tool set.
-	tools []fantasy.AgentTool
+	tools []Tool
 
 	// Session-scoped tool expansion from skills. Protected by updateMu.
 	executor        ipc.ToolExecutor   // retained for creating new proxy tools
@@ -164,14 +164,17 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	// Build tool set: remote proxy tools + local tools.
 	redactor := NewRedactor(cfg.SecretEnvFn)
-	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, cfg.AllowLayers, cfg.DenyRules, redactor, l.logger)
+	proxyTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, cfg.AllowLayers, cfg.DenyRules, redactor, l.logger)
 
 	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, management tools, Skill.
 	localTools := l.buildLocalTools(cfg)
-	agentTools = append(agentTools, localTools...)
+
+	// Merge: wrap proxy tools (no context) + local tools (may have context).
+	allTools := wrapAll(proxyTools)
+	allTools = append(allTools, localTools...)
 
 	// Store tools for agent recreation on model switch.
-	l.tools = agentTools
+	l.tools = allTools
 
 	// Retain construction values for session-scoped skill tool expansion.
 	l.executor = cfg.Executor
@@ -186,7 +189,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 
 	l.agent = fantasy.NewAgent(cfg.LM,
 		fantasy.WithSystemPrompt(systemPrompt),
-		fantasy.WithTools(agentTools...),
+		fantasy.WithTools(fantasyTools(allTools)...),
 	)
 
 	return l, nil
@@ -284,14 +287,14 @@ func (l *Loop) addSkillProxyTools(skillName string, newToolNames []string) {
 		if !newNames[info.Name] {
 			continue
 		}
-		l.tools = append(l.tools, &proxyTool{
+		l.tools = append(l.tools, wrap(&proxyTool{
 			info:        info,
 			executor:    l.executor,
 			redactor:    l.redactor,
 			logger:      l.logger,
 			allowLayers: skillLayers,
 			denyRules:   l.baseDenyRules,
-		})
+		}))
 	}
 	l.skillExpanded = true
 	l.logger.Info("skill expanded tools",
@@ -451,7 +454,7 @@ func (l *Loop) buildStreamCall(prompt string, files []fantasy.FilePart, messages
 			// Inject expanded tool set if skills have added tools.
 			l.updateMu.Lock()
 			if l.skillExpanded {
-				result.Tools = l.tools
+				result.Tools = fantasyTools(l.tools)
 			}
 			l.updateMu.Unlock()
 			return ctx, result, nil
@@ -596,7 +599,7 @@ func (l *Loop) UpdateModel(lm fantasy.LanguageModel, model, provider string) {
 	l.provider = provider
 	l.agent = fantasy.NewAgent(lm,
 		fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
-		fantasy.WithTools(l.tools...),
+		fantasy.WithTools(fantasyTools(l.tools)...),
 	)
 }
 
@@ -612,10 +615,10 @@ func (l *Loop) UpdateToolRules(allowed map[string]bool, allowLayers [][]toolrule
 	proxyTools := buildProxyTools(l.workingDir, l.executor, allowed, allowLayers, denyRules, l.redactor, l.logger)
 
 	// Preserve local (structural) tools — they bypass permission filtering.
-	var newTools []fantasy.AgentTool
-	newTools = append(newTools, proxyTools...)
+	var newTools []Tool
+	newTools = append(newTools, wrapAll(proxyTools)...)
 	for _, t := range l.tools {
-		if _, isProxy := t.(*proxyTool); !isProxy {
+		if _, isProxy := t.AgentTool.(*proxyTool); !isProxy {
 			newTools = append(newTools, t)
 		}
 	}
@@ -630,7 +633,7 @@ func (l *Loop) UpdateToolRules(allowed map[string]bool, allowLayers [][]toolrule
 	if l.lm != nil {
 		l.agent = fantasy.NewAgent(l.lm,
 			fantasy.WithSystemPrompt(l.currentSystemPromptWithConfig(l.agentConfig)),
-			fantasy.WithTools(l.tools...),
+			fantasy.WithTools(fantasyTools(l.tools)...),
 		)
 	}
 }
@@ -737,7 +740,7 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		SessionDir:  l.sessionDir,
 		Mode:        l.mode,
 	}
-	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames)
+	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames, collectToolContext(l.tools))
 }
 
 // readInstanceState reads persona and memory from the instance directory.
@@ -802,8 +805,11 @@ func (l *Loop) reloadAgentDefinition(cfg *config.AgentConfig) {
 }
 
 // buildLocalTools creates tools that run in the control plane process.
-func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
-	var localTools []fantasy.AgentTool
+// Tools may carry ToolContext that contributes dynamic sections to the
+// system prompt. Context is collected after AllowedTools filtering via
+// collectToolContext, so only tools the agent can actually use contribute.
+func (l *Loop) buildLocalTools(cfg LoopConfig) []Tool {
+	var localTools []Tool
 
 	if cfg.Mode.IsPersistent() && cfg.SessionDir != "" {
 		localTools = append(localTools, buildTodoTools(cfg.SessionDir)...)
@@ -818,9 +824,10 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	}
 
 	if cfg.HostManager != nil {
+		agentCtx := buildAgentListingContext(cfg.HostManager)
 		localTools = append(localTools,
-			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger),
-			buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
+			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, agentCtx, l.logger),
+			buildCreatePersistentInstanceTool(cfg.HostManager, agentCtx, l.logger))
 		localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 	}
 
@@ -840,7 +847,7 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	// Filter by allowed set. All tools — both remote (worker-side) and
 	// local (control-plane-side) — are subject to AllowedTools filtering.
 	if cfg.AllowedTools != nil {
-		filtered := make([]fantasy.AgentTool, 0, len(localTools))
+		filtered := make([]Tool, 0, len(localTools))
 		for _, t := range localTools {
 			if cfg.AllowedTools[t.Info().Name] {
 				filtered = append(filtered, t)

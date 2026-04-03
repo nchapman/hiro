@@ -20,7 +20,7 @@ var historySearchDescription string
 //go:embed history_recall.md
 var historyRecallDescription string
 
-func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool {
+func buildHistoryTools(pdb *platformdb.DB, sessionID string) []Tool {
 	searchHandler := func(ctx context.Context, input struct {
 		Query string `json:"query" description:"Search query (full-text search)."`
 		Scope string `json:"scope" description:"Where to search: 'messages', 'summaries', or 'all'. Default: 'all'." default:"all"`
@@ -58,7 +58,7 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 		return fantasy.NewTextResponse(sb.String()), nil
 	}
 
-	return []fantasy.AgentTool{
+	return wrapAll([]fantasy.AgentTool{
 		fantasy.NewAgentTool("HistorySearch", historySearchDescription, searchHandler),
 		fantasy.NewAgentTool("HistoryRecall",
 			historyRecallDescription,
@@ -68,7 +68,7 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 				return handleHistoryRecall(ctx, pdb, input.SummaryID)
 			},
 		),
-	}
+	})
 }
 
 func handleHistoryRecall(ctx context.Context, pdb *platformdb.DB, summaryID string) (fantasy.ToolResponse, error) {

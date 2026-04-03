@@ -22,8 +22,8 @@ var forgetMemoryDescription string
 // oldest entries (top of the file) are evicted to make room.
 const maxMemoryEntries = 100
 
-func buildMemoryTools(instanceDir string) []fantasy.AgentTool {
-	return []fantasy.AgentTool{
+func buildMemoryTools(instanceDir string) []Tool {
+	return wrapAll([]fantasy.AgentTool{
 		fantasy.NewAgentTool("AddMemory",
 			addMemoryDescription,
 			func(ctx context.Context, input struct {
@@ -41,7 +41,7 @@ func buildMemoryTools(instanceDir string) []fantasy.AgentTool {
 				return handleForgetMemory(instanceDir, input.Match)
 			},
 		),
-	}
+	})
 }
 
 func handleAddMemory(instanceDir, rawContent string) (fantasy.ToolResponse, error) {

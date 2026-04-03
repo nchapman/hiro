@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"time"
@@ -247,4 +249,30 @@ func (m *Manager) collectDescendants(instanceID string) []string {
 		queue = append(queue, m.children[current]...)
 	}
 	return result
+}
+
+// ListAgentDefs scans the agents/ directory and returns a summary of each definition.
+func (m *Manager) ListAgentDefs() []ipc.AgentDef {
+	agentsRoot := filepath.Join(m.rootDir, "agents")
+	entries, err := os.ReadDir(agentsRoot)
+	if err != nil {
+		return nil
+	}
+
+	var defs []ipc.AgentDef
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		cfg, err := config.LoadAgentDir(filepath.Join(agentsRoot, e.Name()))
+		if err != nil {
+			continue
+		}
+		defs = append(defs, ipc.AgentDef{
+			Name:        cfg.Name,
+			Description: cfg.Description,
+		})
+	}
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
+	return defs
 }

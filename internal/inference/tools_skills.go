@@ -21,8 +21,8 @@ var skillDescription string
 // It expands the session's tool set with the skill's tools.
 type SkillExpander func(skill *config.SkillConfig) error
 
-func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, onExpand SkillExpander, logger *slog.Logger) fantasy.AgentTool {
-	return fantasy.NewAgentTool("Skill",
+func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, onExpand SkillExpander, logger *slog.Logger) Tool {
+	return wrap(fantasy.NewAgentTool("Skill",
 		skillDescription,
 		func(ctx context.Context, input struct {
 			Name string `json:"name" description:"The name of the skill to activate."`
@@ -82,7 +82,7 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, onExpand Skil
 
 			return fantasy.NewTextResponse(result.String()), nil
 		},
-	)
+	))
 }
 
 // appendBundledResources lists the files in a directory skill's folder

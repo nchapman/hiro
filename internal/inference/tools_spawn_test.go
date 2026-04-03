@@ -24,6 +24,7 @@ type fakeHostManager struct {
 	lastSpawnPrompt string
 	lastCreateAgent string
 	lastCreateMode  string
+	agentDefs       []ipc.AgentDef
 }
 
 func (f *fakeHostManager) SpawnEphemeral(_ context.Context, agentName, prompt, _ string, _ ipc.NodeID, _ func(ipc.ChatEvent) error) (string, error) {
@@ -62,6 +63,7 @@ func (f *fakeHostManager) ListChildInstances(string) []ipc.InstanceInfo { return
 func (f *fakeHostManager) SecretNames() []string                        { return nil }
 func (f *fakeHostManager) SecretEnv() []string                          { return nil }
 func (f *fakeHostManager) ListNodes() []ipc.NodeInfo                    { return nil }
+func (f *fakeHostManager) ListAgentDefs() []ipc.AgentDef                { return f.agentDefs }
 
 func runTool(t *testing.T, tool fantasy.AgentTool, input string) fantasy.ToolResponse {
 	t.Helper()
@@ -98,7 +100,7 @@ func drainWithTimeout(t *testing.T, nq *NotificationQueue, timeout time.Duration
 func TestSpawnInstance_Sync(t *testing.T) {
 	mgr := &fakeHostManager{spawnResult: "done"}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it"}`)
 	if resp.IsError {
@@ -118,7 +120,7 @@ func TestSpawnInstance_Background(t *testing.T) {
 		spawnDelay:  50 * time.Millisecond,
 	}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it","background":true}`)
 	if resp.IsError {
@@ -150,7 +152,7 @@ func TestSpawnInstance_Background(t *testing.T) {
 func TestSpawnInstance_BackgroundError(t *testing.T) {
 	mgr := &fakeHostManager{spawnErr: context.DeadlineExceeded}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it","background":true}`)
 	if resp.IsError {
@@ -169,7 +171,7 @@ func TestSpawnInstance_BackgroundError(t *testing.T) {
 func TestSpawnInstance_SyncError(t *testing.T) {
 	mgr := &fakeHostManager{spawnErr: context.DeadlineExceeded}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":"do it"}`)
 	if !resp.IsError {
@@ -183,7 +185,7 @@ func TestSpawnInstance_SyncError(t *testing.T) {
 func TestSpawnInstance_EmptyAgent(t *testing.T) {
 	mgr := &fakeHostManager{}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"","prompt":"do it"}`)
 	if !resp.IsError {
@@ -194,7 +196,7 @@ func TestSpawnInstance_EmptyAgent(t *testing.T) {
 func TestSpawnInstance_EmptyPrompt(t *testing.T) {
 	mgr := &fakeHostManager{}
 	nq := NewNotificationQueue(testLogger)
-	tool := buildSpawnTool(mgr, nq, "session-1", testLogger)
+	tool := buildSpawnTool(mgr, nq, "session-1", nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"test","prompt":""}`)
 	if !resp.IsError {
@@ -206,7 +208,7 @@ func TestSpawnInstance_EmptyPrompt(t *testing.T) {
 
 func TestCreatePersistentInstance_Default(t *testing.T) {
 	mgr := &fakeHostManager{createResult: "inst-123"}
-	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"researcher"}`)
 	if resp.IsError {
@@ -224,7 +226,7 @@ func TestCreatePersistentInstance_Default(t *testing.T) {
 
 func TestCreatePersistentInstance_AlwaysPersistent(t *testing.T) {
 	mgr := &fakeHostManager{createResult: "inst-456"}
-	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"manager"}`)
 	if resp.IsError {
@@ -239,10 +241,72 @@ func TestCreatePersistentInstance_AlwaysPersistent(t *testing.T) {
 
 func TestCreatePersistentInstance_EmptyAgent(t *testing.T) {
 	mgr := &fakeHostManager{}
-	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":""}`)
 	if !resp.IsError {
 		t.Error("empty agent should be rejected")
+	}
+}
+
+func TestBuildAgentListingContext_WithAgents(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "General-purpose agent."},
+			{Name: "critic", Description: "Review agent."},
+		},
+	}
+	ctx := buildAgentListingContext(mgr)
+	if ctx == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if ctx.Heading != "Agents" {
+		t.Errorf("expected heading 'Agents', got %q", ctx.Heading)
+	}
+	if !strings.Contains(ctx.Content, "**assistant**") {
+		t.Error("expected assistant in listing")
+	}
+	if !strings.Contains(ctx.Content, "**critic**") {
+		t.Error("expected critic in listing")
+	}
+}
+
+func TestBuildAgentListingContext_NoAgents(t *testing.T) {
+	mgr := &fakeHostManager{}
+	ctx := buildAgentListingContext(mgr)
+	if ctx != nil {
+		t.Error("expected nil context when no agents defined")
+	}
+}
+
+func TestSpawnTool_CarriesContext(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "expert", Description: "Deep investigator."},
+		},
+	}
+	agentCtx := buildAgentListingContext(mgr)
+	tool := buildSpawnTool(mgr, NewNotificationQueue(testLogger), "session-1", agentCtx, testLogger)
+	if tool.Context == nil {
+		t.Fatal("SpawnInstance tool should carry agent listing context")
+	}
+	if tool.Context.Heading != "Agents" {
+		t.Errorf("expected heading 'Agents', got %q", tool.Context.Heading)
+	}
+}
+
+func TestCreatePersistentInstanceTool_CarriesContext(t *testing.T) {
+	mgr := &fakeHostManager{
+		agentDefs: []ipc.AgentDef{
+			{Name: "assistant", Description: "General-purpose agent."},
+		},
+	}
+	agentCtx := buildAgentListingContext(mgr)
+	tool := buildCreatePersistentInstanceTool(mgr, agentCtx, testLogger)
+	if tool.Context == nil {
+		t.Fatal("CreatePersistentInstance tool should carry agent listing context")
+	}
+	if tool.Context != agentCtx {
+		t.Error("both spawn tools should share the same context pointer")
 	}
 }

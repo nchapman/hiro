@@ -2432,3 +2432,52 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 		}
 	}
 }
+
+func TestListAgentDefs(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	defer mgr.Shutdown()
+
+	writeAgentMD(t, dir, "alpha", "---\nname: alpha\ndescription: First agent.\n---\nPrompt.")
+	writeAgentMD(t, dir, "beta", "---\nname: beta\ndescription: Second agent.\n---\nPrompt.")
+
+	defs := mgr.ListAgentDefs()
+	if len(defs) != 2 {
+		t.Fatalf("expected 2 agent defs, got %d", len(defs))
+	}
+	// Should be sorted by name.
+	if defs[0].Name != "alpha" || defs[1].Name != "beta" {
+		t.Errorf("expected sorted [alpha, beta], got [%s, %s]", defs[0].Name, defs[1].Name)
+	}
+	if defs[0].Description != "First agent." {
+		t.Errorf("expected description 'First agent.', got %q", defs[0].Description)
+	}
+}
+
+func TestListAgentDefs_Empty(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+	defer mgr.Shutdown()
+
+	defs := mgr.ListAgentDefs()
+	if len(defs) != 0 {
+		t.Fatalf("expected 0 agent defs, got %d", len(defs))
+	}
+}
+
+func TestListAgentDefs_SkipsInvalid(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	defer mgr.Shutdown()
+
+	writeAgentMD(t, dir, "good", "---\nname: good\ndescription: Valid.\n---\nPrompt.")
+	// Write a malformed agent.md (missing name).
+	agentDir := filepath.Join(dir, "agents", "bad")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\ndescription: No name.\n---\nPrompt."), 0o644)
+
+	defs := mgr.ListAgentDefs()
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 agent def (skipping invalid), got %d", len(defs))
+	}
+	if defs[0].Name != "good" {
+		t.Errorf("expected 'good', got %q", defs[0].Name)
+	}
+}

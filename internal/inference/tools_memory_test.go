@@ -12,7 +12,7 @@ import (
 	"github.com/nchapman/hiro/internal/config"
 )
 
-func runMemoryTool(t *testing.T, tools []fantasy.AgentTool, name, input string) fantasy.ToolResponse {
+func runMemoryTool(t *testing.T, tools []Tool, name, input string) fantasy.ToolResponse {
 	t.Helper()
 	for _, tool := range tools {
 		if tool.Info().Name == name {

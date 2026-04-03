@@ -9,6 +9,12 @@ type NodeID = string
 // HomeNodeID is the well-known ID for the leader's local node.
 const HomeNodeID = "home"
 
+// AgentDef is a summary of an agent definition (name + description).
+type AgentDef struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // NodeInfo describes a node in the cluster for external consumers.
 type NodeInfo struct {
 	ID          string `json:"id"`
@@ -63,4 +69,7 @@ type HostManager interface {
 	// ListNodes returns all nodes in the cluster. Returns nil if clustering
 	// is not enabled.
 	ListNodes() []NodeInfo
+
+	// ListAgentDefs returns a summary of all available agent definitions.
+	ListAgentDefs() []AgentDef
 }

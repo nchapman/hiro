@@ -1,15 +1,18 @@
 package inference
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"charm.land/fantasy"
 
 	"github.com/nchapman/hiro/internal/config"
 )
 
 func TestBuildSystemPrompt_MinimalConfig(t *testing.T) {
 	cfg := config.AgentConfig{Prompt: "You are a helpful assistant."}
-	got := buildSystemPrompt(cfg, EnvInfo{}, "", "", "", nil)
+	got := buildSystemPrompt(cfg, EnvInfo{}, "", "", "", nil, nil)
 
 	if !strings.Contains(got, "You are a helpful assistant.") {
 		t.Error("expected main prompt in output")
@@ -37,7 +40,7 @@ func TestBuildSystemPrompt_AllSections(t *testing.T) {
 		SessionDir:  "/hiro/instances/abc123/sessions/sess1",
 		Mode:        config.ModePersistent,
 	}
-	got := buildSystemPrompt(cfg, env, "Friendly and precise.", "Remember X.", "- [ ] Do Y", []string{"API_KEY", "DB_PASS"})
+	got := buildSystemPrompt(cfg, env, "Friendly and precise.", "Remember X.", "- [ ] Do Y", []string{"API_KEY", "DB_PASS"}, nil)
 
 	for _, want := range []string{
 		"## Environment", "workspace/", "memory.md", "persona.md",
@@ -66,7 +69,7 @@ func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 		SessionDir:  "/hiro/instances/x/sessions/y",
 		Mode:        config.ModePersistent,
 	}
-	got := buildSystemPrompt(cfg, env, "PERSONA", "MEMORIES", "TODOS", []string{"SECRET"})
+	got := buildSystemPrompt(cfg, env, "PERSONA", "MEMORIES", "TODOS", []string{"SECRET"}, nil)
 
 	order := []string{
 		"## Environment",
@@ -93,9 +96,114 @@ func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 
 func TestBuildSystemPrompt_NoSecretsSection_WhenEmpty(t *testing.T) {
 	cfg := config.AgentConfig{Prompt: "test"}
-	got := buildSystemPrompt(cfg, EnvInfo{}, "", "", "", []string{})
+	got := buildSystemPrompt(cfg, EnvInfo{}, "", "", "", []string{}, nil)
 	if strings.Contains(got, "## Secrets") {
 		t.Error("secrets section should not appear with empty slice")
+	}
+}
+
+func TestBuildSystemPrompt_ToolContext(t *testing.T) {
+	cfg := config.AgentConfig{Prompt: "test"}
+	ctx := []ToolContext{
+		{Heading: "Agents", Content: "- **assistant**: General-purpose agent."},
+	}
+	got := buildSystemPrompt(cfg, EnvInfo{}, "", "", "", nil, ctx)
+
+	if !strings.Contains(got, "## Agents") {
+		t.Error("expected Agents section")
+	}
+	if !strings.Contains(got, "**assistant**") {
+		t.Error("expected assistant in agent listing")
+	}
+	// Tool context should appear before Security.
+	agentsIdx := strings.Index(got, "## Agents")
+	securityIdx := strings.Index(got, "## Security")
+	if agentsIdx > securityIdx {
+		t.Error("Agents section should appear before Security")
+	}
+}
+
+func TestCollectToolContext_Dedup(t *testing.T) {
+	agentCtx := &ToolContext{Heading: "Agents", Content: "agent listing"}
+	tools := []Tool{
+		{AgentTool: nil, Context: agentCtx},
+		{AgentTool: nil, Context: agentCtx}, // same heading+content — deduplicated
+		{AgentTool: nil, Context: &ToolContext{Heading: "Agents", Content: "different content"}},
+	}
+	got := collectToolContext(tools)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 context entries (same heading, different content), got %d", len(got))
+	}
+	if got[0].Content != "agent listing" {
+		t.Error("first entry should be kept")
+	}
+	if got[1].Content != "different content" {
+		t.Error("second entry with different content should be kept")
+	}
+}
+
+func TestCollectToolContext_NilContextSkipped(t *testing.T) {
+	tools := []Tool{
+		{AgentTool: nil, Context: nil},
+		{AgentTool: nil, Context: &ToolContext{Heading: "Nodes", Content: "node list"}},
+		{AgentTool: nil, Context: nil},
+	}
+	got := collectToolContext(tools)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 context entry, got %d", len(got))
+	}
+	if got[0].Heading != "Nodes" {
+		t.Error("expected Nodes context")
+	}
+}
+
+func TestCollectToolContext_Empty(t *testing.T) {
+	got := collectToolContext(nil)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 context entries, got %d", len(got))
+	}
+}
+
+func TestFantasyTools(t *testing.T) {
+	a := fantasy.NewAgentTool("A", "desc", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	b := fantasy.NewAgentTool("B", "desc", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	tools := []Tool{wrap(a), wrap(b)}
+	ft := fantasyTools(tools)
+	if len(ft) != 2 {
+		t.Fatalf("expected 2 fantasy tools, got %d", len(ft))
+	}
+	if ft[0].Info().Name != "A" || ft[1].Info().Name != "B" {
+		t.Error("fantasy tools should preserve order and identity")
+	}
+}
+
+func TestWrapAndWrapAll(t *testing.T) {
+	a := fantasy.NewAgentTool("A", "desc", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	tool := wrap(a)
+	if tool.Info().Name != "A" {
+		t.Error("wrap should preserve tool identity")
+	}
+	if tool.Context != nil {
+		t.Error("wrap should produce nil context")
+	}
+
+	b := fantasy.NewAgentTool("B", "desc", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	tools := wrapAll([]fantasy.AgentTool{a, b})
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(tools))
+	}
+	for _, t2 := range tools {
+		if t2.Context != nil {
+			t.Error("wrapAll should produce nil context")
+		}
 	}
 }
 

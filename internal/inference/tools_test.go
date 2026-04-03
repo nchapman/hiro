@@ -421,7 +421,7 @@ func newTestLoop(t *testing.T, allowedTools map[string]bool, allowLayers [][]too
 		redactor:        redactor,
 		baseDenyRules:   denyRules,
 		baseAllowLayers: allowLayers,
-		tools:           proxyTools,
+		tools:           wrapAll(proxyTools),
 		logger:          testLogger,
 	}
 	// Create a minimal agent so UpdateToolRules can recreate it.
@@ -522,7 +522,7 @@ func TestExpandToolsForSkill_ParameterizedRulesEnforced(t *testing.T) {
 	// Find the Bash proxy tool and test that rules are enforced.
 	for _, tool := range l.tools {
 		if tool.Info().Name == "Bash" {
-			pt := tool.(*proxyTool)
+			pt := tool.AgentTool.(*proxyTool)
 			// kubectl should be allowed.
 			resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 				ID: "call-1", Name: "Bash",
@@ -713,7 +713,7 @@ func TestUpdateToolRules_PreservesLocalTools(t *testing.T) {
 	localTool := fantasy.NewAgentTool("FakeLocal", "test", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		return fantasy.NewTextResponse("ok"), nil
 	})
-	l.tools = append(l.tools, localTool)
+	l.tools = append(l.tools, wrap(localTool))
 
 	// Update tool rules — should preserve local tools.
 	l.UpdateToolRules(
@@ -785,7 +785,7 @@ func TestUpdateToolRules_WithDenyRules(t *testing.T) {
 	// Find the Bash proxy and verify deny rules are applied.
 	for _, tool := range l.tools {
 		if tool.Info().Name == "Bash" {
-			pt := tool.(*proxyTool)
+			pt := tool.AgentTool.(*proxyTool)
 			resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 				ID: "call-1", Name: "Bash",
 				Input: `{"command":"rm -rf /"}`,

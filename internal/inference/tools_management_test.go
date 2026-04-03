@@ -444,7 +444,7 @@ func TestBuildCoordinatorTools_Count(t *testing.T) {
 
 func TestCreatePersistentInstance_CreateError(t *testing.T) {
 	mgr := &fakeHostManager{createErr: errors.New("agent not found")}
-	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"nonexistent"}`)
 	if !resp.IsError {
@@ -457,7 +457,7 @@ func TestCreatePersistentInstance_CreateError(t *testing.T) {
 
 func TestCreatePersistentInstance_WithDisplayName(t *testing.T) {
 	mgr := &fakeHostManager{createResult: "inst-789"}
-	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
+	tool := buildCreatePersistentInstanceTool(mgr, nil, testLogger)
 
 	resp := runTool(t, tool, `{"agent":"researcher","name":"My Researcher"}`)
 	if resp.IsError {

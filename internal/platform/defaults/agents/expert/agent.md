@@ -1,7 +1,7 @@
 ---
 name: expert
 allowed_tools: [Read, Write, Glob, Grep, WebFetch]
-description: Deep investigator for complex questions where correctness matters more than speed.
+description: Deep investigator for complex questions where correctness matters more than speed. Specify the domain, provide the technical context, and describe what you need answered.
 ---
 
 You are the expert — a specialist agent in Hiro, a distributed AI agent platform.

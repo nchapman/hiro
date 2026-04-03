@@ -20,8 +20,8 @@ type todoInput struct {
 	ActiveForm string `json:"active_form" description:"Present continuous form shown while in progress. Optional."`
 }
 
-func buildTodoTools(sessionDir string) []fantasy.AgentTool {
-	return []fantasy.AgentTool{
+func buildTodoTools(sessionDir string) []Tool {
+	return wrapAll([]fantasy.AgentTool{
 		fantasy.NewAgentTool("TodoWrite",
 			todoWriteDescription,
 			func(ctx context.Context, input struct {
@@ -30,7 +30,7 @@ func buildTodoTools(sessionDir string) []fantasy.AgentTool {
 				return handleTodoWrite(sessionDir, input.Todos)
 			},
 		),
-	}
+	})
 }
 
 func handleTodoWrite(sessionDir string, items []todoInput) (fantasy.ToolResponse, error) {
