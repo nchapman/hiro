@@ -92,10 +92,6 @@ linters:
           - gocritic
           - revive
           - staticcheck
-      # noctx: many legitimate uses of non-context variants
-      - linters:
-          - noctx
-        text: "net\\.Listen|exec\\.Command|crypto/tls|net\\.Dial|net\\.LookupHost|httptest\\.NewRequest"
       # revive: suppress noisy export doc and unused-param rules
       - linters:
           - revive
