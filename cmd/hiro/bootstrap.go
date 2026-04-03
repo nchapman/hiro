@@ -96,7 +96,7 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	grpcSrv := newClusterGRPCServer(tlsCert)
 	leaderStream.Register(grpcSrv)
 
-	lis, err := net.Listen("tcp", clusterAddr)
+	lis, err := net.Listen("tcp", clusterAddr) //nolint:noctx // startup-time listener
 	if err != nil {
 		return clusterState{}, fmt.Errorf("listening on cluster addr %s: %w", clusterAddr, err)
 	}

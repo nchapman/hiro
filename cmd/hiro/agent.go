@@ -169,7 +169,7 @@ func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJo
 		socketPath = fmt.Sprintf("/tmp/hiro-agent-%s.sock", cfg.SessionID)
 	}
 	os.Remove(socketPath)
-	lis, err := net.Listen("unix", socketPath)
+	lis, err := net.Listen("unix", socketPath) //nolint:noctx // startup-time listener, no cancellation needed
 	if err != nil {
 		return nil, nil, fmt.Errorf("listening on %s: %w", socketPath, err)
 	}

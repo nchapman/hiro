@@ -1,5 +1,7 @@
 package controlplane
 
+import "maps"
+
 // AgentTools returns the operator-defined tool override for the named
 // agent and whether an override exists. If ok is false, the agent has
 // no control plane restriction (use its declared tools from agent.md).
@@ -79,8 +81,6 @@ func (cp *ControlPlane) AllPolicies() map[string]AgentPolicy {
 	defer cp.mu.RUnlock()
 
 	result := make(map[string]AgentPolicy, len(cp.config.Agents))
-	for k, v := range cp.config.Agents {
-		result[k] = v
-	}
+	maps.Copy(result, cp.config.Agents)
 	return result
 }

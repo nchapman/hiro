@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -224,13 +225,7 @@ func (m *Manager) ActiveSessionID(instanceID string) string {
 
 // IsDescendant reports whether targetID is a descendant of (or equal to) ancestorID.
 func (m *Manager) IsDescendant(targetID, ancestorID string) bool {
-	descendants := m.collectDescendants(ancestorID)
-	for _, id := range descendants {
-		if id == targetID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.collectDescendants(ancestorID), targetID)
 }
 
 // collectDescendants returns instanceID plus all its descendants via BFS,

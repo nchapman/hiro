@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
@@ -59,16 +60,16 @@ func FormatTodos(todos []Todo) string {
 	if len(todos) == 0 {
 		return ""
 	}
-	var s string
+	var b strings.Builder
 	for _, t := range todos {
 		switch t.Status {
 		case TodoStatusCompleted:
-			s += fmt.Sprintf("- [x] %s\n", t.Content)
+			fmt.Fprintf(&b, "- [x] %s\n", t.Content)
 		case TodoStatusInProgress:
-			s += fmt.Sprintf("- [ ] **%s** *(in progress)*\n", t.Content)
+			fmt.Fprintf(&b, "- [ ] **%s** *(in progress)*\n", t.Content)
 		default:
-			s += fmt.Sprintf("- [ ] %s\n", t.Content)
+			fmt.Fprintf(&b, "- [ ] %s\n", t.Content)
 		}
 	}
-	return s
+	return b.String()
 }

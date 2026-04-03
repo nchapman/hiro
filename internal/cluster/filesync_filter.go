@@ -42,8 +42,7 @@ var ignoredExtensions = map[string]bool{
 
 // shouldIgnore returns true if a relative path should be excluded from sync.
 func shouldIgnore(relPath string) bool {
-	parts := strings.Split(relPath, string(filepath.Separator))
-	for _, part := range parts {
+	for part := range strings.SplitSeq(relPath, string(filepath.Separator)) {
 		if ignoredNames[part] {
 			return true
 		}

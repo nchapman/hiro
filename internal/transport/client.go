@@ -134,11 +134,9 @@ func (c *Client) messageLoop(ctx context.Context) error {
 
 		switch env.Type {
 		case TypeTaskRequest:
-			c.taskWg.Add(1)
-			go func() {
-				defer c.taskWg.Done()
+			c.taskWg.Go(func() {
 				c.handleTask(ctx, env)
-			}()
+			})
 
 		case TypeHeartbeat:
 			_ = c.write(ctx, Envelope{

@@ -58,7 +58,7 @@ func (m *WorkerTerminalManager) handleCreate(_ context.Context, msg *pb.CreateTe
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell)
+	cmd := exec.Command(shell) //nolint:noctx // terminal sessions manage their own lifecycle via SIGHUP/Kill
 	cmd.Dir = m.rootDir
 	cmd.Env = workerTerminalEnv()
 

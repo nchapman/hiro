@@ -51,8 +51,8 @@ type BackgroundJob struct {
 	stderr      *cappedBuffer
 	done        chan struct{}
 	exitErr     error
-	completedAt int64       // unix timestamp, 0 if still running
-	notified    atomic.Bool // true once completion notification has been sent/suppressed
+	completedAt atomic.Int64 // unix timestamp, 0 if still running
+	notified    atomic.Bool  // true once completion notification has been sent/suppressed
 }
 
 // ExitErr returns the exit error from the completed job, or nil if still running or succeeded.
@@ -150,12 +150,12 @@ func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob
 
 		if err := cmd.Start(); err != nil {
 			job.exitErr = err
-			atomic.StoreInt64(&job.completedAt, time.Now().Unix())
+			job.completedAt.Store(time.Now().Unix())
 			return
 		}
 
 		job.exitErr = cmd.Wait()
-		atomic.StoreInt64(&job.completedAt, time.Now().Unix())
+		job.completedAt.Store(time.Now().Unix())
 	}()
 
 	return job, nil
@@ -251,7 +251,7 @@ func (m *BackgroundJobManager) Remove(id string) {
 func (m *BackgroundJobManager) cleanupLocked() {
 	cutoff := time.Now().Add(-completedJobRetention).Unix()
 	for id, j := range m.jobs {
-		t := atomic.LoadInt64(&j.completedAt)
+		t := j.completedAt.Load()
 		if t > 0 && t < cutoff {
 			delete(m.jobs, id)
 		}

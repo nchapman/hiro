@@ -4,6 +4,7 @@ package watcher
 
 import (
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,9 +257,7 @@ func (w *Watcher) handleRawEvent(ev fsnotify.Event, pending map[string]Op) {
 func (w *Watcher) dispatch(events []Event) {
 	w.mu.RLock()
 	subs := make(map[uint64]subscription, len(w.subs))
-	for id, sub := range w.subs {
-		subs[id] = sub
-	}
+	maps.Copy(subs, w.subs)
 	w.mu.RUnlock()
 
 	for _, sub := range subs {

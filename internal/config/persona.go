@@ -97,7 +97,7 @@ func WritePersonaFile(instanceDir, name, description, body string) error {
 			return fmt.Errorf("marshaling persona frontmatter: %w", err)
 		}
 		sb.WriteString("---\n")
-		sb.WriteString(string(fmBytes))
+		sb.Write(fmBytes)
 		sb.WriteString("---\n")
 		if body != "" {
 			sb.WriteString("\n")

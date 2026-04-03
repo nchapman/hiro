@@ -573,7 +573,7 @@ func (c *Compactor) precedingSummaryContent(ctx context.Context, startOrdinal in
 	for i, ci := range allItems {
 		if ci.Ordinal >= startOrdinal {
 			for j := i - 1; j >= 0; j-- {
-				if allItems[j].ItemType == "summary" && allItems[j].SummaryID != nil {
+				if allItems[j].ItemType == platformdb.ItemTypeSummary && allItems[j].SummaryID != nil {
 					prevSummaryID = allItems[j].SummaryID
 					break
 				}

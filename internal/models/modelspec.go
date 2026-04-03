@@ -30,13 +30,13 @@ func ParseModelSpec(s string) ModelSpec {
 	if s == "" {
 		return ModelSpec{}
 	}
-	i := strings.IndexByte(s, '/')
-	if i < 0 {
+	provider, model, ok := strings.Cut(s, "/")
+	if !ok {
 		return ModelSpec{Model: s}
 	}
 	return ModelSpec{
-		Provider: s[:i],
-		Model:    s[i+1:],
+		Provider: provider,
+		Model:    model,
 	}
 }
 

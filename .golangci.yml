@@ -35,6 +35,11 @@ linters:
     - nakedret
     - loggercheck
     - gosec
+    - modernize
+    - mirror
+    - musttag
+    - maintidx
+    - noctx
 
   settings:
     gocritic:
@@ -113,6 +118,7 @@ linters:
           - nestif
           - forcetypeassert
           - gosec
+          - modernize
       # Generated protobuf code
       - path: \.pb\.go$
         linters:

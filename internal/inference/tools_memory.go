@@ -131,7 +131,7 @@ func entryContent(entry string) string {
 // parseMemoryEntries splits memory.md content into non-empty lines.
 func parseMemoryEntries(content string) []string {
 	var entries []string
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			entries = append(entries, line)

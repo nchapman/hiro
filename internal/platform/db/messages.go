@@ -10,7 +10,12 @@ import (
 	"time"
 )
 
-const maxSearchQueryLen = 512 // max byte length for FTS search queries
+const (
+	maxSearchQueryLen = 512 // max byte length for FTS search queries
+
+	// ItemTypeSummary is the context item type for compacted summaries.
+	ItemTypeSummary = "summary"
+)
 
 // Message represents a stored conversation message.
 type Message struct {
@@ -456,7 +461,7 @@ func (d *DB) ContiguousSummariesAtDepth(ctx context.Context, sessionID string, d
 	var candidates []candidate
 
 	for idx, ci := range allCI {
-		if ci.ItemType != "summary" || ci.SummaryID == nil {
+		if ci.ItemType != ItemTypeSummary || ci.SummaryID == nil {
 			continue
 		}
 		sum, err := d.GetSummary(ctx, *ci.SummaryID)
@@ -574,7 +579,7 @@ func (d *DB) SearchSummaries(ctx context.Context, sessionID, query string, limit
 		return nil, fmt.Errorf("searching summaries: %w", err)
 	}
 	defer rows.Close()
-	return scanSearchResults(rows, "summary")
+	return scanSearchResults(rows, ItemTypeSummary)
 }
 
 // Search performs a full-text search over messages and summaries in a session.

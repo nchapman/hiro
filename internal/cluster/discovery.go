@@ -88,13 +88,20 @@ type announceRequest struct {
 // Fields are newline-delimited; sanitizeField strips any newlines to prevent
 // field injection attacks in the canonical form.
 func (req *announceRequest) signedMessage() []byte {
-	msg := sanitizeField(req.SwarmHash) + "\n" +
-		strconv.FormatInt(req.Timestamp, 10) + "\n" +
-		sanitizeField(req.Role) + "\n" +
-		strconv.Itoa(req.GRPCPort) + "\n" +
-		sanitizeField(req.WGPubKey) + "\n" +
-		sanitizeField(req.WGEndpoint) + "\n" +
-		sanitizeField(req.TLSFingerprint)
+	var b strings.Builder
+	b.WriteString(sanitizeField(req.SwarmHash))
+	b.WriteByte('\n')
+	b.WriteString(strconv.FormatInt(req.Timestamp, 10))
+	b.WriteByte('\n')
+	b.WriteString(sanitizeField(req.Role))
+	b.WriteByte('\n')
+	b.WriteString(strconv.Itoa(req.GRPCPort))
+	b.WriteByte('\n')
+	b.WriteString(sanitizeField(req.WGPubKey))
+	b.WriteByte('\n')
+	b.WriteString(sanitizeField(req.WGEndpoint))
+	b.WriteByte('\n')
+	b.WriteString(sanitizeField(req.TLSFingerprint))
 	if len(req.Meta) > 0 {
 		keys := make([]string, 0, len(req.Meta))
 		for k := range req.Meta {
@@ -102,10 +109,13 @@ func (req *announceRequest) signedMessage() []byte {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			msg += "\n" + sanitizeField(k) + "=" + sanitizeField(req.Meta[k])
+			b.WriteByte('\n')
+			b.WriteString(sanitizeField(k))
+			b.WriteByte('=')
+			b.WriteString(sanitizeField(req.Meta[k]))
 		}
 	}
-	return []byte(msg)
+	return []byte(b.String())
 }
 
 // sanitizeField strips newlines from a field to prevent injection in the

@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"maps"
 	"os"
 	"time"
 )
@@ -155,9 +156,7 @@ func (cp *ControlPlane) ApprovedNodes() map[string]ApprovedNode {
 		return nil
 	}
 	nodes := make(map[string]ApprovedNode, len(cp.config.Cluster.ApprovedNodes))
-	for k, v := range cp.config.Cluster.ApprovedNodes {
-		nodes[k] = v
-	}
+	maps.Copy(nodes, cp.config.Cluster.ApprovedNodes)
 	return nodes
 }
 

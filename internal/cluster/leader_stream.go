@@ -97,7 +97,7 @@ func (s *LeaderStream) SetRelayAddr(addr string) {
 		return
 	}
 	// Resolve hostname to IPs for reliable comparison with peer addrs.
-	ips, err := net.LookupHost(host)
+	ips, err := net.LookupHost(host) //nolint:noctx // one-time resolution at config time, no request context available
 	if err != nil || len(ips) == 0 {
 		s.mu.Lock()
 		s.relayAddr = addr

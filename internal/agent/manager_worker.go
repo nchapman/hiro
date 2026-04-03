@@ -186,7 +186,7 @@ func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
 // watchJobCompletions monitors a worker for background task completions and
 // pushes notifications into the instance's notification queue. If the worker
 // does not support WatchJobs (e.g. test fakes), this is a no-op.
-func (m *Manager) watchJobCompletions(ctx context.Context, worker interface{}, notifications *inference.NotificationQueue) {
+func (m *Manager) watchJobCompletions(ctx context.Context, worker any, notifications *inference.NotificationQueue) {
 	wc, ok := worker.(*grpcipc.WorkerClient)
 	if !ok {
 		return

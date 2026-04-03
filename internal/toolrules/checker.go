@@ -107,7 +107,7 @@ func wildcardMatchFunc(pattern, value string) MatchResult {
 // Used for SpawnInstance(worker,researcher) style rules where each
 // item can also be a wildcard pattern (e.g. "research*,coder").
 func matchCommaList(pattern, value string) MatchResult {
-	for _, item := range strings.Split(pattern, ",") {
+	for item := range strings.SplitSeq(pattern, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue // skip empty items from trailing/leading/double commas

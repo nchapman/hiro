@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -210,9 +211,7 @@ func (nb *NodeBridge) handleKill(ctx context.Context, msg *pb.KillWorker) {
 func (nb *NodeBridge) ShutdownAll(ctx context.Context) {
 	nb.mu.Lock()
 	workers := make(map[string]*localWorker, len(nb.workers))
-	for k, v := range nb.workers {
-		workers[k] = v
-	}
+	maps.Copy(workers, nb.workers)
 	nb.mu.Unlock()
 
 	for sessionID, w := range workers {

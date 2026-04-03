@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -666,10 +667,8 @@ func searchTextFile(path string, re *regexp.Regexp, modTime int64) []grepMatch {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil
 	}
-	for _, b := range header[:hn] {
-		if b == 0 {
-			return nil // binary file
-		}
+	if slices.Contains(header[:hn], 0) {
+		return nil // binary file — null byte detected
 	}
 
 	// Seek back to start to search the full file

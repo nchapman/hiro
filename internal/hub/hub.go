@@ -4,6 +4,7 @@ package hub
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -28,12 +29,7 @@ func (w *Worker) clone() Worker {
 
 // HasSkill reports whether the worker advertises the given skill.
 func (w Worker) HasSkill(skill string) bool {
-	for _, s := range w.Skills {
-		if s == skill {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(w.Skills, skill)
 }
 
 // Task represents an in-flight delegated task.

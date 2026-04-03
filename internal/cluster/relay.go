@@ -128,7 +128,7 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 // dialAndRegister establishes a TCP connection to the relay and completes
 // the leader handshake. Returns the connection on success.
 func (rc *RelayClient) dialAndRegister() (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", rc.relayAddr, relayDialTimeout)
+	conn, err := net.DialTimeout("tcp", rc.relayAddr, relayDialTimeout) //nolint:noctx // relay uses its own reconnect lifecycle, not request context
 	if err != nil {
 		return nil, fmt.Errorf("dialing relay: %w", err)
 	}
@@ -317,7 +317,7 @@ func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
 			return nil
 		},
 	}
-	conn, err := tls.DialWithDialer(
+	conn, err := tls.DialWithDialer( //nolint:noctx // one-shot reachability test, no request context
 		&net.Dialer{Timeout: relaySelfTestTimeout},
 		"tcp", addr, tlsCfg,
 	)

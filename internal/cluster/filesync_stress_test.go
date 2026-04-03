@@ -148,7 +148,7 @@ func TestStress_RapidBurstWrites(t *testing.T) {
 	for i := range n {
 		path := filepath.Join(p.leaderDir, "workspace", "burst", fmt.Sprintf("file-%03d.txt", i))
 		os.MkdirAll(filepath.Dir(path), 0o755)
-		os.WriteFile(path, []byte(fmt.Sprintf("content-%d", i)), 0o644)
+		os.WriteFile(path, fmt.Appendf(nil, "content-%d", i), 0o644)
 	}
 
 	// Wait for all files to arrive on the worker.
@@ -186,7 +186,7 @@ func TestStress_BidirectionalSync(t *testing.T) {
 		for i := range n {
 			path := filepath.Join(p.leaderDir, "workspace", "from-leader", fmt.Sprintf("file-%03d.txt", i))
 			os.MkdirAll(filepath.Dir(path), 0o755)
-			os.WriteFile(path, []byte(fmt.Sprintf("leader-%d", i)), 0o644)
+			os.WriteFile(path, fmt.Appendf(nil, "leader-%d", i), 0o644)
 		}
 	}()
 
@@ -195,7 +195,7 @@ func TestStress_BidirectionalSync(t *testing.T) {
 		for i := range n {
 			path := filepath.Join(p.workerDir, "workspace", "from-worker", fmt.Sprintf("file-%03d.txt", i))
 			os.MkdirAll(filepath.Dir(path), 0o755)
-			os.WriteFile(path, []byte(fmt.Sprintf("worker-%d", i)), 0o644)
+			os.WriteFile(path, fmt.Appendf(nil, "worker-%d", i), 0o644)
 		}
 	}()
 
@@ -515,7 +515,7 @@ func TestStress_EchoSuppression(t *testing.T) {
 	for i := range n {
 		path := filepath.Join(p.leaderDir, "workspace", "echo-test", fmt.Sprintf("file-%03d.txt", i))
 		os.MkdirAll(filepath.Dir(path), 0o755)
-		os.WriteFile(path, []byte(fmt.Sprintf("content-%d", i)), 0o644)
+		os.WriteFile(path, fmt.Appendf(nil, "content-%d", i), 0o644)
 	}
 
 	// Wait for files to arrive on worker.

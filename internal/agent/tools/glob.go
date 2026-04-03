@@ -247,7 +247,7 @@ func isHiddenPath(path, root string) bool {
 	if err != nil {
 		return false
 	}
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if strings.HasPrefix(part, ".") {
 			return true
 		}

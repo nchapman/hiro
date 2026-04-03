@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,9 +92,7 @@ func (s *FileSyncService) handleFSEvent(watcher *fsnotify.Watcher, event fsnotif
 func (s *FileSyncService) flushPending(mu *sync.Mutex, pending map[string]bool) {
 	mu.Lock()
 	batch := make(map[string]bool, len(pending))
-	for k, v := range pending {
-		batch[k] = v
-	}
+	maps.Copy(batch, pending)
 	for k := range pending {
 		delete(pending, k)
 	}

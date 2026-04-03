@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -230,10 +231,5 @@ func isBinaryData(data []byte) bool {
 	if len(check) > binaryCheckSize {
 		check = check[:binaryCheckSize]
 	}
-	for _, b := range check {
-		if b == 0 {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(check, 0)
 }
