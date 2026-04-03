@@ -1820,6 +1820,199 @@ Wants escalation.`)
 	}
 }
 
+func TestManager_Groups_ChildDoesNotAutoInheritParentGroups(t *testing.T) {
+	// A privileged parent spawning a child that declares NO groups
+	// should NOT pass its groups to the child. Groups are opt-in.
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetGroupGID("hiro-coordinators", 10001)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+
+	writeAgentMD(t, dir, "coord", `---
+name: coord
+allowed_tools: [Bash, CreatePersistentInstance]
+groups: [hiro-coordinators]
+---
+Coordinator.`)
+
+	writeAgentMD(t, dir, "plain-worker", `---
+name: plain-worker
+allowed_tools: [Bash]
+---
+Worker with no group declarations.`)
+
+	parentID, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	_, err = mgr.CreateInstance(t.Context(), "plain-worker", parentID, "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	childCfg := (*configs)[1]
+
+	// Child should only have primary group — parent's hiro-coordinators NOT inherited.
+	if len(childCfg.Groups) != 1 {
+		t.Fatalf("expected 1 group (primary only), got %v", childCfg.Groups)
+	}
+	if childCfg.Groups[0] != 10000 {
+		t.Errorf("expected primary GID 10000, got %d", childCfg.Groups[0])
+	}
+}
+
+func TestManager_Groups_RootInstanceGetsAllDeclaredGroups(t *testing.T) {
+	// Root instances (no parent) get whatever they declare — no intersection.
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("custom-group", 20000)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+
+	writeAgentMD(t, dir, "root-agent", `---
+name: root-agent
+allowed_tools: [Bash]
+groups: [hiro-coordinators, custom-group]
+---
+Root agent with multiple groups.`)
+
+	_, err := mgr.CreateInstance(t.Context(), "root-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cfg := (*configs)[0]
+
+	groupSet := make(map[uint32]bool)
+	for _, g := range cfg.Groups {
+		groupSet[g] = true
+	}
+	if !groupSet[10000] {
+		t.Error("root should have primary GID 10000")
+	}
+	if !groupSet[10001] {
+		t.Error("root should have hiro-coordinators (10001)")
+	}
+	if !groupSet[20000] {
+		t.Error("root should have custom-group (20000)")
+	}
+	if len(cfg.Groups) != 3 {
+		t.Errorf("expected 3 groups, got %v", cfg.Groups)
+	}
+}
+
+func TestManager_Groups_ThreeLevelInheritance(t *testing.T) {
+	// Grandchild can only get groups that flow through the entire chain.
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("extra-group", 20000)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+
+	// Root has both groups.
+	writeAgentMD(t, dir, "root", `---
+name: root
+allowed_tools: [Bash, CreatePersistentInstance]
+groups: [hiro-coordinators, extra-group]
+---
+Root.`)
+
+	// Middle agent only has hiro-coordinators (not extra-group).
+	writeAgentMD(t, dir, "middle", `---
+name: middle
+allowed_tools: [Bash, CreatePersistentInstance]
+groups: [hiro-coordinators]
+---
+Middle.`)
+
+	// Leaf requests both groups.
+	writeAgentMD(t, dir, "leaf", `---
+name: leaf
+allowed_tools: [Bash]
+groups: [hiro-coordinators, extra-group]
+---
+Leaf.`)
+
+	rootID, err := mgr.CreateInstance(t.Context(), "root", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+
+	middleID, err := mgr.CreateInstance(t.Context(), "middle", rootID, "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create middle: %v", err)
+	}
+
+	_, err = mgr.CreateInstance(t.Context(), "leaf", middleID, "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create leaf: %v", err)
+	}
+
+	leafCfg := (*configs)[2]
+	leafGroups := make(map[uint32]bool)
+	for _, g := range leafCfg.Groups {
+		leafGroups[g] = true
+	}
+
+	// Leaf should get hiro-coordinators (root has it, middle has it, leaf declares it).
+	if !leafGroups[10001] {
+		t.Error("leaf should have hiro-coordinators")
+	}
+
+	// Leaf should NOT get extra-group — middle doesn't have it, breaking the chain.
+	if leafGroups[20000] {
+		t.Error("leaf should NOT have extra-group (middle doesn't have it)")
+	}
+}
+
+func TestManager_Groups_EphemeralChildSameRules(t *testing.T) {
+	// Ephemeral children follow the same group inheritance rules.
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetGroupGID("hiro-coordinators", 10001)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+
+	writeAgentMD(t, dir, "no-groups-parent", `---
+name: no-groups-parent
+allowed_tools: [Bash]
+---
+Parent without groups.`)
+
+	writeAgentMD(t, dir, "eph-child", `---
+name: eph-child
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Ephemeral child wanting groups.`)
+
+	parentID, err := mgr.CreateInstance(t.Context(), "no-groups-parent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("eph-child"))
+	mgr.startInstance(t.Context(), "eph-id", "eph-sess-id", cfg, parentID, config.ModeEphemeral, "", "", "")
+
+	childCfg := (*configs)[1]
+
+	// Ephemeral child should only have primary group.
+	if len(childCfg.Groups) != 1 {
+		t.Fatalf("expected 1 group, got %v", childCfg.Groups)
+	}
+}
+
+func TestManager_Groups_NoPoolNoGroups(t *testing.T) {
+	// Without a UID pool (local dev, no Docker), groups are irrelevant.
+	mgr, dir := setupTestManager(t) // no pool
+	writeAgentMD(t, dir, "agent-with-groups", `---
+name: agent-with-groups
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Agent.`)
+
+	// Should succeed — groups are silently ignored without a pool.
+	_, err := mgr.CreateInstance(t.Context(), "agent-with-groups", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+}
+
 // --- Config push tests ---
 
 func TestExtractAgentName(t *testing.T) {
