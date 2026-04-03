@@ -134,10 +134,10 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 				return fmt.Errorf("creating dir %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
-			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&0666); err != nil {
+			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&0o666); err != nil {
 				return fmt.Errorf("writing file %s: %w", header.Name, err)
 			}
 		}

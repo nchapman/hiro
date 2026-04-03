@@ -257,7 +257,7 @@ func TestOnline_LeafCompaction(t *testing.T) {
 	}
 
 	// Verify a summary was created.
-	items, err := pdb.GetContextItems("online-1")
+	items, err := pdb.GetContextItems(context.Background(), "online-1")
 	if err != nil {
 		t.Fatalf("GetContextItems: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestOnline_LeafCompaction(t *testing.T) {
 		t.Fatal("expected a summary context item after leaf compaction")
 	}
 
-	sum, err := pdb.GetSummary(*summaryItem.SummaryID)
+	sum, err := pdb.GetSummary(context.Background(), *summaryItem.SummaryID)
 	if err != nil {
 		t.Fatalf("GetSummary: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestOnline_FullCompactionPipeline(t *testing.T) {
 
 	// Simulate real trigger: pass estimated tokens as lastInputTokens
 	// (since we don't have a real API call, just use a value above soft).
-	estimated, err := pdb.ContextTokenCount("online-2")
+	estimated, err := pdb.ContextTokenCount(context.Background(), "online-2")
 	if err != nil {
 		t.Fatalf("ContextTokenCount: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestOnline_FullCompactionPipeline(t *testing.T) {
 	}
 
 	// Check what we ended up with.
-	items, err := pdb.GetContextItems("online-2")
+	items, err := pdb.GetContextItems(context.Background(), "online-2")
 	if err != nil {
 		t.Fatalf("GetContextItems: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestOnline_FullCompactionPipeline(t *testing.T) {
 		}
 	}
 
-	postTokens, err := pdb.ContextTokenCount("online-2")
+	postTokens, err := pdb.ContextTokenCount(context.Background(), "online-2")
 	if err != nil {
 		t.Fatalf("ContextTokenCount: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestOnline_FullCompactionPipeline(t *testing.T) {
 	t.Logf("Token change: %d → %d", estimated, postTokens)
 
 	// Check the max depth — should have condensation if enough leaf summaries were created.
-	maxDepth, err := pdb.MaxSummaryDepth("online-2")
+	maxDepth, err := pdb.MaxSummaryDepth(context.Background(), "online-2")
 	if err != nil {
 		t.Fatalf("MaxSummaryDepth: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestOnline_FullCompactionPipeline(t *testing.T) {
 		if item.ItemType != "summary" || item.SummaryID == nil {
 			continue
 		}
-		sum, err := pdb.GetSummary(*item.SummaryID)
+		sum, err := pdb.GetSummary(context.Background(), *item.SummaryID)
 		if err != nil {
 			t.Logf("GetSummary %s: %v", *item.SummaryID, err)
 			continue
@@ -470,7 +470,7 @@ func TestOnline_FullCompactionPipeline(t *testing.T) {
 			if item.ItemType != "summary" || item.SummaryID == nil {
 				continue
 			}
-			sum, _ := pdb.GetSummary(*item.SummaryID)
+			sum, _ := pdb.GetSummary(context.Background(), *item.SummaryID)
 			if sum.Depth == maxDepth {
 				// A good condensed summary should reference multiple topics.
 				topics := []string{"database", "auth", "search"}

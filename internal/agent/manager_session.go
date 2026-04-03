@@ -74,7 +74,7 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 			ModelOverride:   inst.info.Model,
 			ReasoningEffort: inst.loop.ReasoningEffort(),
 		}
-		if err := m.pdb.UpdateInstanceConfig(instanceID, cfg); err != nil {
+		if err := m.pdb.UpdateInstanceConfig(ctx, instanceID, cfg); err != nil {
 			m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
 		}
 	}
@@ -113,7 +113,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	// Resume the latest session if one exists, otherwise create a new one.
 	var sessionID string
 	if m.pdb != nil {
-		if sess, ok, sessErr := m.pdb.LatestSessionByInstance(instanceID); sessErr != nil {
+		if sess, ok, sessErr := m.pdb.LatestSessionByInstance(ctx, instanceID); sessErr != nil {
 			m.logger.Warn("failed to query latest session", "instance", instanceID, "error", sessErr)
 		} else if ok {
 			sessionID = sess.ID
@@ -158,24 +158,24 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	// Mark the old session as stopped in DB.
 	if m.pdb != nil && oldSession != "" {
-		_ = m.pdb.UpdateSessionStatus(oldSession, "stopped")
+		_ = m.pdb.UpdateSessionStatus(context.Background(), oldSession, "stopped")
 	}
 
 	// Create new session directory.
 	newSessionID := uuid.Must(uuid.NewV7()).String()
 	sessDir := m.instanceSessionDir(instanceID, newSessionID)
-	if err := os.MkdirAll(sessDir, 0700); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0o700); err != nil {
 			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
 		}
 	}
 
 	// Register new session in DB.
 	if m.pdb != nil {
-		if err := m.pdb.CreateSession(platformdb.Session{
+		if err := m.pdb.CreateSession(context.Background(), platformdb.Session{
 			ID:         newSessionID,
 			InstanceID: instanceID,
 			AgentName:  inst.agentName,
@@ -262,7 +262,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		m.setInstanceStatus(instanceID, "stopped")
 		os.RemoveAll(sessDir)
 		if m.pdb != nil {
-			_ = m.pdb.DeleteSession(newSessionID)
+			_ = m.pdb.DeleteSession(context.Background(), newSessionID)
 		}
 		return "", err
 	}

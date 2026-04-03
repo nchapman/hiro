@@ -13,8 +13,8 @@ import (
 
 func TestGrep_FilesWithMatches_Default(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\nfunc hello() {}\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package lib\n\nfunc world() {}\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\nfunc hello() {}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package lib\n\nfunc world() {}\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "func hello"}`)
@@ -31,7 +31,7 @@ func TestGrep_FilesWithMatches_Default(t *testing.T) {
 
 func TestGrep_FilesWithMatches_NoMatches(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "nonexistent"}`)
@@ -47,7 +47,7 @@ func TestGrep_FilesWithMatches_NoMatches(t *testing.T) {
 
 func TestGrep_ContentMode_Basic(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\nfunc hello() {}\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\nfunc hello() {}\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "func hello", "output_mode": "content"}`)
@@ -64,7 +64,7 @@ func TestGrep_ContentMode_Basic(t *testing.T) {
 
 func TestGrep_ContentMode_Regex(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "code.go"), []byte("log.Error(\"something failed\")\nlog.Info(\"ok\")\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "code.go"), []byte("log.Error(\"something failed\")\nlog.Info(\"ok\")\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "log\\.Error", "output_mode": "content"}`)
@@ -78,7 +78,7 @@ func TestGrep_ContentMode_Regex(t *testing.T) {
 
 func TestGrep_ContentMode_LiteralText(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("price is $5.00\nother line\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("price is $5.00\nother line\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "$5.00", "literal_text": true, "output_mode": "content"}`)
@@ -94,8 +94,8 @@ func TestGrep_ContentMode_LiteralText(t *testing.T) {
 
 func TestGrep_CountMode(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("findme\nno match\nfindme\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("findme here\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("findme\nno match\nfindme\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("findme here\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "findme", "output_mode": "count"}`)
@@ -114,8 +114,8 @@ func TestGrep_CountMode(t *testing.T) {
 
 func TestGrep_GlobFilter(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("hello world\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello world\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("hello world\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello world\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "hello", "glob": "*.go"}`)
@@ -132,9 +132,9 @@ func TestGrep_GlobFilter(t *testing.T) {
 
 func TestGrep_GlobBraceExpansion(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.ts"), []byte("findme\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "b.tsx"), []byte("findme\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "c.js"), []byte("findme\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.ts"), []byte("findme\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.tsx"), []byte("findme\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "c.js"), []byte("findme\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "findme", "glob": "*.{ts,tsx}"}`)
@@ -154,7 +154,7 @@ func TestGrep_GlobBraceExpansion(t *testing.T) {
 
 func TestGrep_CaseInsensitive(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("Hello World\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("Hello World\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "hello world", "i": true}`)
@@ -170,9 +170,9 @@ func TestGrep_CaseInsensitive(t *testing.T) {
 
 func TestGrep_SkipsNodeModules(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0755)
-	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "index.js"), []byte("findme\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "app.js"), []byte("findme\n"), 0644)
+	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755)
+	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "index.js"), []byte("findme\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "app.js"), []byte("findme\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "findme"}`)
@@ -190,9 +190,9 @@ func TestGrep_SkipsNodeModules(t *testing.T) {
 func TestGrep_CustomPath(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
-	os.MkdirAll(sub, 0755)
-	os.WriteFile(filepath.Join(sub, "inner.txt"), []byte("target\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "outer.txt"), []byte("target\n"), 0644)
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "inner.txt"), []byte("target\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "outer.txt"), []byte("target\n"), 0o644)
 
 	tool := NewGrepTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "target", "path": "`+sub+`"}`)
@@ -269,7 +269,7 @@ func TestGlobToRegex(t *testing.T) {
 func TestSearchTextFile_SkipsBinary(t *testing.T) {
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "binary.dat")
-	os.WriteFile(binPath, []byte("findme\x00\x01\x02"), 0644)
+	os.WriteFile(binPath, []byte("findme\x00\x01\x02"), 0o644)
 
 	re := regexp.MustCompile("findme")
 	matches := searchTextFile(binPath, re, 0)
@@ -286,7 +286,7 @@ func TestSearchTextFile_PerFileMatchCap(t *testing.T) {
 	for i := 0; i < maxMatchesPerFile+20; i++ {
 		content.WriteString("findme\n")
 	}
-	os.WriteFile(path, []byte(content.String()), 0644)
+	os.WriteFile(path, []byte(content.String()), 0o644)
 
 	re := regexp.MustCompile("findme")
 	matches := searchTextFile(path, re, 0)
@@ -297,12 +297,12 @@ func TestSearchTextFile_PerFileMatchCap(t *testing.T) {
 
 func TestGrepWithRegex_Fallback(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\nfunc hello() {}\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello world\n"), 0644)
-	os.MkdirAll(filepath.Join(dir, ".hidden"), 0755)
-	os.WriteFile(filepath.Join(dir, ".hidden", "secret.go"), []byte("func hello() {}\n"), 0644)
-	os.MkdirAll(filepath.Join(dir, "node_modules"), 0755)
-	os.WriteFile(filepath.Join(dir, "node_modules", "dep.go"), []byte("func hello() {}\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\nfunc hello() {}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello world\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, ".hidden"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".hidden", "secret.go"), []byte("func hello() {}\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755)
+	os.WriteFile(filepath.Join(dir, "node_modules", "dep.go"), []byte("func hello() {}\n"), 0o644)
 
 	ctx := context.Background()
 

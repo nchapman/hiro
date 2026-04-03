@@ -68,7 +68,7 @@ func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logs, err := s.pdb.QueryLogs(opts)
+	logs, err := s.pdb.QueryLogs(r.Context(), opts)
 	if err != nil {
 		s.logger.Error("failed to query logs", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -131,13 +131,13 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogSources returns the distinct component names from the logs table.
-func (s *Server) handleLogSources(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) {
 	if s.pdb == nil {
 		http.Error(w, "logging unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	sources, err := s.pdb.LogSources()
+	sources, err := s.pdb.LogSources(r.Context())
 	if err != nil {
 		s.logger.Error("failed to get log sources", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

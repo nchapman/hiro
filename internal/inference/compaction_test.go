@@ -86,7 +86,7 @@ func TestCompactIfNeeded_LeafPassTriggered(t *testing.T) {
 	}
 
 	// Verify a summary was created in context items.
-	items, err := pdb.GetContextItems("s1")
+	items, err := pdb.GetContextItems(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("GetContextItems: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestCompactIfNeeded_HardThresholdSetsFlag(t *testing.T) {
 
 	// Verify the mechanical assumption: post-compaction estimated tokens
 	// must actually exceed the hard threshold for this test to be meaningful.
-	postTokens, err := pdb.ContextTokenCount("s1")
+	postTokens, err := pdb.ContextTokenCount(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("ContextTokenCount: %v", err)
 	}
@@ -288,13 +288,13 @@ func TestCompactIfNeeded_CondensationFiresAfterLeafPasses(t *testing.T) {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
 
-	maxDepth, err := pdb.MaxSummaryDepth("s1")
+	maxDepth, err := pdb.MaxSummaryDepth(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("MaxSummaryDepth: %v", err)
 	}
 	if maxDepth < 1 {
 		// Log context items for debugging.
-		items, _ := pdb.GetContextItems("s1")
+		items, _ := pdb.GetContextItems(context.Background(), "s1")
 		for _, item := range items {
 			t.Logf("  ordinal=%d type=%s msg=%v sum=%v", item.Ordinal, item.ItemType, item.MessageID, item.SummaryID)
 		}

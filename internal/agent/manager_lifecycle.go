@@ -203,7 +203,7 @@ func (m *Manager) DeleteInstance(instanceID string) error {
 		// Always delete instance dir and DB record regardless of mode.
 		os.RemoveAll(m.instanceDir(id))
 		if m.pdb != nil {
-			_ = m.pdb.DeleteInstance(id)
+			_ = m.pdb.DeleteInstance(context.Background(), id)
 		}
 		m.logger.Info("instance deleted", "id", id)
 	}
@@ -257,7 +257,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	instDir := m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
 	dirIsNew := os.IsNotExist(statErr)
-	if err := os.MkdirAll(instDir, 0700); err != nil {
+	if err := os.MkdirAll(instDir, 0o700); err != nil {
 		return "", fmt.Errorf("creating instance dir: %w", err)
 	}
 
@@ -270,24 +270,24 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			}
 		} else {
 			// Seed empty persona.md.
-			if err := os.WriteFile(filepath.Join(instDir, "persona.md"), nil, 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(instDir, "persona.md"), nil, 0o600); err != nil {
 				return "", fmt.Errorf("creating persona.md: %w", err)
 			}
 		}
 		// Seed empty memory.md.
 		memPath := filepath.Join(instDir, "memory.md")
-		if err := os.WriteFile(memPath, nil, 0600); err != nil {
+		if err := os.WriteFile(memPath, nil, 0o600); err != nil {
 			return "", fmt.Errorf("creating memory.md: %w", err)
 		}
 	}
 
 	// Create session directory with session-level state.
 	sessDir := m.instanceSessionDir(instanceID, sessionID)
-	if err := os.MkdirAll(sessDir, 0700); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0o700); err != nil {
 			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
 		}
 	}
@@ -300,7 +300,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	// Register instance in the platform database.
 	if m.pdb != nil {
-		if err := m.pdb.CreateInstance(platformdb.Instance{
+		if err := m.pdb.CreateInstance(ctx, platformdb.Instance{
 			ID:        instanceID,
 			AgentName: cfg.Name,
 			Mode:      string(mode),
@@ -312,7 +312,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 		// Register session in the platform database.
 		// Note: session parent_id is left empty — lineage is tracked via instances.parent_id.
-		if err := m.pdb.CreateSession(platformdb.Session{
+		if err := m.pdb.CreateSession(ctx, platformdb.Session{
 			ID:         sessionID,
 			InstanceID: instanceID,
 			AgentName:  cfg.Name,

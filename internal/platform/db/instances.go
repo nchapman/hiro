@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -26,7 +27,7 @@ type Instance struct {
 }
 
 // CreateInstance inserts a new instance.
-func (d *DB) CreateInstance(inst Instance) error {
+func (d *DB) CreateInstance(ctx context.Context, inst Instance) error {
 	var parentID *string
 	if inst.ParentID != "" {
 		parentID = &inst.ParentID
@@ -35,7 +36,7 @@ func (d *DB) CreateInstance(inst Instance) error {
 	if nodeID == "" {
 		nodeID = "home"
 	}
-	_, err := d.db.Exec(
+	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO instances (id, agent_name, mode, parent_id, node_id, status) VALUES (?, ?, ?, ?, ?, ?)`,
 		inst.ID, inst.AgentName, inst.Mode, parentID, nodeID, "running",
 	)
@@ -49,12 +50,12 @@ func (d *DB) CreateInstance(inst Instance) error {
 }
 
 // GetInstance retrieves an instance by ID.
-func (d *DB) GetInstance(id string) (Instance, error) {
+func (d *DB) GetInstance(ctx context.Context, id string) (Instance, error) {
 	var inst Instance
 	var parentID sql.NullString
 	var createdAt string
 	var stoppedAt sql.NullString
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		`SELECT id, agent_name, mode, parent_id, node_id, status, created_at, stopped_at
 		 FROM instances WHERE id = ?`, id,
 	).Scan(&inst.ID, &inst.AgentName, &inst.Mode, &parentID, &inst.NodeID, &inst.Status, &createdAt, &stoppedAt)
@@ -77,7 +78,7 @@ func (d *DB) GetInstance(id string) (Instance, error) {
 
 // ListInstances returns all instances matching the given filters.
 // Pass empty strings to skip a filter.
-func (d *DB) ListInstances(parentID, status string) ([]Instance, error) {
+func (d *DB) ListInstances(ctx context.Context, parentID, status string) ([]Instance, error) {
 	query := "SELECT id, agent_name, mode, parent_id, node_id, status, created_at, stopped_at FROM instances WHERE 1=1"
 	var args []any
 
@@ -91,7 +92,7 @@ func (d *DB) ListInstances(parentID, status string) ([]Instance, error) {
 	}
 	query += " ORDER BY created_at"
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,19 +102,19 @@ func (d *DB) ListInstances(parentID, status string) ([]Instance, error) {
 }
 
 // ListChildInstances returns direct children of an instance.
-func (d *DB) ListChildInstances(parentID string) ([]Instance, error) {
-	return d.ListInstances(parentID, "")
+func (d *DB) ListChildInstances(ctx context.Context, parentID string) ([]Instance, error) {
+	return d.ListInstances(ctx, parentID, "")
 }
 
 // UpdateInstanceStatus sets the instance status. If status is "stopped",
 // stopped_at is set to now.
-func (d *DB) UpdateInstanceStatus(id, status string) error {
+func (d *DB) UpdateInstanceStatus(ctx context.Context, id, status string) error {
 	var stoppedAt *string
 	if status == "stopped" {
 		now := time.Now().UTC().Format("2006-01-02 15:04:05")
 		stoppedAt = &now
 	}
-	result, err := d.db.Exec(
+	result, err := d.db.ExecContext(ctx,
 		`UPDATE instances SET status = ?, stopped_at = ? WHERE id = ?`,
 		status, stoppedAt, id,
 	)
@@ -131,8 +132,8 @@ func (d *DB) UpdateInstanceStatus(id, status string) error {
 }
 
 // DeleteInstance removes an instance and all its data (cascades to sessions).
-func (d *DB) DeleteInstance(id string) error {
-	result, err := d.db.Exec("DELETE FROM instances WHERE id = ?", id)
+func (d *DB) DeleteInstance(ctx context.Context, id string) error {
+	result, err := d.db.ExecContext(ctx, "DELETE FROM instances WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("deleting instance: %w", err)
 	}
@@ -153,9 +154,9 @@ type InstanceConfig struct {
 }
 
 // GetInstanceConfig reads the per-instance config JSON.
-func (d *DB) GetInstanceConfig(instanceID string) (InstanceConfig, error) {
+func (d *DB) GetInstanceConfig(ctx context.Context, instanceID string) (InstanceConfig, error) {
 	var raw string
-	err := d.db.QueryRow("SELECT COALESCE(config, '{}') FROM instances WHERE id = ?", instanceID).Scan(&raw)
+	err := d.db.QueryRowContext(ctx, "SELECT COALESCE(config, '{}') FROM instances WHERE id = ?", instanceID).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return InstanceConfig{}, fmt.Errorf("instance %s: %w", instanceID, ErrNotFound)
 	}
@@ -172,12 +173,12 @@ func (d *DB) GetInstanceConfig(instanceID string) (InstanceConfig, error) {
 }
 
 // UpdateInstanceConfig writes the per-instance config JSON.
-func (d *DB) UpdateInstanceConfig(instanceID string, cfg InstanceConfig) error {
+func (d *DB) UpdateInstanceConfig(ctx context.Context, instanceID string, cfg InstanceConfig) error {
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling instance config: %w", err)
 	}
-	result, err := d.db.Exec("UPDATE instances SET config = ? WHERE id = ?", string(raw), instanceID)
+	result, err := d.db.ExecContext(ctx, "UPDATE instances SET config = ? WHERE id = ?", string(raw), instanceID)
 	if err != nil {
 		return fmt.Errorf("updating instance config: %w", err)
 	}
@@ -193,7 +194,7 @@ func (d *DB) UpdateInstanceConfig(instanceID string, cfg InstanceConfig) error {
 
 // IsInstanceDescendant returns true if targetID is a descendant of ancestorID
 // in the instance tree. Detects cycles and enforces a maximum traversal depth.
-func (d *DB) IsInstanceDescendant(targetID, ancestorID string) (bool, error) {
+func (d *DB) IsInstanceDescendant(ctx context.Context, targetID, ancestorID string) (bool, error) {
 	const maxDepth = 100
 	visited := make(map[string]bool, maxDepth)
 	current := targetID
@@ -206,7 +207,7 @@ func (d *DB) IsInstanceDescendant(targetID, ancestorID string) (bool, error) {
 			return true, nil
 		}
 		var parentID sql.NullString
-		err := d.db.QueryRow("SELECT parent_id FROM instances WHERE id = ?", current).Scan(&parentID)
+		err := d.db.QueryRowContext(ctx, "SELECT parent_id FROM instances WHERE id = ?", current).Scan(&parentID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil // node not in DB, therefore not a descendant
 		}

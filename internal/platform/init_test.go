@@ -59,11 +59,11 @@ func TestInit_ExistingAgents(t *testing.T) {
 
 	// Pre-create agents dir with a custom agent
 	agentsDir := filepath.Join(dir, "agents", "my-agent")
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	customContent := []byte("custom")
-	if err := os.WriteFile(filepath.Join(agentsDir, "agent.md"), customContent, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(agentsDir, "agent.md"), customContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
 

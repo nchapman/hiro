@@ -71,13 +71,13 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	sessionDir := filepath.Join(nb.rootDir, msg.SessionDir)
 
 	// Create directories.
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		nb.logger.Error("creating session dir", "error", err)
 		_ = nb.stream.SendSpawnResult(msg.RequestId, fmt.Sprintf("creating session dir: %v", err))
 		return
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessionDir, sub), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(sessionDir, sub), 0o755); err != nil {
 			nb.logger.Error("creating session subdir", "dir", sub, "error", err)
 		}
 	}
@@ -216,14 +216,14 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	// Create a private socket directory (0700) so the socket is inaccessible
+	// Create a private socket directory (0o700) so the socket is inaccessible
 	// to other processes from the moment it's created (no TOCTOU window).
 	sessPrefix := cfg.SessionID
 	if len(sessPrefix) > 18 {
 		sessPrefix = sessPrefix[:18]
 	}
 	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
-	if err := os.MkdirAll(socketDir, 0700); err != nil {
+	if err := os.MkdirAll(socketDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}
 	socketPath := socketDir + "/a.sock"

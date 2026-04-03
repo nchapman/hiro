@@ -285,8 +285,8 @@ func TestClusterAPI_RevokeDisconnectsBeforeSave(t *testing.T) {
 	token := loginAndGetToken(t, srv)
 
 	// Make the config path unwritable to force a save failure.
-	os.Chmod(filepath.Dir(cp.Path()), 0400)
-	t.Cleanup(func() { os.Chmod(filepath.Dir(cp.Path()), 0700) })
+	os.Chmod(filepath.Dir(cp.Path()), 0o400)
+	t.Cleanup(func() { os.Chmod(filepath.Dir(cp.Path()), 0o700) })
 
 	req := httptest.NewRequest("DELETE", "/api/cluster/approved/node-save-fail", nil)
 	req.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})

@@ -10,7 +10,7 @@ import (
 func TestEdit_ReplaceContent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("hello world"), 0644)
+	os.WriteFile(path, []byte("hello world"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "world", "new_string": "earth"}`)
@@ -27,7 +27,7 @@ func TestEdit_ReplaceContent(t *testing.T) {
 func TestEdit_DeleteContent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("hello beautiful world"), 0644)
+	os.WriteFile(path, []byte("hello beautiful world"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": " beautiful", "new_string": ""}`)
@@ -63,7 +63,7 @@ func TestEdit_CreateFile(t *testing.T) {
 func TestEdit_CreateFile_AlreadyExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "existing.txt")
-	os.WriteFile(path, []byte("old"), 0644)
+	os.WriteFile(path, []byte("old"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "", "new_string": "new"}`)
@@ -78,7 +78,7 @@ func TestEdit_CreateFile_AlreadyExists(t *testing.T) {
 func TestEdit_OldStringNotFound(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("hello world"), 0644)
+	os.WriteFile(path, []byte("hello world"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "missing", "new_string": "x"}`)
@@ -93,7 +93,7 @@ func TestEdit_OldStringNotFound(t *testing.T) {
 func TestEdit_MultipleMatches(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("foo bar foo baz foo"), 0644)
+	os.WriteFile(path, []byte("foo bar foo baz foo"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "foo", "new_string": "qux"}`)
@@ -108,7 +108,7 @@ func TestEdit_MultipleMatches(t *testing.T) {
 func TestEdit_ReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("foo bar foo baz foo"), 0644)
+	os.WriteFile(path, []byte("foo bar foo baz foo"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "foo", "new_string": "qux", "replace_all": true}`)
@@ -150,7 +150,7 @@ func TestEdit_EmptyFilePath(t *testing.T) {
 func TestEdit_NoChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("hello"), 0644)
+	os.WriteFile(path, []byte("hello"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "hello", "new_string": "hello", "replace_all": true}`)
@@ -165,7 +165,7 @@ func TestEdit_NoChange(t *testing.T) {
 func TestEdit_MultilineReplace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.go")
-	os.WriteFile(path, []byte("func foo() {\n    return 1\n}\n"), 0644)
+	os.WriteFile(path, []byte("func foo() {\n    return 1\n}\n"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "    return 1", "new_string": "    return 2"}`)
@@ -181,7 +181,7 @@ func TestEdit_MultilineReplace(t *testing.T) {
 
 func TestEdit_RelativePath(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello world"), 0644)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello world"), 0o644)
 
 	tool := NewEditTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "test.txt", "old_string": "world", "new_string": "earth"}`)

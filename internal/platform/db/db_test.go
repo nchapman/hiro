@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -36,9 +37,10 @@ func TestOpen_CreatesDB(t *testing.T) {
 
 func TestSessions_CRUD(t *testing.T) {
 	d := openTestDB(t)
+	ctx := context.Background()
 
 	// Create.
-	err := d.CreateSession(Session{
+	err := d.CreateSession(ctx, Session{
 		ID:        "sess-1",
 		AgentName: "coordinator",
 		Mode:      "persistent",
@@ -48,7 +50,7 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 
 	// Create child.
-	err = d.CreateSession(Session{
+	err = d.CreateSession(ctx, Session{
 		ID:        "sess-2",
 		AgentName: "researcher",
 		Mode:      "ephemeral",
@@ -59,7 +61,7 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 
 	// Get.
-	s, err := d.GetSession("sess-1")
+	s, err := d.GetSession(ctx, "sess-1")
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -68,7 +70,7 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 
 	// Get child with parent.
-	s2, err := d.GetSession("sess-2")
+	s2, err := d.GetSession(ctx, "sess-2")
 	if err != nil {
 		t.Fatalf("GetSession child: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 
 	// List children.
-	children, err := d.ListChildSessions("sess-1")
+	children, err := d.ListChildSessions(ctx, "sess-1")
 	if err != nil {
 		t.Fatalf("ListChildSessions: %v", err)
 	}
@@ -86,38 +88,38 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 
 	// Update status.
-	if err := d.UpdateSessionStatus("sess-1", "stopped"); err != nil {
+	if err := d.UpdateSessionStatus(ctx, "sess-1", "stopped"); err != nil {
 		t.Fatalf("UpdateSessionStatus: %v", err)
 	}
-	s, _ = d.GetSession("sess-1")
+	s, _ = d.GetSession(ctx, "sess-1")
 	if s.Status != "stopped" || s.StoppedAt == nil {
 		t.Errorf("expected stopped with timestamp, got %+v", s)
 	}
 
 	// Instance descendant checking.
-	if err := d.CreateInstance(Instance{ID: "inst-1", AgentName: "coordinator", Mode: "persistent"}); err != nil {
+	if err := d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "coordinator", Mode: "persistent"}); err != nil {
 		t.Fatalf("CreateInstance parent: %v", err)
 	}
-	if err := d.CreateInstance(Instance{ID: "inst-2", AgentName: "researcher", Mode: "persistent", ParentID: "inst-1"}); err != nil {
+	if err := d.CreateInstance(ctx, Instance{ID: "inst-2", AgentName: "researcher", Mode: "persistent", ParentID: "inst-1"}); err != nil {
 		t.Fatalf("CreateInstance child: %v", err)
 	}
-	ok, err := d.IsInstanceDescendant("inst-2", "inst-1")
+	ok, err := d.IsInstanceDescendant(ctx, "inst-2", "inst-1")
 	if err != nil {
 		t.Fatalf("IsInstanceDescendant: %v", err)
 	}
 	if !ok {
 		t.Error("expected inst-2 to be descendant of inst-1")
 	}
-	ok, _ = d.IsInstanceDescendant("inst-1", "inst-2")
+	ok, _ = d.IsInstanceDescendant(ctx, "inst-1", "inst-2")
 	if ok {
 		t.Error("inst-1 should not be descendant of inst-2")
 	}
 
 	// Delete parent — child is cascade-deleted.
-	if err := d.DeleteSession("sess-1"); err != nil {
+	if err := d.DeleteSession(ctx, "sess-1"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
-	_, err = d.GetSession("sess-2")
+	_, err = d.GetSession(ctx, "sess-2")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected child to be cascade-deleted, got: %v", err)
 	}
@@ -125,12 +127,13 @@ func TestSessions_CRUD(t *testing.T) {
 
 func TestLatestSessionByInstance(t *testing.T) {
 	d := openTestDB(t)
+	ctx := context.Background()
 
 	// Create an instance.
-	d.CreateInstance(Instance{ID: "inst-A", AgentName: "test", Mode: "persistent"})
+	d.CreateInstance(ctx, Instance{ID: "inst-A", AgentName: "test", Mode: "persistent"})
 
 	// No sessions yet.
-	_, ok, err := d.LatestSessionByInstance("inst-A")
+	_, ok, err := d.LatestSessionByInstance(ctx, "inst-A")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +148,7 @@ func TestLatestSessionByInstance(t *testing.T) {
 		"sess-new", "inst-A", "test", "persistent", "running", "2026-01-02 00:00:00")
 
 	// Should return the newest one.
-	sess, ok, err := d.LatestSessionByInstance("inst-A")
+	sess, ok, err := d.LatestSessionByInstance(ctx, "inst-A")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,20 +165,21 @@ func TestLatestSessionByInstance(t *testing.T) {
 
 func TestMessages_AppendAndRetrieve(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Append messages.
-	id1, err := d.AppendMessage("s1", "user", "hello", `{"role":"user"}`, 10)
+	id1, err := d.AppendMessage(ctx, "s1", "user", "hello", `{"role":"user"}`, 10)
 	if err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
-	id2, err := d.AppendMessage("s1", "assistant", "hi there", `{"role":"assistant"}`, 15)
+	id2, err := d.AppendMessage(ctx, "s1", "assistant", "hi there", `{"role":"assistant"}`, 15)
 	if err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
 
 	// GetMessage.
-	m, err := d.GetMessage(id1)
+	m, err := d.GetMessage(ctx, id1)
 	if err != nil {
 		t.Fatalf("GetMessage: %v", err)
 	}
@@ -184,7 +188,7 @@ func TestMessages_AppendAndRetrieve(t *testing.T) {
 	}
 
 	// GetMessages.
-	msgs, err := d.GetMessages([]int64{id2, id1})
+	msgs, err := d.GetMessages(ctx, []int64{id2, id1})
 	if err != nil {
 		t.Fatalf("GetMessages: %v", err)
 	}
@@ -193,7 +197,7 @@ func TestMessages_AppendAndRetrieve(t *testing.T) {
 	}
 
 	// RecentMessages.
-	recent, err := d.RecentMessages("s1", 1)
+	recent, err := d.RecentMessages(ctx, "s1", 1)
 	if err != nil {
 		t.Fatalf("RecentMessages: %v", err)
 	}
@@ -202,7 +206,7 @@ func TestMessages_AppendAndRetrieve(t *testing.T) {
 	}
 
 	// Context items created.
-	items, err := d.GetContextItems("s1")
+	items, err := d.GetContextItems(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetContextItems: %v", err)
 	}
@@ -211,7 +215,7 @@ func TestMessages_AppendAndRetrieve(t *testing.T) {
 	}
 
 	// ContextTokenCount.
-	total, err := d.ContextTokenCount("s1")
+	total, err := d.ContextTokenCount(ctx, "s1")
 	if err != nil {
 		t.Fatalf("ContextTokenCount: %v", err)
 	}
@@ -222,15 +226,16 @@ func TestMessages_AppendAndRetrieve(t *testing.T) {
 
 func TestMessages_SessionScoping(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "a", Mode: "persistent"})
-	d.CreateSession(Session{ID: "s2", AgentName: "b", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "a", Mode: "persistent"})
+	d.CreateSession(ctx, Session{ID: "s2", AgentName: "b", Mode: "persistent"})
 
-	d.AppendMessage("s1", "user", "session one", "{}", 10)
-	d.AppendMessage("s2", "user", "session two", "{}", 10)
+	d.AppendMessage(ctx, "s1", "user", "session one", "{}", 10)
+	d.AppendMessage(ctx, "s2", "user", "session two", "{}", 10)
 
 	// Each session sees only its own messages.
-	msgs1, _ := d.RecentMessages("s1", 10)
-	msgs2, _ := d.RecentMessages("s2", 10)
+	msgs1, _ := d.RecentMessages(ctx, "s1", 10)
+	msgs2, _ := d.RecentMessages(ctx, "s2", 10)
 	if len(msgs1) != 1 || msgs1[0].Content != "session one" {
 		t.Errorf("s1 got wrong messages: %+v", msgs1)
 	}
@@ -246,15 +251,16 @@ func TestMessages_SessionScoping(t *testing.T) {
 
 func TestCompaction_Workflow(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Add messages.
 	for i := 0; i < 5; i++ {
-		d.AppendMessage("s1", "user", "msg", "{}", 100)
+		d.AppendMessage(ctx, "s1", "user", "msg", "{}", 100)
 	}
 
 	// Verify tokens outside tail.
-	outside, err := d.MessageTokensOutsideTail("s1", 2)
+	outside, err := d.MessageTokensOutsideTail(ctx, "s1", 2)
 	if err != nil {
 		t.Fatalf("MessageTokensOutsideTail: %v", err)
 	}
@@ -263,7 +269,7 @@ func TestCompaction_Workflow(t *testing.T) {
 	}
 
 	// Get oldest items for compaction.
-	items, msgs, err := d.OldestMessageContextItems("s1", 2, 500)
+	items, msgs, err := d.OldestMessageContextItems(ctx, "s1", 2, 500)
 	if err != nil {
 		t.Fatalf("OldestMessageContextItems: %v", err)
 	}
@@ -283,7 +289,7 @@ func TestCompaction_Workflow(t *testing.T) {
 		LatestAt:     time.Now(),
 		SourceTokens: 300,
 	}
-	if err := d.CreateSummary(sum); err != nil {
+	if err := d.CreateSummary(ctx, sum); err != nil {
 		t.Fatalf("CreateSummary: %v", err)
 	}
 
@@ -291,15 +297,15 @@ func TestCompaction_Workflow(t *testing.T) {
 	for i, m := range msgs {
 		msgIDs[i] = m.ID
 	}
-	if err := d.LinkSummaryMessages("sum_test1", msgIDs); err != nil {
+	if err := d.LinkSummaryMessages(ctx, "sum_test1", msgIDs); err != nil {
 		t.Fatalf("LinkSummaryMessages: %v", err)
 	}
-	if err := d.ReplaceContextItems("s1", items[0].Ordinal, items[len(items)-1].Ordinal, "sum_test1"); err != nil {
+	if err := d.ReplaceContextItems(ctx, "s1", items[0].Ordinal, items[len(items)-1].Ordinal, "sum_test1"); err != nil {
 		t.Fatalf("ReplaceContextItems: %v", err)
 	}
 
 	// Verify context items: 1 summary + 2 tail messages.
-	ciAfter, err := d.GetContextItems("s1")
+	ciAfter, err := d.GetContextItems(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetContextItems after compaction: %v", err)
 	}
@@ -311,19 +317,19 @@ func TestCompaction_Workflow(t *testing.T) {
 	}
 
 	// Token count should reflect summary + remaining messages.
-	total, _ := d.ContextTokenCount("s1")
+	total, _ := d.ContextTokenCount(ctx, "s1")
 	if total != 250 { // 50 (summary) + 100*2 (tail)
 		t.Errorf("expected 250 tokens after compaction, got %d", total)
 	}
 
 	// Max summary depth.
-	depth, _ := d.MaxSummaryDepth("s1")
+	depth, _ := d.MaxSummaryDepth(ctx, "s1")
 	if depth != 0 {
 		t.Errorf("expected max depth 0, got %d", depth)
 	}
 
 	// GetSummary.
-	retrieved, err := d.GetSummary("sum_test1")
+	retrieved, err := d.GetSummary(ctx, "sum_test1")
 	if err != nil {
 		t.Fatalf("GetSummary: %v", err)
 	}
@@ -332,7 +338,7 @@ func TestCompaction_Workflow(t *testing.T) {
 	}
 
 	// GetSummarySourceMessages.
-	sourceIDs, err := d.GetSummarySourceMessages("sum_test1")
+	sourceIDs, err := d.GetSummarySourceMessages(ctx, "sum_test1")
 	if err != nil {
 		t.Fatalf("GetSummarySourceMessages: %v", err)
 	}
@@ -343,15 +349,16 @@ func TestCompaction_Workflow(t *testing.T) {
 
 func TestSearch_FTS(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
-	d.CreateSession(Session{ID: "s2", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	d.CreateSession(ctx, Session{ID: "s2", AgentName: "test", Mode: "persistent"})
 
-	d.AppendMessage("s1", "user", "the quick brown fox", "{}", 10)
-	d.AppendMessage("s1", "user", "lazy dog sleeps", "{}", 10)
-	d.AppendMessage("s2", "user", "the quick brown fox jumps", "{}", 10)
+	d.AppendMessage(ctx, "s1", "user", "the quick brown fox", "{}", 10)
+	d.AppendMessage(ctx, "s1", "user", "lazy dog sleeps", "{}", 10)
+	d.AppendMessage(ctx, "s2", "user", "the quick brown fox jumps", "{}", 10)
 
 	// Session-scoped search.
-	results, err := d.SearchMessages("s1", "quick brown", 10)
+	results, err := d.SearchMessages(ctx, "s1", "quick brown", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -363,10 +370,11 @@ func TestSearch_FTS(t *testing.T) {
 
 func TestUsage_RecordAndAggregate(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Record usage events via RecordTurnUsage.
-	if err := d.RecordTurnUsage([]UsageEvent{
+	if err := d.RecordTurnUsage(ctx, []UsageEvent{
 		{
 			SessionID:    "s1",
 			Model:        "claude-sonnet-4-6",
@@ -389,7 +397,7 @@ func TestUsage_RecordAndAggregate(t *testing.T) {
 	}
 
 	// Session usage.
-	usage, err := d.GetSessionUsage("s1")
+	usage, err := d.GetSessionUsage(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetSessionUsage: %v", err)
 	}
@@ -404,13 +412,13 @@ func TestUsage_RecordAndAggregate(t *testing.T) {
 	}
 
 	// Total usage.
-	total, _ := d.GetTotalUsage()
+	total, _ := d.GetTotalUsage(ctx)
 	if total.TotalInputTokens != 3000 {
 		t.Errorf("total usage mismatch: %+v", total)
 	}
 
 	// By model.
-	byModel, err := d.GetUsageByModel()
+	byModel, err := d.GetUsageByModel(ctx)
 	if err != nil {
 		t.Fatalf("GetUsageByModel: %v", err)
 	}
@@ -419,7 +427,7 @@ func TestUsage_RecordAndAggregate(t *testing.T) {
 	}
 
 	// By day.
-	byDay, err := d.GetUsageByDay(7)
+	byDay, err := d.GetUsageByDay(ctx, 7)
 	if err != nil {
 		t.Fatalf("GetUsageByDay: %v", err)
 	}
@@ -430,10 +438,11 @@ func TestUsage_RecordAndAggregate(t *testing.T) {
 
 func TestUsage_TurnGrouping(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Turn 1: two steps (e.g., tool-use turn).
-	err := d.RecordTurnUsage([]UsageEvent{
+	err := d.RecordTurnUsage(ctx, []UsageEvent{
 		{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 1000, OutputTokens: 200, Cost: 0.01},
 		{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 1500, OutputTokens: 300, Cost: 0.02},
 	})
@@ -442,7 +451,7 @@ func TestUsage_TurnGrouping(t *testing.T) {
 	}
 
 	// Turn 2: single step.
-	err = d.RecordTurnUsage([]UsageEvent{
+	err = d.RecordTurnUsage(ctx, []UsageEvent{
 		{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 2000, OutputTokens: 400, Cost: 0.03},
 	})
 	if err != nil {
@@ -450,7 +459,7 @@ func TestUsage_TurnGrouping(t *testing.T) {
 	}
 
 	// GetLastTurnUsage should return only turn 2.
-	turn, ok, err := d.GetLastTurnUsage("s1")
+	turn, ok, err := d.GetLastTurnUsage(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetLastTurnUsage: %v", err)
 	}
@@ -468,7 +477,7 @@ func TestUsage_TurnGrouping(t *testing.T) {
 	}
 
 	// GetLastUsageEvent should return the last step of turn 2.
-	last, ok, err := d.GetLastUsageEvent("s1")
+	last, ok, err := d.GetLastUsageEvent(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetLastUsageEvent: %v", err)
 	}
@@ -480,7 +489,7 @@ func TestUsage_TurnGrouping(t *testing.T) {
 	}
 
 	// Session totals should include all events from both turns.
-	session, err := d.GetSessionUsage("s1")
+	session, err := d.GetSessionUsage(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetSessionUsage: %v", err)
 	}
@@ -494,7 +503,8 @@ func TestUsage_TurnGrouping(t *testing.T) {
 
 func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Simulate a legacy turn-0 row (pre-migration data) via direct insert.
 	if _, err := d.db.Exec(`INSERT INTO usage_events (session_id, model, provider, turn, input_tokens, cost) VALUES (?, ?, ?, 0, 9999, 0.99)`, "s1", "m", "p"); err != nil {
@@ -502,7 +512,7 @@ func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
 	}
 
 	// GetLastTurnUsage should not return turn-0 data.
-	_, ok, err := d.GetLastTurnUsage("s1")
+	_, ok, err := d.GetLastTurnUsage(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetLastTurnUsage: %v", err)
 	}
@@ -511,7 +521,7 @@ func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
 	}
 
 	// GetLastUsageEvent should also skip turn-0.
-	_, ok, err = d.GetLastUsageEvent("s1")
+	_, ok, err = d.GetLastUsageEvent(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetLastUsageEvent: %v", err)
 	}
@@ -520,7 +530,7 @@ func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
 	}
 
 	// But session totals should still include turn-0 rows.
-	session, err := d.GetSessionUsage("s1")
+	session, err := d.GetSessionUsage(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetSessionUsage: %v", err)
 	}
@@ -531,17 +541,18 @@ func TestUsage_TurnGrouping_LegacyTurn0(t *testing.T) {
 
 func TestUsage_RecordTurnUsage_Empty(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Empty slice should be a no-op.
-	if err := d.RecordTurnUsage(nil); err != nil {
+	if err := d.RecordTurnUsage(ctx, nil); err != nil {
 		t.Errorf("RecordTurnUsage(nil): %v", err)
 	}
-	if err := d.RecordTurnUsage([]UsageEvent{}); err != nil {
+	if err := d.RecordTurnUsage(ctx, []UsageEvent{}); err != nil {
 		t.Errorf("RecordTurnUsage([]): %v", err)
 	}
 
-	session, _ := d.GetSessionUsage("s1")
+	session, _ := d.GetSessionUsage(ctx, "s1")
 	if session.EventCount != 0 {
 		t.Errorf("expected 0 events, got %d", session.EventCount)
 	}
@@ -549,25 +560,26 @@ func TestUsage_RecordTurnUsage_Empty(t *testing.T) {
 
 func TestDeleteSession_Cascades(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateSession(Session{ID: "s1", AgentName: "test", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
-	d.AppendMessage("s1", "user", "hello", "{}", 10)
-	d.RecordTurnUsage([]UsageEvent{{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 100}})
+	d.AppendMessage(ctx, "s1", "user", "hello", "{}", 10)
+	d.RecordTurnUsage(ctx, []UsageEvent{{SessionID: "s1", Model: "m", Provider: "p", InputTokens: 100}})
 	if _, err := d.db.Exec(`INSERT INTO request_log (session_id, model) VALUES (?, ?)`, "s1", "m"); err != nil {
 		t.Fatalf("inserting test request_log row: %v", err)
 	}
 
-	if err := d.DeleteSession("s1"); err != nil {
+	if err := d.DeleteSession(ctx, "s1"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
 	// All related data should be gone.
-	msgs, _ := d.RecentMessages("s1", 10)
+	msgs, _ := d.RecentMessages(ctx, "s1", 10)
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 messages after delete, got %d", len(msgs))
 	}
 
-	usage, _ := d.GetSessionUsage("s1")
+	usage, _ := d.GetSessionUsage(ctx, "s1")
 	if usage.EventCount != 0 {
 		t.Errorf("expected 0 usage events after delete, got %d", usage.EventCount)
 	}

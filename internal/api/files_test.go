@@ -46,8 +46,8 @@ func TestFilesTree_ListsFilesAndDirs(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	// Create a directory and a file.
-	os.Mkdir(filepath.Join(root, "mydir"), 0755)
-	os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi"), 0644)
+	os.Mkdir(filepath.Join(root, "mydir"), 0o755)
+	os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi"), 0o644)
 
 	req := httptest.NewRequest("GET", "/api/files/tree", nil)
 	rec := httptest.NewRecorder()
@@ -74,8 +74,8 @@ func TestFilesTree_ListsFilesAndDirs(t *testing.T) {
 func TestFilesTree_SkipsHiddenFiles(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, ".env"), []byte("SECRET=x"), 0644)
-	os.WriteFile(filepath.Join(root, "visible.txt"), []byte("ok"), 0644)
+	os.WriteFile(filepath.Join(root, ".env"), []byte("SECRET=x"), 0o644)
+	os.WriteFile(filepath.Join(root, "visible.txt"), []byte("ok"), 0o644)
 
 	req := httptest.NewRequest("GET", "/api/files/tree", nil)
 	rec := httptest.NewRecorder()
@@ -96,8 +96,8 @@ func TestFilesTree_Subdirectory(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	sub := filepath.Join(root, "sub")
-	os.Mkdir(sub, 0755)
-	os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("deep"), 0644)
+	os.Mkdir(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("deep"), 0o644)
 
 	req := httptest.NewRequest("GET", "/api/files/tree?path=sub", nil)
 	rec := httptest.NewRecorder()
@@ -146,7 +146,7 @@ func TestFilesTree_PathTraversal(t *testing.T) {
 func TestFilesRead_Success(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "readme.txt"), []byte("hello world"), 0644)
+	os.WriteFile(filepath.Join(root, "readme.txt"), []byte("hello world"), 0o644)
 
 	req := httptest.NewRequest("GET", "/api/files/file?path=readme.txt", nil)
 	rec := httptest.NewRecorder()
@@ -187,7 +187,7 @@ func TestFilesRead_NotFound(t *testing.T) {
 func TestFilesRead_Directory(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.Mkdir(filepath.Join(root, "adir"), 0755)
+	os.Mkdir(filepath.Join(root, "adir"), 0o755)
 
 	req := httptest.NewRequest("GET", "/api/files/file?path=adir", nil)
 	rec := httptest.NewRecorder()
@@ -203,7 +203,7 @@ func TestFilesRead_TooLarge(t *testing.T) {
 
 	// Create a file just over the 2 MB read limit.
 	big := make([]byte, maxFileReadSize+1)
-	os.WriteFile(filepath.Join(root, "big.bin"), big, 0644)
+	os.WriteFile(filepath.Join(root, "big.bin"), big, 0o644)
 
 	req := httptest.NewRequest("GET", "/api/files/file?path=big.bin", nil)
 	rec := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestFilesWrite_CreateNew(t *testing.T) {
 func TestFilesWrite_Overwrite(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "existing.txt"), []byte("old"), 0644)
+	os.WriteFile(filepath.Join(root, "existing.txt"), []byte("old"), 0o644)
 
 	body := strings.NewReader("new")
 	req := httptest.NewRequest("PUT", "/api/files/file?path=existing.txt", body)
@@ -426,7 +426,7 @@ func TestFilesMkdir_MissingPath(t *testing.T) {
 func TestFilesDelete_File(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "doomed.txt"), []byte("bye"), 0644)
+	os.WriteFile(filepath.Join(root, "doomed.txt"), []byte("bye"), 0o644)
 
 	req := httptest.NewRequest("DELETE", "/api/files/file?path=doomed.txt", nil)
 	rec := httptest.NewRecorder()
@@ -445,8 +445,8 @@ func TestFilesDelete_Directory(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	dir := filepath.Join(root, "rmdir")
-	os.Mkdir(dir, 0755)
-	os.WriteFile(filepath.Join(dir, "child.txt"), []byte("x"), 0644)
+	os.Mkdir(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "child.txt"), []byte("x"), 0o644)
 
 	req := httptest.NewRequest("DELETE", "/api/files/file?path=rmdir", nil)
 	rec := httptest.NewRecorder()
@@ -478,7 +478,7 @@ func TestFilesDelete_ProtectedPaths(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	for _, name := range []string{"agents", "config", "instances", "skills", "workspace"} {
-		os.MkdirAll(filepath.Join(root, name), 0755)
+		os.MkdirAll(filepath.Join(root, name), 0o755)
 	}
 
 	for _, name := range []string{"agents", "config", "instances", "skills", "workspace"} {
@@ -521,7 +521,7 @@ func TestFilesDelete_PathTraversal(t *testing.T) {
 func TestFilesRename_Success(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "old.txt"), []byte("data"), 0644)
+	os.WriteFile(filepath.Join(root, "old.txt"), []byte("data"), 0o644)
 
 	req := httptest.NewRequest("POST", "/api/files/rename?from=old.txt&to=new.txt", nil)
 	rec := httptest.NewRecorder()
@@ -546,7 +546,7 @@ func TestFilesRename_Success(t *testing.T) {
 func TestFilesRename_MoveToSubdir(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "moveme.txt"), []byte("moving"), 0644)
+	os.WriteFile(filepath.Join(root, "moveme.txt"), []byte("moving"), 0o644)
 
 	req := httptest.NewRequest("POST", "/api/files/rename?from=moveme.txt&to=subdir/moveme.txt", nil)
 	rec := httptest.NewRecorder()
@@ -568,8 +568,8 @@ func TestFilesRename_MoveToSubdir(t *testing.T) {
 func TestFilesRename_DestinationExists(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644)
-	os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0644)
+	os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644)
+	os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0o644)
 
 	req := httptest.NewRequest("POST", "/api/files/rename?from=a.txt&to=b.txt", nil)
 	rec := httptest.NewRecorder()
@@ -595,7 +595,7 @@ func TestFilesRename_SourceNotFound(t *testing.T) {
 func TestFilesRename_ProtectedSource(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.Mkdir(filepath.Join(root, "agents"), 0755)
+	os.Mkdir(filepath.Join(root, "agents"), 0o755)
 
 	req := httptest.NewRequest("POST", "/api/files/rename?from=agents&to=renamed", nil)
 	rec := httptest.NewRecorder()
@@ -634,7 +634,7 @@ func TestFilesRename_MissingParams(t *testing.T) {
 func TestFilesRename_PathTraversal(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "legit.txt"), []byte("x"), 0644)
+	os.WriteFile(filepath.Join(root, "legit.txt"), []byte("x"), 0o644)
 
 	req := httptest.NewRequest("POST", "/api/files/rename?from=legit.txt&to=../../escaped.txt", nil)
 	rec := httptest.NewRecorder()
@@ -650,7 +650,7 @@ func TestFilesRename_PathTraversal(t *testing.T) {
 func TestFilesTree_SkipsSymlinks(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "real.txt"), []byte("x"), 0644)
+	os.WriteFile(filepath.Join(root, "real.txt"), []byte("x"), 0o644)
 	os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "link.txt"))
 
 	req := httptest.NewRequest("GET", "/api/files/tree", nil)
@@ -672,7 +672,7 @@ func TestFilesDelete_SymlinkBlocked(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	// Create a real file and a symlink to it.
-	os.WriteFile(filepath.Join(root, "target.txt"), []byte("real"), 0644)
+	os.WriteFile(filepath.Join(root, "target.txt"), []byte("real"), 0o644)
 	symPath := filepath.Join(root, "link.txt")
 	os.Symlink(filepath.Join(root, "target.txt"), symPath)
 
@@ -696,7 +696,7 @@ func TestFilesDelete_SymlinkBlocked(t *testing.T) {
 func TestFilesRename_SymlinkSourceBlocked(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
-	os.WriteFile(filepath.Join(root, "real.txt"), []byte("x"), 0644)
+	os.WriteFile(filepath.Join(root, "real.txt"), []byte("x"), 0o644)
 	os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "link.txt"))
 
 	// Rename resolves symlinks, so the source becomes real.txt.
@@ -752,8 +752,8 @@ func TestFilesRename_Directory(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	dir := filepath.Join(root, "olddir")
-	os.Mkdir(dir, 0755)
-	os.WriteFile(filepath.Join(dir, "child.txt"), []byte("inside"), 0644)
+	os.Mkdir(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "child.txt"), []byte("inside"), 0o644)
 
 	req := httptest.NewRequest("POST", "/api/files/rename?from=olddir&to=newdir", nil)
 	rec := httptest.NewRecorder()
@@ -813,7 +813,7 @@ func TestFilesTree_IncludesFileSize(t *testing.T) {
 	srv, root := newFilesTestServer(t)
 
 	content := "hello world"
-	os.WriteFile(filepath.Join(root, "sized.txt"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(root, "sized.txt"), []byte(content), 0o644)
 
 	req := httptest.NewRequest("GET", "/api/files/tree", nil)
 	rec := httptest.NewRecorder()
@@ -883,7 +883,7 @@ func TestResolveFilesPath_EmptyRelPath(t *testing.T) {
 
 func TestResolveFilesPath_ValidSubpath(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0644)
+	os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0o644)
 
 	resolved, err := resolveFilesPath(root, "file.txt")
 	if err != nil {

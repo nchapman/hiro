@@ -36,8 +36,8 @@ func newSyncPair(t *testing.T) *syncPair {
 	t.Helper()
 	leaderDir := t.TempDir()
 	workerDir := t.TempDir()
-	os.MkdirAll(filepath.Join(leaderDir, "workspace"), 0755)
-	os.MkdirAll(filepath.Join(workerDir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(leaderDir, "workspace"), 0o755)
+	os.MkdirAll(filepath.Join(workerDir, "workspace"), 0o755)
 
 	p := &syncPair{leaderDir: leaderDir, workerDir: workerDir}
 
@@ -147,8 +147,8 @@ func TestStress_RapidBurstWrites(t *testing.T) {
 	const n = 500
 	for i := 0; i < n; i++ {
 		path := filepath.Join(p.leaderDir, "workspace", "burst", fmt.Sprintf("file-%03d.txt", i))
-		os.MkdirAll(filepath.Dir(path), 0755)
-		os.WriteFile(path, []byte(fmt.Sprintf("content-%d", i)), 0644)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(fmt.Sprintf("content-%d", i)), 0o644)
 	}
 
 	// Wait for all files to arrive on the worker.
@@ -185,8 +185,8 @@ func TestStress_BidirectionalSync(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < n; i++ {
 			path := filepath.Join(p.leaderDir, "workspace", "from-leader", fmt.Sprintf("file-%03d.txt", i))
-			os.MkdirAll(filepath.Dir(path), 0755)
-			os.WriteFile(path, []byte(fmt.Sprintf("leader-%d", i)), 0644)
+			os.MkdirAll(filepath.Dir(path), 0o755)
+			os.WriteFile(path, []byte(fmt.Sprintf("leader-%d", i)), 0o644)
 		}
 	}()
 
@@ -194,8 +194,8 @@ func TestStress_BidirectionalSync(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < n; i++ {
 			path := filepath.Join(p.workerDir, "workspace", "from-worker", fmt.Sprintf("file-%03d.txt", i))
-			os.MkdirAll(filepath.Dir(path), 0755)
-			os.WriteFile(path, []byte(fmt.Sprintf("worker-%d", i)), 0644)
+			os.MkdirAll(filepath.Dir(path), 0o755)
+			os.WriteFile(path, []byte(fmt.Sprintf("worker-%d", i)), 0o644)
 		}
 	}()
 
@@ -226,7 +226,7 @@ func TestStress_AtomicWriteIntegrity(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -243,7 +243,7 @@ func TestStress_AtomicWriteIntegrity(t *testing.T) {
 	filePath := filepath.Join(dir, "workspace", "hotfile.txt")
 
 	// Seed the file so readers don't get ENOENT on the first iteration.
-	os.WriteFile(filePath, bytes.Repeat([]byte{0}, fileSize), 0644)
+	os.WriteFile(filePath, bytes.Repeat([]byte{0}, fileSize), 0o644)
 
 	var violations atomic.Int64
 	var readerDone atomic.Bool
@@ -284,7 +284,7 @@ func TestStress_AtomicWriteIntegrity(t *testing.T) {
 				svc.ApplyFileUpdate(&pb.FileUpdate{
 					Path:           "workspace/hotfile.txt",
 					Content:        content,
-					Mode:           0644,
+					Mode:           0o644,
 					MtimeUnixNanos: time.Now().UnixNano(),
 					OriginNode:     fmt.Sprintf("writer-%d", id),
 				})
@@ -326,7 +326,7 @@ func TestStress_ConflictDetection(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -347,13 +347,13 @@ func TestStress_ConflictDetection(t *testing.T) {
 		svc.ApplyFileUpdate(&pb.FileUpdate{
 			Path:           relPath,
 			Content:        []byte("initial"),
-			Mode:           0644,
+			Mode:           0o644,
 			MtimeUnixNanos: baseMtime.UnixNano(),
 			OriginNode:     "leader",
 		})
 
 		// Simulate a local edit (mtime = now, well past the baseline).
-		os.WriteFile(absPath, []byte(fmt.Sprintf("local-%d", i)), 0644)
+		os.WriteFile(absPath, []byte(fmt.Sprintf("local-%d", i)), 0o644)
 		now := time.Now()
 		os.Chtimes(absPath, now, now)
 
@@ -363,7 +363,7 @@ func TestStress_ConflictDetection(t *testing.T) {
 		err := svc.ApplyFileUpdate(&pb.FileUpdate{
 			Path:           relPath,
 			Content:        []byte(fmt.Sprintf("remote-%d", i)),
-			Mode:           0644,
+			Mode:           0o644,
 			MtimeUnixNanos: remoteMtime.UnixNano(),
 			OriginNode:     "leader",
 		})
@@ -395,12 +395,12 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 
 	// Set up leader with 100 files.
 	leaderDir := t.TempDir()
-	os.MkdirAll(filepath.Join(leaderDir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(leaderDir, "workspace"), 0o755)
 
 	const n = 100
 	for i := 0; i < n; i++ {
 		path := filepath.Join(leaderDir, "workspace", fmt.Sprintf("file-%03d.txt", i))
-		os.WriteFile(path, []byte(fmt.Sprintf("original-%d", i)), 0644)
+		os.WriteFile(path, []byte(fmt.Sprintf("original-%d", i)), 0o644)
 	}
 
 	leader := NewFileSyncService(FileSyncConfig{
@@ -422,7 +422,7 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 			default:
 				i := rand.Intn(n)
 				path := filepath.Join(leaderDir, "workspace", fmt.Sprintf("file-%03d.txt", i))
-				os.WriteFile(path, []byte(fmt.Sprintf("modified-%d-%d", i, time.Now().UnixNano())), 0644)
+				os.WriteFile(path, []byte(fmt.Sprintf("modified-%d-%d", i, time.Now().UnixNano())), 0o644)
 				time.Sleep(time.Millisecond)
 			}
 		}
@@ -438,9 +438,9 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 
 	// Apply to worker dir (which also has some of its own files).
 	workerDir := t.TempDir()
-	os.MkdirAll(filepath.Join(workerDir, "workspace", "worker-only"), 0755)
+	os.MkdirAll(filepath.Join(workerDir, "workspace", "worker-only"), 0o755)
 	for i := 0; i < 20; i++ {
-		os.WriteFile(filepath.Join(workerDir, "workspace", "worker-only", fmt.Sprintf("w-%d.txt", i)), []byte("mine"), 0644)
+		os.WriteFile(filepath.Join(workerDir, "workspace", "worker-only", fmt.Sprintf("w-%d.txt", i)), []byte("mine"), 0o644)
 	}
 
 	worker := NewFileSyncService(FileSyncConfig{
@@ -514,8 +514,8 @@ func TestStress_EchoSuppression(t *testing.T) {
 	const n = 50
 	for i := 0; i < n; i++ {
 		path := filepath.Join(p.leaderDir, "workspace", "echo-test", fmt.Sprintf("file-%03d.txt", i))
-		os.MkdirAll(filepath.Dir(path), 0755)
-		os.WriteFile(path, []byte(fmt.Sprintf("content-%d", i)), 0644)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(fmt.Sprintf("content-%d", i)), 0o644)
 	}
 
 	// Wait for files to arrive on worker.
@@ -560,9 +560,9 @@ func TestStress_DeepDirectoryTree(t *testing.T) {
 		for level := 0; level < depth; level++ {
 			parts = append(parts, fmt.Sprintf("level-%d", level))
 			dir := filepath.Join(parts...)
-			os.MkdirAll(dir, 0755)
+			os.MkdirAll(dir, 0o755)
 			file := filepath.Join(dir, "leaf.txt")
-			os.WriteFile(file, []byte(fmt.Sprintf("tree-%d-level-%d", tree, level)), 0644)
+			os.WriteFile(file, []byte(fmt.Sprintf("tree-%d-level-%d", tree, level)), 0o644)
 
 			rel, _ := filepath.Rel(p.leaderDir, file)
 			allFiles = append(allFiles, rel)
@@ -605,9 +605,9 @@ func TestStress_DeleteDuringSync(t *testing.T) {
 
 	// Create files.
 	dir := filepath.Join(p.leaderDir, "workspace", "ephemeral")
-	os.MkdirAll(dir, 0755)
+	os.MkdirAll(dir, 0o755)
 	for i := 0; i < n; i++ {
-		os.WriteFile(filepath.Join(dir, fmt.Sprintf("file-%03d.txt", i)), []byte(fmt.Sprintf("doomed-%d", i)), 0644)
+		os.WriteFile(filepath.Join(dir, fmt.Sprintf("file-%03d.txt", i)), []byte(fmt.Sprintf("doomed-%d", i)), 0o644)
 	}
 
 	// Wait for propagation.
@@ -653,8 +653,8 @@ func TestStress_ReconnectionGap(t *testing.T) {
 	const baseFiles = 50
 	for i := 0; i < baseFiles; i++ {
 		path := filepath.Join(p.leaderDir, "workspace", "shared", fmt.Sprintf("file-%03d.txt", i))
-		os.MkdirAll(filepath.Dir(path), 0755)
-		os.WriteFile(path, []byte(fmt.Sprintf("base-%d", i)), 0644)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(fmt.Sprintf("base-%d", i)), 0o644)
 	}
 	waitFor(t, 10*time.Second, func() bool {
 		return countFiles(filepath.Join(p.workerDir, "workspace", "shared")) >= baseFiles
@@ -669,12 +669,12 @@ func TestStress_ReconnectionGap(t *testing.T) {
 	// Leader: add 30 new files.
 	for i := 0; i < 30; i++ {
 		path := filepath.Join(p.leaderDir, "workspace", "shared", fmt.Sprintf("gap-new-%03d.txt", i))
-		os.WriteFile(path, []byte(fmt.Sprintf("gap-new-%d", i)), 0644)
+		os.WriteFile(path, []byte(fmt.Sprintf("gap-new-%d", i)), 0o644)
 	}
 	// Leader: modify 10 existing files.
 	for i := 0; i < 10; i++ {
 		path := filepath.Join(p.leaderDir, "workspace", "shared", fmt.Sprintf("file-%03d.txt", i))
-		os.WriteFile(path, []byte(fmt.Sprintf("gap-modified-%d", i)), 0644)
+		os.WriteFile(path, []byte(fmt.Sprintf("gap-modified-%d", i)), 0o644)
 	}
 	// Leader: delete 5 files.
 	for i := 45; i < 50; i++ {
@@ -682,9 +682,9 @@ func TestStress_ReconnectionGap(t *testing.T) {
 	}
 	// Worker: add 20 files outside the sync directory (to verify they're
 	// not disturbed by Reconcile, which is authoritative for the sync dir).
-	os.MkdirAll(filepath.Join(p.workerDir, "local-data"), 0755)
+	os.MkdirAll(filepath.Join(p.workerDir, "local-data"), 0o755)
 	for i := 0; i < 20; i++ {
-		os.WriteFile(filepath.Join(p.workerDir, "local-data", fmt.Sprintf("w-%03d.txt", i)), []byte("mine"), 0644)
+		os.WriteFile(filepath.Join(p.workerDir, "local-data", fmt.Sprintf("w-%03d.txt", i)), []byte("mine"), 0o644)
 	}
 
 	// Phase 4: Reconnect — build knownFiles from worker's current state, reconcile.

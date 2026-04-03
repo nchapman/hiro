@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -23,7 +24,7 @@ func openTestDB(t *testing.T) *platformdb.DB {
 
 func createTestSession(t *testing.T, pdb *platformdb.DB, id string) {
 	t.Helper()
-	if err := pdb.CreateSession(platformdb.Session{
+	if err := pdb.CreateSession(context.Background(), platformdb.Session{
 		ID:        id,
 		AgentName: "test-agent",
 		Mode:      "persistent",
@@ -42,7 +43,7 @@ func appendMsg(t *testing.T, pdb *platformdb.DB, sessionID, role, content string
 		}
 	}
 	raw, _ := json.Marshal(msg)
-	if _, err := pdb.AppendMessage(sessionID, role, content, string(raw), tokens); err != nil {
+	if _, err := pdb.AppendMessage(context.Background(), sessionID, role, content, string(raw), tokens); err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
 }
@@ -51,7 +52,7 @@ func TestAssemble_Empty(t *testing.T) {
 	pdb := openTestDB(t)
 	createTestSession(t, pdb, "s1")
 
-	result, err := Assemble(pdb, "s1", DefaultCompactionConfig())
+	result, err := Assemble(context.Background(), pdb, "s1", DefaultCompactionConfig())
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestAssemble_ReturnsMessages(t *testing.T) {
 	appendMsg(t, pdb, "s1", "assistant", "hi there", 15)
 	appendMsg(t, pdb, "s1", "user", "how are you?", 12)
 
-	result, err := Assemble(pdb, "s1", DefaultCompactionConfig())
+	result, err := Assemble(context.Background(), pdb, "s1", DefaultCompactionConfig())
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestAssemble_RespectsBudget(t *testing.T) {
 		TokenBudget:    20_000,
 		FreshTailCount: 5,
 	}
-	result, err := Assemble(pdb, "s1", cfg)
+	result, err := Assemble(context.Background(), pdb, "s1", cfg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestAssemble_TailTruncation(t *testing.T) {
 		TokenBudget:    10_000,
 		FreshTailCount: 10, // wants all 10, but tail cap = 8000 tokens
 	}
-	result, err := Assemble(pdb, "s1", cfg)
+	result, err := Assemble(context.Background(), pdb, "s1", cfg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestAssemble_SessionIsolation(t *testing.T) {
 	appendMsg(t, pdb, "s1", "user", "session 1 msg", 10)
 	appendMsg(t, pdb, "s2", "user", "session 2 msg", 10)
 
-	result, err := Assemble(pdb, "s1", DefaultCompactionConfig())
+	result, err := Assemble(context.Background(), pdb, "s1", DefaultCompactionConfig())
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}

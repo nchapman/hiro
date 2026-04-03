@@ -19,10 +19,10 @@ func ReadMemoryFile(instanceDir string) (string, error) {
 // so concurrent readers never see partial content.
 func WriteMemoryFile(instanceDir, content string) error {
 	path := filepath.Join(instanceDir, memoryFileName)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
-	return atomicWrite(path, []byte(content), 0600)
+	return atomicWrite(path, []byte(content), 0o600)
 }
 
 // atomicWrite writes content to path via a temp file + rename.

@@ -70,8 +70,8 @@ func TestWriteTodos_Permissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("expected 0600, got %o", perm)
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected 0o600, got %o", perm)
 	}
 }
 

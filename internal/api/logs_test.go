@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -37,7 +38,7 @@ func TestQueryLogs_WithData(t *testing.T) {
 	t.Cleanup(func() { pdb.Close() })
 	srv.pdb = pdb
 
-	pdb.InsertLogs([]platformdb.LogEntry{
+	pdb.InsertLogs(context.Background(), []platformdb.LogEntry{
 		{Level: "INFO", Message: "hello", Component: "api", CreatedAt: time.Now().UTC()},
 		{Level: "WARN", Message: "caution", Component: "inference", CreatedAt: time.Now().UTC()},
 	})
@@ -62,7 +63,7 @@ func TestQueryLogs_LevelFilter(t *testing.T) {
 	t.Cleanup(func() { pdb.Close() })
 	srv.pdb = pdb
 
-	pdb.InsertLogs([]platformdb.LogEntry{
+	pdb.InsertLogs(context.Background(), []platformdb.LogEntry{
 		{Level: "INFO", Message: "info msg", CreatedAt: time.Now().UTC()},
 		{Level: "ERROR", Message: "error msg", CreatedAt: time.Now().UTC()},
 	})

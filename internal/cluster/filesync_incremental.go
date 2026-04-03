@@ -205,15 +205,15 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 
 	// Write the file atomically (temp + rename) so concurrent readers
 	// never see partial content.
-	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return fmt.Errorf("creating parent dir for %s: %w", update.Path, err)
 	}
 
-	mode := os.FileMode(0644)
+	mode := os.FileMode(0o644)
 	if update.Mode != 0 {
 		// Strip execute, setuid, setgid, and sticky bits from remote files
 		// to prevent a compromised node from planting executables.
-		mode = os.FileMode(update.Mode) & 0666
+		mode = os.FileMode(update.Mode) & 0o666
 	}
 
 	if err := atomicWrite(absPath, update.Content, mode); err != nil {

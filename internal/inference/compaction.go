@@ -196,7 +196,7 @@ func (c *Compactor) CompactIfNeeded(ctx context.Context, lastInputTokens int64) 
 	// (first turn, or usage not tracked).
 	contextTokens := lastInputTokens
 	if contextTokens == 0 {
-		estimated, err := c.pdb.ContextTokenCount(c.sessionID)
+		estimated, err := c.pdb.ContextTokenCount(ctx, c.sessionID)
 		if err != nil {
 			return result, fmt.Errorf("checking context tokens: %w", err)
 		}
@@ -225,7 +225,7 @@ func (c *Compactor) CompactIfNeeded(ctx context.Context, lastInputTokens int64) 
 	// Re-check with post-compaction estimated tokens to decide if the hard
 	// threshold is still exceeded. We use estimates here because the real
 	// input_tokens won't be known until the next API call.
-	postTokens, err := c.pdb.ContextTokenCount(c.sessionID)
+	postTokens, err := c.pdb.ContextTokenCount(ctx, c.sessionID)
 	if err != nil {
 		return result, fmt.Errorf("post-compaction token check: %w", err)
 	}
@@ -248,7 +248,7 @@ func tokenSource(lastInputTokens int64) string {
 }
 
 func (c *Compactor) leafPass(ctx context.Context) error {
-	items, msgs, err := c.pdb.OldestMessageContextItems(c.sessionID, c.config.FreshTailCount, c.config.LeafChunkTokens)
+	items, msgs, err := c.pdb.OldestMessageContextItems(ctx, c.sessionID, c.config.FreshTailCount, c.config.LeafChunkTokens)
 	if err != nil {
 		return err
 	}
@@ -257,7 +257,7 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 	}
 
 	// Look for a summary immediately preceding this chunk for dedup context.
-	prevContext := c.precedingSummaryContent(items[0].Ordinal, nil)
+	prevContext := c.precedingSummaryContent(ctx, items[0].Ordinal, nil)
 
 	input := buildLeafInput(msgs)
 	sourceTokens := 0
@@ -287,13 +287,13 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 		SourceTokens: sourceTokens,
 	}
 
-	if err := c.pdb.CreateSummary(sum); err != nil {
+	if err := c.pdb.CreateSummary(ctx, sum); err != nil {
 		return fmt.Errorf("creating summary: %w", err)
 	}
-	if err := c.pdb.LinkSummaryMessages(summaryID, msgIDs); err != nil {
+	if err := c.pdb.LinkSummaryMessages(ctx, summaryID, msgIDs); err != nil {
 		return fmt.Errorf("linking messages: %w", err)
 	}
-	if err := c.pdb.ReplaceContextItems(c.sessionID, items[0].Ordinal, items[len(items)-1].Ordinal, summaryID); err != nil {
+	if err := c.pdb.ReplaceContextItems(ctx, c.sessionID, items[0].Ordinal, items[len(items)-1].Ordinal, summaryID); err != nil {
 		return fmt.Errorf("replacing context items: %w", err)
 	}
 
@@ -307,7 +307,7 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 }
 
 func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
-	maxDepth, err := c.pdb.MaxSummaryDepth(c.sessionID)
+	maxDepth, err := c.pdb.MaxSummaryDepth(ctx, c.sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -316,7 +316,7 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 	}
 
 	// Fetch all context items once for dedup lookups across depth iterations.
-	allContextItems, err := c.pdb.GetContextItems(c.sessionID)
+	allContextItems, err := c.pdb.GetContextItems(ctx, c.sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -327,7 +327,7 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 	}
 
 	for depth := 0; depth <= maxAllowedDepth; depth++ {
-		items, sums, err := c.pdb.ContiguousSummariesAtDepth(c.sessionID, depth, c.config.CondenseMinFanout)
+		items, sums, err := c.pdb.ContiguousSummariesAtDepth(ctx, c.sessionID, depth, c.config.CondenseMinFanout)
 		if err != nil {
 			return false, err
 		}
@@ -336,7 +336,7 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 		}
 
 		// Look for a summary immediately preceding this run for dedup context.
-		prevContext := c.precedingSummaryContent(items[0].Ordinal, allContextItems)
+		prevContext := c.precedingSummaryContent(ctx, items[0].Ordinal, allContextItems)
 
 		input := buildCondensationInput(sums)
 		sourceTokens := 0
@@ -366,13 +366,13 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 			SourceTokens: sourceTokens,
 		}
 
-		if err := c.pdb.CreateSummary(sum); err != nil {
+		if err := c.pdb.CreateSummary(ctx, sum); err != nil {
 			return false, fmt.Errorf("creating condensed summary: %w", err)
 		}
-		if err := c.pdb.LinkSummaryParents(summaryID, childIDs); err != nil {
+		if err := c.pdb.LinkSummaryParents(ctx, summaryID, childIDs); err != nil {
 			return false, fmt.Errorf("linking parents: %w", err)
 		}
-		if err := c.pdb.ReplaceContextItems(c.sessionID, items[0].Ordinal, items[len(items)-1].Ordinal, summaryID); err != nil {
+		if err := c.pdb.ReplaceContextItems(ctx, c.sessionID, items[0].Ordinal, items[len(items)-1].Ordinal, summaryID); err != nil {
 			return false, fmt.Errorf("replacing context items: %w", err)
 		}
 
@@ -391,7 +391,7 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 func (c *Compactor) fullSweep(ctx context.Context) error {
 	const maxIterations = 10
 	for i := 0; i < maxIterations; i++ {
-		tokensOutside, err := c.pdb.MessageTokensOutsideTail(c.sessionID, c.config.FreshTailCount)
+		tokensOutside, err := c.pdb.MessageTokensOutsideTail(ctx, c.sessionID, c.config.FreshTailCount)
 		if err != nil {
 			return err
 		}
@@ -468,10 +468,10 @@ func generateSummaryID() string {
 // When allItems is provided, it reuses that slice instead of re-fetching from
 // the DB. This avoids a redundant full scan in the condensation path where
 // ContiguousSummariesAtDepth already fetches all context items.
-func (c *Compactor) precedingSummaryContent(startOrdinal int, allItems []platformdb.ContextItem) string {
+func (c *Compactor) precedingSummaryContent(ctx context.Context, startOrdinal int, allItems []platformdb.ContextItem) string {
 	if allItems == nil {
 		var err error
-		allItems, err = c.pdb.GetContextItems(c.sessionID)
+		allItems, err = c.pdb.GetContextItems(ctx, c.sessionID)
 		if err != nil {
 			return ""
 		}
@@ -494,7 +494,7 @@ func (c *Compactor) precedingSummaryContent(startOrdinal int, allItems []platfor
 		return ""
 	}
 
-	sum, err := c.pdb.GetSummary(*prevSummaryID)
+	sum, err := c.pdb.GetSummary(ctx, *prevSummaryID)
 	if err != nil {
 		return ""
 	}

@@ -35,7 +35,7 @@ func runAgent() error {
 	// When running under UID isolation, set a collaborative umask and
 	// verify we are running as the expected user.
 	if cfg.UID != 0 {
-		syscall.Umask(0002)
+		syscall.Umask(0o002)
 		if uint32(os.Getuid()) != cfg.UID {
 			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
 		}

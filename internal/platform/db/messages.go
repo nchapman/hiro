@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -59,9 +60,9 @@ type SearchResult struct {
 
 // AppendMessage stores a new message and adds it to the context items.
 // If meta is true, the message is visible to the model but hidden from the user's transcript.
-func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int, meta ...bool) (int64, error) {
+func (d *DB) AppendMessage(ctx context.Context, sessionID, role, content, rawJSON string, tokens int, meta ...bool) (int64, error) {
 	isMeta := len(meta) > 0 && meta[0]
-	tx, err := d.db.Begin()
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -69,7 +70,7 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int,
 
 	// Get next sequence number for this session.
 	var maxSeq sql.NullInt64
-	if err := tx.QueryRow("SELECT MAX(seq) FROM messages WHERE session_id = ?", sessionID).Scan(&maxSeq); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT MAX(seq) FROM messages WHERE session_id = ?", sessionID).Scan(&maxSeq); err != nil {
 		return 0, err
 	}
 	seq := 1
@@ -81,7 +82,7 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int,
 	if isMeta {
 		metaInt = 1
 	}
-	result, err := tx.Exec(
+	result, err := tx.ExecContext(ctx,
 		"INSERT INTO messages (session_id, seq, role, content, raw_json, tokens, meta) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		sessionID, seq, role, content, rawJSON, tokens, metaInt,
 	)
@@ -95,7 +96,7 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int,
 
 	// Get next context ordinal for this session.
 	var maxOrd sql.NullInt64
-	if err := tx.QueryRow("SELECT MAX(ordinal) FROM context_items WHERE session_id = ?", sessionID).Scan(&maxOrd); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT MAX(ordinal) FROM context_items WHERE session_id = ?", sessionID).Scan(&maxOrd); err != nil {
 		return 0, err
 	}
 	ord := 0
@@ -103,7 +104,7 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int,
 		ord = int(maxOrd.Int64) + 1
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		"INSERT INTO context_items (session_id, ordinal, item_type, message_id) VALUES (?, ?, 'message', ?)",
 		sessionID, ord, msgID,
 	); err != nil {
@@ -115,17 +116,17 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int,
 
 // UpdateMessageTimestamp sets the created_at timestamp for a message.
 // Used by tests that ingest historical data with known timestamps.
-func (d *DB) UpdateMessageTimestamp(id int64, t time.Time) error {
-	_, err := d.db.Exec("UPDATE messages SET created_at = ? WHERE id = ?",
+func (d *DB) UpdateMessageTimestamp(ctx context.Context, id int64, t time.Time) error {
+	_, err := d.db.ExecContext(ctx, "UPDATE messages SET created_at = ? WHERE id = ?",
 		t.Format("2006-01-02 15:04:05"), id)
 	return err
 }
 
 // GetMessage retrieves a message by ID.
-func (d *DB) GetMessage(id int64) (Message, error) {
+func (d *DB) GetMessage(ctx context.Context, id int64) (Message, error) {
 	var m Message
 	var createdAt string
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		"SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at FROM messages WHERE id = ?", id,
 	).Scan(&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &m.RawJSON, &m.Tokens, &m.Meta, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -139,7 +140,7 @@ func (d *DB) GetMessage(id int64) (Message, error) {
 }
 
 // GetMessages retrieves messages by their IDs, in sequence order.
-func (d *DB) GetMessages(ids []int64) ([]Message, error) {
+func (d *DB) GetMessages(ctx context.Context, ids []int64) ([]Message, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -153,7 +154,7 @@ func (d *DB) GetMessages(ids []int64) ([]Message, error) {
 		"SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at FROM messages WHERE id IN (%s) ORDER BY seq",
 		strings.Join(placeholders, ","),
 	)
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +163,8 @@ func (d *DB) GetMessages(ids []int64) ([]Message, error) {
 }
 
 // RecentMessages returns the most recent N messages for a session, oldest first.
-func (d *DB) RecentMessages(sessionID string, limit int) ([]Message, error) {
-	rows, err := d.db.Query(
+func (d *DB) RecentMessages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
+	rows, err := d.db.QueryContext(ctx,
 		`SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at
 		 FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?`,
 		sessionID, limit,
@@ -187,8 +188,8 @@ func (d *DB) RecentMessages(sessionID string, limit int) ([]Message, error) {
 // --- Summaries ---
 
 // CreateSummary inserts a new summary record.
-func (d *DB) CreateSummary(sum Summary) error {
-	_, err := d.db.Exec(
+func (d *DB) CreateSummary(ctx context.Context, sum Summary) error {
+	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO summaries (id, session_id, kind, depth, content, tokens, earliest_at, latest_at, source_tokens, model)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sum.ID, sum.SessionID, sum.Kind, sum.Depth, sum.Content, sum.Tokens,
@@ -199,14 +200,14 @@ func (d *DB) CreateSummary(sum Summary) error {
 }
 
 // LinkSummaryMessages links a leaf summary to its source messages.
-func (d *DB) LinkSummaryMessages(summaryID string, messageIDs []int64) error {
-	tx, err := d.db.Begin()
+func (d *DB) LinkSummaryMessages(ctx context.Context, summaryID string, messageIDs []int64) error {
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	for i, msgID := range messageIDs {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO summary_messages (summary_id, message_id, ordinal) VALUES (?, ?, ?)",
 			summaryID, msgID, i,
 		); err != nil {
@@ -217,14 +218,14 @@ func (d *DB) LinkSummaryMessages(summaryID string, messageIDs []int64) error {
 }
 
 // LinkSummaryParents links a condensed summary to its child summaries.
-func (d *DB) LinkSummaryParents(parentID string, childIDs []string) error {
-	tx, err := d.db.Begin()
+func (d *DB) LinkSummaryParents(ctx context.Context, parentID string, childIDs []string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	for i, childID := range childIDs {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO summary_parents (child_id, parent_id, ordinal) VALUES (?, ?, ?)",
 			childID, parentID, i,
 		); err != nil {
@@ -235,11 +236,11 @@ func (d *DB) LinkSummaryParents(parentID string, childIDs []string) error {
 }
 
 // GetSummary retrieves a summary by ID.
-func (d *DB) GetSummary(id string) (Summary, error) {
+func (d *DB) GetSummary(ctx context.Context, id string) (Summary, error) {
 	var sum Summary
 	var earliest, latest, created string
 	var model sql.NullString
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		`SELECT id, session_id, kind, depth, content, tokens, earliest_at, latest_at, source_tokens, model, created_at
 		 FROM summaries WHERE id = ?`, id,
 	).Scan(&sum.ID, &sum.SessionID, &sum.Kind, &sum.Depth, &sum.Content, &sum.Tokens,
@@ -260,8 +261,8 @@ func (d *DB) GetSummary(id string) (Summary, error) {
 }
 
 // GetSummarySourceMessages returns the source message IDs for a leaf summary.
-func (d *DB) GetSummarySourceMessages(summaryID string) ([]int64, error) {
-	rows, err := d.db.Query(
+func (d *DB) GetSummarySourceMessages(ctx context.Context, summaryID string) ([]int64, error) {
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT message_id FROM summary_messages WHERE summary_id = ? ORDER BY ordinal", summaryID,
 	)
 	if err != nil {
@@ -281,8 +282,8 @@ func (d *DB) GetSummarySourceMessages(summaryID string) ([]int64, error) {
 }
 
 // GetSummaryChildren returns the child summary IDs for a condensed summary.
-func (d *DB) GetSummaryChildren(parentID string) ([]string, error) {
-	rows, err := d.db.Query(
+func (d *DB) GetSummaryChildren(ctx context.Context, parentID string) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT child_id FROM summary_parents WHERE parent_id = ? ORDER BY ordinal", parentID,
 	)
 	if err != nil {
@@ -304,8 +305,8 @@ func (d *DB) GetSummaryChildren(parentID string) ([]string, error) {
 // --- Context Items ---
 
 // GetContextItems returns all context items for a session in ordinal order.
-func (d *DB) GetContextItems(sessionID string) ([]ContextItem, error) {
-	rows, err := d.db.Query(
+func (d *DB) GetContextItems(ctx context.Context, sessionID string) ([]ContextItem, error) {
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT session_id, ordinal, item_type, message_id, summary_id FROM context_items WHERE session_id = ? ORDER BY ordinal",
 		sessionID,
 	)
@@ -327,20 +328,20 @@ func (d *DB) GetContextItems(sessionID string) ([]ContextItem, error) {
 
 // ReplaceContextItems replaces a range of context items (inclusive) with a
 // single summary item. Used after compaction.
-func (d *DB) ReplaceContextItems(sessionID string, startOrd, endOrd int, summaryID string) error {
-	tx, err := d.db.Begin()
+func (d *DB) ReplaceContextItems(ctx context.Context, sessionID string, startOrd, endOrd int, summaryID string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		"DELETE FROM context_items WHERE session_id = ? AND ordinal >= ? AND ordinal <= ?",
 		sessionID, startOrd, endOrd,
 	); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		"INSERT INTO context_items (session_id, ordinal, item_type, summary_id) VALUES (?, ?, 'summary', ?)",
 		sessionID, startOrd, summaryID,
 	); err != nil {
@@ -350,9 +351,9 @@ func (d *DB) ReplaceContextItems(sessionID string, startOrd, endOrd int, summary
 }
 
 // ContextTokenCount returns the total estimated tokens across all context items for a session.
-func (d *DB) ContextTokenCount(sessionID string) (int, error) {
+func (d *DB) ContextTokenCount(ctx context.Context, sessionID string) (int, error) {
 	var total int
-	err := d.db.QueryRow(`
+	err := d.db.QueryRowContext(ctx, `
 		SELECT COALESCE(
 			(SELECT SUM(m.tokens) FROM context_items ci
 			 JOIN messages m ON ci.message_id = m.id
@@ -368,9 +369,9 @@ func (d *DB) ContextTokenCount(sessionID string) (int, error) {
 
 // MessageTokensOutsideTail returns the total tokens in messages that are
 // in context_items but outside the most recent tailSize items for a session.
-func (d *DB) MessageTokensOutsideTail(sessionID string, tailSize int) (int, error) {
+func (d *DB) MessageTokensOutsideTail(ctx context.Context, sessionID string, tailSize int) (int, error) {
 	var total int
-	err := d.db.QueryRow(`
+	err := d.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(m.tokens), 0)
 		FROM context_items ci
 		JOIN messages m ON ci.message_id = m.id
@@ -384,8 +385,8 @@ func (d *DB) MessageTokensOutsideTail(sessionID string, tailSize int) (int, erro
 
 // OldestMessageContextItems returns the oldest N message-type context items
 // outside the fresh tail for a session, along with their message data.
-func (d *DB) OldestMessageContextItems(sessionID string, tailSize, maxTokens int) ([]ContextItem, []Message, error) {
-	rows, err := d.db.Query(`
+func (d *DB) OldestMessageContextItems(ctx context.Context, sessionID string, tailSize, maxTokens int) ([]ContextItem, []Message, error) {
+	rows, err := d.db.QueryContext(ctx, `
 		SELECT ci.session_id, ci.ordinal, ci.item_type, ci.message_id, ci.summary_id,
 		       m.id, m.session_id, m.seq, m.role, m.content, m.raw_json, m.tokens, m.meta, m.created_at
 		FROM context_items ci
@@ -434,11 +435,11 @@ func (d *DB) OldestMessageContextItems(sessionID string, tailSize, maxTokens int
 // Note: adjacency is determined by context position, not by ordinal arithmetic.
 // After ReplaceContextItems, ordinals have gaps (e.g., summaries at ordinals
 // 5 and 21 with nothing between them are adjacent even though 5+1 != 21).
-func (d *DB) ContiguousSummariesAtDepth(sessionID string, depth, minCount int) ([]ContextItem, []Summary, error) {
+func (d *DB) ContiguousSummariesAtDepth(ctx context.Context, sessionID string, depth, minCount int) ([]ContextItem, []Summary, error) {
 	// Fetch all context items to determine adjacency, then filter to
 	// summaries at the target depth. Two summaries are adjacent if no
 	// other context items appear between their positions in the full list.
-	allCI, err := d.GetContextItems(sessionID)
+	allCI, err := d.GetContextItems(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -456,7 +457,7 @@ func (d *DB) ContiguousSummariesAtDepth(sessionID string, depth, minCount int) (
 		if ci.ItemType != "summary" || ci.SummaryID == nil {
 			continue
 		}
-		sum, err := d.GetSummary(*ci.SummaryID)
+		sum, err := d.GetSummary(ctx, *ci.SummaryID)
 		if err != nil {
 			continue
 		}
@@ -503,9 +504,9 @@ func (d *DB) ContiguousSummariesAtDepth(sessionID string, depth, minCount int) (
 
 // MaxSummaryDepth returns the maximum depth of any summary in context_items
 // for a session, or -1 if there are no summaries.
-func (d *DB) MaxSummaryDepth(sessionID string) (int, error) {
+func (d *DB) MaxSummaryDepth(ctx context.Context, sessionID string) (int, error) {
 	var depth sql.NullInt64
-	err := d.db.QueryRow(`
+	err := d.db.QueryRowContext(ctx, `
 		SELECT MAX(s.depth) FROM context_items ci
 		JOIN summaries s ON ci.summary_id = s.id
 		WHERE ci.session_id = ? AND ci.item_type = 'summary'
@@ -527,7 +528,7 @@ func sanitizeFTSQuery(q string) string {
 }
 
 // SearchMessages performs a full-text search over messages in a session.
-func (d *DB) SearchMessages(sessionID, query string, limit int) ([]SearchResult, error) {
+func (d *DB) SearchMessages(ctx context.Context, sessionID, query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -535,7 +536,7 @@ func (d *DB) SearchMessages(sessionID, query string, limit int) ([]SearchResult,
 		return nil, fmt.Errorf("search query too long (max 512 bytes)")
 	}
 	query = sanitizeFTSQuery(query)
-	rows, err := d.db.Query(`
+	rows, err := d.db.QueryContext(ctx, `
 		SELECT m.id, m.session_id, snippet(messages_fts, 0, '»', '«', '…', 32), rank
 		FROM messages_fts
 		JOIN messages m ON messages_fts.rowid = m.id
@@ -551,7 +552,7 @@ func (d *DB) SearchMessages(sessionID, query string, limit int) ([]SearchResult,
 }
 
 // SearchSummaries performs a full-text search over summaries in a session.
-func (d *DB) SearchSummaries(sessionID, query string, limit int) ([]SearchResult, error) {
+func (d *DB) SearchSummaries(ctx context.Context, sessionID, query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -559,7 +560,7 @@ func (d *DB) SearchSummaries(sessionID, query string, limit int) ([]SearchResult
 		return nil, fmt.Errorf("search query too long (max 512 bytes)")
 	}
 	query = sanitizeFTSQuery(query)
-	rows, err := d.db.Query(`
+	rows, err := d.db.QueryContext(ctx, `
 		SELECT s.id, s.session_id, snippet(summaries_fts, 1, '»', '«', '…', 32), rank
 		FROM summaries_fts
 		JOIN summaries s ON summaries_fts.summary_id = s.id
@@ -575,12 +576,12 @@ func (d *DB) SearchSummaries(sessionID, query string, limit int) ([]SearchResult
 }
 
 // Search performs a full-text search over messages and summaries in a session.
-func (d *DB) Search(sessionID, query string, limit int) ([]SearchResult, error) {
-	msgs, err := d.SearchMessages(sessionID, query, limit)
+func (d *DB) Search(ctx context.Context, sessionID, query string, limit int) ([]SearchResult, error) {
+	msgs, err := d.SearchMessages(ctx, sessionID, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	sums, err := d.SearchSummaries(sessionID, query, limit)
+	sums, err := d.SearchSummaries(ctx, sessionID, query, limit)
 	if err != nil {
 		return nil, err
 	}

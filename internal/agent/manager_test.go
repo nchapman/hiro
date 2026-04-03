@@ -21,7 +21,7 @@ import (
 // openTestPDB opens a platform DB in the given directory for testing.
 func openTestPDB(t *testing.T, dir string) *platformdb.DB {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, "db"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "db"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	pdb, err := platformdb.Open(filepath.Join(dir, "db", "hiro.db"))
@@ -85,10 +85,10 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 func writeAgentMD(t *testing.T, rootDir, name, content string) {
 	t.Helper()
 	agentDir := filepath.Join(rootDir, "agents", name)
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1026,7 +1026,7 @@ func TestManager_Restore_EphemeralCleaned(t *testing.T) {
 	ctx := t.Context()
 
 	// Manually insert an ephemeral instance into the DB.
-	pdb.CreateInstance(platformdb.Instance{
+	pdb.CreateInstance(ctx, platformdb.Instance{
 		ID:        "eph-orphan",
 		AgentName: "test-agent",
 		Mode:      "ephemeral",
@@ -1038,7 +1038,7 @@ func TestManager_Restore_EphemeralCleaned(t *testing.T) {
 	}
 
 	// Ephemeral should have been cleaned from DB.
-	_, err := pdb.GetInstance("eph-orphan")
+	_, err := pdb.GetInstance(ctx, "eph-orphan")
 	if err == nil {
 		t.Error("ephemeral instance should have been cleaned from DB")
 	}
@@ -1052,7 +1052,7 @@ func TestManager_Restore_MissingAgentDefSkipped(t *testing.T) {
 	ctx := t.Context()
 
 	// Insert a persistent instance for a non-existent agent.
-	pdb.CreateInstance(platformdb.Instance{
+	pdb.CreateInstance(ctx, platformdb.Instance{
 		ID:        "orphan-inst",
 		AgentName: "deleted-agent",
 		Mode:      "persistent",
@@ -1078,7 +1078,7 @@ func TestManager_Restore_MissingInstanceDirCleaned(t *testing.T) {
 	ctx := t.Context()
 
 	// Insert a running persistent instance but don't create the instance dir.
-	pdb.CreateInstance(platformdb.Instance{
+	pdb.CreateInstance(ctx, platformdb.Instance{
 		ID:        "no-dir-inst",
 		AgentName: "test-agent",
 		Mode:      "persistent",
@@ -1091,7 +1091,7 @@ func TestManager_Restore_MissingInstanceDirCleaned(t *testing.T) {
 	}
 
 	// Instance should have been removed from DB.
-	_, err := pdb.GetInstance("no-dir-inst")
+	_, err := pdb.GetInstance(ctx, "no-dir-inst")
 	if err == nil {
 		t.Error("running instance with missing dir should have been cleaned from DB")
 	}
@@ -2317,8 +2317,8 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 
 	agentDir := filepath.Join(dir, "agents", "worker")
-	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\nallowed_tools: [Bash, Read]\n---\nWork."), 0644)
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\nallowed_tools: [Bash, Read]\n---\nWork."), 0o644)
 
 	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "", "", "")
 	if err != nil {
@@ -2326,7 +2326,7 @@ func TestManager_PushConfigUpdate(t *testing.T) {
 	}
 
 	// Update agent.md
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\nallowed_tools: [Bash, Read, Grep]\n---\nUpdated work."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\nallowed_tools: [Bash, Read, Grep]\n---\nUpdated work."), 0o644)
 	mgr.pushConfigUpdate("worker")
 
 	// Verify the description was updated in-memory.
@@ -2344,8 +2344,8 @@ func TestManager_PushConfigUpdate_SkipsStopped(t *testing.T) {
 
 	// Write agent definition
 	agentDir := filepath.Join(dir, "agents", "worker")
-	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\n---\nWork."), 0644)
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\n---\nWork."), 0o644)
 
 	// Start and stop a session
 	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "", "", "")
@@ -2371,8 +2371,8 @@ func TestManager_PushConfigUpdate_UpdatesDescription(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 
 	agentDir := filepath.Join(dir, "agents", "worker")
-	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\n---\nWork."), 0644)
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: Old desc\n---\nWork."), 0o644)
 
 	id, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "", "", "")
 	if err != nil {
@@ -2380,7 +2380,7 @@ func TestManager_PushConfigUpdate_UpdatesDescription(t *testing.T) {
 	}
 
 	// Update description
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\n---\nWork."), 0644)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: worker\ndescription: New desc\n---\nWork."), 0o644)
 	mgr.pushConfigUpdate("worker")
 
 	info, ok := mgr.GetInstance(id)
@@ -2397,9 +2397,9 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 
 	for _, name := range []string{"alpha", "beta"} {
 		agentDir := filepath.Join(dir, "agents", name)
-		os.MkdirAll(agentDir, 0755)
+		os.MkdirAll(agentDir, 0o755)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ndescription: old\nallowed_tools: [Bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: old\nallowed_tools: [Bash]\n---\nDo stuff."), 0o644)
 	}
 
 	idA, err := mgr.CreateInstance(t.Context(), "alpha", "", "persistent", "", "", "")
@@ -2415,7 +2415,7 @@ func TestManager_PushConfigUpdateAll(t *testing.T) {
 	for _, name := range []string{"alpha", "beta"} {
 		agentDir := filepath.Join(dir, "agents", name)
 		os.WriteFile(filepath.Join(agentDir, "agent.md"),
-			[]byte("---\nname: "+name+"\ndescription: updated\nallowed_tools: [Bash]\n---\nDo stuff."), 0644)
+			[]byte("---\nname: "+name+"\ndescription: updated\nallowed_tools: [Bash]\n---\nDo stuff."), 0o644)
 	}
 
 	mgr.PushConfigUpdateAll()

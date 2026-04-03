@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -29,17 +30,17 @@ type LogQuery struct {
 }
 
 // InsertLogs batch-inserts log entries in a single transaction.
-func (d *DB) InsertLogs(entries []LogEntry) error {
+func (d *DB) InsertLogs(ctx context.Context, entries []LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	tx, err := d.db.Begin()
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning log insert tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.Prepare(
+	stmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO logs (level, message, component, instance_id, attrs, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 	)
@@ -69,7 +70,7 @@ func (d *DB) InsertLogs(entries []LogEntry) error {
 
 		createdAt := e.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z")
 
-		_, err = stmt.Exec(e.Level, e.Message, component, instanceID, attrsJSON, createdAt)
+		_, err = stmt.ExecContext(ctx, e.Level, e.Message, component, instanceID, attrsJSON, createdAt)
 		if err != nil {
 			return fmt.Errorf("inserting log entry: %w", err)
 		}
@@ -79,7 +80,7 @@ func (d *DB) InsertLogs(entries []LogEntry) error {
 
 // QueryLogs returns log entries matching the given filters, ordered newest-first.
 // Supports cursor-based pagination via the Before field.
-func (d *DB) QueryLogs(opts LogQuery) ([]LogEntry, error) {
+func (d *DB) QueryLogs(ctx context.Context, opts LogQuery) ([]LogEntry, error) {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 200
@@ -116,7 +117,7 @@ func (d *DB) QueryLogs(opts LogQuery) ([]LogEntry, error) {
 	query += " ORDER BY id DESC LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying logs: %w", err)
 	}
@@ -149,9 +150,9 @@ func (d *DB) QueryLogs(opts LogQuery) ([]LogEntry, error) {
 }
 
 // PruneLogs deletes log entries older than maxAge and returns the count deleted.
-func (d *DB) PruneLogs(maxAge time.Duration) (int64, error) {
+func (d *DB) PruneLogs(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-maxAge).Format("2006-01-02T15:04:05.000Z")
-	result, err := d.db.Exec("DELETE FROM logs WHERE created_at < ?", cutoff)
+	result, err := d.db.ExecContext(ctx, "DELETE FROM logs WHERE created_at < ?", cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("pruning logs: %w", err)
 	}
@@ -159,8 +160,8 @@ func (d *DB) PruneLogs(maxAge time.Duration) (int64, error) {
 }
 
 // LogSources returns the distinct component values from the logs table.
-func (d *DB) LogSources() ([]string, error) {
-	rows, err := d.db.Query(
+func (d *DB) LogSources(ctx context.Context) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT DISTINCT component FROM logs WHERE component IS NOT NULL ORDER BY component",
 	)
 	if err != nil {

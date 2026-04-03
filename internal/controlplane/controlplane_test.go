@@ -34,7 +34,7 @@ agents:
   researcher:
     allowed_tools: [Read, Grep]
 `
-	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,7 +324,7 @@ func TestCommandToolsRm(t *testing.T) {
 func TestReload_ExternalEdit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0600)
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -335,7 +335,7 @@ func TestReload_ExternalEdit(t *testing.T) {
 	}
 
 	// Simulate external edit: add a second secret.
-	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n  B: \"2\"\n"), 0600)
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n  B: \"2\"\n"), 0o600)
 	if err := cp.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestReload_ExternalEdit(t *testing.T) {
 func TestReload_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0600)
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -357,7 +357,7 @@ func TestReload_InvalidYAML(t *testing.T) {
 	}
 
 	// Write invalid YAML (tabs are illegal in YAML).
-	os.WriteFile(path, []byte("\t\tinvalid"), 0600)
+	os.WriteFile(path, []byte("\t\tinvalid"), 0o600)
 	if err := cp.Reload(); err != nil {
 		t.Fatal("expected nil error for invalid YAML, got", err)
 	}
@@ -371,7 +371,7 @@ func TestReload_InvalidYAML(t *testing.T) {
 func TestReload_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0600)
+	os.WriteFile(path, []byte("secrets:\n  A: \"1\"\n"), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -393,7 +393,7 @@ func TestReload_MissingFile(t *testing.T) {
 func TestReload_PreservesSignerOnSamePassword(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$test\"\n  session_secret: \"0102030405060708091011121314151617181920212223242526272829303132\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$test\"\n  session_secret: \"0102030405060708091011121314151617181920212223242526272829303132\"\n"), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -409,7 +409,7 @@ func TestReload_PreservesSignerOnSamePassword(t *testing.T) {
 	// Reload with same password hash — signer should be preserved.
 	// Re-read the file since TokenSigner may have updated the session_secret.
 	data, _ := os.ReadFile(path)
-	os.WriteFile(path, data, 0600)
+	os.WriteFile(path, data, 0o600)
 
 	if err := cp.Reload(); err != nil {
 		t.Fatal(err)
@@ -427,7 +427,7 @@ func TestReload_PreservesSignerOnSamePassword(t *testing.T) {
 func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234\"\n"), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -442,7 +442,7 @@ func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
 	_ = signer
 
 	// Reload with different password hash.
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$changed\"\n  session_secret: \"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$changed\"\n  session_secret: \"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234\"\n"), 0o600)
 	if err := cp.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestReload_InvalidatesSignerOnPasswordChange(t *testing.T) {
 func TestReload_InvalidatesSignerOnSecretRotation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd\"\n"), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -473,7 +473,7 @@ func TestReload_InvalidatesSignerOnSecretRotation(t *testing.T) {
 	}
 
 	// Rotate session_secret only (password hash unchanged).
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"11223344112233441122334411223344112233441122334411223344aabbccdd\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$same\"\n  session_secret: \"11223344112233441122334411223344112233441122334411223344aabbccdd\"\n"), 0o600)
 	if err := cp.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -795,7 +795,7 @@ func TestClusterTrackerURL_EnvOverride(t *testing.T) {
 	t.Setenv("HIRO_TRACKER_URL", "https://env-tracker.example.com")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("cluster:\n  tracker_url: https://config-tracker.example.com\n"), 0600)
+	os.WriteFile(path, []byte("cluster:\n  tracker_url: https://config-tracker.example.com\n"), 0o600)
 
 	cp, _ := Load(path, testLogger())
 	if url := cp.ClusterTrackerURL(); url != "https://env-tracker.example.com" {
@@ -813,7 +813,7 @@ func TestHandleCommand_SaveWarning(t *testing.T) {
 	cp.path = badPath
 
 	// Create the parent dir as a file to block MkdirAll.
-	os.WriteFile(filepath.Join(dir, "nowrite"), []byte("not a dir"), 0600)
+	os.WriteFile(filepath.Join(dir, "nowrite"), []byte("not a dir"), 0o600)
 
 	result, err := cp.HandleCommand("/secrets set TOKEN=abc123")
 	if err != nil {
@@ -863,7 +863,7 @@ func TestAuth_PasswordHash(t *testing.T) {
 func TestAuth_SetPasswordHash_InvalidatesSigner(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd\"\n"), 0600)
+	os.WriteFile(path, []byte("auth:\n  password_hash: \"$2a$10$original\"\n  session_secret: \"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd\"\n"), 0o600)
 
 	cp, _ := Load(path, testLogger())
 	signer1, err := cp.TokenSigner()
@@ -899,7 +899,7 @@ func TestClusterGetters(t *testing.T) {
   leader_addr: "leader:9090"
   node_name: "node-1"
   swarm_code: "swarm42"
-`), 0600)
+`), 0o600)
 
 	cp, err := Load(path, testLogger())
 	if err != nil {
@@ -921,7 +921,7 @@ func TestClusterSwarmCode_EnvOverride(t *testing.T) {
 	t.Setenv("HIRO_SWARM_CODE", "env-swarm")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("cluster:\n  swarm_code: config-swarm\n"), 0600)
+	os.WriteFile(path, []byte("cluster:\n  swarm_code: config-swarm\n"), 0o600)
 
 	cp, _ := Load(path, testLogger())
 	if v := cp.ClusterSwarmCode(); v != "env-swarm" {

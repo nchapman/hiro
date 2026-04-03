@@ -176,7 +176,7 @@ func TestResolveAndConfine_SymlinkEscape(t *testing.T) {
 
 	// A regular file inside the root should still work.
 	realFile := filepath.Join(root, "legit.txt")
-	os.WriteFile(realFile, []byte("ok"), 0644)
+	os.WriteFile(realFile, []byte("ok"), 0o644)
 
 	resolved, err := resolveAndConfine(root, "legit.txt")
 	if err != nil {
@@ -192,7 +192,7 @@ func TestAtomicWriteFile(t *testing.T) {
 	path := filepath.Join(dir, "out.txt")
 
 	// Write new file.
-	if err := atomicWriteFile(path, []byte("hello"), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("atomicWriteFile: %v", err)
 	}
 	data, _ := os.ReadFile(path)
@@ -200,12 +200,12 @@ func TestAtomicWriteFile(t *testing.T) {
 		t.Errorf("content = %q, want %q", string(data), "hello")
 	}
 	info, _ := os.Stat(path)
-	if perm := info.Mode().Perm(); perm != 0644 {
-		t.Errorf("permissions = %o, want 0644", perm)
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("permissions = %o, want 0o644", perm)
 	}
 
 	// Overwrite existing file.
-	if err := atomicWriteFile(path, []byte("world"), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte("world"), 0o644); err != nil {
 		t.Fatalf("atomicWriteFile overwrite: %v", err)
 	}
 	data, _ = os.ReadFile(path)

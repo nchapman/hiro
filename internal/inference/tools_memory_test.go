@@ -283,7 +283,7 @@ func TestMemoryFile_Permissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("expected 0600 permissions, got %04o", perm)
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected 0o600 permissions, got %04o", perm)
 	}
 }

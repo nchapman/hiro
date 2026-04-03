@@ -57,7 +57,7 @@ func createFile(filePath, content string) (fantasy.ToolResponse, error) {
 			fmt.Sprintf("error creating directory: %v", err)), nil
 	}
 
-	if err := os.WriteFile(filePath, []byte(content), 0666); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0o666); err != nil {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("error creating file: %v", err)), nil
 	}

@@ -19,7 +19,7 @@ func TestWatchFileWrite(t *testing.T) {
 
 	// Create a file before starting the watcher.
 	initial := filepath.Join(dir, "test.txt")
-	os.WriteFile(initial, []byte("hello"), 0644)
+	os.WriteFile(initial, []byte("hello"), 0o644)
 
 	w, err := New(dir, testLogger(), WithDebounce(50*time.Millisecond))
 	if err != nil {
@@ -42,7 +42,7 @@ func TestWatchFileWrite(t *testing.T) {
 	})
 
 	// Modify the file.
-	os.WriteFile(initial, []byte("world"), 0644)
+	os.WriteFile(initial, []byte("world"), 0o644)
 
 	select {
 	case <-done:
@@ -84,7 +84,7 @@ func TestWatchFileCreate(t *testing.T) {
 	})
 
 	// Create a new file.
-	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# Hello"), 0644)
+	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# Hello"), 0o644)
 
 	select {
 	case <-done:
@@ -106,7 +106,7 @@ func TestWatchSubdirectory(t *testing.T) {
 	dir := t.TempDir()
 
 	// Pre-create a subdirectory.
-	os.MkdirAll(filepath.Join(dir, "agents", "test"), 0755)
+	os.MkdirAll(filepath.Join(dir, "agents", "test"), 0o755)
 
 	w, err := New(dir, testLogger(), WithDebounce(50*time.Millisecond))
 	if err != nil {
@@ -129,7 +129,7 @@ func TestWatchSubdirectory(t *testing.T) {
 	})
 
 	// Create a file in a subdirectory.
-	os.WriteFile(filepath.Join(dir, "agents", "test", "agent.md"), []byte("---\nname: test\n---"), 0644)
+	os.WriteFile(filepath.Join(dir, "agents", "test", "agent.md"), []byte("---\nname: test\n---"), 0o644)
 
 	select {
 	case <-done:
@@ -172,8 +172,8 @@ func TestWatchNewDirectory(t *testing.T) {
 
 	// Create a new directory and a file inside it atomically —
 	// synthesizeExisting should catch the file even without a delay.
-	os.MkdirAll(filepath.Join(dir, "newdir"), 0755)
-	os.WriteFile(filepath.Join(dir, "newdir", "file.txt"), []byte("content"), 0644)
+	os.MkdirAll(filepath.Join(dir, "newdir"), 0o755)
+	os.WriteFile(filepath.Join(dir, "newdir", "file.txt"), []byte("content"), 0o644)
 
 	select {
 	case <-done:
@@ -203,7 +203,7 @@ func TestWatchPatternNoMatch(t *testing.T) {
 	})
 
 	// Create a .txt file — should not match *.go pattern.
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
 	time.Sleep(200 * time.Millisecond)
 
 	if called.Load() {
@@ -226,7 +226,7 @@ func TestWatchUnsubscribe(t *testing.T) {
 	})
 	unsub()
 
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
 	time.Sleep(200 * time.Millisecond)
 
 	if called.Load() {
@@ -237,7 +237,7 @@ func TestWatchUnsubscribe(t *testing.T) {
 func TestWatchDebounce(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "rapid.txt")
-	os.WriteFile(f, []byte("v0"), 0644)
+	os.WriteFile(f, []byte("v0"), 0o644)
 
 	w, err := New(dir, testLogger(), WithDebounce(100*time.Millisecond))
 	if err != nil {
@@ -258,7 +258,7 @@ func TestWatchDebounce(t *testing.T) {
 
 	// Rapid writes — should be coalesced into one batch.
 	for i := 0; i < 10; i++ {
-		os.WriteFile(f, []byte("v"+string(rune('1'+i))), 0644)
+		os.WriteFile(f, []byte("v"+string(rune('1'+i))), 0o644)
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -312,7 +312,7 @@ func TestWatchMultipleSubscribers(t *testing.T) {
 		}
 	})
 
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
 
 	select {
 	case <-done1:
@@ -350,7 +350,7 @@ func TestWatchSkipHiddenFiles(t *testing.T) {
 	})
 
 	// Create a hidden file.
-	os.WriteFile(filepath.Join(dir, ".hidden"), []byte("secret"), 0644)
+	os.WriteFile(filepath.Join(dir, ".hidden"), []byte("secret"), 0o644)
 	time.Sleep(200 * time.Millisecond)
 
 	if called.Load() {

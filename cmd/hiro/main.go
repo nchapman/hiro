@@ -136,7 +136,7 @@ func run() error {
 			case <-pruneCtx.Done():
 				return
 			case <-ticker.C:
-				if n, err := pdb.PruneLogs(7 * 24 * time.Hour); err != nil {
+				if n, err := pdb.PruneLogs(pruneCtx, 7*24*time.Hour); err != nil {
 					logger.Warn("failed to prune logs", "error", err)
 				} else if n > 0 {
 					logger.Info("pruned old logs", "count", n)

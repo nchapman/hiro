@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -56,11 +57,11 @@ func (s *Server) handleInstanceUsage(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = id // fallback
 	}
-	writeJSON(w, http.StatusOK, s.buildUsageInfoForSession(sessionID, model))
+	writeJSON(w, http.StatusOK, s.buildUsageInfoForSession(r.Context(), sessionID, model))
 }
 
 // buildUsageInfoForSession constructs a UsageInfo from the DB for a given session.
-func (s *Server) buildUsageInfoForSession(sessionID, model string) UsageInfo {
+func (s *Server) buildUsageInfoForSession(ctx context.Context, sessionID, model string) UsageInfo {
 	info := UsageInfo{
 		ContextWindow: models.ContextWindow(model),
 		Model:         model,
@@ -71,7 +72,7 @@ func (s *Server) buildUsageInfoForSession(sessionID, model string) UsageInfo {
 	}
 
 	// Cumulative session totals.
-	if usage, err := s.pdb.GetSessionUsage(sessionID); err == nil {
+	if usage, err := s.pdb.GetSessionUsage(ctx, sessionID); err == nil {
 		info.SessionInputTokens = usage.TotalInputTokens
 		info.SessionOutputTokens = usage.TotalOutputTokens
 		info.SessionTotalTokens = usage.TotalInputTokens + usage.TotalOutputTokens
@@ -80,14 +81,14 @@ func (s *Server) buildUsageInfoForSession(sessionID, model string) UsageInfo {
 	}
 
 	// Per-turn totals (all steps in the most recent turn).
-	if turn, ok, err := s.pdb.GetLastTurnUsage(sessionID); err == nil && ok {
+	if turn, ok, err := s.pdb.GetLastTurnUsage(ctx, sessionID); err == nil && ok {
 		info.TurnInputTokens = turn.TotalInputTokens
 		info.TurnOutputTokens = turn.TotalOutputTokens
 		info.TurnCost = turn.TotalCost
 	}
 
 	// Last step (actual context window usage from the final LLM call).
-	if last, ok, err := s.pdb.GetLastUsageEvent(sessionID); err == nil && ok {
+	if last, ok, err := s.pdb.GetLastUsageEvent(ctx, sessionID); err == nil && ok {
 		info.PromptTokens = last.InputTokens
 		info.CompletionTokens = last.OutputTokens
 	}
@@ -95,12 +96,12 @@ func (s *Server) buildUsageInfoForSession(sessionID, model string) UsageInfo {
 	return info
 }
 
-func (s *Server) handleTotalUsage(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleTotalUsage(w http.ResponseWriter, r *http.Request) {
 	if s.pdb == nil {
 		http.Error(w, "usage tracking unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	usage, err := s.pdb.GetTotalUsage()
+	usage, err := s.pdb.GetTotalUsage(r.Context())
 	if err != nil {
 		s.logger.Error("failed to get total usage", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -109,12 +110,12 @@ func (s *Server) handleTotalUsage(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, usage)
 }
 
-func (s *Server) handleUsageByModel(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleUsageByModel(w http.ResponseWriter, r *http.Request) {
 	if s.pdb == nil {
 		http.Error(w, "usage tracking unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	usage, err := s.pdb.GetUsageByModel()
+	usage, err := s.pdb.GetUsageByModel(r.Context())
 	if err != nil {
 		s.logger.Error("failed to get usage by model", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -134,7 +135,7 @@ func (s *Server) handleUsageByDay(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	usage, err := s.pdb.GetUsageByDay(limit)
+	usage, err := s.pdb.GetUsageByDay(r.Context(), limit)
 	if err != nil {
 		s.logger.Error("failed to get usage by day", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

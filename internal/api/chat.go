@@ -149,7 +149,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// sendDone writes the end-of-turn marker with usage data.
 	sendDone := func() error {
 		done := ChatMessage{Type: "done", Role: "assistant"}
-		done.Usage = s.buildUsageInfo(instanceID)
+		done.Usage = s.buildUsageInfo(ctx, instanceID)
 		return wsjson.Write(ctx, conn, done)
 	}
 
@@ -218,7 +218,7 @@ func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, in
 			s.logger.Info("config updated", "instance_id", instanceID, "model", msg.Model)
 			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
 		}
-		done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(instanceID)}
+		done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(ctx, instanceID)}
 		return wsjson.Write(ctx, conn, done)
 	}
 
@@ -343,7 +343,7 @@ func (s *Server) drainNotifications(ctx context.Context, instanceID string, onEv
 
 // buildUsageInfo queries the platform DB for instance usage and returns it
 // as a UsageInfo struct for inclusion in WebSocket messages.
-func (s *Server) buildUsageInfo(instanceID string) *UsageInfo {
+func (s *Server) buildUsageInfo(ctx context.Context, instanceID string) *UsageInfo {
 	if s.pdb == nil {
 		return nil
 	}
@@ -363,7 +363,7 @@ func (s *Server) buildUsageInfo(instanceID string) *UsageInfo {
 		}
 	}
 
-	info := s.buildUsageInfoForSession(sessionID, model)
+	info := s.buildUsageInfoForSession(ctx, sessionID, model)
 	return &info
 }
 

@@ -82,7 +82,7 @@ func TestReadPersonaFile_AgentEditedFrontmatter(t *testing.T) {
 	// Simulate an agent editing persona.md with frontmatter directly via file tools.
 	dir := t.TempDir()
 	content := "---\nname: Custom Name\ndescription: Custom desc\n---\n\nPersona instructions here."
-	if err := os.WriteFile(filepath.Join(dir, "persona.md"), []byte(content), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "persona.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestReadPersonaFile_PlainMarkdown(t *testing.T) {
 	// Backward compat: persona.md with no frontmatter is treated as body-only.
 	dir := t.TempDir()
 	content := "Just some persona text, no frontmatter."
-	if err := os.WriteFile(filepath.Join(dir, "persona.md"), []byte(content), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "persona.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestWritePersonaFile_Permissions(t *testing.T) {
 		t.Fatalf("Stat: %v", err)
 	}
 	perm := info.Mode().Perm()
-	if perm != 0600 {
-		t.Errorf("expected 0600 permissions, got %o", perm)
+	if perm != 0o600 {
+		t.Errorf("expected 0o600 permissions, got %o", perm)
 	}
 }

@@ -236,10 +236,10 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create parent directories if needed. Use 02775 (setgid + group-writable)
+	// Create parent directories if needed. Use 0o2775 (setgid + group-writable)
 	// so agent processes (hiro-agents group) can also write into these dirs.
 	dir := filepath.Dir(absPath)
-	if err := os.MkdirAll(dir, 02775); err != nil {
+	if err := os.MkdirAll(dir, 0o2775); err != nil {
 		s.logger.Error("files mkdir failed", "path", dir, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -271,7 +271,7 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	if err := tmp.Chmod(0664); err != nil {
+	if err := tmp.Chmod(0o664); err != nil {
 		s.logger.Error("files upload chmod failed", "path", tmpName, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -300,7 +300,7 @@ func (s *Server) handleFilesMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.MkdirAll(absPath, 02775); err != nil {
+	if err := os.MkdirAll(absPath, 0o2775); err != nil {
 		s.logger.Error("files mkdir failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -415,7 +415,7 @@ func (s *Server) handleFilesRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create parent dirs for destination if needed.
-	if err := os.MkdirAll(filepath.Dir(absTo), 02775); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absTo), 0o2775); err != nil {
 		s.logger.Error("files rename mkdir failed", "path", absTo, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

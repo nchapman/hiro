@@ -36,7 +36,7 @@ func TestBash_SimpleCommand(t *testing.T) {
 
 func TestBash_WorkingDir(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("found it"), 0644)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("found it"), 0o644)
 
 	tool := NewBashTool("/tmp", NewBackgroundJobManager(nil))
 	content, isErr := runTool(t, tool, `{"command": "cat test.txt", "working_dir": "`+dir+`"}`)

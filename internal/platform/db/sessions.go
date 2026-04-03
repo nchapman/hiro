@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -47,7 +48,7 @@ type Session struct {
 }
 
 // CreateSession inserts a new session.
-func (d *DB) CreateSession(s Session) error {
+func (d *DB) CreateSession(ctx context.Context, s Session) error {
 	var parentID *string
 	if s.ParentID != "" {
 		parentID = &s.ParentID
@@ -56,7 +57,7 @@ func (d *DB) CreateSession(s Session) error {
 	if s.InstanceID != "" {
 		instanceID = &s.InstanceID
 	}
-	_, err := d.db.Exec(
+	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO sessions (id, agent_name, mode, parent_id, status, instance_id) VALUES (?, ?, ?, ?, ?, ?)`,
 		s.ID, s.AgentName, s.Mode, parentID, "running", instanceID,
 	)
@@ -70,13 +71,13 @@ func (d *DB) CreateSession(s Session) error {
 }
 
 // GetSession retrieves a session by ID.
-func (d *DB) GetSession(id string) (Session, error) {
+func (d *DB) GetSession(ctx context.Context, id string) (Session, error) {
 	var s Session
 	var parentID sql.NullString
 	var createdAt string
 	var stoppedAt sql.NullString
 	var instanceID sql.NullString
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
 		 FROM sessions WHERE id = ?`, id,
 	).Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
@@ -102,7 +103,7 @@ func (d *DB) GetSession(id string) (Session, error) {
 
 // ListSessions returns all sessions matching the given filters.
 // Pass empty strings to skip a filter.
-func (d *DB) ListSessions(parentID, status string) ([]Session, error) {
+func (d *DB) ListSessions(ctx context.Context, parentID, status string) ([]Session, error) {
 	query := "SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at FROM sessions WHERE 1=1"
 	var args []any
 
@@ -116,7 +117,7 @@ func (d *DB) ListSessions(parentID, status string) ([]Session, error) {
 	}
 	query += " ORDER BY created_at"
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,13 +127,13 @@ func (d *DB) ListSessions(parentID, status string) ([]Session, error) {
 }
 
 // ListChildSessions returns direct children of a session.
-func (d *DB) ListChildSessions(parentID string) ([]Session, error) {
-	return d.ListSessions(parentID, "")
+func (d *DB) ListChildSessions(ctx context.Context, parentID string) ([]Session, error) {
+	return d.ListSessions(ctx, parentID, "")
 }
 
 // ListSessionsByInstance returns all sessions belonging to an instance.
-func (d *DB) ListSessionsByInstance(instanceID string) ([]Session, error) {
-	rows, err := d.db.Query(
+func (d *DB) ListSessionsByInstance(ctx context.Context, instanceID string) ([]Session, error) {
+	rows, err := d.db.QueryContext(ctx,
 		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
 		 FROM sessions WHERE instance_id = ? ORDER BY created_at`, instanceID,
 	)
@@ -146,12 +147,12 @@ func (d *DB) ListSessionsByInstance(instanceID string) ([]Session, error) {
 // LatestSessionByInstance returns the most recently created session for an instance.
 // Returns the session and true if found, zero value and false if not found.
 // Returns an error for database failures (distinct from "not found").
-func (d *DB) LatestSessionByInstance(instanceID string) (Session, bool, error) {
+func (d *DB) LatestSessionByInstance(ctx context.Context, instanceID string) (Session, bool, error) {
 	var s Session
 	var parentID sql.NullString
 	var createdAt string
 	var stoppedAt sql.NullString
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
 		 FROM sessions WHERE instance_id = ? ORDER BY created_at DESC LIMIT 1`, instanceID,
 	).Scan(&s.ID, &s.InstanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
@@ -174,13 +175,13 @@ func (d *DB) LatestSessionByInstance(instanceID string) (Session, bool, error) {
 
 // UpdateSessionStatus sets the session status. If status is "stopped",
 // stopped_at is set to now.
-func (d *DB) UpdateSessionStatus(id, status string) error {
+func (d *DB) UpdateSessionStatus(ctx context.Context, id, status string) error {
 	var stoppedAt *string
 	if status == "stopped" {
 		now := time.Now().UTC().Format("2006-01-02 15:04:05")
 		stoppedAt = &now
 	}
-	result, err := d.db.Exec(
+	result, err := d.db.ExecContext(ctx,
 		`UPDATE sessions SET status = ?, stopped_at = ? WHERE id = ?`,
 		status, stoppedAt, id,
 	)
@@ -198,8 +199,8 @@ func (d *DB) UpdateSessionStatus(id, status string) error {
 }
 
 // DeleteSession removes a session and all its data (cascades).
-func (d *DB) DeleteSession(id string) error {
-	result, err := d.db.Exec("DELETE FROM sessions WHERE id = ?", id)
+func (d *DB) DeleteSession(ctx context.Context, id string) error {
+	result, err := d.db.ExecContext(ctx, "DELETE FROM sessions WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("deleting session: %w", err)
 	}

@@ -61,11 +61,11 @@ func newInstanceTestServer(t *testing.T) (*Server, *agent.Manager, string) {
 
 	// Create a minimal agent definition.
 	agentDir := filepath.Join(dir, "agents", "test-agent")
-	os.MkdirAll(agentDir, 0755)
-	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: test-agent\n---\nYou are a test agent.\n"), 0644)
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "agent.md"), []byte("---\nname: test-agent\n---\nYou are a test agent.\n"), 0o644)
 
 	// Create instances directory.
-	os.MkdirAll(filepath.Join(dir, "instances"), 0755)
+	os.MkdirAll(filepath.Join(dir, "instances"), 0o755)
 
 	pdb, _ := platformdb.Open(filepath.Join(dir, "test.db"))
 	t.Cleanup(func() { pdb.Close() })

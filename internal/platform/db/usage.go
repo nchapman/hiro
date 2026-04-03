@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -52,11 +53,11 @@ type DailyUsage struct {
 // RecordTurnUsage inserts multiple usage events (one per inference step)
 // as a single turn within a transaction. The turn number is auto-assigned.
 // Turn numbering starts at 1; turn 0 is reserved for legacy pre-migration rows.
-func (d *DB) RecordTurnUsage(events []UsageEvent) error {
+func (d *DB) RecordTurnUsage(ctx context.Context, events []UsageEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
-	tx, err := d.db.Begin()
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning turn usage tx: %w", err)
 	}
@@ -64,7 +65,7 @@ func (d *DB) RecordTurnUsage(events []UsageEvent) error {
 
 	// Determine next turn number atomically within the transaction.
 	var maxTurn sql.NullInt64
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(ctx,
 		`SELECT MAX(turn) FROM usage_events WHERE session_id = ?`, events[0].SessionID,
 	).Scan(&maxTurn)
 	if err != nil {
@@ -76,7 +77,7 @@ func (d *DB) RecordTurnUsage(events []UsageEvent) error {
 	}
 
 	for _, e := range events {
-		_, err = tx.Exec(
+		_, err = tx.ExecContext(ctx,
 			`INSERT INTO usage_events (session_id, model, provider, turn, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			e.SessionID, e.Model, e.Provider, turn,
@@ -93,10 +94,10 @@ func (d *DB) RecordTurnUsage(events []UsageEvent) error {
 // GetLastUsageEvent returns the most recent usage event for a session.
 // Returns a zero UsageEvent and false if no tracked events exist.
 // Turn 0 (legacy pre-migration rows) is excluded.
-func (d *DB) GetLastUsageEvent(sessionID string) (UsageEvent, bool, error) {
+func (d *DB) GetLastUsageEvent(ctx context.Context, sessionID string) (UsageEvent, bool, error) {
 	var e UsageEvent
 	var createdAt string
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		`SELECT id, session_id, model, provider, turn,
 		        input_tokens, output_tokens, reasoning_tokens,
 		        cache_read_tokens, cache_write_tokens, cost, created_at
@@ -117,9 +118,9 @@ func (d *DB) GetLastUsageEvent(sessionID string) (UsageEvent, bool, error) {
 // GetLastTurnUsage returns aggregated usage for the most recent turn in a session.
 // A turn may contain multiple steps (LLM calls). Returns false if no tracked
 // turns exist. Turn 0 (legacy pre-migration rows) is excluded.
-func (d *DB) GetLastTurnUsage(sessionID string) (UsageSummary, bool, error) {
+func (d *DB) GetLastTurnUsage(ctx context.Context, sessionID string) (UsageSummary, bool, error) {
 	var u UsageSummary
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
 		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
@@ -140,8 +141,8 @@ func (d *DB) GetLastTurnUsage(sessionID string) (UsageSummary, bool, error) {
 }
 
 // GetSessionUsage returns aggregated usage for a session.
-func (d *DB) GetSessionUsage(sessionID string) (UsageSummary, error) {
-	return d.queryUsageSummary(
+func (d *DB) GetSessionUsage(ctx context.Context, sessionID string) (UsageSummary, error) {
+	return d.queryUsageSummary(ctx,
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
 		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
@@ -150,8 +151,8 @@ func (d *DB) GetSessionUsage(sessionID string) (UsageSummary, error) {
 }
 
 // GetTotalUsage returns aggregated usage across all sessions.
-func (d *DB) GetTotalUsage() (UsageSummary, error) {
-	return d.queryUsageSummary(
+func (d *DB) GetTotalUsage(ctx context.Context) (UsageSummary, error) {
+	return d.queryUsageSummary(ctx,
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
 		        COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost),0), COUNT(*)
@@ -160,8 +161,8 @@ func (d *DB) GetTotalUsage() (UsageSummary, error) {
 }
 
 // GetUsageByModel returns usage aggregated per model.
-func (d *DB) GetUsageByModel() ([]ModelUsage, error) {
-	rows, err := d.db.Query(
+func (d *DB) GetUsageByModel(ctx context.Context) ([]ModelUsage, error) {
+	rows, err := d.db.QueryContext(ctx,
 		`SELECT model, provider,
 		        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
@@ -190,11 +191,11 @@ func (d *DB) GetUsageByModel() ([]ModelUsage, error) {
 }
 
 // GetUsageByDay returns usage aggregated per day.
-func (d *DB) GetUsageByDay(limit int) ([]DailyUsage, error) {
+func (d *DB) GetUsageByDay(ctx context.Context, limit int) ([]DailyUsage, error) {
 	if limit <= 0 {
 		limit = 30
 	}
-	rows, err := d.db.Query(
+	rows, err := d.db.QueryContext(ctx,
 		`SELECT date(created_at) as day,
 		        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
@@ -222,9 +223,9 @@ func (d *DB) GetUsageByDay(limit int) ([]DailyUsage, error) {
 	return results, rows.Err()
 }
 
-func (d *DB) queryUsageSummary(query string, args ...any) (UsageSummary, error) {
+func (d *DB) queryUsageSummary(ctx context.Context, query string, args ...any) (UsageSummary, error) {
 	var u UsageSummary
-	err := d.db.QueryRow(query, args...).Scan(
+	err := d.db.QueryRowContext(ctx, query, args...).Scan(
 		&u.TotalInputTokens, &u.TotalOutputTokens,
 		&u.TotalReasoningTokens, &u.TotalCacheReadTokens,
 		&u.TotalCacheWriteTokens, &u.TotalCost, &u.EventCount,

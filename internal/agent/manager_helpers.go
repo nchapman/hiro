@@ -180,7 +180,7 @@ func (m *Manager) setInstanceStatus(id, status string) {
 	if m.pdb == nil {
 		return
 	}
-	if err := m.pdb.UpdateInstanceStatus(id, status); err != nil {
+	if err := m.pdb.UpdateInstanceStatus(context.Background(), id, status); err != nil {
 		m.logger.Warn("failed to update instance status in db", "id", id, "status", status, "error", err)
 	}
 }

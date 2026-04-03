@@ -34,7 +34,6 @@ linters:
       disabled-checks:
         - hugeParam
         - rangeValCopy
-        - octalLiteral
         - unnamedResult
         - paramTypeCombine
         - exposedSyncMutex
@@ -96,7 +95,7 @@ linters:
       # noctx: many legitimate uses of non-context variants
       - linters:
           - noctx
-        text: "net\\.Listen|exec\\.Command|database/sql|crypto/tls|net\\.Dial|net\\.LookupHost|httptest\\.NewRequest"
+        text: "net\\.Listen|exec\\.Command|crypto/tls|net\\.Dial|net\\.LookupHost|httptest\\.NewRequest"
       # revive: suppress noisy export doc and unused-param rules
       - linters:
           - revive

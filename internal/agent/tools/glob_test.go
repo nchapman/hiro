@@ -9,9 +9,9 @@ import (
 
 func TestGlob_MatchesByExtension(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0644)
-	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello"), 0644)
-	os.WriteFile(filepath.Join(dir, "c.go"), []byte("package c"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello"), 0o644)
+	os.WriteFile(filepath.Join(dir, "c.go"), []byte("package c"), 0o644)
 
 	tool := NewGlobTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "*.go"}`)
@@ -29,9 +29,9 @@ func TestGlob_MatchesByExtension(t *testing.T) {
 func TestGlob_MatchesInSubdirectories(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "src", "pkg")
-	os.MkdirAll(sub, 0755)
-	os.WriteFile(filepath.Join(sub, "main.go"), []byte("package main"), 0644)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# hi"), 0644)
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "main.go"), []byte("package main"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# hi"), 0o644)
 
 	tool := NewGlobTool(dir)
 	// The Go fallback supports **/ prefix matching against basename
@@ -50,9 +50,9 @@ func TestGlob_MatchesInSubdirectories(t *testing.T) {
 func TestGlob_CustomPath(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
-	os.MkdirAll(sub, 0755)
-	os.WriteFile(filepath.Join(sub, "inner.txt"), []byte("x"), 0644)
-	os.WriteFile(filepath.Join(dir, "outer.txt"), []byte("y"), 0644)
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "inner.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "outer.txt"), []byte("y"), 0o644)
 
 	tool := NewGlobTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "*.txt", "path": "`+sub+`"}`)
@@ -69,9 +69,9 @@ func TestGlob_CustomPath(t *testing.T) {
 
 func TestGlob_SkipsHiddenDirs(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".hidden"), 0755)
-	os.WriteFile(filepath.Join(dir, ".hidden", "secret.go"), []byte("x"), 0644)
-	os.WriteFile(filepath.Join(dir, "visible.go"), []byte("y"), 0644)
+	os.MkdirAll(filepath.Join(dir, ".hidden"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".hidden", "secret.go"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "visible.go"), []byte("y"), 0o644)
 
 	tool := NewGlobTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "*.go"}`)
@@ -88,9 +88,9 @@ func TestGlob_SkipsHiddenDirs(t *testing.T) {
 
 func TestGlob_SkipsNodeModules(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0755)
-	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "index.js"), []byte("x"), 0644)
-	os.WriteFile(filepath.Join(dir, "app.js"), []byte("y"), 0644)
+	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755)
+	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "index.js"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "app.js"), []byte("y"), 0o644)
 
 	tool := NewGlobTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "*.js"}`)
@@ -107,7 +107,7 @@ func TestGlob_SkipsNodeModules(t *testing.T) {
 
 func TestGlob_NoMatches(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0644)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644)
 
 	tool := NewGlobTool(dir)
 	content, isErr := runTool(t, tool, `{"pattern": "*.go"}`)
@@ -143,11 +143,11 @@ func TestGlob_NonexistentPath(t *testing.T) {
 
 func TestGlob_PrefixedDoublestarPattern(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0755)
-	os.MkdirAll(filepath.Join(dir, "test"), 0755)
-	os.WriteFile(filepath.Join(dir, "src", "pkg", "main.go"), []byte("package main"), 0644)
-	os.WriteFile(filepath.Join(dir, "test", "helper.go"), []byte("package test"), 0644)
-	os.WriteFile(filepath.Join(dir, "root.go"), []byte("package root"), 0644)
+	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "test"), 0o755)
+	os.WriteFile(filepath.Join(dir, "src", "pkg", "main.go"), []byte("package main"), 0o644)
+	os.WriteFile(filepath.Join(dir, "test", "helper.go"), []byte("package test"), 0o644)
+	os.WriteFile(filepath.Join(dir, "root.go"), []byte("package root"), 0o644)
 
 	tool := NewGlobTool(dir)
 	// src/**/*.go should only match files under src/
@@ -168,9 +168,9 @@ func TestGlob_PrefixedDoublestarPattern(t *testing.T) {
 
 func TestGlobWalk_DirectlyTestedFallback(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "a", "b"), 0755)
-	os.WriteFile(filepath.Join(dir, "a", "b", "deep.go"), []byte("x"), 0644)
-	os.WriteFile(filepath.Join(dir, "top.txt"), []byte("y"), 0644)
+	os.MkdirAll(filepath.Join(dir, "a", "b"), 0o755)
+	os.WriteFile(filepath.Join(dir, "a", "b", "deep.go"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "top.txt"), []byte("y"), 0o644)
 
 	// Test the Go fallback directly
 	paths, truncated, err := globWalk("**/*.go", dir)
@@ -196,9 +196,9 @@ func TestGlobWalk_DirectlyTestedFallback(t *testing.T) {
 
 func TestGlobWalk_BraceExpansion(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "app.ts"), []byte("x"), 0644)
-	os.WriteFile(filepath.Join(dir, "app.tsx"), []byte("y"), 0644)
-	os.WriteFile(filepath.Join(dir, "app.js"), []byte("z"), 0644)
+	os.WriteFile(filepath.Join(dir, "app.ts"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "app.tsx"), []byte("y"), 0o644)
+	os.WriteFile(filepath.Join(dir, "app.js"), []byte("z"), 0o644)
 
 	paths, _, err := globWalk("*.{ts,tsx}", dir)
 	if err != nil {

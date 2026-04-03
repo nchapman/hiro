@@ -163,5 +163,5 @@ func (r *PendingRegistry) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.filePath, data, 0600)
+	return os.WriteFile(r.filePath, data, 0o600)
 }

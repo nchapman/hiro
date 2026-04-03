@@ -10,7 +10,7 @@ import (
 func TestReadFile_Basic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("line one\nline two\nline three\n"), 0644)
+	os.WriteFile(path, []byte("line one\nline two\nline three\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`"}`)
@@ -28,7 +28,7 @@ func TestReadFile_Basic(t *testing.T) {
 func TestReadFile_WithOffset(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644)
+	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "offset": 3}`)
@@ -46,7 +46,7 @@ func TestReadFile_WithOffset(t *testing.T) {
 func TestReadFile_WithLimit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644)
+	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "limit": 2}`)
@@ -64,7 +64,7 @@ func TestReadFile_WithLimit(t *testing.T) {
 func TestReadFile_OffsetAndLimit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644)
+	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "offset": 2, "limit": 2}`)
@@ -101,7 +101,7 @@ func TestReadFile_EmptyPath(t *testing.T) {
 func TestReadFile_OffsetBeyondEnd(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("short\n"), 0644)
+	os.WriteFile(path, []byte("short\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "offset": 999}`)
@@ -115,7 +115,7 @@ func TestReadFile_OffsetBeyondEnd(t *testing.T) {
 
 func TestReadFile_RelativePath(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello world\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello world\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "hello.txt"}`)
@@ -130,8 +130,8 @@ func TestReadFile_RelativePath(t *testing.T) {
 func TestReadFile_RelativeSubdirectory(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub", "dir")
-	os.MkdirAll(sub, 0755)
-	os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("nested content\n"), 0644)
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("nested content\n"), 0o644)
 
 	tool := NewReadTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "sub/dir/nested.txt"}`)

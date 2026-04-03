@@ -345,7 +345,7 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 		if needsSync {
 			l.compactMu.Lock()
 			compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm, providerOptions: providerOpts}, cfg, l.logger)
-			if result, err := compactor.CompactIfNeeded(context.Background(), lastTokens); err != nil {
+			if result, err := compactor.CompactIfNeeded(ctx, lastTokens); err != nil {
 				l.logger.Warn("synchronous compaction failed", "error", err)
 			} else if result.HardThresholdExceeded {
 				l.logger.Warn("context still exceeds hard threshold after synchronous compaction")
@@ -356,7 +356,7 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 		// Assemble intentionally runs outside compactMu. If a prior turn's
 		// async compaction is still in progress, SQLite WAL snapshot isolation
 		// ensures Assemble sees a consistent pre- or post-compaction state.
-		assembled, err := Assemble(l.pdb, l.sessionID, cfg)
+		assembled, err := Assemble(ctx, l.pdb, l.sessionID, cfg)
 		if err != nil {
 			l.logger.Error("failed to assemble context, proceeding with empty history", "error", err)
 		}
@@ -457,7 +457,7 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	// Record usage.
 	if l.pdb != nil {
-		l.recordUsage(result, agentModel, agentProvider)
+		l.recordUsage(ctx, result, agentModel, agentProvider)
 	}
 
 	return result.Response.Content.Text(), nil
@@ -466,10 +466,10 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 // persistTurn stores the user message and all step messages in the platform DB,
 // then kicks off async compaction. lm, model, and providerOpts are snapshots
 // captured at the start of the turn to avoid racing with UpdateModel.
-func (l *Loop) persistTurn(_ context.Context, prompt string, files []fantasy.FilePart, meta bool, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
+func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
 	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
-	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens, meta); err != nil {
+	if _, err := l.pdb.AppendMessage(ctx, l.sessionID, "user", prompt, rawJSON, tokens, meta); err != nil {
 		l.logger.Warn("failed to ingest user message", "error", err)
 	}
 
@@ -479,7 +479,7 @@ func (l *Loop) persistTurn(_ context.Context, prompt string, files []fantasy.Fil
 			text := extractText(msg)
 			role := string(msg.Role)
 			t := EstimateTokens(text)
-			if _, err := l.pdb.AppendMessage(l.sessionID, role, text, raw, t); err != nil {
+			if _, err := l.pdb.AppendMessage(ctx, l.sessionID, role, text, raw, t); err != nil {
 				l.logger.Warn("failed to ingest step message", "role", role, "error", err)
 			}
 		}
@@ -514,7 +514,7 @@ func (l *Loop) persistTurn(_ context.Context, prompt string, files []fantasy.Fil
 // the real token counts from the provider. All steps in a turn share the same
 // turn number for grouping. The model and provider parameters are snapshots
 // from the turn start to avoid racing with UpdateModel.
-func (l *Loop) recordUsage(result *fantasy.AgentResult, model, provider string) {
+func (l *Loop) recordUsage(ctx context.Context, result *fantasy.AgentResult, model, provider string) {
 	if result == nil {
 		return
 	}
@@ -555,7 +555,7 @@ func (l *Loop) recordUsage(result *fantasy.AgentResult, model, provider string) 
 			"steps", len(events),
 		)
 	}
-	if err := l.pdb.RecordTurnUsage(events); err != nil {
+	if err := l.pdb.RecordTurnUsage(ctx, events); err != nil {
 		l.logger.Warn("failed to record usage", "error", err)
 	}
 }

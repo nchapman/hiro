@@ -287,21 +287,21 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 		for _, turn := range turns {
 			content := fmt.Sprintf("[%s] %s", turn.Speaker, turn.Text)
 			tokens := EstimateTokens(content)
-			msgID, err := pdb.AppendMessage(sessionID, "user", content, "{}", tokens)
+			msgID, err := pdb.AppendMessage(context.Background(), sessionID, "user", content, "{}", tokens)
 			if err != nil {
 				t.Fatalf("AppendMessage: %v", err)
 			}
 			// Set the correct timestamp from the LoCoMo session date so that
 			// the compaction summarizer can resolve relative time references.
 			if !turn.Timestamp.IsZero() {
-				pdb.UpdateMessageTimestamp(msgID, turn.Timestamp)
+				pdb.UpdateMessageTimestamp(context.Background(), msgID, turn.Timestamp)
 			}
 		}
 
 		// Optionally compact. We run multiple rounds to simulate compaction
 		// as a long-running session would experience, driving the context
 		// through leaf passes and condensation.
-		preTokens, _ := pdb.ContextTokenCount(sessionID)
+		preTokens, _ := pdb.ContextTokenCount(context.Background(), sessionID)
 		var compactCfg *CompactionConfig
 		if configFn != nil {
 			compactCfg = configFn(preTokens, len(turns))
@@ -326,15 +326,15 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 					break
 				}
 
-				newEstimated, _ := pdb.ContextTokenCount(sessionID)
+				newEstimated, _ := pdb.ContextTokenCount(context.Background(), sessionID)
 				if newEstimated >= estimated {
 					break // no further compression possible
 				}
 				estimated = newEstimated
 			}
 
-			postTokens, _ := pdb.ContextTokenCount(sessionID)
-			items, _ := pdb.GetContextItems(sessionID)
+			postTokens, _ := pdb.ContextTokenCount(context.Background(), sessionID)
+			items, _ := pdb.GetContextItems(context.Background(), sessionID)
 			msgCount, sumCount := 0, 0
 			for _, item := range items {
 				if item.ItemType == "message" {
@@ -343,7 +343,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 					sumCount++
 				}
 			}
-			maxDepth, _ := pdb.MaxSummaryDepth(sessionID)
+			maxDepth, _ := pdb.MaxSummaryDepth(context.Background(), sessionID)
 			reduction := 0.0
 			if preTokens > 0 {
 				reduction = (1 - float64(postTokens)/float64(preTokens)) * 100
@@ -357,7 +357,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 
 		// Assemble context.
 		assembleCfg := DefaultCompactionConfig()
-		assembled, err := Assemble(pdb, sessionID, assembleCfg)
+		assembled, err := Assemble(context.Background(), pdb, sessionID, assembleCfg)
 		if err != nil {
 			t.Fatalf("Assemble: %v", err)
 		}
@@ -634,7 +634,7 @@ func dumpEvalResults(t *testing.T, pdb *platformdb.DB, sessionID, evalName strin
 	dir := filepath.Join("testdata", "eval-output", modelName)
 	os.MkdirAll(dir, 0o755)
 
-	items, err := pdb.GetContextItems(sessionID)
+	items, err := pdb.GetContextItems(context.Background(), sessionID)
 	if err != nil {
 		t.Logf("warning: could not get context items for eval dump: %v", err)
 		return
@@ -665,7 +665,7 @@ func dumpEvalResults(t *testing.T, pdb *platformdb.DB, sessionID, evalName strin
 		if item.ItemType != "summary" || item.SummaryID == nil {
 			continue
 		}
-		sum, err := pdb.GetSummary(*item.SummaryID)
+		sum, err := pdb.GetSummary(context.Background(), *item.SummaryID)
 		if err != nil {
 			fmt.Fprintf(&buf, "### Summary %d (ERROR: %v)\n\n", sumIdx, err)
 			continue

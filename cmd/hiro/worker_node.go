@@ -93,7 +93,7 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 
 	// Create workspace directories locally.
 	for _, dir := range []string{"workspace", "instances"} {
-		if err := os.MkdirAll(fmt.Sprintf("%s/%s", rootDir, dir), 0755); err != nil {
+		if err := os.MkdirAll(fmt.Sprintf("%s/%s", rootDir, dir), 0o755); err != nil {
 			return fmt.Errorf("creating %s directory: %w", dir, err)
 		}
 	}

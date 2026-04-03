@@ -37,7 +37,7 @@ func NewWriteTool(workingDir string) fantasy.AgentTool {
 					fmt.Sprintf("error creating directory: %v", err)), nil
 			}
 
-			if err := atomicWriteFile(path, []byte(params.Content), 0666); err != nil {
+			if err := atomicWriteFile(path, []byte(params.Content), 0o666); err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("error writing file: %v", err)), nil
 			}

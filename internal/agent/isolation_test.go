@@ -55,7 +55,7 @@ func setupIsolationManager(t *testing.T) (*Manager, string, *[]*isolationWorker)
 
 	dir := t.TempDir()
 	// Make the workspace accessible to agent users
-	os.Chmod(dir, 0775)
+	os.Chmod(dir, 0o775)
 	os.Chown(dir, 0, int(gid))
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -168,7 +168,7 @@ func TestIsolation_PoolExhaustion(t *testing.T) {
 	gid, _ := strconv.ParseUint(grp.Gid, 10, 32)
 
 	dir := t.TempDir()
-	os.Chmod(dir, 0775)
+	os.Chmod(dir, 0o775)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	// Create a tiny pool (size 2) to test exhaustion
@@ -214,16 +214,16 @@ func TestIsolation_SessionDirInaccessible(t *testing.T) {
 	checkOwnership(t, sessDirA, uidA, (*workers)[0].spawnCfg.GID)
 	checkOwnership(t, sessDirB, uidB, (*workers)[1].spawnCfg.GID)
 
-	// Session dirs have 0700 — agent B's UID shouldn't be able to read agent A's dir
+	// Session dirs have 0o700 — agent B's UID shouldn't be able to read agent A's dir
 	info, err := os.Stat(sessDirA)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
 	perm := info.Mode().Perm()
-	if perm&0070 != 0 { // no group permissions
+	if perm&0o070 != 0 { // no group permissions
 		t.Fatalf("session dir has group permissions: %o", perm)
 	}
-	if perm&0007 != 0 { // no other permissions
+	if perm&0o007 != 0 { // no other permissions
 		t.Fatalf("session dir has other permissions: %o", perm)
 	}
 }
@@ -260,7 +260,7 @@ func fileUID(info os.FileInfo) (fileOwnership, bool) {
 }
 
 // TestIsolation_ConfigYAMLProtected verifies that config/config.yaml owned by
-// root with mode 0600 is not readable by agent users. The test creates the file
+// root with mode 0o600 is not readable by agent users. The test creates the file
 // as root, then attempts to read it as an agent UID using a subprocess.
 func TestIsolation_ConfigYAMLProtected(t *testing.T) {
 	grp, err := user.LookupGroup("hiro-agents")
@@ -275,11 +275,11 @@ func TestIsolation_ConfigYAMLProtected(t *testing.T) {
 
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
-	os.MkdirAll(configDir, 0700)
+	os.MkdirAll(configDir, 0o700)
 	configPath := filepath.Join(configDir, "config.yaml")
 
-	// Create config.yaml as root with 0600
-	if err := os.WriteFile(configPath, []byte("secrets:\n  TOKEN: secret123\n"), 0600); err != nil {
+	// Create config.yaml as root with 0o600
+	if err := os.WriteFile(configPath, []byte("secrets:\n  TOKEN: secret123\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

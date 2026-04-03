@@ -18,7 +18,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		return nil
 	}
 
-	instances, err := m.pdb.ListInstances("", "")
+	instances, err := m.pdb.ListInstances(ctx, "", "")
 	if err != nil {
 		return fmt.Errorf("listing instances from db: %w", err)
 	}
@@ -37,7 +37,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	for _, dbInst := range instances {
 		mode := config.AgentMode(dbInst.Mode)
 		if !mode.IsPersistent() {
-			_ = m.pdb.DeleteInstance(dbInst.ID)
+			_ = m.pdb.DeleteInstance(ctx, dbInst.ID)
 			os.RemoveAll(m.instanceDir(dbInst.ID))
 			cleaned++
 			continue
@@ -110,13 +110,13 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		if _, err := os.Stat(m.instanceDir(e.dbInst.ID)); os.IsNotExist(err) {
 			m.logger.Warn("instance dir missing, removing orphaned DB record",
 				"id", e.dbInst.ID, "agent", e.dbInst.AgentName)
-			_ = m.pdb.DeleteInstance(e.dbInst.ID)
+			_ = m.pdb.DeleteInstance(ctx, e.dbInst.ID)
 			continue
 		}
 
 		// Resume the latest session if one exists, otherwise create a new one.
 		var sessionID string
-		sess, ok, sessErr := m.pdb.LatestSessionByInstance(e.dbInst.ID)
+		sess, ok, sessErr := m.pdb.LatestSessionByInstance(ctx, e.dbInst.ID)
 		if sessErr != nil {
 			m.logger.Warn("failed to query latest session, creating new one",
 				"instance", e.dbInst.ID, "error", sessErr)
@@ -140,7 +140,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 
 		// Restore per-instance config (model override, reasoning effort).
-		if instCfg, cfgErr := m.pdb.GetInstanceConfig(e.dbInst.ID); cfgErr == nil {
+		if instCfg, cfgErr := m.pdb.GetInstanceConfig(ctx, e.dbInst.ID); cfgErr == nil {
 			if instCfg.ModelOverride != "" || instCfg.ReasoningEffort != "" {
 				effort := instCfg.ReasoningEffort
 				if err := m.UpdateInstanceConfig(ctx, e.dbInst.ID, instCfg.ModelOverride, &effort); err != nil {

@@ -29,7 +29,7 @@ func TestWriteFile_CreateNew(t *testing.T) {
 func TestWriteFile_Overwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "existing.txt")
-	os.WriteFile(path, []byte("old"), 0644)
+	os.WriteFile(path, []byte("old"), 0o644)
 
 	tool := NewWriteTool(dir)
 	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "content": "new"}`)

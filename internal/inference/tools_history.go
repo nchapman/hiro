@@ -37,11 +37,11 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 				var err error
 				switch scope {
 				case "messages":
-					results, err = pdb.SearchMessages(sessionID, input.Query, 20)
+					results, err = pdb.SearchMessages(ctx, sessionID, input.Query, 20)
 				case "summaries":
-					results, err = pdb.SearchSummaries(sessionID, input.Query, 20)
+					results, err = pdb.SearchSummaries(ctx, sessionID, input.Query, 20)
 				default:
-					results, err = pdb.Search(sessionID, input.Query, 20)
+					results, err = pdb.Search(ctx, sessionID, input.Query, 20)
 				}
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("search failed: %v", err)), nil
@@ -67,7 +67,7 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 					return fantasy.NewTextErrorResponse("summary_id is required"), nil
 				}
 
-				sum, err := pdb.GetSummary(input.SummaryID)
+				sum, err := pdb.GetSummary(ctx, input.SummaryID)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("summary not found: %v", err)), nil
 				}
@@ -81,12 +81,12 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 				sb.WriteString(sum.Content)
 
 				if sum.Kind == "leaf" {
-					msgIDs, err := pdb.GetSummarySourceMessages(sum.ID)
+					msgIDs, err := pdb.GetSummarySourceMessages(ctx, sum.ID)
 					if err != nil {
 						return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to load source messages: %v", err)), nil
 					}
 					if len(msgIDs) > 0 {
-						msgs, err := pdb.GetMessages(msgIDs)
+						msgs, err := pdb.GetMessages(ctx, msgIDs)
 						if err != nil {
 							return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to load messages: %v", err)), nil
 						}
@@ -98,14 +98,14 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 						}
 					}
 				} else {
-					childIDs, err := pdb.GetSummaryChildren(sum.ID)
+					childIDs, err := pdb.GetSummaryChildren(ctx, sum.ID)
 					if err != nil {
 						return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to load child summaries: %v", err)), nil
 					}
 					if len(childIDs) > 0 {
 						sb.WriteString("\n\n---\n### Child Summaries\n\n")
 						for _, cid := range childIDs {
-							child, err := pdb.GetSummary(cid)
+							child, err := pdb.GetSummary(ctx, cid)
 							if err != nil {
 								continue
 							}

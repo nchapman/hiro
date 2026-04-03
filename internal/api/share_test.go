@@ -72,8 +72,8 @@ func TestHandleShareCreate(t *testing.T) {
 	// Create a file to share.
 	root := t.TempDir()
 	srv.rootDir = root
-	os.MkdirAll(filepath.Join(root, "workspace"), 0755)
-	os.WriteFile(filepath.Join(root, "workspace", "hello.txt"), []byte("content"), 0644)
+	os.MkdirAll(filepath.Join(root, "workspace"), 0o755)
+	os.WriteFile(filepath.Join(root, "workspace", "hello.txt"), []byte("content"), 0o644)
 
 	body, _ := json.Marshal(map[string]string{"path": "workspace/hello.txt"})
 	req := authedRequest(t, srv, "POST", "/api/files/share", body)
@@ -95,8 +95,8 @@ func TestHandleShareCreate_ConfigDirBlocked(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 	root := t.TempDir()
 	srv.rootDir = root
-	os.MkdirAll(filepath.Join(root, "config"), 0700)
-	os.WriteFile(filepath.Join(root, "config", "config.yaml"), []byte("secrets: {}"), 0600)
+	os.MkdirAll(filepath.Join(root, "config"), 0o700)
+	os.WriteFile(filepath.Join(root, "config", "config.yaml"), []byte("secrets: {}"), 0o600)
 
 	body, _ := json.Marshal(map[string]string{"path": "config/config.yaml"})
 	req := authedRequest(t, srv, "POST", "/api/files/share", body)
@@ -112,8 +112,8 @@ func TestHandleSharedFile(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 	root := t.TempDir()
 	srv.rootDir = root
-	os.MkdirAll(filepath.Join(root, "workspace"), 0755)
-	os.WriteFile(filepath.Join(root, "workspace", "shared.txt"), []byte("hello world"), 0644)
+	os.MkdirAll(filepath.Join(root, "workspace"), 0o755)
+	os.WriteFile(filepath.Join(root, "workspace", "shared.txt"), []byte("hello world"), 0o644)
 
 	// Create a share token.
 	token, err := srv.encryptPath("workspace/shared.txt")

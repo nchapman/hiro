@@ -112,13 +112,13 @@ description: A research agent
 ---
 
 You are a research agent. You find information.`
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Write skills
 	skillsDir := filepath.Join(dir, "skills")
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,7 +128,7 @@ description: Search the web for information
 ---
 
 When searching, use multiple sources and cross-reference.`
-	if err := os.WriteFile(filepath.Join(skillsDir, "search.md"), []byte(skillMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillsDir, "search.md"), []byte(skillMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,7 +158,7 @@ model: claude-sonnet-4-20250514
 ---
 
 No name field.`
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -175,7 +175,7 @@ name: simple
 ---
 
 A simple agent with no skills directory.`
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -195,7 +195,7 @@ name: test
 ---
 
 No mode specified.`
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +214,7 @@ mode: ephemeral
 ---
 
 Mode field should be ignored.`
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -256,10 +256,10 @@ func TestAgentMode_IsPersistent(t *testing.T) {
 
 func TestLoadAgentDir_IgnoresLegacyFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nInstructions."), 0644)
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nInstructions."), 0o644)
 	// Legacy files should be ignored — no error, not loaded into config.
-	os.WriteFile(filepath.Join(dir, "soul.md"), []byte("Be warm and curious."), 0644)
-	os.WriteFile(filepath.Join(dir, "tools.md"), []byte("Use grep for searching."), 0644)
+	os.WriteFile(filepath.Join(dir, "soul.md"), []byte("Be warm and curious."), 0o644)
+	os.WriteFile(filepath.Join(dir, "tools.md"), []byte("Use grep for searching."), 0o644)
 
 	agent, err := LoadAgentDir(dir)
 	if err != nil {
@@ -277,16 +277,16 @@ name: test
 ---
 
 Test agent.`
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	skillsDir := filepath.Join(dir, "skills")
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// Write a non-.md file that should be skipped
-	if err := os.WriteFile(filepath.Join(skillsDir, "notes.txt"), []byte("not a skill"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillsDir, "notes.txt"), []byte("not a skill"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -361,8 +361,8 @@ metadata:
 ---
 
 Instructions for PDF processing.`
-	os.MkdirAll(filepath.Join(dir, "skills"), 0755)
-	os.WriteFile(filepath.Join(dir, "skills", "pdf-tools.md"), []byte(skillMD), 0644)
+	os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
+	os.WriteFile(filepath.Join(dir, "skills", "pdf-tools.md"), []byte(skillMD), 0o644)
 
 	skills, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err != nil {
@@ -388,8 +388,8 @@ Instructions for PDF processing.`
 
 func TestLoadSkills_DescriptionRequired(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills"), 0755)
-	os.WriteFile(filepath.Join(dir, "skills", "no-desc.md"), []byte("---\nname: no-desc\n---\nBody."), 0644)
+	os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
+	os.WriteFile(filepath.Join(dir, "skills", "no-desc.md"), []byte("---\nname: no-desc\n---\nBody."), 0o644)
 
 	_, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err == nil || !strings.Contains(err.Error(), "description") {
@@ -399,8 +399,8 @@ func TestLoadSkills_DescriptionRequired(t *testing.T) {
 
 func TestLoadSkills_NameValidation(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills"), 0755)
-	os.WriteFile(filepath.Join(dir, "skills", "bad.md"), []byte("---\nname: BAD NAME\ndescription: desc\n---\nBody."), 0644)
+	os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
+	os.WriteFile(filepath.Join(dir, "skills", "bad.md"), []byte("---\nname: BAD NAME\ndescription: desc\n---\nBody."), 0o644)
 
 	_, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err == nil || !strings.Contains(err.Error(), "kebab-case") {
@@ -410,9 +410,9 @@ func TestLoadSkills_NameValidation(t *testing.T) {
 
 func TestLoadSkills_DescriptionTooLong(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills"), 0755)
+	os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "long-desc.md"),
-		[]byte("---\nname: long-desc\ndescription: "+strings.Repeat("x", 1025)+"\n---\nBody."), 0644)
+		[]byte("---\nname: long-desc\ndescription: "+strings.Repeat("x", 1025)+"\n---\nBody."), 0o644)
 
 	_, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err == nil || !strings.Contains(err.Error(), "1024") {
@@ -423,15 +423,15 @@ func TestLoadSkills_DescriptionTooLong(t *testing.T) {
 func TestLoadSkills_SkillDirectory(t *testing.T) {
 	dir := t.TempDir()
 	skillDir := filepath.Join(dir, "skills", "my-skill")
-	os.MkdirAll(filepath.Join(skillDir, "scripts"), 0755)
-	os.MkdirAll(filepath.Join(skillDir, "references"), 0755)
+	os.MkdirAll(filepath.Join(skillDir, "scripts"), 0o755)
+	os.MkdirAll(filepath.Join(skillDir, "references"), 0o755)
 	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
 name: my-skill
 description: A directory-based skill.
 ---
 
-Read references/guide.md for details.`), 0644)
-	os.WriteFile(filepath.Join(skillDir, "scripts", "run.sh"), []byte("#!/bin/bash\necho hi"), 0755)
+Read references/guide.md for details.`), 0o644)
+	os.WriteFile(filepath.Join(skillDir, "scripts", "run.sh"), []byte("#!/bin/bash\necho hi"), 0o755)
 
 	skills, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err != nil {
@@ -447,9 +447,9 @@ Read references/guide.md for details.`), 0644)
 
 func TestLoadSkills_DirectoryNameMismatch(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills", "my-skill"), 0755)
+	os.MkdirAll(filepath.Join(dir, "skills", "my-skill"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "my-skill", "SKILL.md"),
-		[]byte("---\nname: wrong-name\ndescription: Mismatched.\n---\nBody."), 0644)
+		[]byte("---\nname: wrong-name\ndescription: Mismatched.\n---\nBody."), 0o644)
 
 	_, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err == nil || !strings.Contains(err.Error(), "must match directory") {
@@ -459,7 +459,7 @@ func TestLoadSkills_DirectoryNameMismatch(t *testing.T) {
 
 func TestLoadSkills_DirectoryWithoutSKILLMD(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills", "empty-dir"), 0755)
+	os.MkdirAll(filepath.Join(dir, "skills", "empty-dir"), 0o755)
 
 	skills, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err != nil {
@@ -473,11 +473,11 @@ func TestLoadSkills_DirectoryWithoutSKILLMD(t *testing.T) {
 func TestLoadSkills_MixedFormats(t *testing.T) {
 	dir := t.TempDir()
 	skillsDir := filepath.Join(dir, "skills")
-	os.MkdirAll(skillsDir, 0755)
+	os.MkdirAll(skillsDir, 0o755)
 
-	os.WriteFile(filepath.Join(skillsDir, "flat-skill.md"), []byte("---\nname: flat-skill\ndescription: Flat.\n---\nBody."), 0644)
-	os.MkdirAll(filepath.Join(skillsDir, "dir-skill"), 0755)
-	os.WriteFile(filepath.Join(skillsDir, "dir-skill", "SKILL.md"), []byte("---\nname: dir-skill\ndescription: Dir.\n---\nBody."), 0644)
+	os.WriteFile(filepath.Join(skillsDir, "flat-skill.md"), []byte("---\nname: flat-skill\ndescription: Flat.\n---\nBody."), 0o644)
+	os.MkdirAll(filepath.Join(skillsDir, "dir-skill"), 0o755)
+	os.WriteFile(filepath.Join(skillsDir, "dir-skill", "SKILL.md"), []byte("---\nname: dir-skill\ndescription: Dir.\n---\nBody."), 0o644)
 
 	skills, err := LoadSkills(skillsDir)
 	if err != nil {
@@ -530,9 +530,9 @@ func TestMergeSkills(t *testing.T) {
 
 func TestLoadSkills_CompatibilityTooLong(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills"), 0755)
+	os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "long-compat.md"),
-		[]byte("---\nname: long-compat\ndescription: desc\ncompatibility: "+strings.Repeat("x", 501)+"\n---\nBody."), 0644)
+		[]byte("---\nname: long-compat\ndescription: desc\ncompatibility: "+strings.Repeat("x", 501)+"\n---\nBody."), 0o644)
 
 	_, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err == nil || !strings.Contains(err.Error(), "500") {
@@ -542,9 +542,9 @@ func TestLoadSkills_CompatibilityTooLong(t *testing.T) {
 
 func TestLoadSkills_PathIsAbsolute(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "skills"), 0755)
+	os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "my-skill.md"),
-		[]byte("---\nname: my-skill\ndescription: desc\n---\nBody."), 0644)
+		[]byte("---\nname: my-skill\ndescription: desc\n---\nBody."), 0o644)
 
 	skills, err := LoadSkills(filepath.Join(dir, "skills"))
 	if err != nil {
@@ -560,7 +560,7 @@ func TestLoadSkills_PathIsAbsolute(t *testing.T) {
 
 func TestReloadAgentTexts(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nOriginal prompt."), 0644)
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nOriginal prompt."), 0o644)
 
 	prompt, err := ReloadAgentTexts(dir)
 	if err != nil {
@@ -571,7 +571,7 @@ func TestReloadAgentTexts(t *testing.T) {
 	}
 
 	// Modify agent.md body and re-read — should pick up new text.
-	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nUpdated prompt."), 0644)
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nname: test\n---\nUpdated prompt."), 0o644)
 	prompt, err = ReloadAgentTexts(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

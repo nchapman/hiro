@@ -1,6 +1,7 @@
 package loghandler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -32,7 +33,7 @@ func TestHandler_WritesToDB(t *testing.T) {
 	// Close flushes the async buffer.
 	h.Close()
 
-	logs, err := db.QueryLogs(platformdb.LogQuery{})
+	logs, err := db.QueryLogs(context.Background(), platformdb.LogQuery{})
 	if err != nil {
 		t.Fatalf("QueryLogs: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestHandler_ExtractsReservedKeys(t *testing.T) {
 	logger.Info("request handled")
 	h.Close()
 
-	logs, _ := db.QueryLogs(platformdb.LogQuery{})
+	logs, _ := db.QueryLogs(context.Background(), platformdb.LogQuery{})
 	if len(logs) != 1 {
 		t.Fatalf("got %d logs, want 1", len(logs))
 	}
@@ -82,7 +83,7 @@ func TestHandler_WithGroup(t *testing.T) {
 	logger.Info("handled", "method", "GET")
 	h.Close()
 
-	logs, _ := db.QueryLogs(platformdb.LogQuery{})
+	logs, _ := db.QueryLogs(context.Background(), platformdb.LogQuery{})
 	if len(logs) != 1 {
 		t.Fatalf("got %d logs", len(logs))
 	}
@@ -101,7 +102,7 @@ func TestHandler_ReservedKeysUnderGroup(t *testing.T) {
 	logger.Info("step", "tool", "bash")
 	h.Close()
 
-	logs, _ := db.QueryLogs(platformdb.LogQuery{})
+	logs, _ := db.QueryLogs(context.Background(), platformdb.LogQuery{})
 	if len(logs) != 1 {
 		t.Fatalf("got %d logs", len(logs))
 	}
@@ -122,7 +123,7 @@ func TestHandler_LevelFiltering(t *testing.T) {
 	logger.Warn("should be kept")
 	h.Close()
 
-	logs, _ := db.QueryLogs(platformdb.LogQuery{})
+	logs, _ := db.QueryLogs(context.Background(), platformdb.LogQuery{})
 	if len(logs) != 1 {
 		t.Fatalf("got %d logs, want 1 (info should be filtered)", len(logs))
 	}
@@ -201,7 +202,7 @@ func TestHandler_BatchedWrites(t *testing.T) {
 
 	h.Close()
 
-	logs, _ := db.QueryLogs(platformdb.LogQuery{Limit: 200})
+	logs, _ := db.QueryLogs(context.Background(), platformdb.LogQuery{Limit: 200})
 	if len(logs) != 100 {
 		t.Errorf("got %d logs, want 100", len(logs))
 	}

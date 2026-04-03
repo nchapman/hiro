@@ -149,12 +149,12 @@ func (cp *ControlPlane) saveUnlocked() error {
 		return fmt.Errorf("marshaling control plane config: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cp.path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cp.path), 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
 	// Write with restrictive permissions since this contains secrets.
-	if err := os.WriteFile(cp.path, data, 0600); err != nil {
+	if err := os.WriteFile(cp.path, data, 0o600); err != nil {
 		return fmt.Errorf("writing control plane config: %w", err)
 	}
 

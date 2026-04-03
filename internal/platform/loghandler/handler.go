@@ -218,7 +218,7 @@ func (h *Handler) writeLoop() {
 			return
 		}
 		// Best-effort insert — don't let DB errors stop the writer.
-		_ = h.db.InsertLogs(batch)
+		_ = h.db.InsertLogs(context.Background(), batch)
 		batch = batch[:0]
 	}
 

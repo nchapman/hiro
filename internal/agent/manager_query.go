@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -107,7 +108,7 @@ func (m *Manager) enrichPersonaNames(infos []InstanceInfo) {
 }
 
 // GetHistory returns recent messages from the active session of a persistent instance.
-func (m *Manager) GetHistory(instanceID string, limit int) ([]HistoryMessage, error) {
+func (m *Manager) GetHistory(ctx context.Context, instanceID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()
 	inst, ok := m.instances[instanceID]
 	var sessionID string
@@ -132,7 +133,7 @@ func (m *Manager) GetHistory(instanceID string, limit int) ([]HistoryMessage, er
 		return nil, nil
 	}
 
-	msgs, err := m.pdb.RecentMessages(sessionID, limit)
+	msgs, err := m.pdb.RecentMessages(ctx, sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("reading history: %w", err)
 	}
@@ -157,12 +158,12 @@ func (m *Manager) GetHistory(instanceID string, limit int) ([]HistoryMessage, er
 }
 
 // GetSessionHistory returns recent messages from a specific session (for history browsing).
-func (m *Manager) GetSessionHistory(sessionID string, limit int) ([]HistoryMessage, error) {
+func (m *Manager) GetSessionHistory(ctx context.Context, sessionID string, limit int) ([]HistoryMessage, error) {
 	if m.pdb == nil {
 		return nil, nil
 	}
 
-	msgs, err := m.pdb.RecentMessages(sessionID, limit)
+	msgs, err := m.pdb.RecentMessages(ctx, sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("reading history: %w", err)
 	}

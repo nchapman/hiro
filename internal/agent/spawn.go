@@ -30,14 +30,14 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 
 	// Create a private socket directory so the socket is inaccessible to other
 	// agent UIDs from the moment it's created (no TOCTOU window). The directory
-	// is 0700, owned by the agent's UID. Short path to stay under the 104-byte
+	// is 0o700, owned by the agent's UID. Short path to stay under the 104-byte
 	// Unix socket limit.
 	sessPrefix := cfg.SessionID
 	if len(sessPrefix) > 18 {
 		sessPrefix = sessPrefix[:18]
 	}
 	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
-	if err := os.MkdirAll(socketDir, 0700); err != nil {
+	if err := os.MkdirAll(socketDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}
 	if cfg.UID != 0 {

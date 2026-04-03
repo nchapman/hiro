@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -18,8 +19,8 @@ type AssembleResult struct {
 
 // Assemble builds a []fantasy.Message from the context items in the platform DB,
 // respecting the token budget.
-func Assemble(pdb *platformdb.DB, sessionID string, cfg CompactionConfig) (AssembleResult, error) {
-	items, err := pdb.GetContextItems(sessionID)
+func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg CompactionConfig) (AssembleResult, error) {
+	items, err := pdb.GetContextItems(ctx, sessionID)
 	if err != nil {
 		return AssembleResult{}, fmt.Errorf("loading context items: %w", err)
 	}
@@ -33,7 +34,7 @@ func Assemble(pdb *platformdb.DB, sessionID string, cfg CompactionConfig) (Assem
 	}
 	all := make([]resolved, len(items))
 	for i, item := range items {
-		msg, tokens, err := resolveItem(pdb, item)
+		msg, tokens, err := resolveItem(ctx, pdb, item)
 		if err != nil {
 			return AssembleResult{}, fmt.Errorf("resolving item %d: %w", item.Ordinal, err)
 		}
@@ -106,13 +107,13 @@ func Assemble(pdb *platformdb.DB, sessionID string, cfg CompactionConfig) (Assem
 }
 
 // resolveItem converts a context item to a fantasy.Message.
-func resolveItem(pdb *platformdb.DB, item platformdb.ContextItem) (fantasy.Message, int, error) {
+func resolveItem(ctx context.Context, pdb *platformdb.DB, item platformdb.ContextItem) (fantasy.Message, int, error) {
 	switch item.ItemType {
 	case "message":
 		if item.MessageID == nil {
 			return fantasy.Message{}, 0, fmt.Errorf("message item has nil message_id")
 		}
-		msg, err := pdb.GetMessage(*item.MessageID)
+		msg, err := pdb.GetMessage(ctx, *item.MessageID)
 		if err != nil {
 			return fantasy.Message{}, 0, err
 		}
@@ -132,7 +133,7 @@ func resolveItem(pdb *platformdb.DB, item platformdb.ContextItem) (fantasy.Messa
 		if item.SummaryID == nil {
 			return fantasy.Message{}, 0, fmt.Errorf("summary item has nil summary_id")
 		}
-		sum, err := pdb.GetSummary(*item.SummaryID)
+		sum, err := pdb.GetSummary(ctx, *item.SummaryID)
 		if err != nil {
 			return fantasy.Message{}, 0, err
 		}

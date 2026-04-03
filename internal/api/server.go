@@ -235,7 +235,7 @@ func (s *Server) handleInstanceMessages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	id := r.PathValue("id")
-	msgs, err := s.manager.GetHistory(id, 100)
+	msgs, err := s.manager.GetHistory(r.Context(), id, 100)
 	if err != nil {
 		if errors.Is(err, agent.ErrInstanceNotFound) {
 			http.Error(w, "instance not found", http.StatusNotFound)
@@ -254,7 +254,7 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	msgs, err := s.manager.GetSessionHistory(id, 100)
+	msgs, err := s.manager.GetSessionHistory(r.Context(), id, 100)
 	if err != nil {
 		s.logger.Error("failed to read session history", "id", id, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

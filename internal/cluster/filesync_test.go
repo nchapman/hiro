@@ -40,14 +40,14 @@ func TestShouldIgnore(t *testing.T) {
 func TestCreateAndApplyInitialSync(t *testing.T) {
 	// Set up a source directory with some files.
 	srcDir := t.TempDir()
-	os.MkdirAll(filepath.Join(srcDir, "workspace", "project"), 0755)
-	os.MkdirAll(filepath.Join(srcDir, "agents", "helper"), 0755)
-	os.WriteFile(filepath.Join(srcDir, "workspace", "project", "main.go"), []byte("package main"), 0644)
-	os.WriteFile(filepath.Join(srcDir, "agents", "helper", "agent.md"), []byte("# Helper"), 0644)
+	os.MkdirAll(filepath.Join(srcDir, "workspace", "project"), 0o755)
+	os.MkdirAll(filepath.Join(srcDir, "agents", "helper"), 0o755)
+	os.WriteFile(filepath.Join(srcDir, "workspace", "project", "main.go"), []byte("package main"), 0o644)
+	os.WriteFile(filepath.Join(srcDir, "agents", "helper", "agent.md"), []byte("# Helper"), 0o644)
 
 	// Also create an ignored directory — it should not be synced.
-	os.MkdirAll(filepath.Join(srcDir, "workspace", "project", ".git"), 0755)
-	os.WriteFile(filepath.Join(srcDir, "workspace", "project", ".git", "HEAD"), []byte("ref: refs/heads/main"), 0644)
+	os.MkdirAll(filepath.Join(srcDir, "workspace", "project", ".git"), 0o755)
+	os.WriteFile(filepath.Join(srcDir, "workspace", "project", ".git", "HEAD"), []byte("ref: refs/heads/main"), 0o644)
 
 	src := NewFileSyncService(FileSyncConfig{
 		RootDir:  srcDir,
@@ -109,7 +109,7 @@ func TestApplyFileUpdate_Create(t *testing.T) {
 	err := svc.ApplyFileUpdate(&pb.FileUpdate{
 		Path:    "workspace/new-file.txt",
 		Content: []byte("hello world"),
-		Mode:    0644,
+		Mode:    0o644,
 	})
 	if err != nil {
 		t.Fatalf("ApplyFileUpdate: %v", err)
@@ -126,8 +126,8 @@ func TestApplyFileUpdate_Create(t *testing.T) {
 
 func TestApplyFileUpdate_Overwrite(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
-	os.WriteFile(filepath.Join(dir, "workspace", "file.txt"), []byte("old"), 0644)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
+	os.WriteFile(filepath.Join(dir, "workspace", "file.txt"), []byte("old"), 0o644)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -139,7 +139,7 @@ func TestApplyFileUpdate_Overwrite(t *testing.T) {
 	err := svc.ApplyFileUpdate(&pb.FileUpdate{
 		Path:           "workspace/file.txt",
 		Content:        []byte("new"),
-		Mode:           0644,
+		Mode:           0o644,
 		MtimeUnixNanos: time.Now().Add(1 * time.Second).UnixNano(),
 	})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestApplyFileUpdate_Overwrite(t *testing.T) {
 
 func TestApplyFileUpdate_Conflict(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -167,14 +167,14 @@ func TestApplyFileUpdate_Conflict(t *testing.T) {
 	svc.ApplyFileUpdate(&pb.FileUpdate{
 		Path:           "workspace/file.txt",
 		Content:        []byte("synced version"),
-		Mode:           0644,
+		Mode:           0o644,
 		MtimeUnixNanos: firstMtime,
 		OriginNode:     "leader",
 	})
 
 	// Simulate a local modification by writing directly and advancing mtime.
 	filePath := filepath.Join(dir, "workspace", "file.txt")
-	os.WriteFile(filePath, []byte("local version"), 0644)
+	os.WriteFile(filePath, []byte("local version"), 0o644)
 	now := time.Now()
 	os.Chtimes(filePath, now, now)
 
@@ -183,7 +183,7 @@ func TestApplyFileUpdate_Conflict(t *testing.T) {
 	err := svc.ApplyFileUpdate(&pb.FileUpdate{
 		Path:           "workspace/file.txt",
 		Content:        []byte("remote version"),
-		Mode:           0644,
+		Mode:           0o644,
 		MtimeUnixNanos: time.Now().Add(-5 * time.Second).UnixNano(),
 		OriginNode:     "node-2",
 	})
@@ -211,11 +211,11 @@ func TestApplyFileUpdate_Conflict(t *testing.T) {
 
 func TestApplyFileUpdate_NoConflictOnFirstReceive(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
 
 	// Write a local file (simulating pre-existing content).
 	filePath := filepath.Join(dir, "workspace", "file.txt")
-	os.WriteFile(filePath, []byte("old"), 0644)
+	os.WriteFile(filePath, []byte("old"), 0o644)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -228,7 +228,7 @@ func TestApplyFileUpdate_NoConflictOnFirstReceive(t *testing.T) {
 	err := svc.ApplyFileUpdate(&pb.FileUpdate{
 		Path:           "workspace/file.txt",
 		Content:        []byte("synced"),
-		Mode:           0644,
+		Mode:           0o644,
 		MtimeUnixNanos: time.Now().UnixNano(),
 		OriginNode:     "leader",
 	})
@@ -250,8 +250,8 @@ func TestApplyFileUpdate_NoConflictOnFirstReceive(t *testing.T) {
 
 func TestApplyFileUpdate_Delete(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
-	os.WriteFile(filepath.Join(dir, "workspace", "doomed.txt"), []byte("bye"), 0644)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
+	os.WriteFile(filepath.Join(dir, "workspace", "doomed.txt"), []byte("bye"), 0o644)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -303,7 +303,7 @@ func TestApplyInitialSync_PathTraversal(t *testing.T) {
 	tw := tar.NewWriter(zw)
 	tw.WriteHeader(&tar.Header{
 		Name:     "../../../etc/evil",
-		Mode:     0644,
+		Mode:     0o644,
 		Size:     6,
 		Typeflag: tar.TypeReg,
 	})
@@ -368,7 +368,7 @@ func TestEchoSuppression(t *testing.T) {
 // when the file write happens before fsnotify registers the new directory.
 func TestWatchAndSync_NewDirWithFile(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
 
 	var mu sync.Mutex
 	var sent []string
@@ -394,8 +394,8 @@ func TestWatchAndSync_NewDirWithFile(t *testing.T) {
 	// This simulates the API upload race: mkdir + write before fsnotify
 	// can register the new directory.
 	subdir := filepath.Join(dir, "workspace", "new-project")
-	os.MkdirAll(subdir, 0755)
-	os.WriteFile(filepath.Join(subdir, "README.md"), []byte("hello"), 0644)
+	os.MkdirAll(subdir, 0o755)
+	os.WriteFile(filepath.Join(subdir, "README.md"), []byte("hello"), 0o644)
 
 	// Wait for debounce + processing.
 	wantPath := filepath.Join("workspace", "new-project", "README.md")
@@ -425,7 +425,7 @@ func TestAtomicWrite(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 
 	// Create file.
-	if err := atomicWrite(path, []byte("hello"), 0644); err != nil {
+	if err := atomicWrite(path, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("atomicWrite: %v", err)
 	}
 	content, _ := os.ReadFile(path)
@@ -434,7 +434,7 @@ func TestAtomicWrite(t *testing.T) {
 	}
 
 	// Overwrite atomically.
-	if err := atomicWrite(path, []byte("world"), 0644); err != nil {
+	if err := atomicWrite(path, []byte("world"), 0o644); err != nil {
 		t.Fatalf("atomicWrite: %v", err)
 	}
 	content, _ = os.ReadFile(path)
@@ -452,8 +452,8 @@ func TestAtomicWrite(t *testing.T) {
 func TestApplyInitialSyncStream(t *testing.T) {
 	// Set up a source directory.
 	srcDir := t.TempDir()
-	os.MkdirAll(filepath.Join(srcDir, "workspace"), 0755)
-	os.WriteFile(filepath.Join(srcDir, "workspace", "file.go"), []byte("package main"), 0644)
+	os.MkdirAll(filepath.Join(srcDir, "workspace"), 0o755)
+	os.WriteFile(filepath.Join(srcDir, "workspace", "file.go"), []byte("package main"), 0o644)
 
 	src := NewFileSyncService(FileSyncConfig{
 		RootDir:  srcDir,
@@ -495,8 +495,8 @@ func TestApplyInitialSyncStream(t *testing.T) {
 
 func TestReconcile_CatchesDrift(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "workspace"), 0755)
-	os.WriteFile(filepath.Join(dir, "workspace", "original.txt"), []byte("v1"), 0644)
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
+	os.WriteFile(filepath.Join(dir, "workspace", "original.txt"), []byte("v1"), 0o644)
 
 	svc := NewFileSyncService(FileSyncConfig{
 		RootDir:  dir,
@@ -512,9 +512,9 @@ func TestReconcile_CatchesDrift(t *testing.T) {
 	_ = snap // The tar was created with "v1" content.
 
 	// Simulate drift: modify a file after the snapshot.
-	os.WriteFile(filepath.Join(dir, "workspace", "original.txt"), []byte("v2"), 0644)
+	os.WriteFile(filepath.Join(dir, "workspace", "original.txt"), []byte("v2"), 0o644)
 	// Also add a new file.
-	os.WriteFile(filepath.Join(dir, "workspace", "new.txt"), []byte("new"), 0644)
+	os.WriteFile(filepath.Join(dir, "workspace", "new.txt"), []byte("new"), 0o644)
 
 	// Collect updates sent by Reconcile.
 	var sent []*pb.FileUpdate

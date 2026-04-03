@@ -1,15 +1,17 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
 
 func TestInstanceCRUD(t *testing.T) {
 	d := openTestDB(t)
+	ctx := context.Background()
 
 	// Create a root instance.
-	err := d.CreateInstance(Instance{
+	err := d.CreateInstance(ctx, Instance{
 		ID: "inst-1", AgentName: "coordinator", Mode: "persistent",
 	})
 	if err != nil {
@@ -17,7 +19,7 @@ func TestInstanceCRUD(t *testing.T) {
 	}
 
 	// Get it back.
-	inst, err := d.GetInstance("inst-1")
+	inst, err := d.GetInstance(ctx, "inst-1")
 	if err != nil {
 		t.Fatalf("GetInstance: %v", err)
 	}
@@ -29,25 +31,25 @@ func TestInstanceCRUD(t *testing.T) {
 	}
 
 	// Get non-existent.
-	_, err = d.GetInstance("no-such-id")
+	_, err = d.GetInstance(ctx, "no-such-id")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 
 	// Create child.
-	err = d.CreateInstance(Instance{
+	err = d.CreateInstance(ctx, Instance{
 		ID: "inst-2", AgentName: "worker", Mode: "ephemeral", ParentID: "inst-1",
 	})
 	if err != nil {
 		t.Fatalf("CreateInstance child: %v", err)
 	}
-	child, _ := d.GetInstance("inst-2")
+	child, _ := d.GetInstance(ctx, "inst-2")
 	if child.ParentID != "inst-1" {
 		t.Errorf("expected parent_id=inst-1, got %s", child.ParentID)
 	}
 
 	// Duplicate.
-	err = d.CreateInstance(Instance{ID: "inst-1", AgentName: "x", Mode: "ephemeral"})
+	err = d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "x", Mode: "ephemeral"})
 	if !errors.Is(err, ErrDuplicate) {
 		t.Errorf("expected ErrDuplicate, got %v", err)
 	}
@@ -55,13 +57,14 @@ func TestInstanceCRUD(t *testing.T) {
 
 func TestListInstances(t *testing.T) {
 	d := openTestDB(t)
+	ctx := context.Background()
 
-	d.CreateInstance(Instance{ID: "root", AgentName: "coord", Mode: "persistent"})
-	d.CreateInstance(Instance{ID: "child-1", AgentName: "w1", Mode: "ephemeral", ParentID: "root"})
-	d.CreateInstance(Instance{ID: "child-2", AgentName: "w2", Mode: "persistent", ParentID: "root"})
+	d.CreateInstance(ctx, Instance{ID: "root", AgentName: "coord", Mode: "persistent"})
+	d.CreateInstance(ctx, Instance{ID: "child-1", AgentName: "w1", Mode: "ephemeral", ParentID: "root"})
+	d.CreateInstance(ctx, Instance{ID: "child-2", AgentName: "w2", Mode: "persistent", ParentID: "root"})
 
 	// List all.
-	all, err := d.ListInstances("", "")
+	all, err := d.ListInstances(ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +73,7 @@ func TestListInstances(t *testing.T) {
 	}
 
 	// List by parent.
-	children, err := d.ListChildInstances("root")
+	children, err := d.ListChildInstances(ctx, "root")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +82,7 @@ func TestListInstances(t *testing.T) {
 	}
 
 	// List by status.
-	running, err := d.ListInstances("", "running")
+	running, err := d.ListInstances(ctx, "", "running")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +93,14 @@ func TestListInstances(t *testing.T) {
 
 func TestUpdateInstanceStatus(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateInstance(Instance{ID: "inst-1", AgentName: "worker", Mode: "ephemeral"})
+	ctx := context.Background()
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "worker", Mode: "ephemeral"})
 
 	// Stop it.
-	if err := d.UpdateInstanceStatus("inst-1", "stopped"); err != nil {
+	if err := d.UpdateInstanceStatus(ctx, "inst-1", "stopped"); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := d.GetInstance("inst-1")
+	inst, _ := d.GetInstance(ctx, "inst-1")
 	if inst.Status != "stopped" {
 		t.Errorf("expected stopped, got %s", inst.Status)
 	}
@@ -105,7 +109,7 @@ func TestUpdateInstanceStatus(t *testing.T) {
 	}
 
 	// Non-existent.
-	err := d.UpdateInstanceStatus("no-such", "stopped")
+	err := d.UpdateInstanceStatus(ctx, "no-such", "stopped")
 	if err == nil {
 		t.Error("expected error for non-existent instance")
 	}
@@ -113,19 +117,20 @@ func TestUpdateInstanceStatus(t *testing.T) {
 
 func TestDeleteInstance(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateInstance(Instance{ID: "inst-1", AgentName: "worker", Mode: "ephemeral"})
+	ctx := context.Background()
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "worker", Mode: "ephemeral"})
 
-	if err := d.DeleteInstance("inst-1"); err != nil {
+	if err := d.DeleteInstance(ctx, "inst-1"); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := d.GetInstance("inst-1")
+	_, err := d.GetInstance(ctx, "inst-1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 
 	// Non-existent.
-	err = d.DeleteInstance("no-such")
+	err = d.DeleteInstance(ctx, "no-such")
 	if err == nil {
 		t.Error("expected error for non-existent instance")
 	}
@@ -133,10 +138,11 @@ func TestDeleteInstance(t *testing.T) {
 
 func TestInstanceConfig(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateInstance(Instance{ID: "inst-1", AgentName: "worker", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "worker", Mode: "persistent"})
 
 	// Default config is empty.
-	cfg, err := d.GetInstanceConfig("inst-1")
+	cfg, err := d.GetInstanceConfig(ctx, "inst-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +151,7 @@ func TestInstanceConfig(t *testing.T) {
 	}
 
 	// Update config.
-	err = d.UpdateInstanceConfig("inst-1", InstanceConfig{
+	err = d.UpdateInstanceConfig(ctx, "inst-1", InstanceConfig{
 		ModelOverride:   "claude-3-opus",
 		ReasoningEffort: "high",
 	})
@@ -153,18 +159,18 @@ func TestInstanceConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, _ = d.GetInstanceConfig("inst-1")
+	cfg, _ = d.GetInstanceConfig(ctx, "inst-1")
 	if cfg.ModelOverride != "claude-3-opus" || cfg.ReasoningEffort != "high" {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
 
 	// Non-existent.
-	_, err = d.GetInstanceConfig("no-such")
+	_, err = d.GetInstanceConfig(ctx, "no-such")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 
-	err = d.UpdateInstanceConfig("no-such", InstanceConfig{})
+	err = d.UpdateInstanceConfig(ctx, "no-such", InstanceConfig{})
 	if err == nil {
 		t.Error("expected error for non-existent instance")
 	}
@@ -172,17 +178,18 @@ func TestInstanceConfig(t *testing.T) {
 
 func TestDeleteInstance_CascadesSessions(t *testing.T) {
 	d := openTestDB(t)
-	d.CreateInstance(Instance{ID: "inst-1", AgentName: "worker", Mode: "persistent"})
+	ctx := context.Background()
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "worker", Mode: "persistent"})
 
 	// Create a session under this instance.
-	d.CreateSession(Session{
+	d.CreateSession(ctx, Session{
 		ID: "sess-1", AgentName: "worker", Mode: "persistent", InstanceID: "inst-1",
 	})
 
 	// Delete the instance — session should cascade.
-	d.DeleteInstance("inst-1")
+	d.DeleteInstance(ctx, "inst-1")
 
-	_, err := d.GetSession("sess-1")
+	_, err := d.GetSession(ctx, "sess-1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected session to be cascade-deleted, got %v", err)
 	}

@@ -252,18 +252,18 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 			for _, msg := range phase.Messages {
 				content := msg.Content
 				tokens := EstimateTokens(content)
-				msgID, err := pdb.AppendMessage(sessionID, msg.Role, content, "{}", tokens)
+				msgID, err := pdb.AppendMessage(context.Background(), sessionID, msg.Role, content, "{}", tokens)
 				if err != nil {
 					t.Fatalf("AppendMessage: %v", err)
 				}
 				// Set realistic timestamps — each message 2 minutes apart.
 				msgTime := baseTime.Add(time.Duration(msgIdx) * 2 * time.Minute)
-				pdb.UpdateMessageTimestamp(msgID, msgTime)
+				pdb.UpdateMessageTimestamp(context.Background(), msgID, msgTime)
 				msgIdx++
 			}
 		}
 
-		preTokens, _ := pdb.ContextTokenCount(sessionID)
+		preTokens, _ := pdb.ContextTokenCount(context.Background(), sessionID)
 
 		if compact {
 			// Code conversations are shorter than LoCoMo — force compaction
@@ -287,15 +287,15 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 					break
 				}
 
-				newEstimated, _ := pdb.ContextTokenCount(sessionID)
+				newEstimated, _ := pdb.ContextTokenCount(context.Background(), sessionID)
 				if newEstimated >= estimated {
 					break
 				}
 				estimated = newEstimated
 			}
 
-			postTokens, _ := pdb.ContextTokenCount(sessionID)
-			items, _ := pdb.GetContextItems(sessionID)
+			postTokens, _ := pdb.ContextTokenCount(context.Background(), sessionID)
+			items, _ := pdb.GetContextItems(context.Background(), sessionID)
 			msgCount, sumCount := 0, 0
 			for _, item := range items {
 				if item.ItemType == "message" {
@@ -304,7 +304,7 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 					sumCount++
 				}
 			}
-			maxDepth, _ := pdb.MaxSummaryDepth(sessionID)
+			maxDepth, _ := pdb.MaxSummaryDepth(context.Background(), sessionID)
 			reduction := 0.0
 			if preTokens > 0 {
 				reduction = (1 - float64(postTokens)/float64(preTokens)) * 100
@@ -319,7 +319,7 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 
 		// Assemble context.
 		assembleCfg := DefaultCompactionConfig()
-		assembled, err := Assemble(pdb, sessionID, assembleCfg)
+		assembled, err := Assemble(context.Background(), pdb, sessionID, assembleCfg)
 		if err != nil {
 			t.Fatalf("Assemble: %v", err)
 		}

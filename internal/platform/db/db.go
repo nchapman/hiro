@@ -11,6 +11,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -34,7 +35,7 @@ type DB struct {
 // Open opens (or creates) the platform database at the given path
 // and runs any pending migrations.
 func Open(path string) (*DB, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)
 	}
@@ -77,15 +78,17 @@ func Open(path string) (*DB, error) {
 // the query planner effective. WAL checkpoint truncates the write-ahead
 // log file to reclaim disk space.
 func (d *DB) Close() error {
-	_, _ = d.db.Exec("PRAGMA optimize")
-	_, _ = d.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	ctx := context.Background()
+	_, _ = d.db.ExecContext(ctx, "PRAGMA optimize")
+	_, _ = d.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
 	return d.db.Close()
 }
 
 // migrate runs embedded SQL migration files in order,
 // skipping any that have already been applied.
 func (d *DB) migrate() error {
-	_, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	ctx := context.Background()
+	_, err := d.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		filename   TEXT PRIMARY KEY,
 		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 	)`)
@@ -108,7 +111,7 @@ func (d *DB) migrate() error {
 		}
 
 		var count int
-		err := d.db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE filename = ?", entry.Name()).Scan(&count)
+		err := d.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE filename = ?", entry.Name()).Scan(&count)
 		if err != nil {
 			return fmt.Errorf("checking migration %s: %w", entry.Name(), err)
 		}
@@ -121,15 +124,15 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("reading migration %s: %w", entry.Name(), err)
 		}
 
-		tx, err := d.db.Begin()
+		tx, err := d.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin tx for %s: %w", entry.Name(), err)
 		}
-		if _, err := tx.Exec(string(data)); err != nil {
+		if _, err := tx.ExecContext(ctx, string(data)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("executing migration %s: %w", entry.Name(), err)
 		}
-		if _, err := tx.Exec("INSERT INTO schema_migrations (filename) VALUES (?)", entry.Name()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (filename) VALUES (?)", entry.Name()); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("recording migration %s: %w", entry.Name(), err)
 		}
