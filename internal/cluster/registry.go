@@ -33,8 +33,8 @@ type NodeInfo struct {
 	Name        string     `json:"name"`
 	Status      NodeStatus `json:"status"`
 	IsHome      bool       `json:"is_home"`
-	Addr        string     `json:"addr,omitempty"`  // peer address (ip:port)
-	Via         string     `json:"via,omitempty"`    // "direct" or "relay"
+	Addr        string     `json:"addr,omitempty"` // peer address (ip:port)
+	Via         string     `json:"via,omitempty"`  // "direct" or "relay"
 	ConnectedAt time.Time  `json:"connected_at"`
 	LastSeen    time.Time  `json:"last_seen"`
 	Capacity    int        `json:"capacity"`     // max concurrent workers, 0 = unlimited

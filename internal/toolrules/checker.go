@@ -82,7 +82,7 @@ var defaultExtractors = map[string]ParamExtractor{
 	"Glob":          pathExtractor("pattern"),
 	"Grep":          pathExtractor("pattern"),
 	"WebFetch":      strExtractor("url"),
-	"SpawnInstance":  strExtractor("agent"),
+	"SpawnInstance": strExtractor("agent"),
 	"TaskOutput":    strExtractor("task_id"),
 	"TaskStop":      strExtractor("task_id"),
 }
@@ -91,7 +91,7 @@ var defaultExtractors = map[string]ParamExtractor{
 // that need special matching semantics.
 var defaultMatchers = map[string]MatchFunc{
 	"Bash":          bashMatch,
-	"SpawnInstance":  matchCommaList,
+	"SpawnInstance": matchCommaList,
 }
 
 // wildcardMatchFunc adapts MatchWildcard (bool) to the MatchFunc interface.

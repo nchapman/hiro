@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -50,7 +51,7 @@ func main() {
 	for {
 		start := time.Now()
 		err := run()
-		if err == errRestartRequested {
+		if errors.Is(err, errRestartRequested) {
 			if time.Since(start) > 30*time.Second {
 				restarts = 0 // ran long enough — not a crash loop
 			}
@@ -71,7 +72,7 @@ func main() {
 
 func run() error {
 	// Load .env file if present (does not override existing env vars)
-	godotenv.Load()
+	_ = godotenv.Load()
 
 	// Parse log level from environment (default INFO).
 	logLevel := slog.LevelInfo
@@ -225,7 +226,11 @@ func run() error {
 			logger.Info("tracker discovery started", "tracker", trackerURL, "role", "leader")
 
 			relayLis = cluster.NewChannelListener(cs.listener.Addr())
-			go cs.grpcServer.Serve(relayLis)
+			go func() {
+				if err := cs.grpcServer.Serve(relayLis); err != nil {
+					logger.Error("relay gRPC server error", "error", err)
+				}
+			}()
 
 			go func() {
 				ticker := time.NewTicker(1 * time.Second)
@@ -276,9 +281,8 @@ func run() error {
 			api.WireClusterTerminal(ts, clusterSvc)
 		}
 		srv.SetDisconnectNode(func(nodeID string) {
-			nid := cluster.NodeID(nodeID)
-			clusterSvc.KillWorkersOnNode(nid)
-			cs.leaderStream.DisconnectNode(nid)
+			clusterSvc.KillWorkersOnNode(nodeID)
+			cs.leaderStream.DisconnectNode(nodeID)
 		})
 		return nil
 	}
@@ -445,5 +449,3 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
-
-

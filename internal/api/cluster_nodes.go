@@ -123,7 +123,7 @@ func (s *Server) handleRemoveApproved(w http.ResponseWriter, r *http.Request) {
 		s.disconnectNode(nodeID)
 	}
 	if s.nodeRegistry != nil {
-		s.nodeRegistry.Unregister(cluster.NodeID(nodeID))
+		s.nodeRegistry.Unregister(nodeID)
 	}
 
 	if err := s.cp.Save(); err != nil {

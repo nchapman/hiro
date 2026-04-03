@@ -11,7 +11,7 @@ type clusterTerminalSender struct {
 }
 
 func (s *clusterTerminalSender) SendCreateTerminal(nodeID string, sessionID string, cols, rows uint32) error {
-	return s.svc.SendTerminalMessage(cluster.NodeID(nodeID), &pb.LeaderMessage{
+	return s.svc.SendTerminalMessage(nodeID, &pb.LeaderMessage{
 		Msg: &pb.LeaderMessage_CreateTerminal{
 			CreateTerminal: &pb.CreateTerminal{
 				SessionId: sessionID,
@@ -23,7 +23,7 @@ func (s *clusterTerminalSender) SendCreateTerminal(nodeID string, sessionID stri
 }
 
 func (s *clusterTerminalSender) SendTerminalInput(nodeID string, sessionID string, data []byte) error {
-	return s.svc.SendTerminalMessage(cluster.NodeID(nodeID), &pb.LeaderMessage{
+	return s.svc.SendTerminalMessage(nodeID, &pb.LeaderMessage{
 		Msg: &pb.LeaderMessage_TerminalInput{
 			TerminalInput: &pb.TerminalInput{
 				SessionId: sessionID,
@@ -34,7 +34,7 @@ func (s *clusterTerminalSender) SendTerminalInput(nodeID string, sessionID strin
 }
 
 func (s *clusterTerminalSender) SendTerminalResize(nodeID string, sessionID string, cols, rows uint32) error {
-	return s.svc.SendTerminalMessage(cluster.NodeID(nodeID), &pb.LeaderMessage{
+	return s.svc.SendTerminalMessage(nodeID, &pb.LeaderMessage{
 		Msg: &pb.LeaderMessage_TerminalResize{
 			TerminalResize: &pb.TerminalResize{
 				SessionId: sessionID,
@@ -46,7 +46,7 @@ func (s *clusterTerminalSender) SendTerminalResize(nodeID string, sessionID stri
 }
 
 func (s *clusterTerminalSender) SendCloseTerminal(nodeID string, sessionID string) error {
-	return s.svc.SendTerminalMessage(cluster.NodeID(nodeID), &pb.LeaderMessage{
+	return s.svc.SendTerminalMessage(nodeID, &pb.LeaderMessage{
 		Msg: &pb.LeaderMessage_CloseTerminal{
 			CloseTerminal: &pb.CloseTerminal{
 				SessionId: sessionID,
@@ -61,7 +61,7 @@ type clusterNodeChecker struct {
 }
 
 func (c *clusterNodeChecker) IsOnlineApproved(nodeID string) bool {
-	info, ok := c.registry.Get(cluster.NodeID(nodeID))
+	info, ok := c.registry.Get(nodeID)
 	return ok && info.Status == cluster.NodeOnline
 }
 
@@ -73,13 +73,13 @@ func WireClusterTerminal(termSessions *TerminalSessionManager, svc *cluster.Lead
 
 	svc.SetTerminalHandlers(
 		func(nodeID cluster.NodeID, msg *pb.TerminalCreated) {
-			termSessions.HandleTerminalCreated(string(nodeID), msg.SessionId, msg.Error)
+			termSessions.HandleTerminalCreated(nodeID, msg.SessionId, msg.Error)
 		},
 		func(nodeID cluster.NodeID, msg *pb.TerminalOutput) {
-			termSessions.HandleTerminalOutput(string(nodeID), msg.SessionId, msg.Data)
+			termSessions.HandleTerminalOutput(nodeID, msg.SessionId, msg.Data)
 		},
 		func(nodeID cluster.NodeID, msg *pb.TerminalExited) {
-			termSessions.HandleTerminalExited(string(nodeID), msg.SessionId, int(msg.ExitCode))
+			termSessions.HandleTerminalExited(nodeID, msg.SessionId, int(msg.ExitCode))
 		},
 	)
 }

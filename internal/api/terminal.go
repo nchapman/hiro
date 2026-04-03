@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/coder/websocket"
-	"github.com/nchapman/hiro/internal/cluster"
 )
 
 // Wire protocol constants for the multiplexed terminal WebSocket.
@@ -42,7 +41,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("terminal websocket accept failed", "error", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// Allow large pastes.
 	conn.SetReadLimit(1 * 1024 * 1024)
@@ -100,7 +99,7 @@ func (ts *termSocket) resolveNodeName(nodeID string) string {
 		return "local"
 	}
 	if ts.server.nodeRegistry != nil {
-		if info, ok := ts.server.nodeRegistry.Get(cluster.NodeID(nodeID)); ok && info.Name != "" {
+		if info, ok := ts.server.nodeRegistry.Get(nodeID); ok && info.Name != "" {
 			return info.Name
 		}
 	}

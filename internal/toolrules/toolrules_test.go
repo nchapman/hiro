@@ -228,9 +228,9 @@ func TestMatchWildcard(t *testing.T) {
 
 func TestExtractCommands(t *testing.T) {
 	tests := []struct {
-		cmd         string
-		wantCmds    []string
-		wantUncert  bool
+		cmd        string
+		wantCmds   []string
+		wantUncert bool
 	}{
 		// Simple command.
 		{"ls -la", []string{"ls -la"}, false},

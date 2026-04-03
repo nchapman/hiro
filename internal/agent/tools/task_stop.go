@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os/exec"
 
@@ -37,7 +38,8 @@ func NewTaskStopTool(bgMgr *BackgroundJobManager) fantasy.AgentTool {
 
 // exitCode extracts the exit code from an exec error, or returns -1.
 func exitCode(err error) int {
-	if e, ok := err.(*exec.ExitError); ok {
+	var e *exec.ExitError
+	if errors.As(err, &e) {
 		return e.ExitCode()
 	}
 	return -1

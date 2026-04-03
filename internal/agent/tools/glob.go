@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -132,11 +133,12 @@ func runRgGlob(cmd *exec.Cmd, searchRoot string) ([]string, error) {
 	}
 
 	// Drain remaining output and wait for process to exit
-	io.Copy(io.Discard, stdout)
+	_, _ = io.Copy(io.Discard, stdout)
 	waitErr := cmd.Wait()
 
 	if len(entries) == 0 && waitErr != nil {
-		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(waitErr, &ee) && ee.ExitCode() == 1 {
 			return nil, nil // no matches
 		}
 		return nil, fmt.Errorf("ripgrep: %w", waitErr)
@@ -176,7 +178,7 @@ func globWalk(pattern, searchPath string) ([]string, bool, error) {
 
 	err := filepath.WalkDir(searchPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible entries
 		}
 
 		// Skip hidden directories
@@ -205,7 +207,7 @@ func globWalk(pattern, searchPath string) ([]string, bool, error) {
 		if matched {
 			info, err := d.Info()
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // skip entries with unreadable metadata
 			}
 			entries = append(entries, globEntry{
 				path:    path,

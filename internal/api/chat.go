@@ -277,7 +277,7 @@ func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, in
 	files, attErr := processAttachments(msg.Attachments)
 	if attErr != nil {
 		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: attErr.Error()})
-		return nil
+		return nil //nolint:nilerr // error reported to client; don't break WebSocket connection
 	}
 
 	// Stream response — agent process owns the conversation.

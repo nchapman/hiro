@@ -82,7 +82,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Conn, cancel context.CancelFunc) {
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// First message must be a register message — enforce a deadline
 	regCtx, regCancel := context.WithTimeout(ctx, registrationTimeout)
@@ -96,7 +96,7 @@ func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Con
 
 	if env.Type != TypeRegister {
 		s.logger.Error("expected register message", "got", env.Type)
-		conn.Close(websocket.StatusPolicyViolation, "first message must be register")
+		_ = conn.Close(websocket.StatusPolicyViolation, "first message must be register")
 		return
 	}
 
@@ -115,26 +115,26 @@ func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Con
 	// Validate swarm code — constant-time comparison
 	if subtle.ConstantTimeCompare([]byte(reg.SwarmCode), []byte(s.swarm.Code())) != 1 {
 		s.logger.Warn("invalid swarm code attempt", "agent", reg.AgentName)
-		conn.Close(websocket.StatusPolicyViolation, "invalid swarm code")
+		_ = conn.Close(websocket.StatusPolicyViolation, "invalid swarm code")
 		return
 	}
 
 	// Validate registration fields
 	if reg.AgentName == "" || len(reg.AgentName) > maxAgentNameLen {
-		conn.Close(websocket.StatusPolicyViolation, "invalid agent name")
+		_ = conn.Close(websocket.StatusPolicyViolation, "invalid agent name")
 		return
 	}
 	if len(reg.Description) > maxDescriptionLen {
-		conn.Close(websocket.StatusPolicyViolation, "description too long")
+		_ = conn.Close(websocket.StatusPolicyViolation, "description too long")
 		return
 	}
 	if len(reg.Skills) > maxSkills {
-		conn.Close(websocket.StatusPolicyViolation, "too many skills")
+		_ = conn.Close(websocket.StatusPolicyViolation, "too many skills")
 		return
 	}
 	for _, skill := range reg.Skills {
 		if skill == "" || len(skill) > maxSkillNameLen {
-			conn.Close(websocket.StatusPolicyViolation, "invalid skill name")
+			_ = conn.Close(websocket.StatusPolicyViolation, "invalid skill name")
 			return
 		}
 	}
@@ -202,11 +202,7 @@ func (s *Server) readLoop(ctx context.Context, wc *workerConn) {
 		}
 
 		switch env.Type {
-		case TypeHeartbeat:
-			// Update last seen
-			if _, ok := s.swarm.GetWorker(wc.workerID); ok {
-				// TODO: add UpdateLastSeen method to swarm
-			}
+		case TypeHeartbeat: //nolint:revive // intentional no-op; heartbeat presence keeps the connection alive
 
 		case TypeTaskResult:
 			s.handleTaskResult(wc.workerID, env)
@@ -263,7 +259,7 @@ func (s *Server) handleTaskResult(workerID string, env Envelope) {
 		ch <- taskResponse{result: result.Result}
 	}
 
-	s.swarm.CompleteTask(result.TaskID, result.Result)
+	_ = s.swarm.CompleteTask(result.TaskID, result.Result)
 }
 
 func (s *Server) handleTaskError(workerID string, env Envelope) {
@@ -301,7 +297,7 @@ func (s *Server) handleTaskError(workerID string, env Envelope) {
 		ch <- taskResponse{err: fmt.Errorf("worker error: %s", taskErr.Error)}
 	}
 
-	s.swarm.FailTask(taskErr.TaskID, taskErr.Error)
+	_ = s.swarm.FailTask(taskErr.TaskID, taskErr.Error)
 }
 
 func (s *Server) handleTaskProgress(env Envelope) {
@@ -348,7 +344,7 @@ func (s *Server) cleanup(workerID string) {
 		if pt.ch != nil {
 			pt.ch <- taskResponse{err: fmt.Errorf("worker disconnected")}
 		}
-		s.swarm.FailTask(pt.taskID, "worker disconnected")
+		_ = s.swarm.FailTask(pt.taskID, "worker disconnected")
 	}
 
 	s.swarm.RemoveWorker(workerID)
@@ -409,14 +405,14 @@ func (s *Server) DispatchTask(ctx context.Context, worker hub.Worker, skill, pro
 		},
 	})
 	if err != nil {
-		s.swarm.FailTask(taskID, err.Error())
+		_ = s.swarm.FailTask(taskID, err.Error())
 		return "", fmt.Errorf("sending task to worker: %w", err)
 	}
 
 	// Wait for result
 	select {
 	case <-ctx.Done():
-		s.swarm.FailTask(taskID, "context cancelled")
+		_ = s.swarm.FailTask(taskID, "context cancelled")
 		return "", ctx.Err()
 	case resp := <-ch:
 		if resp.err != nil {

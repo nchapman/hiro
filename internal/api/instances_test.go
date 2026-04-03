@@ -36,8 +36,8 @@ func testWorkerFactory(_ context.Context, _ ipc.SpawnConfig) (*agent.WorkerHandl
 }
 
 type fakeWorker struct {
-	done     chan struct{}
-	once     sync.Once
+	done chan struct{}
+	once sync.Once
 }
 
 func (f *fakeWorker) shutdown() {
@@ -213,4 +213,3 @@ func TestInstanceMessages_NotFound(t *testing.T) {
 		t.Fatalf("status=%d, want 404", rec.Code)
 	}
 }
-

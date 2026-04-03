@@ -176,4 +176,3 @@ func TestHandleDeleteProvider_AllowsWhenMultiple(t *testing.T) {
 		t.Errorf("expected 200 when deleting non-last provider, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
-

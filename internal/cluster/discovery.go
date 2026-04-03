@@ -283,7 +283,7 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 		d.logger.Warn("tracker announce failed", "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))

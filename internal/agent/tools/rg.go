@@ -45,7 +45,6 @@ func rgGlobCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-
 // errRgUnavailable is returned when ripgrep is not installed.
 var errRgUnavailable = fmt.Errorf("ripgrep not available")
 

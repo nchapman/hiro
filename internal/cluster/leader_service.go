@@ -27,7 +27,7 @@ type LeaderService struct {
 
 	fileSync *FileSyncService // for sending file updates to nodes; nil if not configured
 
-	onJobCompletion  func(sessionID string, completion *pb.JobCompletionNotify) // called on background task completion
+	onJobCompletion   func(sessionID string, completion *pb.JobCompletionNotify) // called on background task completion
 	onTerminalCreated func(nodeID NodeID, msg *pb.TerminalCreated)
 	onTerminalOutput  func(nodeID NodeID, msg *pb.TerminalOutput)
 	onTerminalExited  func(nodeID NodeID, msg *pb.TerminalExited)
@@ -359,7 +359,7 @@ func (s *LeaderService) handleFileUpdate(fromNode NodeID, msg *pb.FileUpdate) {
 		return
 	}
 	// Stamp the authenticated node ID to prevent OriginNode spoofing.
-	msg.OriginNode = string(fromNode)
+	msg.OriginNode = fromNode
 	if err := fs.ApplyFileUpdate(msg); err != nil {
 		s.logger.Warn("failed to apply file update from node", "node", fromNode, "path", msg.Path, "error", err)
 		return

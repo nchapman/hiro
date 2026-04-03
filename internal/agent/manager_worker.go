@@ -22,7 +22,7 @@ func (m *Manager) shutdownHandle(h *WorkerHandle) {
 	}
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	h.Worker.Shutdown(shutCtx)
+	_ = h.Worker.Shutdown(shutCtx)
 
 	select {
 	case <-h.Done:
@@ -210,9 +210,9 @@ func formatJobNotification(c *pb.JobCompletion) inference.Notification {
 	}
 	var summary string
 	if c.Failed {
-		summary = fmt.Sprintf("Background command \"%s\" failed with exit code %d", desc, c.ExitCode)
+		summary = fmt.Sprintf("Background command %q failed with exit code %d", desc, c.ExitCode)
 	} else {
-		summary = fmt.Sprintf("Background command \"%s\" completed (exit code %d)", desc, c.ExitCode)
+		summary = fmt.Sprintf("Background command %q completed (exit code %d)", desc, c.ExitCode)
 	}
 
 	content := fmt.Sprintf("<task-notification>\n<task_id>%s</task_id>\n<status>%s</status>\n<summary>%s</summary>\n</task-notification>",

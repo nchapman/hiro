@@ -13,9 +13,9 @@ func TestEstimateTokens(t *testing.T) {
 		want  int
 	}{
 		{"", 0},
-		{"hi", 1},      // len=2, 2/4=0 but >0 → 1
-		{"abc", 1},      // len=3, 3/4=0 but >0 → 1
-		{"abcd", 1},     // len=4, 4/4=1
+		{"hi", 1},           // len=2, 2/4=0 but >0 → 1
+		{"abc", 1},          // len=3, 3/4=0 but >0 → 1
+		{"abcd", 1},         // len=4, 4/4=1
 		{"hello world!", 3}, // len=12, 12/4=3
 	}
 	for _, tt := range tests {
@@ -104,8 +104,8 @@ func TestEstimateFileTokens(t *testing.T) {
 
 	t.Run("multiple files sum", func(t *testing.T) {
 		files := []fantasy.FilePart{
-			makeFile("image/jpeg", 100),     // 85 (floor)
-			makeFile("text/plain", 400),     // 100
+			makeFile("image/jpeg", 100),       // 85 (floor)
+			makeFile("text/plain", 400),       // 100
 			makeFile("application/pdf", 1024), // 1600 (1 page min)
 		}
 		got := EstimateFileTokens(files)

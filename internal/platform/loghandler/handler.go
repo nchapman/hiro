@@ -235,12 +235,12 @@ func (h *Handler) writeLoop() {
 			// Drain remaining entries. Use a short timer to catch
 			// in-flight Handle() calls that haven't sent yet.
 			drainTimer := time.NewTimer(50 * time.Millisecond)
-			defer drainTimer.Stop()
 			for {
 				select {
 				case e := <-h.shared.buf:
 					batch = append(batch, e)
 				case <-drainTimer.C:
+					drainTimer.Stop()
 					flush()
 					return
 				}

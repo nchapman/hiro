@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -359,7 +360,7 @@ func grepCount(ctx context.Context, pattern, searchPath, workingDir string, para
 		}
 		relPath := relativizePath(parts[0], workingDir)
 		count := 0
-		fmt.Sscanf(parts[1], "%d", &count)
+		_, _ = fmt.Sscanf(parts[1], "%d", &count)
 		totalMatches += count
 		output = append(output, fmt.Sprintf("%s:%s", relPath, parts[1]))
 	}
@@ -491,7 +492,8 @@ func runRgText(ctx context.Context, pattern, searchPath string, params GrepParam
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
 			return nil, nil // no matches
 		}
 		return nil, err
@@ -515,7 +517,8 @@ func runRgFilesList(ctx context.Context, pattern, searchPath string, params Grep
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
 			return nil, nil // no matches
 		}
 		return nil, err
@@ -545,7 +548,8 @@ func runRgCount(ctx context.Context, pattern, searchPath string, params GrepPara
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
 			return nil, nil // no matches
 		}
 		return nil, err
@@ -589,7 +593,7 @@ func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]gr
 
 	err = filepath.WalkDir(rootPath, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible entries
 		}
 
 		// Check context cancellation periodically
@@ -622,7 +626,7 @@ func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]gr
 
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // skip entries with unreadable metadata
 		}
 
 		fileMatches := searchTextFile(path, re, info.ModTime().UnixNano())
@@ -632,7 +636,7 @@ func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]gr
 		}
 		return nil
 	})
-	if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return nil, err
 	}
 
@@ -651,7 +655,7 @@ func searchTextFile(path string, re *regexp.Regexp, modTime int64) []grepMatch {
 	// Check for binary content by looking for null bytes in the first 512 bytes
 	header := make([]byte, 512)
 	hn, err := f.Read(header)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil
 	}
 	for _, b := range header[:hn] {

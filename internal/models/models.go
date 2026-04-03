@@ -91,7 +91,7 @@ func ModelsForProvider(providerType string) []ModelInfo {
 
 // ModelsForProviders returns models for multiple provider types.
 func ModelsForProviders(providerTypes []string) []ModelInfo {
-	var result []ModelInfo
+	result := make([]ModelInfo, 0, len(providerTypes)*10)
 	for _, pt := range providerTypes {
 		result = append(result, ModelsForProvider(pt)...)
 	}

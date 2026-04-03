@@ -74,7 +74,7 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 			}
 
 			callerID := callerIDFromContext(ctx)
-			nodeID := ipc.NodeID(input.Node)
+			nodeID := input.Node
 
 			logger.Info("tool call", "tool", "SpawnInstance", "agent", input.Agent, "background", input.Background)
 
@@ -141,7 +141,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 			mode := "persistent"
 
 			callerID := callerIDFromContext(ctx)
-			nodeID := ipc.NodeID(input.Node)
+			nodeID := input.Node
 
 			logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode, "name", input.Name)
 

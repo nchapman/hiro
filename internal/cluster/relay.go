@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
@@ -85,7 +85,7 @@ func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 		if wasConnected {
 			backoff = 5 * time.Second
 		} else if backoff < 120*time.Second {
-			backoff = backoff * 2
+			backoff *= 2
 		}
 
 		rc.logger.Warn("relay control connection lost, reconnecting...", "error", err, "backoff", backoff)
@@ -103,23 +103,23 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 		return false, fmt.Errorf("dialing relay: %w", err)
 	}
 	if tc, ok := conn.(*net.TCPConn); ok {
-		tc.SetKeepAlive(true)
-		tc.SetKeepAlivePeriod(15 * time.Second)
+		_ = tc.SetKeepAlive(true)
+		_ = tc.SetKeepAlivePeriod(15 * time.Second)
 	}
 
 	// Send leader handshake.
 	if err := rc.sendHandshake(conn, relayRoleLeader); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return false, err
 	}
 
 	status, err := readRelayStatus(conn)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return false, err
 	}
 	if status == relayStatusConflict {
-		conn.Close()
+		_ = conn.Close()
 		// NOTE: Conflict is NOT a permanent error. The most common case is our
 		// previous control connection died but the relay hasn't cleaned it up yet
 		// (relay has a 5-minute read timeout on control connections). The Run()
@@ -129,7 +129,7 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 		return false, fmt.Errorf("relay: leader already registered for this swarm")
 	}
 	if status != relayStatusOK {
-		conn.Close()
+		_ = conn.Close()
 		return false, fmt.Errorf("relay registration failed: status %d", status)
 	}
 
@@ -147,7 +147,7 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 	// Close connection on context cancellation.
 	go func() {
 		<-connCtx.Done()
-		conn.Close()
+		_ = conn.Close()
 	}()
 
 	// Keepalive: send bytes every 15s to prevent NAT/proxy idle timeouts.
@@ -157,13 +157,13 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 		for {
 			select {
 			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 				if _, err := conn.Write([]byte{0x00}); err != nil {
 					rc.logger.Warn("relay keepalive write failed", "error", err)
-					conn.Close() // unblocks the read loop
+					_ = conn.Close() // unblocks the read loop
 					return
 				}
-				conn.SetWriteDeadline(time.Time{})
+				_ = conn.SetWriteDeadline(time.Time{})
 			case <-connCtx.Done():
 				return
 			}
@@ -208,19 +208,19 @@ func (rc *RelayClient) handleIncoming(ctx context.Context, onConnection func(net
 	}
 
 	if err := rc.sendHandshake(conn, relayRoleLeader); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		rc.logger.Error("relay data handshake failed", "error", err)
 		return
 	}
 
 	status, err := readRelayStatus(conn)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		rc.logger.Error("relay data status read failed", "error", err)
 		return
 	}
 	if status != relayStatusOK {
-		conn.Close()
+		_ = conn.Close()
 		rc.logger.Error("relay data connection rejected", "status", status)
 		return
 	}
@@ -239,9 +239,9 @@ func (rc *RelayClient) sendHandshake(conn net.Conn, role byte) error {
 	sig := ed25519.Sign(rc.identity.PrivateKey, buf[:74])
 	copy(buf[74:138], sig)
 
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, err := conn.Write(buf[:])
-	conn.SetWriteDeadline(time.Time{})
+	_ = conn.SetWriteDeadline(time.Time{})
 	return err
 }
 
@@ -266,20 +266,20 @@ func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity
 	sig := ed25519.Sign(identity.PrivateKey, buf[:74])
 	copy(buf[74:138], sig)
 
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if _, err := conn.Write(buf[:]); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("writing handshake: %w", err)
 	}
-	conn.SetWriteDeadline(time.Time{})
+	_ = conn.SetWriteDeadline(time.Time{})
 
 	status, err := readRelayStatus(conn)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("reading status: %w", err)
 	}
 	if status != relayStatusOK {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("relay pairing failed: status %d (%s)", status, relayStatusName(status))
 	}
 
@@ -310,17 +310,17 @@ func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 	return true
 }
 
 func readRelayStatus(conn net.Conn) (byte, error) {
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	var status [1]byte
 	if _, err := io.ReadFull(conn, status[:]); err != nil {
 		return 0, err
 	}
-	conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Time{})
 	return status[0], nil
 }
 
@@ -363,7 +363,7 @@ func (l *ChannelListener) Enqueue(conn net.Conn) {
 	select {
 	case l.ch <- conn:
 	case <-l.done:
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 

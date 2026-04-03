@@ -74,7 +74,7 @@ func buildEnvironmentSection(env EnvInfo) string {
 	b.WriteString("## Environment\n\n")
 
 	root := env.WorkingDir
-	b.WriteString(fmt.Sprintf("Working directory: `%s`\n\n", root))
+	fmt.Fprintf(&b, "Working directory: `%s`\n\n", root)
 
 	// Build a compact tree. Use relative paths from root for readability.
 	// Fall back to absolute paths if the instance dir is outside the root.
@@ -88,23 +88,23 @@ func buildEnvironmentSection(env EnvInfo) string {
 	}
 
 	b.WriteString("```\n")
-	b.WriteString(fmt.Sprintf("%s/\n", root))
+	fmt.Fprintf(&b, "%s/\n", root)
 	b.WriteString("├── workspace/          # Project files — use this for all work\n")
 	b.WriteString("├── agents/             # Agent definitions (agent.md + skills/)\n")
 	b.WriteString("├── skills/             # Shared skills available to all agents\n")
 
 	if env.Mode.IsPersistent() && relInstance != "" {
-		b.WriteString(fmt.Sprintf("├── %s/\n", relInstance))
+		fmt.Fprintf(&b, "├── %s/\n", relInstance)
 		b.WriteString("│   ├── memory.md       # Persistent memory (managed by AddMemory/ForgetMemory)\n")
 		b.WriteString("│   ├── persona.md      # Persistent persona/identity\n")
-		b.WriteString(fmt.Sprintf("│   └── %s/\n", relSessionFromInstance))
+		fmt.Fprintf(&b, "│   └── %s/\n", relSessionFromInstance)
 		b.WriteString("│       ├── todos.yaml   # Managed by TodoWrite tool\n")
 		b.WriteString("│       ├── scratch/      # Working files for this session\n")
 		b.WriteString("│       └── tmp/          # Temporary files\n")
 	} else if relInstance != "" {
 		// Ephemeral — show instance dir but simpler.
-		b.WriteString(fmt.Sprintf("├── %s/\n", relInstance))
-		b.WriteString(fmt.Sprintf("│   └── %s/\n", relSessionFromInstance))
+		fmt.Fprintf(&b, "├── %s/\n", relInstance)
+		fmt.Fprintf(&b, "│   └── %s/\n", relSessionFromInstance)
 		b.WriteString("│       ├── scratch/      # Working files\n")
 		b.WriteString("│       └── tmp/          # Temporary files\n")
 	}
@@ -113,10 +113,10 @@ func buildEnvironmentSection(env EnvInfo) string {
 	b.WriteString("```\n")
 
 	if env.Mode.IsPersistent() && env.InstanceDir != "" {
-		b.WriteString(fmt.Sprintf("\nYour instance directory: `%s`\n", env.InstanceDir))
-		b.WriteString(fmt.Sprintf("Your session directory: `%s`\n", env.SessionDir))
+		fmt.Fprintf(&b, "\nYour instance directory: `%s`\n", env.InstanceDir)
+		fmt.Fprintf(&b, "Your session directory: `%s`\n", env.SessionDir)
 	} else if env.SessionDir != "" {
-		b.WriteString(fmt.Sprintf("\nYour session directory: `%s`\n", env.SessionDir))
+		fmt.Fprintf(&b, "\nYour session directory: `%s`\n", env.SessionDir)
 	}
 
 	return b.String()

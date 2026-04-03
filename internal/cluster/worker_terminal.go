@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	pb "github.com/nchapman/hiro/internal/ipc/proto"
 	"github.com/creack/pty"
+	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
 // WorkerTerminalManager handles terminal sessions on a worker node.

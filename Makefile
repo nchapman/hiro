@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation test-online test-cluster test-cluster-relay check clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
 
 BINARY := hiro
 PKG := github.com/nchapman/hiro
@@ -81,6 +81,9 @@ test-cluster-relay:
 	docker compose -f docker-compose.cluster-relay.yml down -v; \
 	rm -rf tests/e2e_cluster/leader-config; \
 	exit $$EXIT
+
+lint:
+	golangci-lint run ./...
 
 check:
 	docker build --target test -t hiro-test .

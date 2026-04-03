@@ -7,9 +7,9 @@ import (
 
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/config"
-	"github.com/nchapman/hiro/internal/models"
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/toolrules"
 	"github.com/nchapman/hiro/internal/uidpool"
@@ -58,26 +58,26 @@ type WorkerFactory func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle
 type instance struct {
 	mu             sync.Mutex // serializes calls through the worker
 	info           InstanceInfo
-	agentName      string             // agent definition name (immutable, for config loading)
-	activeSession  string             // current session ID
+	agentName      string // agent definition name (immutable, for config loading)
+	activeSession  string // current session ID
 	worker         ipc.AgentWorker
 	handle         *WorkerHandle
-	loop           *inference.Loop    // inference loop (runs in control plane)
+	loop           *inference.Loop              // inference loop (runs in control plane)
 	notifications  *inference.NotificationQueue // instance-level; survives loop recreation
-	effectiveTools map[string]bool    // built-in tools this instance is allowed; nil = unrestricted
-	allowLayers    [][]toolrules.Rule // per-source allow rules for call-time enforcement
-	denyRules      []toolrules.Rule   // merged deny rules from all sources
-	uid            uint32             // isolated UID (0 = no isolation)
-	gid            uint32             // isolated GID
-	groups         []uint32           // supplementary groups only (not primary GID); used for inheritance checks
-	nodeID         ipc.NodeID         // which node this instance runs on ("home" for local)
+	effectiveTools map[string]bool              // built-in tools this instance is allowed; nil = unrestricted
+	allowLayers    [][]toolrules.Rule           // per-source allow rules for call-time enforcement
+	denyRules      []toolrules.Rule             // merged deny rules from all sources
+	uid            uint32                       // isolated UID (0 = no isolation)
+	gid            uint32                       // isolated GID
+	groups         []uint32                     // supplementary groups only (not primary GID); used for inheritance checks
+	nodeID         ipc.NodeID                   // which node this instance runs on ("home" for local)
 }
 
 // Manager supervises agent instance lifecycles on a single node.
 type Manager struct {
 	mu        sync.RWMutex
-	instances map[string]*instance  // instance ID -> running instance
-	children  map[string][]string   // parent instance ID -> child instance IDs
+	instances map[string]*instance // instance ID -> running instance
+	children  map[string][]string  // parent instance ID -> child instance IDs
 
 	ctx     context.Context // long-lived context for persistent instances
 	rootDir string

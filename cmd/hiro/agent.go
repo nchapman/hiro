@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -77,7 +78,8 @@ func runAgent() error {
 		failed := false
 		if job.ExitErr() != nil {
 			failed = true
-			if e, ok := job.ExitErr().(*exec.ExitError); ok {
+			var e *exec.ExitError
+			if errors.As(job.ExitErr(), &e) {
 				exitCode = int32(e.ExitCode())
 			}
 		}

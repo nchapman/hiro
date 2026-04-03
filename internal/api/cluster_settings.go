@@ -57,12 +57,12 @@ func (s *Server) handleGetClusterSettings(w http.ResponseWriter, _ *http.Request
 				// is nil (no nodes have ever been approved), we skip the
 				// filter — the registry will only contain the home node.
 				if !n.IsHome && approved != nil {
-					if _, ok := approved[string(n.ID)]; !ok {
+					if _, ok := approved[n.ID]; !ok {
 						continue
 					}
 				}
 				nodeList = append(nodeList, nodeInfo{
-					ID:     string(n.ID),
+					ID:     n.ID,
 					Name:   n.Name,
 					Status: string(n.Status),
 					IsHome: n.IsHome,
@@ -95,7 +95,7 @@ func (s *Server) handleClusterReset(w http.ResponseWriter, r *http.Request) {
 	if s.nodeRegistry != nil {
 		for _, n := range s.nodeRegistry.List() {
 			if !n.IsHome && s.disconnectNode != nil {
-				s.disconnectNode(string(n.ID))
+				s.disconnectNode(n.ID)
 			}
 		}
 		s.nodeRegistry.ClearRemote()

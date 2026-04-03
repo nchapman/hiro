@@ -112,7 +112,11 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 		Logger: logger,
 	})
 	svc.SetFileSync(fileSync)
-	go fileSync.WatchAndSync()
+	go func() {
+		if err := fileSync.WatchAndSync(); err != nil {
+			logger.Warn("file sync watcher stopped", "error", err)
+		}
+	}()
 
 	go func() {
 		logger.Info("cluster gRPC server starting", "addr", clusterAddr)

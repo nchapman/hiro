@@ -54,10 +54,7 @@ func shouldIgnore(relPath string) bool {
 		return true
 	}
 	ext := filepath.Ext(relPath)
-	if ignoredExtensions[ext] {
-		return true
-	}
-	return false
+	return ignoredExtensions[ext]
 }
 
 // sanitizeNodeID removes characters that are invalid in filenames.

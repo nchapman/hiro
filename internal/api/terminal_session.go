@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -127,14 +125,14 @@ type RemoteTerminalSender interface {
 // TerminalSessionManager owns all terminal sessions. Sessions persist across
 // WebSocket disconnects and are only destroyed on explicit close or idle timeout.
 type TerminalSessionManager struct {
-	mu         sync.Mutex
-	sessions   map[string]*TerminalSession
-	rootDir    string
-	logger     *slog.Logger
-	stopOnce   sync.Once
-	stopCh     chan struct{}
-	remote      RemoteTerminalSender  // nil when clustering is not active
-	nodeChecker NodeChecker           // nil when clustering is not active
+	mu          sync.Mutex
+	sessions    map[string]*TerminalSession
+	rootDir     string
+	logger      *slog.Logger
+	stopOnce    sync.Once
+	stopCh      chan struct{}
+	remote      RemoteTerminalSender   // nil when clustering is not active
+	nodeChecker NodeChecker            // nil when clustering is not active
 	createChans map[string]chan string // sessionID -> error string (empty = success)
 }
 
@@ -447,7 +445,7 @@ func (m *TerminalSessionManager) outputPump(sess *TerminalSession) {
 // Attach registers a subscriber to a session and returns the subscriber ID,
 // output channel, and replay data. Subscribe + replay snapshot + exit state
 // are all read under sess.mu to prevent data loss between replay and live.
-func (m *TerminalSessionManager) Attach(sessionID string) (subID string, ch <-chan sessionEvent, replayData []byte, exited bool, exitCode int, err error) {
+func (m *TerminalSessionManager) Attach(sessionID string) (subID string, ch <-chan sessionEvent, replayData []byte, exited bool, exitCode int, err error) { //nolint:gocritic // complex return is intentional for this internal API
 	m.mu.Lock()
 	sess, ok := m.sessions[sessionID]
 	m.mu.Unlock()
@@ -672,14 +670,6 @@ func (m *TerminalSessionManager) cleanupIdle() {
 	}
 }
 
-// resolveNodeName returns the display name for a node ID.
-func resolveNodeName(nodeID string) string {
-	if nodeID == "home" {
-		return "local"
-	}
-	return nodeID
-}
-
 // --- Control message types for the multiplexed WebSocket protocol ---
 
 // termControlMsg is a JSON control message sent/received over the multiplexed
@@ -787,18 +777,4 @@ func terminalEnvForSession(_ string) []string {
 		}
 	}
 	return env
-}
-
-// sanitizeDir validates and resolves a working directory relative to rootDir.
-func sanitizeDir(rootDir, dir string) string {
-	if dir == "" {
-		return rootDir
-	}
-	absDir := filepath.Join(rootDir, filepath.Clean(dir))
-	if strings.HasPrefix(absDir, rootDir+string(filepath.Separator)) || absDir == rootDir {
-		if info, err := os.Stat(absDir); err == nil && info.IsDir() {
-			return absDir
-		}
-	}
-	return rootDir
 }

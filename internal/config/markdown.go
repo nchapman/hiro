@@ -183,7 +183,7 @@ func ParseMarkdownFile(path string) (ParsedMarkdown, error) {
 	if err != nil {
 		return ParsedMarkdown{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return ParseMarkdown(f)
 }
 
@@ -203,15 +203,15 @@ func (m AgentMode) IsPersistent() bool {
 
 // AgentConfig represents an agent's configuration loaded from markdown.
 type AgentConfig struct {
-	Name          string
-	Description   string
-	AllowedTools []string // from frontmatter "allowed_tools"; nil = no built-in tools (closed by default)
+	Name            string
+	Description     string
+	AllowedTools    []string // from frontmatter "allowed_tools"; nil = no built-in tools (closed by default)
 	DisallowedTools []string // from frontmatter "disallowed_tools"; deny rules checked at call time
 	Model           string   // from frontmatter "model"; per-agent model override
 	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
 	Groups          []string // from frontmatter "groups"; supplementary Unix groups for the worker process
-	Prompt        string   // the markdown body — the agent's operating instructions
-	Skills        []SkillConfig
+	Prompt          string   // the markdown body — the agent's operating instructions
+	Skills          []SkillConfig
 }
 
 // SkillConfig represents a skill definition loaded from markdown.
@@ -274,14 +274,14 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 	}
 
 	agent := AgentConfig{
-		Name:          parsed.Frontmatter.String("name"),
-		Description:   parsed.Frontmatter.String("description"),
-		AllowedTools: parsed.Frontmatter.StringSlice("allowed_tools"),
+		Name:            parsed.Frontmatter.String("name"),
+		Description:     parsed.Frontmatter.String("description"),
+		AllowedTools:    parsed.Frontmatter.StringSlice("allowed_tools"),
 		DisallowedTools: parsed.Frontmatter.StringSlice("disallowed_tools"),
 		Model:           parsed.Frontmatter.String("model"),
-		MaxTurns:         parsed.Frontmatter.Int("max_turns"),
-		Groups:           parsed.Frontmatter.StringSlice("groups"),
-		Prompt:           parsed.Body,
+		MaxTurns:        parsed.Frontmatter.Int("max_turns"),
+		Groups:          parsed.Frontmatter.StringSlice("groups"),
+		Prompt:          parsed.Body,
 	}
 
 	if agent.Name == "" {
@@ -331,16 +331,17 @@ func LoadSkills(skillsDir string) ([]SkillConfig, error) {
 	var skills []SkillConfig
 	for _, entry := range entries {
 		var skillPath string
-		if entry.IsDir() {
+		switch {
+		case entry.IsDir():
 			// Directory skill: look for SKILL.md inside
 			candidate := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
 			if _, err := os.Stat(candidate); err != nil {
 				continue // directory without SKILL.md, skip
 			}
 			skillPath = candidate
-		} else if strings.HasSuffix(entry.Name(), ".md") {
+		case strings.HasSuffix(entry.Name(), ".md"):
 			skillPath = filepath.Join(skillsDir, entry.Name())
-		} else {
+		default:
 			continue
 		}
 
@@ -369,8 +370,8 @@ func MergeSkills(agentSkills, sharedSkills []SkillConfig) []SkillConfig {
 	for _, s := range agentSkills {
 		seen[s.Name] = true
 	}
-	merged := make([]SkillConfig, len(agentSkills))
-	copy(merged, agentSkills)
+	merged := make([]SkillConfig, 0, len(agentSkills)+len(sharedSkills))
+	merged = append(merged, agentSkills...)
 	for _, s := range sharedSkills {
 		if !seen[s.Name] {
 			merged = append(merged, s)

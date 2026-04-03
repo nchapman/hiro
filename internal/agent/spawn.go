@@ -89,7 +89,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 
 	// Write config to stdin and close.
 	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("writing spawn config: %w", err)
 	}
 	stdinPipe.Close()
@@ -116,15 +116,15 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 	select {
 	case r := <-readyCh:
 		if r.err != nil {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill()
 			<-waitCh
 			return nil, fmt.Errorf("%w; stderr: %s", r.err, stderrBuf.String())
 		}
 	case waitErr := <-waitCh:
 		// Process exited before signaling ready.
-		return nil, fmt.Errorf("agent process exited during startup: %v; stderr: %s", waitErr, stderrBuf.String())
+		return nil, fmt.Errorf("agent process exited during startup: %w; stderr: %s", waitErr, stderrBuf.String())
 	case <-time.After(spawnTimeout):
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		<-waitCh
 		return nil, fmt.Errorf("agent process startup timed out after %s; stderr: %s", spawnTimeout, stderrBuf.String())
 	}
@@ -134,7 +134,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		<-waitCh
 		return nil, fmt.Errorf("connecting to agent worker: %w", err)
 	}
@@ -155,7 +155,7 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 	return &WorkerHandle{
 		Worker: worker,
 		Kill: func() {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill()
 		},
 		Close: func() {
 			conn.Close()

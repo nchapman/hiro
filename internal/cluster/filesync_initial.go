@@ -76,7 +76,7 @@ func (s *FileSyncService) CreateInitialSync() ([]byte, error) {
 			if err != nil {
 				return nil
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			_, err = io.Copy(tw, f)
 			return err
 		})

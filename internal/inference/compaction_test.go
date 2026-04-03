@@ -57,11 +57,11 @@ func TestCompactIfNeeded_LeafPassTriggered(t *testing.T) {
 
 	cfg := CompactionConfig{
 		ContextWindow:        10_000,
-		SoftThreshold:        0.60,  // soft = 6000
+		SoftThreshold:        0.60, // soft = 6000
 		HardThreshold:        0.85,
 		TokenBudget:          9_000,
 		FreshTailCount:       5,
-		LeafChunkTokens:      500,   // low threshold to trigger leaf pass inside sweep
+		LeafChunkTokens:      500, // low threshold to trigger leaf pass inside sweep
 		LeafTargetTokens:     200,
 		CondenseTargetTokens: 400,
 		LeafMinFanout:        3,
@@ -312,7 +312,7 @@ func TestPrecedingSummaryContent_FlowsThroughToPrompt(t *testing.T) {
 		HardThreshold:        0.99,
 		TokenBudget:          9_000,
 		FreshTailCount:       2,
-		LeafChunkTokens:      400,  // fits 4 messages at 100 tokens each
+		LeafChunkTokens:      400, // fits 4 messages at 100 tokens each
 		LeafTargetTokens:     200,
 		CondenseTargetTokens: 400,
 		LeafMinFanout:        3,
@@ -469,7 +469,7 @@ func TestSummarizeWithEscalation_FallbackTruncation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	compactor := NewCompactor(pdb, "s1", summarizer, DefaultCompactionConfig(), logger)
-	got, err := compactor.summarizeWithEscalation(context.Background(), 0, "input text", 10000, "")
+	got, err := compactor.summarizeWithEscalation(context.Background(), 0, "input text", "")
 	if err != nil {
 		t.Fatalf("summarizeWithEscalation: %v", err)
 	}
@@ -499,10 +499,10 @@ func TestCompactionConfigScaling(t *testing.T) {
 		wantBudget     int
 		wantMaxDepth   int
 	}{
-		{32_000, 3_200, 640, 1_280, 20, 3, 19_200, 27_200, 28_800, 4},          // small: linear scaling
-		{200_000, 20_000, 4_000, 8_000, 20, 3, 120_000, 170_000, 180_000, 4},   // reference: caps equal linear
-		{340_000, 20_000, 4_000, 8_000, 34, 3, 200_000, 289_000, 306_000, 6},   // transition: soft capped, hard still linear
-		{500_000, 20_000, 4_000, 8_000, 50, 5, 200_000, 300_000, 350_000, 8},   // large: all caps active
+		{32_000, 3_200, 640, 1_280, 20, 3, 19_200, 27_200, 28_800, 4},           // small: linear scaling
+		{200_000, 20_000, 4_000, 8_000, 20, 3, 120_000, 170_000, 180_000, 4},    // reference: caps equal linear
+		{340_000, 20_000, 4_000, 8_000, 34, 3, 200_000, 289_000, 306_000, 6},    // transition: soft capped, hard still linear
+		{500_000, 20_000, 4_000, 8_000, 50, 5, 200_000, 300_000, 350_000, 8},    // large: all caps active
 		{1_000_000, 20_000, 4_000, 8_000, 100, 6, 200_000, 300_000, 350_000, 8}, // 1M: capped
 		{2_000_000, 20_000, 4_000, 8_000, 200, 6, 200_000, 300_000, 350_000, 8}, // 2M: capped
 	}

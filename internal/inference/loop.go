@@ -35,12 +35,12 @@ type LoopConfig struct {
 	AgentDefDir    string
 	SharedSkillDir string
 	LM             fantasy.LanguageModel
-	Executor       ipc.ToolExecutor       // worker's tool executor (for remote tools)
-	PDB            *platformdb.DB         // nil for ephemeral
-	AllowedTools   map[string]bool        // nil = unrestricted
-	AllowLayers    [][]toolrules.Rule     // per-source allow rules for call-time enforcement
-	DenyRules      []toolrules.Rule       // merged deny rules from all sources
-	MaxTurns       int                    // max agentic turns; 0 = unlimited
+	Executor       ipc.ToolExecutor   // worker's tool executor (for remote tools)
+	PDB            *platformdb.DB     // nil for ephemeral
+	AllowedTools   map[string]bool    // nil = unrestricted
+	AllowLayers    [][]toolrules.Rule // per-source allow rules for call-time enforcement
+	DenyRules      []toolrules.Rule   // merged deny rules from all sources
+	MaxTurns       int                // max agentic turns; 0 = unlimited
 	HasSkills      bool
 	SecretNamesFn  func() []string
 	SecretEnvFn    func() []string
@@ -84,12 +84,12 @@ type Loop struct {
 	tools []fantasy.AgentTool
 
 	// Session-scoped tool expansion from skills. Protected by updateMu.
-	executor       ipc.ToolExecutor       // retained for creating new proxy tools
-	redactor       *Redactor              // retained for creating new proxy tools
-	baseDenyRules  []toolrules.Rule       // instance-level deny rules (immutable)
-	baseAllowLayers [][]toolrules.Rule    // instance-level allow layers (immutable)
-	skillAllowLayer []toolrules.Rule      // accumulated allow rules from activated skills
-	skillExpanded  bool                   // true if any skill has expanded tools this session
+	executor        ipc.ToolExecutor   // retained for creating new proxy tools
+	redactor        *Redactor          // retained for creating new proxy tools
+	baseDenyRules   []toolrules.Rule   // instance-level deny rules (immutable)
+	baseAllowLayers [][]toolrules.Rule // instance-level allow layers (immutable)
+	skillAllowLayer []toolrules.Rule   // accumulated allow rules from activated skills
+	skillExpanded   bool               // true if any skill has expanded tools this session
 
 	// Per-session model/reasoning config (protected by updateMu).
 	model           string // resolved model ID (e.g. "claude-sonnet-4-20250514")
@@ -466,7 +466,7 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 // persistTurn stores the user message and all step messages in the platform DB,
 // then kicks off async compaction. lm, model, and providerOpts are snapshots
 // captured at the start of the turn to avoid racing with UpdateModel.
-func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
+func (l *Loop) persistTurn(_ context.Context, prompt string, files []fantasy.FilePart, meta bool, result *fantasy.AgentResult, lm fantasy.LanguageModel, model string, providerOpts fantasy.ProviderOptions) {
 	rawJSON := marshalMessage(fantasy.NewUserMessage(prompt, files...))
 	tokens := EstimateTokens(prompt) + EstimateFileTokens(files)
 	if _, err := l.pdb.AppendMessage(l.sessionID, "user", prompt, rawJSON, tokens, meta); err != nil {
@@ -680,7 +680,6 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 	}
 }
 
-
 // currentSystemPrompt rebuilds the system prompt from config and disk.
 // Acquires updateMu to snapshot agentConfig. Safe to call from Chat's
 // PrepareStep callback. Must NOT be called while updateMu is held —
@@ -781,8 +780,9 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 	}
 
 	if cfg.HostManager != nil {
-		localTools = append(localTools, buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger))
-		localTools = append(localTools, buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
+		localTools = append(localTools,
+			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger),
+			buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
 		localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 	}
 

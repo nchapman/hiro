@@ -143,7 +143,7 @@ func TestManager_CreateSession_MissingConfig(t *testing.T) {
 func TestManager_CreateSession_InvalidMode(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
-	for _, mode := range []string{"", "coordinator", "supercoordinator", "persistant"} {
+	for _, mode := range []string{"", "coordinator", "supercoordinator", "invalid-mode"} {
 		_, err := mgr.CreateInstance(t.Context(), "test-agent", "", mode, "", "", "")
 		if err == nil {
 			t.Errorf("mode %q: expected error, got nil", mode)
@@ -1546,9 +1546,9 @@ func (m *mockCP) SecretEnv() []string                       { return nil }
 func (m *mockCP) ProviderInfo() (string, string, string, bool) {
 	return "", "", "", false
 }
-func (m *mockCP) ProviderByType(string) (string, string, bool)    { return "", "", false }
-func (m *mockCP) ConfiguredProviderTypes() []string               { return nil }
-func (m *mockCP) DefaultModelSpec() models.ModelSpec              { return models.ModelSpec{} }
+func (m *mockCP) ProviderByType(string) (string, string, bool) { return "", "", false }
+func (m *mockCP) ConfiguredProviderTypes() []string            { return nil }
+func (m *mockCP) DefaultModelSpec() models.ModelSpec           { return models.ModelSpec{} }
 
 func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
 	t.Helper()

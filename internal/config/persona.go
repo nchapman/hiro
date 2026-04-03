@@ -67,7 +67,7 @@ func ReadPersonaFile(instanceDir string) (PersonaData, error) {
 	parsed, err := ParseMarkdown(strings.NewReader(content))
 	if err != nil {
 		// If frontmatter parsing fails, treat entire content as body.
-		return PersonaData{Body: content}, nil
+		return PersonaData{Body: content}, nil //nolint:nilerr // graceful degradation: unparseable frontmatter is fine
 	}
 
 	return PersonaData{

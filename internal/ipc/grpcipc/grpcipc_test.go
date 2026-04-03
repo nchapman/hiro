@@ -19,7 +19,7 @@ const bufSize = 1024 * 1024
 
 // fakeWorker implements ipc.AgentWorker for testing.
 type fakeWorker struct {
-	shutdown bool
+	shutdown   bool
 	toolResult ipc.ToolResult
 	lastTool   struct{ callID, name, input string }
 }

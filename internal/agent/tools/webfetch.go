@@ -83,7 +83,7 @@ func NewWebFetchTool() fantasy.AgentTool {
 			if ssrfEnabled.Load() {
 				client.Transport = ssrfTransport
 			}
-			req, err := http.NewRequestWithContext(ctx, "GET", params.URL, nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", params.URL, http.NoBody)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(
 					fmt.Sprintf("invalid request: %v", err)), nil

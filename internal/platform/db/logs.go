@@ -37,7 +37,7 @@ func (d *DB) InsertLogs(entries []LogEntry) error {
 	if err != nil {
 		return fmt.Errorf("beginning log insert tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(
 		`INSERT INTO logs (level, message, component, instance_id, attrs, created_at)

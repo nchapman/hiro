@@ -51,7 +51,7 @@ type Event struct {
 type Handler func(events []Event)
 
 type subscription struct {
-	pattern string  // glob pattern relative to root (e.g. "config.yaml", "agents/**/*.md")
+	pattern string // glob pattern relative to root (e.g. "config.yaml", "agents/**/*.md")
 	handler Handler
 }
 
@@ -104,7 +104,7 @@ func New(root string, logger *slog.Logger, opts ...Option) (*Watcher, error) {
 
 	// Walk the tree and add all directories.
 	if err := w.addRecursive(absRoot); err != nil {
-		fsw.Close()
+		_ = fsw.Close()
 		return nil, err
 	}
 
@@ -228,7 +228,7 @@ func (w *Watcher) handleRawEvent(ev fsnotify.Event, pending map[string]Op) {
 	if ev.Op.Has(fsnotify.Create) {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			if !skipDir(info.Name()) {
-				w.addRecursive(ev.Name)
+				_ = w.addRecursive(ev.Name)
 				w.synthesizeExisting(ev.Name, pending)
 			}
 			return // don't dispatch events for directory creation itself
@@ -312,7 +312,7 @@ func (w *Watcher) synthesizeExisting(dir string, pending map[string]Op) {
 func (w *Watcher) addRecursive(dir string) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip inaccessible dirs
+			return nil //nolint:nilerr // skip inaccessible dirs
 		}
 		if d.IsDir() {
 			if skipDir(d.Name()) {

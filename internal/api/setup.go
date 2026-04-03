@@ -19,8 +19,8 @@ const defaultTrackerURL = "https://discover.hellohiro.ai"
 
 type setupRequest struct {
 	Password string `json:"password"`
-	Mode     string `json:"mode"`                   // "standalone", "leader", or "worker"
-	NodeName string `json:"node_name,omitempty"`     // human-friendly machine name (leader + worker)
+	Mode     string `json:"mode"`                // "standalone", "leader", or "worker"
+	NodeName string `json:"node_name,omitempty"` // human-friendly machine name (leader + worker)
 
 	// Provider (standalone + leader only; workers get this from the leader)
 	ProviderType string `json:"provider_type,omitempty"`
@@ -301,4 +301,3 @@ func (s *Server) handleValidateSwarm(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, result)
 }
-

@@ -84,7 +84,7 @@ func (j *BackgroundJob) Wait(ctx context.Context) bool {
 type BackgroundJobManager struct {
 	mu         sync.RWMutex
 	jobs       map[string]*BackgroundJob
-	envFn      func() []string         // extra env vars injected into every command (e.g. secrets)
+	envFn      func() []string          // extra env vars injected into every command (e.g. secrets)
 	OnComplete func(job *BackgroundJob) // called when a backgrounded job completes
 }
 

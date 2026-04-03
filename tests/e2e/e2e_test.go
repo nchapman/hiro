@@ -217,8 +217,8 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 
 // chatMessage mirrors the server's ChatMessage type.
 type chatMessage struct {
-	Type    string `json:"type"`              // "message", "delta", "done", "error", "system"
-	Role    string `json:"role,omitempty"`     // "user" or "assistant"
+	Type    string `json:"type"`           // "message", "delta", "done", "error", "system"
+	Role    string `json:"role,omitempty"` // "user" or "assistant"
 	Content string `json:"content,omitempty"`
 }
 

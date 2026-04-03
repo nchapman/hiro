@@ -65,7 +65,7 @@ func (d *DB) AppendMessage(sessionID, role, content, rawJSON string, tokens int,
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Get next sequence number for this session.
 	var maxSeq sql.NullInt64
@@ -204,7 +204,7 @@ func (d *DB) LinkSummaryMessages(summaryID string, messageIDs []int64) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for i, msgID := range messageIDs {
 		if _, err := tx.Exec(
 			"INSERT INTO summary_messages (summary_id, message_id, ordinal) VALUES (?, ?, ?)",
@@ -222,7 +222,7 @@ func (d *DB) LinkSummaryParents(parentID string, childIDs []string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for i, childID := range childIDs {
 		if _, err := tx.Exec(
 			"INSERT INTO summary_parents (child_id, parent_id, ordinal) VALUES (?, ?, ?)",
@@ -332,7 +332,7 @@ func (d *DB) ReplaceContextItems(sessionID string, startOrd, endOrd int, summary
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(
 		"DELETE FROM context_items WHERE session_id = ? AND ordinal >= ? AND ordinal <= ?",
@@ -584,7 +584,9 @@ func (d *DB) Search(sessionID, query string, limit int) ([]SearchResult, error) 
 	if err != nil {
 		return nil, err
 	}
-	all := append(msgs, sums...)
+	all := make([]SearchResult, 0, len(msgs)+len(sums))
+	all = append(all, msgs...)
+	all = append(all, sums...)
 	sort.Slice(all, func(i, j int) bool { return all[i].Rank < all[j].Rank })
 	if len(all) > limit {
 		all = all[:limit]

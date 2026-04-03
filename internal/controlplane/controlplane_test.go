@@ -652,8 +652,8 @@ func TestMaskKey(t *testing.T) {
 	}{
 		{"short", "*****"},
 		{"12345678", "********"},
-		{"1234567890", "**********"},       // 10 chars: prefix+suffix would reveal all, so fully masked
-		{"12345678901", "123456...8901"},    // 11 chars: just enough to mask 1 middle char
+		{"1234567890", "**********"},     // 10 chars: prefix+suffix would reveal all, so fully masked
+		{"12345678901", "123456...8901"}, // 11 chars: just enough to mask 1 middle char
 		{"sk-ant-api03-longkey", "sk-ant...gkey"},
 	}
 	for _, tt := range tests {
@@ -802,7 +802,6 @@ func TestClusterTrackerURL_EnvOverride(t *testing.T) {
 		t.Errorf("expected env var to take precedence, got %q", url)
 	}
 }
-
 
 // --- Error path tests ---
 
@@ -1127,4 +1126,3 @@ func TestParseToolList_SpaceSeparatedArgs(t *testing.T) {
 		t.Errorf("expected [Bash(curl *)], got %v", result)
 	}
 }
-

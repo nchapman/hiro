@@ -85,7 +85,7 @@ func setupRemoteWorkerTest(t *testing.T) (*cluster.RemoteWorker, pb.Cluster_Node
 	if err != nil {
 		t.Fatalf("recv registered: %v", err)
 	}
-	nodeID := cluster.NodeID(resp.GetRegistered().NodeId)
+	nodeID := resp.GetRegistered().NodeId
 
 	// Create RemoteWorker.
 	rw := cluster.NewRemoteWorker(leader, nodeID, "session-test")

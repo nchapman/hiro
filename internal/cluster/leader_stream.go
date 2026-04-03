@@ -3,6 +3,7 @@ package cluster
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -50,21 +51,21 @@ type nodeConn struct {
 	nodeID    NodeID
 	stream    pb.Cluster_NodeStreamServer
 	done      chan struct{} // closed to force disconnect
-	closeOnce sync.Once    // prevents double-close panic on done
-	sendMu    sync.Mutex   // serialize writes to the stream
+	closeOnce sync.Once     // prevents double-close panic on done
+	sendMu    sync.Mutex    // serialize writes to the stream
 	handlers  *NodeHandlers
 }
 
 // NodeHandlers holds callbacks for messages received from a node.
 type NodeHandlers struct {
-	OnSpawnResult      func(nodeID NodeID, msg *pb.SpawnResult)
-	OnToolResult       func(nodeID NodeID, msg *pb.NodeToolResult)
-	OnWorkerExited     func(nodeID NodeID, msg *pb.WorkerExited)
-	OnFileUpdate       func(nodeID NodeID, msg *pb.FileUpdate)
-	OnJobCompletion    func(nodeID NodeID, msg *pb.JobCompletionNotify)
-	OnTerminalCreated  func(nodeID NodeID, msg *pb.TerminalCreated)
-	OnTerminalOutput   func(nodeID NodeID, msg *pb.TerminalOutput)
-	OnTerminalExited   func(nodeID NodeID, msg *pb.TerminalExited)
+	OnSpawnResult     func(nodeID NodeID, msg *pb.SpawnResult)
+	OnToolResult      func(nodeID NodeID, msg *pb.NodeToolResult)
+	OnWorkerExited    func(nodeID NodeID, msg *pb.WorkerExited)
+	OnFileUpdate      func(nodeID NodeID, msg *pb.FileUpdate)
+	OnJobCompletion   func(nodeID NodeID, msg *pb.JobCompletionNotify)
+	OnTerminalCreated func(nodeID NodeID, msg *pb.TerminalCreated)
+	OnTerminalOutput  func(nodeID NodeID, msg *pb.TerminalOutput)
+	OnTerminalExited  func(nodeID NodeID, msg *pb.TerminalExited)
 }
 
 // NewLeaderStream creates a new leader-side cluster gRPC service.
@@ -136,7 +137,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 		return fmt.Errorf("extracting public key from peer cert: %w", err)
 	}
 	hash := sha256.Sum256(pubKey)
-	nodeID := NodeID(hex.EncodeToString(hash[:]))
+	nodeID := hex.EncodeToString(hash[:])
 
 	peerAddr := p.Addr.String()
 
@@ -157,10 +158,10 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	}
 
 	// Step 3: Check approval / revocation atomically (single lock acquisition).
-	status := s.checkApproval(string(nodeID))
+	status := s.checkApproval(nodeID)
 
 	if status != ApprovalGranted {
-		truncID := string(nodeID)
+		truncID := nodeID
 		if len(truncID) > 16 {
 			truncID = truncID[:16] + "..."
 		}
@@ -170,7 +171,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 			_ = stream.Send(&pb.LeaderMessage{
 				Msg: &pb.LeaderMessage_Rejected{
 					Rejected: &pb.NodeRejected{
-						NodeId: string(nodeID),
+						NodeId: nodeID,
 						Reason: "approval revoked by leader operator",
 					},
 				},
@@ -180,7 +181,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 
 		// Not approved and not revoked — add to pending list.
 		ok, isNew := s.pending.AddOrUpdate(PendingNode{
-			NodeID: string(nodeID),
+			NodeID: nodeID,
 			Name:   nodeName,
 			Addr:   peerAddr,
 		})
@@ -190,7 +191,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 			_ = stream.Send(&pb.LeaderMessage{
 				Msg: &pb.LeaderMessage_Rejected{
 					Rejected: &pb.NodeRejected{
-						NodeId: string(nodeID),
+						NodeId: nodeID,
 						Reason: "pending node limit reached; dismiss or approve existing nodes first",
 					},
 				},
@@ -205,7 +206,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 		_ = stream.Send(&pb.LeaderMessage{
 			Msg: &pb.LeaderMessage_Pending{
 				Pending: &pb.NodePending{
-					NodeId:  string(nodeID),
+					NodeId:  nodeID,
 					Message: "awaiting approval from leader operator",
 				},
 			},
@@ -215,7 +216,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 
 	// Step 4: Approved — register and proceed.
 	// Remove from pending if it was there (approved while worker was retrying).
-	s.pending.Remove(string(nodeID))
+	s.pending.Remove(nodeID)
 
 	// Detect relay vs direct connection by checking if peer IP matches relay.
 	via := "direct"
@@ -251,7 +252,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	// The node must receive Registered before any other messages (FileSync, etc.).
 	if err := s.sendToNode(conn, &pb.LeaderMessage{
 		Msg: &pb.LeaderMessage_Registered{
-			Registered: &pb.NodeRegistered{NodeId: string(nodeID)},
+			Registered: &pb.NodeRegistered{NodeId: nodeID},
 		},
 	}); err != nil {
 		s.cleanupNode(nodeID)
@@ -268,7 +269,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 
 	// Cleanup on disconnect.
 	s.cleanupNode(nodeID)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		s.logger.Warn("node disconnected with error", "node_id", nodeID, "error", err)
 		return err
 	}

@@ -171,9 +171,9 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
-	provider := r.URL.Query().Get("provider")
-	if provider != "" {
-		writeJSON(w, http.StatusOK, models.ModelsForProvider(provider))
+	providerFilter := r.URL.Query().Get("provider")
+	if providerFilter != "" {
+		writeJSON(w, http.StatusOK, models.ModelsForProvider(providerFilter))
 		return
 	}
 	// No provider specified: return models from all configured providers.

@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hiro/internal/config"
-	"github.com/nchapman/hiro/internal/ipc"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
@@ -38,7 +37,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	for _, dbInst := range instances {
 		mode := config.AgentMode(dbInst.Mode)
 		if !mode.IsPersistent() {
-			m.pdb.DeleteInstance(dbInst.ID)
+			_ = m.pdb.DeleteInstance(dbInst.ID)
 			os.RemoveAll(m.instanceDir(dbInst.ID))
 			cleaned++
 			continue
@@ -77,10 +76,10 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 				ParentID:    e.dbInst.ParentID,
 				Status:      InstanceStatusStopped,
 				Model:       m.resolveModelString(e.cfg.Model),
-				NodeID:      ipc.NodeID(e.dbInst.NodeID),
+				NodeID:      e.dbInst.NodeID,
 			},
 			agentName: e.cfg.Name,
-			nodeID:    ipc.NodeID(e.dbInst.NodeID),
+			nodeID:    e.dbInst.NodeID,
 		}
 		m.mu.Lock()
 		m.instances[e.dbInst.ID] = inst
@@ -111,7 +110,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		if _, err := os.Stat(m.instanceDir(e.dbInst.ID)); os.IsNotExist(err) {
 			m.logger.Warn("instance dir missing, removing orphaned DB record",
 				"id", e.dbInst.ID, "agent", e.dbInst.AgentName)
-			m.pdb.DeleteInstance(e.dbInst.ID)
+			_ = m.pdb.DeleteInstance(e.dbInst.ID)
 			continue
 		}
 
@@ -133,7 +132,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 		// Pass empty display name/desc — startInstance reads persona.md for existing instances.
 		// Use the persisted node_id so instances restart on their original node.
-		_, err = m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, ipc.NodeID(e.dbInst.NodeID), "", "")
+		_, err = m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "")
 		if err != nil {
 			m.logger.Warn("failed to restore instance",
 				"id", e.dbInst.ID, "agent", e.dbInst.AgentName, "error", err)

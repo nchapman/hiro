@@ -111,7 +111,10 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 
 	webFS, _ := web.DistFS()
 	httpSrv := api.NewServer(logger, webFS, cp, nil, rootDir)
-	httpSrv.SetWorkerStatus(func() string { return connStatus.Load().(string) })
+	httpSrv.SetWorkerStatus(func() string {
+		s := connStatus.Load().(string) //nolint:errcheck // infallible: only strings are stored
+		return s
+	})
 	httpSrv.SetRestartFunc(func() {
 		restartRequested.Store(true)
 		cancel() // unblock the reconnect loop
@@ -237,7 +240,11 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 			// Start the filesystem watcher AFTER initial sync is fully
 			// applied. Starting earlier would cause every extracted file
 			// to echo back as a "new change" to the leader.
-			go syncSvc.WatchAndSync()
+			go func() {
+				if err := syncSvc.WatchAndSync(); err != nil {
+					logger.Warn("file sync watcher stopped", "error", err)
+				}
+			}()
 		}
 	})
 	ws.SetFileUpdateHandler(func(_ context.Context, msg *pb.FileUpdate) {
@@ -260,11 +267,12 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		err := ws.Connect(ctx)
 
 		// Set status based on the disconnect reason before cleanup.
-		if errors.Is(err, cluster.ErrApprovalRevoked) {
+		switch {
+		case errors.Is(err, cluster.ErrApprovalRevoked):
 			connStatus.Store("revoked")
-		} else if errors.Is(err, cluster.ErrPendingApproval) {
+		case errors.Is(err, cluster.ErrPendingApproval):
 			connStatus.Store("pending")
-		} else {
+		default:
 			connStatus.Store("disconnected")
 		}
 

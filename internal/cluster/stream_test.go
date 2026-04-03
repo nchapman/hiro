@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net"
 	"path/filepath"
@@ -111,7 +112,7 @@ func TestStream_ApprovedRegistration(t *testing.T) {
 					t.Errorf("expected capacity 4, got %d", n.Capacity)
 				}
 				// Node ID should be the identity-derived ID, not random.
-				if string(n.ID) != nodeIDFromIdentity(clientID) {
+				if n.ID != nodeIDFromIdentity(clientID) {
 					t.Errorf("node ID = %q, want %q", n.ID, nodeIDFromIdentity(clientID))
 				}
 				// Should not be in pending.
@@ -160,7 +161,7 @@ func TestStream_PendingApproval(t *testing.T) {
 	})
 
 	err = ws.Connect(ctx)
-	if err != cluster.ErrPendingApproval {
+	if !errors.Is(err, cluster.ErrPendingApproval) {
 		t.Fatalf("expected ErrPendingApproval, got %v", err)
 	}
 
@@ -234,7 +235,7 @@ func TestStream_RejectedRevoked(t *testing.T) {
 	})
 
 	err = ws.Connect(ctx)
-	if err != cluster.ErrApprovalRevoked {
+	if !errors.Is(err, cluster.ErrApprovalRevoked) {
 		t.Fatalf("expected ErrApprovalRevoked, got %v", err)
 	}
 
@@ -292,7 +293,7 @@ func TestStream_ToolExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recv registered: %v", err)
 	}
-	nodeID := cluster.NodeID(resp.GetRegistered().NodeId)
+	nodeID := resp.GetRegistered().NodeId
 
 	// Node reads messages in background and handles tool requests.
 	var toolReceived *pb.ExecuteToolRemote

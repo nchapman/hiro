@@ -39,7 +39,7 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 	case "tools":
 		result, mutated, err = cp.handleTools(verb, args)
 	case "cluster":
-		result, mutated, err = cp.handleCluster(verb, args)
+		result, err = cp.handleCluster(verb)
 	default:
 		return "", fmt.Errorf("unknown command: %s", noun)
 	}
@@ -221,12 +221,12 @@ func parseKeyValue(args []string) (name, value string, ok bool) {
 	return "", "", false
 }
 
-func (cp *ControlPlane) handleCluster(verb string, _ []string) (string, bool, error) {
+func (cp *ControlPlane) handleCluster(verb string) (string, error) {
 	switch verb {
 	case "":
 		mode := cp.ClusterMode()
 		if mode == "" {
-			return "Cluster not configured. Use the web UI to set up your deployment mode.", false, nil
+			return "Cluster not configured. Use the web UI to set up your deployment mode.", nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Mode: %s\n", mode)
@@ -239,10 +239,10 @@ func (cp *ControlPlane) handleCluster(verb string, _ []string) (string, bool, er
 		if approved := cp.ApprovedNodes(); len(approved) > 0 {
 			fmt.Fprintf(&b, "Approved nodes: %d\n", len(approved))
 		}
-		return strings.TrimRight(b.String(), "\n"), false, nil
+		return strings.TrimRight(b.String(), "\n"), nil
 
 	default:
-		return "", false, fmt.Errorf("unknown cluster command: %s", verb)
+		return "", fmt.Errorf("unknown cluster command: %s", verb)
 	}
 }
 

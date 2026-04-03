@@ -54,8 +54,8 @@ func (f *fakeHostManager) SendMessage(context.Context, string, string, func(ipc.
 func (f *fakeHostManager) StopInstance(string) (ipc.InstanceInfo, error) {
 	return ipc.InstanceInfo{}, nil
 }
-func (f *fakeHostManager) StartInstance(context.Context, string) error   { return nil }
-func (f *fakeHostManager) DeleteInstance(string) error                   { return nil }
+func (f *fakeHostManager) StartInstance(context.Context, string) error  { return nil }
+func (f *fakeHostManager) DeleteInstance(string) error                  { return nil }
 func (f *fakeHostManager) NewSession(string) (string, error)            { return "", nil }
 func (f *fakeHostManager) IsDescendant(string, string) bool             { return true }
 func (f *fakeHostManager) ListChildInstances(string) []ipc.InstanceInfo { return nil }

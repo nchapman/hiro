@@ -267,7 +267,7 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 		msgIDs = append(msgIDs, m.ID)
 	}
 
-	summary, err := c.summarizeWithEscalation(ctx, 0, input, sourceTokens, prevContext)
+	summary, err := c.summarizeWithEscalation(ctx, 0, input, prevContext)
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 			childIDs = append(childIDs, s.ID)
 		}
 
-		summary, err := c.summarizeWithEscalation(ctx, depth+1, input, sourceTokens, prevContext)
+		summary, err := c.summarizeWithEscalation(ctx, depth+1, input, prevContext)
 		if err != nil {
 			return false, err
 		}
@@ -414,7 +414,7 @@ func (c *Compactor) fullSweep(ctx context.Context) error {
 	return nil
 }
 
-func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, input string, sourceTokens int, prevContext string) (string, error) {
+func (c *Compactor) summarizeWithEscalation(ctx context.Context, depth int, input string, prevContext string) (string, error) {
 	targetTokens := c.config.LeafTargetTokens
 	if depth > 0 {
 		targetTokens = c.config.CondenseTargetTokens
@@ -684,4 +684,3 @@ func truncateAtBullet(content string, maxTokens int) string {
 
 	return strings.TrimRight(truncated, "\n ")
 }
-

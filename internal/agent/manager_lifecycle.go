@@ -130,7 +130,7 @@ func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentI
 	result, err := m.SendMessage(ctx, instID, prompt, onEvent)
 
 	// Clean up the ephemeral instance and its entire subtree
-	m.StopInstance(instID)
+	_, _ = m.StopInstance(instID)
 
 	if err != nil {
 		return "", fmt.Errorf("subagent %q failed: %w", agentName, err)
@@ -203,7 +203,7 @@ func (m *Manager) DeleteInstance(instanceID string) error {
 		// Always delete instance dir and DB record regardless of mode.
 		os.RemoveAll(m.instanceDir(id))
 		if m.pdb != nil {
-			m.pdb.DeleteInstance(id)
+			_ = m.pdb.DeleteInstance(id)
 		}
 		m.logger.Info("instance deleted", "id", id)
 	}
@@ -305,7 +305,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentName: cfg.Name,
 			Mode:      string(mode),
 			ParentID:  parentID,
-			NodeID:    string(resolvedNodeID),
+			NodeID:    resolvedNodeID,
 		}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
 			return "", fmt.Errorf("creating instance in db: %w", err)
 		}

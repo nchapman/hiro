@@ -1,0 +1,111 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gocritic
+    - revive
+    - misspell
+    - nilerr
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errname
+    - errorlint
+    - fatcontext
+    - makezero
+    - prealloc
+    - predeclared
+    - reassign
+    - unconvert
+    - unparam
+    - wastedassign
+
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - octalLiteral
+        - unnamedResult
+        - paramTypeCombine
+        - exposedSyncMutex
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: indent-error-flow
+        - name: errorf
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: empty-block
+    errcheck:
+      check-type-assertions: true
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    staticcheck:
+      checks:
+        - all
+
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files get more latitude
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocritic
+          - noctx
+          - bodyclose
+          - unparam
+          - fatcontext
+          - prealloc
+          - nilerr
+          - revive
+      # Generated protobuf code
+      - path: \.pb\.go$
+        linters:
+          - errcheck
+          - gocritic
+          - revive
+          - staticcheck
+      # noctx: many legitimate uses of non-context variants
+      - linters:
+          - noctx
+        text: "net\\.Listen|exec\\.Command|database/sql|crypto/tls|net\\.Dial|net\\.LookupHost|httptest\\.NewRequest"
+      # revive: suppress noisy export doc and unused-param rules
+      - linters:
+          - revive
+        text: "exported|package-comments|unused-parameter|unexported-return|stutters"
+    paths:
+      - third_party
+      - vendor
+      - web/ui/node_modules
+
+formatters:
+  enable:
+    - gofmt

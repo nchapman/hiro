@@ -158,7 +158,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	// Mark the old session as stopped in DB.
 	if m.pdb != nil && oldSession != "" {
-		m.pdb.UpdateSessionStatus(oldSession, "stopped")
+		_ = m.pdb.UpdateSessionStatus(oldSession, "stopped")
 	}
 
 	// Create new session directory.
@@ -262,7 +262,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 		m.setInstanceStatus(instanceID, "stopped")
 		os.RemoveAll(sessDir)
 		if m.pdb != nil {
-			m.pdb.DeleteSession(newSessionID)
+			_ = m.pdb.DeleteSession(newSessionID)
 		}
 		return "", err
 	}

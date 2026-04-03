@@ -24,13 +24,13 @@ type AuthConfig struct {
 // ProviderConfig defines an LLM provider. The map key is the provider
 // type (e.g. "anthropic", "openrouter"), so only one entry per type.
 type ProviderConfig struct {
-	APIKey  string `yaml:"api_key" json:"api_key"`                      // provider API key
+	APIKey  string `yaml:"api_key" json:"api_key"`                       // provider API key
 	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty"` // optional API base URL override
 }
 
 // AgentPolicy defines operator-level overrides for a named agent.
 type AgentPolicy struct {
-	AllowedTools     []string `yaml:"allowed_tools,omitempty"`
+	AllowedTools    []string `yaml:"allowed_tools,omitempty"`
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
 }
 
@@ -50,21 +50,21 @@ type RevokedNode struct {
 type ClusterConfig struct {
 	Mode          string                  `yaml:"mode,omitempty"`           // "standalone", "leader", or "worker"
 	LeaderAddr    string                  `yaml:"leader_addr,omitempty"`    // gRPC address for worker→leader connection
-	NodeName      string                  `yaml:"node_name,omitempty"`     // human-friendly node name
-	TrackerURL    string                  `yaml:"tracker_url,omitempty"`   // discovery tracker URL (e.g. https://discover.hellohiro.ai)
-	SwarmCode     string                  `yaml:"swarm_code,omitempty"`    // shared swarm code for tracker discovery
+	NodeName      string                  `yaml:"node_name,omitempty"`      // human-friendly node name
+	TrackerURL    string                  `yaml:"tracker_url,omitempty"`    // discovery tracker URL (e.g. https://discover.hellohiro.ai)
+	SwarmCode     string                  `yaml:"swarm_code,omitempty"`     // shared swarm code for tracker discovery
 	ApprovedNodes map[string]ApprovedNode `yaml:"approved_nodes,omitempty"` // keyed by NodeID (hex sha256 of pubkey)
-	RevokedNodes  map[string]RevokedNode `yaml:"revoked_nodes,omitempty"`  // keyed by NodeID — explicitly revoked
+	RevokedNodes  map[string]RevokedNode  `yaml:"revoked_nodes,omitempty"`  // keyed by NodeID — explicitly revoked
 }
 
 // Config is the on-disk representation of the control plane state.
 type Config struct {
-	Auth            AuthConfig                `yaml:"auth,omitempty"`
-	Providers       map[string]ProviderConfig `yaml:"providers,omitempty"`       // keyed by provider type
-	DefaultModel    string                    `yaml:"default_model,omitempty"` // "provider/model" format
-	Secrets         map[string]string         `yaml:"secrets,omitempty"`
-	Agents          map[string]AgentPolicy    `yaml:"agents,omitempty"`
-	Cluster         ClusterConfig             `yaml:"cluster,omitempty"`
+	Auth         AuthConfig                `yaml:"auth,omitempty"`
+	Providers    map[string]ProviderConfig `yaml:"providers,omitempty"`     // keyed by provider type
+	DefaultModel string                    `yaml:"default_model,omitempty"` // "provider/model" format
+	Secrets      map[string]string         `yaml:"secrets,omitempty"`
+	Agents       map[string]AgentPolicy    `yaml:"agents,omitempty"`
+	Cluster      ClusterConfig             `yaml:"cluster,omitempty"`
 }
 
 // initMaps ensures all map fields are non-nil. ApprovedNodes is intentionally

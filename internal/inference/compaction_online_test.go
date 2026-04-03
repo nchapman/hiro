@@ -533,7 +533,7 @@ func TestOnline_EscalationToAggressive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	summary, err := compactor.summarizeWithEscalation(ctx, 0, input, EstimateTokens(input), "")
+	summary, err := compactor.summarizeWithEscalation(ctx, 0, input, "")
 	if err != nil {
 		t.Fatalf("summarizeWithEscalation: %v", err)
 	}

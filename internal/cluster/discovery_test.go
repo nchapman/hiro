@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -385,7 +384,7 @@ func TestSignedMessage_Deterministic(t *testing.T) {
 		t.Fatal("signed message not deterministic")
 	}
 
-	expected := fmt.Sprintf("abc123\n1000\nleader\n8081\n\n\n\na=1\nb=2")
+	expected := "abc123\n1000\nleader\n8081\n\n\n\na=1\nb=2"
 	if string(msg1) != expected {
 		t.Errorf("unexpected signed message:\ngot:  %q\nwant: %q", string(msg1), expected)
 	}

@@ -27,26 +27,26 @@ type CommandHandler interface {
 
 // Server is the HTTP server for the Hiro leader.
 type Server struct {
-	manager      *agent.Manager          // instance manager (nil = no instances)
-	leaderID     string                  // ID of the leader instance for chat
-	cmdHandler   CommandHandler          // control plane command handler (nil = no commands)
-	cp           *controlplane.ControlPlane // control plane (for auth + settings)
-	pdb          *platformdb.DB          // platform database (nil = no usage endpoints)
-	startManager   func() error            // callback to start the instance manager (set by main)
-	startCluster   func() error            // callback to start the cluster gRPC server (set by main)
-	requestRestart func()                  // callback to request a process restart (set by main)
-	nodeRegistry    *cluster.NodeRegistry   // cluster node registry (leader mode only)
-	pendingRegistry *cluster.PendingRegistry // pending node approval registry (leader mode only)
-	workerStatus    func() string            // returns worker connection status (worker mode only)
-	disconnectNode  func(string)             // forcefully disconnect a node (leader mode only)
-	termSessions   *TerminalSessionManager  // terminal session manager (nil = no terminal)
-	webFS          fs.FS                   // embedded web UI files (nil = no UI serving)
-	rootDir      string                  // platform root directory (for terminal working dir)
-	watcher      *watcher.Watcher        // filesystem watcher for HIRO_ROOT (nil = no watching)
-	logHandler   *loghandler.Handler     // log handler for real-time streaming (nil = no log SSE)
-	limiter      *loginLimiter           // login rate limiter (per-server for testability)
-	mux          *http.ServeMux
-	logger       *slog.Logger
+	manager         *agent.Manager             // instance manager (nil = no instances)
+	leaderID        string                     // ID of the leader instance for chat
+	cmdHandler      CommandHandler             // control plane command handler (nil = no commands)
+	cp              *controlplane.ControlPlane // control plane (for auth + settings)
+	pdb             *platformdb.DB             // platform database (nil = no usage endpoints)
+	startManager    func() error               // callback to start the instance manager (set by main)
+	startCluster    func() error               // callback to start the cluster gRPC server (set by main)
+	requestRestart  func()                     // callback to request a process restart (set by main)
+	nodeRegistry    *cluster.NodeRegistry      // cluster node registry (leader mode only)
+	pendingRegistry *cluster.PendingRegistry   // pending node approval registry (leader mode only)
+	workerStatus    func() string              // returns worker connection status (worker mode only)
+	disconnectNode  func(string)               // forcefully disconnect a node (leader mode only)
+	termSessions    *TerminalSessionManager    // terminal session manager (nil = no terminal)
+	webFS           fs.FS                      // embedded web UI files (nil = no UI serving)
+	rootDir         string                     // platform root directory (for terminal working dir)
+	watcher         *watcher.Watcher           // filesystem watcher for HIRO_ROOT (nil = no watching)
+	logHandler      *loghandler.Handler        // log handler for real-time streaming (nil = no log SSE)
+	limiter         *loginLimiter              // login rate limiter (per-server for testability)
+	mux             *http.ServeMux
+	logger          *slog.Logger
 }
 
 // NewServer creates a new API server with its required dependencies.
@@ -307,11 +307,12 @@ func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.manager.StartInstance(r.Context(), id); err != nil {
-		if errors.Is(err, agent.ErrInstanceNotFound) {
+		switch {
+		case errors.Is(err, agent.ErrInstanceNotFound):
 			http.Error(w, "instance not found", http.StatusNotFound)
-		} else if errors.Is(err, agent.ErrInstanceNotStopped) {
+		case errors.Is(err, agent.ErrInstanceNotStopped):
 			http.Error(w, "instance is not stopped", http.StatusConflict)
-		} else {
+		default:
 			s.logger.Error("failed to start instance", "id", id, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
@@ -465,7 +466,7 @@ func (s *Server) handleTerminalNodes(w http.ResponseWriter, _ *http.Request) {
 	if s.nodeRegistry != nil {
 		for _, n := range s.nodeRegistry.List() {
 			nodes = append(nodes, nodeInfo{
-				ID:     string(n.ID),
+				ID:     n.ID,
 				Name:   n.Name,
 				Status: string(n.Status),
 				IsHome: n.IsHome,

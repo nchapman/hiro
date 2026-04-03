@@ -14,8 +14,8 @@ import (
 type WorkerServer struct {
 	pb.UnimplementedAgentWorkerServer
 	worker      ipc.AgentWorker
-	onSecretEnv func([]string)            // called when secret env vars arrive with a tool call
-	completions <-chan *pb.JobCompletion   // background job completion events
+	onSecretEnv func([]string)           // called when secret env vars arrive with a tool call
+	completions <-chan *pb.JobCompletion // background job completion events
 }
 
 // NewWorkerServer creates a gRPC server that delegates to the given AgentWorker.

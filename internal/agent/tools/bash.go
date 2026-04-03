@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -63,7 +64,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 				case <-job.done:
 					bgMgr.Remove(job.ID)
 					stdout, stderr, _, execErr := job.GetOutput()
-					return formatBashResult(stdout, stderr, execErr)
+					return formatBashResult(stdout, stderr, execErr), nil
 				case <-time.After(100 * time.Millisecond):
 				}
 
@@ -90,14 +91,14 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 					stdout, stderr, done, execErr := job.GetOutput()
 					if done {
 						bgMgr.Remove(job.ID)
-						return formatBashResult(stdout, stderr, execErr)
+						return formatBashResult(stdout, stderr, execErr), nil
 					}
 				case <-timeout:
 					// Check one last time — job may have finished at the boundary.
 					stdout, stderr, done, execErr := job.GetOutput()
 					if done {
 						bgMgr.Remove(job.ID)
-						return formatBashResult(stdout, stderr, execErr)
+						return formatBashResult(stdout, stderr, execErr), nil
 					}
 					// Auto-backgrounded — enable completion notification.
 					bgMgr.NotifyOnComplete(job.ID)
@@ -112,7 +113,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 	)
 }
 
-func formatBashResult(stdout, stderr string, execErr error) (fantasy.ToolResponse, error) {
+func formatBashResult(stdout, stderr string, execErr error) fantasy.ToolResponse {
 	stdout = truncateOutput(stdout)
 	stderr = truncateOutput(stderr)
 
@@ -130,21 +131,22 @@ func formatBashResult(stdout, stderr string, execErr error) (fantasy.ToolRespons
 
 	if execErr != nil {
 		exitCode := ""
-		if e, ok := execErr.(*exec.ExitError); ok {
+		var e *exec.ExitError
+		if errors.As(execErr, &e) {
 			exitCode = fmt.Sprintf(" (exit code %d)", e.ExitCode())
 		}
 		if out.Len() == 0 {
 			return fantasy.NewTextErrorResponse(
-				fmt.Sprintf("command failed%s: %v", exitCode, execErr)), nil
+				fmt.Sprintf("command failed%s: %v", exitCode, execErr))
 		}
 		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("%s\n\ncommand failed%s", out.String(), exitCode)), nil
+			fmt.Sprintf("%s\n\ncommand failed%s", out.String(), exitCode))
 	}
 
 	if out.Len() == 0 {
-		return fantasy.NewTextResponse("(no output)"), nil
+		return fantasy.NewTextResponse("(no output)")
 	}
-	return fantasy.NewTextResponse(out.String()), nil
+	return fantasy.NewTextResponse(out.String())
 }
 
 func truncateOutput(s string) string {

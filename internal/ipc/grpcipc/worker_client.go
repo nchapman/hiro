@@ -2,6 +2,7 @@ package grpcipc
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 
@@ -71,7 +72,7 @@ func (c *WorkerClient) WatchJobs(ctx context.Context, logger *slog.Logger) <-cha
 		for {
 			completion, err := stream.Recv()
 			if err != nil {
-				if err != io.EOF && ctx.Err() == nil {
+				if !errors.Is(err, io.EOF) && ctx.Err() == nil {
 					logger.Debug("WatchJobs stream ended", "error", err)
 				}
 				return

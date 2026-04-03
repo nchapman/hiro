@@ -60,7 +60,7 @@ func (d *DB) RecordTurnUsage(events []UsageEvent) error {
 	if err != nil {
 		return fmt.Errorf("beginning turn usage tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Determine next turn number atomically within the transaction.
 	var maxTurn sql.NullInt64
@@ -231,4 +231,3 @@ func (d *DB) queryUsageSummary(query string, args ...any) (UsageSummary, error) 
 	)
 	return u, err
 }
-

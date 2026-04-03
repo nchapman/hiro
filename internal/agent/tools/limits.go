@@ -7,9 +7,6 @@ import "time"
 // --- Timeouts ---
 
 const (
-	// bashTimeout is the maximum duration for synchronous bash commands.
-	bashTimeout = 120 * time.Second
-
 	// autoBackgroundAfter is when a bash command is automatically backgrounded.
 	autoBackgroundAfter = 60 * time.Second
 
@@ -40,9 +37,6 @@ const (
 
 	// maxFileReadLen is the maximum output length when reading a file (bytes).
 	maxFileReadLen = 64000
-
-	// maxRgOutputBytes caps ripgrep output to prevent runaway memory usage (64MB).
-	maxRgOutputBytes = 64 * 1024 * 1024
 )
 
 // --- File size limits ---
@@ -69,9 +63,6 @@ const (
 
 	// maxRgStatEntries caps the number of files we stat for mod-time sorting.
 	maxRgStatEntries = 1000
-
-	// maxListEntries is the maximum number of directory entries returned.
-	maxListEntries = 500
 )
 
 // --- Background job limits ---

@@ -195,7 +195,7 @@ func TestGrep_CustomPath(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "outer.txt"), []byte("target\n"), 0644)
 
 	tool := NewGrepTool(dir)
-	content, isErr := runTool(t, tool, `{"pattern": "target", "path": "` + sub + `"}`)
+	content, isErr := runTool(t, tool, `{"pattern": "target", "path": "`+sub+`"}`)
 	if isErr {
 		t.Fatalf("unexpected error: %s", content)
 	}

@@ -1,6 +1,7 @@
 package loghandler
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -171,7 +172,7 @@ func TestHandler_SubscriberLimit(t *testing.T) {
 
 	// Next subscribe should fail.
 	_, _, err := h.Subscribe()
-	if err != ErrSubscriberLimit {
+	if !errors.Is(err, ErrSubscriberLimit) {
 		t.Errorf("expected ErrSubscriberLimit, got %v", err)
 	}
 

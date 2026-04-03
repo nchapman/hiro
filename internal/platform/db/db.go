@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // SQLite driver
 )
 
 //go:embed migrations/*.sql
@@ -126,11 +126,11 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("begin tx for %s: %w", entry.Name(), err)
 		}
 		if _, err := tx.Exec(string(data)); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("executing migration %s: %w", entry.Name(), err)
 		}
 		if _, err := tx.Exec("INSERT INTO schema_migrations (filename) VALUES (?)", entry.Name()); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("recording migration %s: %w", entry.Name(), err)
 		}
 		if err := tx.Commit(); err != nil {

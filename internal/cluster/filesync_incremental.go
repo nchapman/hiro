@@ -19,12 +19,12 @@ func (s *FileSyncService) WatchAndSync() error {
 	if err != nil {
 		return fmt.Errorf("creating watcher: %w", err)
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	// Add all synced directories recursively.
 	for _, dir := range s.syncDirs {
 		absDir := filepath.Join(s.rootDir, dir)
-		if err := s.addWatchRecursive(watcher, absDir); err != nil {
+		if err = s.addWatchRecursive(watcher, absDir); err != nil {
 			s.logger.Warn("failed to watch directory", "dir", dir, "error", err)
 		}
 	}
@@ -59,7 +59,7 @@ func (s *FileSyncService) WatchAndSync() error {
 			// before fsnotify processes the directory creation event).
 			if event.Has(fsnotify.Create) {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					s.addWatchRecursive(watcher, event.Name)
+					_ = s.addWatchRecursive(watcher, event.Name)
 					s.scanNewDir(event.Name, &mu, pending, timer)
 				}
 			}

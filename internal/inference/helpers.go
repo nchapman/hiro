@@ -13,7 +13,7 @@ import (
 // Uses the ~4 characters per token heuristic.
 func EstimateTokens(s string) int {
 	n := len(s) / 4
-	if n == 0 && len(s) > 0 {
+	if n == 0 && s != "" {
 		return 1
 	}
 	return n
@@ -117,29 +117,29 @@ func extractToolResultOutput(content fantasy.ToolResultOutputContent) (string, b
 
 // toolStatusMessages maps tool names to status message templates.
 var toolStatusMessages = map[string]string{
-	"Read":           "Reading {{file_path}}",
-	"Write":          "Writing {{file_path}}",
-	"Edit":           "Editing {{file_path}}",
-	"Glob":           "Searching for {{pattern}}",
-	"Grep":           "Searching for {{pattern}}",
-	"Bash":           "Running command",
-	"WebFetch":       "Fetching {{url}}",
-	"TaskOutput":     "Reading task output",
-	"TaskStop":       "Stopping task",
+	"Read":                     "Reading {{file_path}}",
+	"Write":                    "Writing {{file_path}}",
+	"Edit":                     "Editing {{file_path}}",
+	"Glob":                     "Searching for {{pattern}}",
+	"Grep":                     "Searching for {{pattern}}",
+	"Bash":                     "Running command",
+	"WebFetch":                 "Fetching {{url}}",
+	"TaskOutput":               "Reading task output",
+	"TaskStop":                 "Stopping task",
 	"SpawnInstance":            "Spawning {{agent}}",
 	"CreatePersistentInstance": "Creating {{agent}} instance",
-	"ResumeInstance":  "Resuming instance",
-	"StopInstance":    "Stopping instance",
-	"DeleteInstance":  "Deleting instance",
-	"ListInstances":   "Listing instances",
-	"ListNodes":       "Listing nodes",
-	"SendMessage":     "Messaging instance",
-	"AddMemory":      "Saving memory",
-	"ForgetMemory":   "Forgetting memory",
-	"TodoWrite":      "Updating tasks",
-	"HistorySearch":  "Searching history for {{query}}",
-	"HistoryRecall":  "Recalling summary",
-	"Skill":          "Using skill {{name}}",
+	"ResumeInstance":           "Resuming instance",
+	"StopInstance":             "Stopping instance",
+	"DeleteInstance":           "Deleting instance",
+	"ListInstances":            "Listing instances",
+	"ListNodes":                "Listing nodes",
+	"SendMessage":              "Messaging instance",
+	"AddMemory":                "Saving memory",
+	"ForgetMemory":             "Forgetting memory",
+	"TodoWrite":                "Updating tasks",
+	"HistorySearch":            "Searching history for {{query}}",
+	"HistoryRecall":            "Recalling summary",
+	"Skill":                    "Using skill {{name}}",
 }
 
 // resolveStatusMessage resolves a status template for a tool call.

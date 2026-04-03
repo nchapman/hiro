@@ -73,7 +73,7 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	// Create directories.
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		nb.logger.Error("creating session dir", "error", err)
-		nb.stream.SendSpawnResult(msg.RequestId, fmt.Sprintf("creating session dir: %v", err))
+		_ = nb.stream.SendSpawnResult(msg.RequestId, fmt.Sprintf("creating session dir: %v", err))
 		return
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
@@ -94,7 +94,7 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	handle, err := nb.spawnLocalWorker(ctx, cfg)
 	if err != nil {
 		nb.logger.Error("spawning worker", "error", err)
-		nb.stream.SendSpawnResult(msg.RequestId, err.Error())
+		_ = nb.stream.SendSpawnResult(msg.RequestId, err.Error())
 		return
 	}
 
@@ -108,7 +108,7 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 		nb.mu.Lock()
 		delete(nb.workers, msg.SessionId)
 		nb.mu.Unlock()
-		nb.stream.SendWorkerExited(msg.SessionId, "")
+		_ = nb.stream.SendWorkerExited(msg.SessionId, "")
 		nb.logger.Info("worker exited", "session_id", msg.SessionId)
 	}()
 
@@ -136,7 +136,7 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 		}()
 	}
 
-	nb.stream.SendSpawnResult(msg.RequestId, "")
+	_ = nb.stream.SendSpawnResult(msg.RequestId, "")
 	nb.logger.Info("worker spawned", "session_id", msg.SessionId)
 }
 
@@ -147,17 +147,17 @@ func (nb *NodeBridge) handleExecuteTool(ctx context.Context, msg *pb.ExecuteTool
 	nb.mu.Unlock()
 
 	if !ok {
-		nb.stream.SendToolResult(msg.SessionId, msg.CallId, "", false, fmt.Sprintf("no worker for session %s", msg.SessionId))
+		_ = nb.stream.SendToolResult(msg.SessionId, msg.CallId, "", false, fmt.Sprintf("no worker for session %s", msg.SessionId))
 		return
 	}
 
 	result, err := w.worker.ExecuteTool(ctx, msg.CallId, msg.ToolName, msg.Input)
 	if err != nil {
-		nb.stream.SendToolResult(msg.SessionId, msg.CallId, "", false, err.Error())
+		_ = nb.stream.SendToolResult(msg.SessionId, msg.CallId, "", false, err.Error())
 		return
 	}
 
-	nb.stream.SendToolResult(msg.SessionId, msg.CallId, result.Content, result.IsError, "")
+	_ = nb.stream.SendToolResult(msg.SessionId, msg.CallId, result.Content, result.IsError, "")
 }
 
 // handleShutdown gracefully shuts down a local worker.
@@ -246,10 +246,10 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 
 	// Write spawn config.
 	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("writing spawn config: %w", err)
 	}
-	stdinPipe.Close()
+	_ = stdinPipe.Close()
 
 	// Wait for readiness.
 	readyCh := make(chan error, 1)
@@ -275,11 +275,11 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	select {
 	case err := <-readyCh:
 		if err != nil {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill()
 			return nil, err
 		}
 	case <-time.After(workerSpawnTimeout):
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("worker did not become ready within %v", workerSpawnTimeout)
 	}
 
@@ -288,7 +288,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("connecting to worker: %w", err)
 	}
 
@@ -297,7 +297,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	// Track process exit.
 	done := make(chan struct{})
 	go func() {
-		cmd.Wait()
+		_ = cmd.Wait()
 		close(done)
 	}()
 
@@ -305,7 +305,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		worker: worker,
 		kill: func() {
 			if cmd.Process != nil {
-				cmd.Process.Kill()
+				_ = cmd.Process.Kill()
 			}
 		},
 		close: func() {

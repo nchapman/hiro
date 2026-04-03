@@ -163,8 +163,7 @@ func firstWord(ce *syntax.CallExpr) string {
 // ($VAR, ${VAR}). Used to detect dynamic command names.
 func wordHasParamExp(w *syntax.Word) bool {
 	for _, part := range w.Parts {
-		switch part.(type) {
-		case *syntax.ParamExp:
+		if _, ok := part.(*syntax.ParamExp); ok {
 			return true
 		}
 	}

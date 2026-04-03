@@ -31,7 +31,7 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 		}
 		err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // skip inaccessible entries
 			}
 			relPath, _ := filepath.Rel(s.rootDir, path)
 			if shouldIgnore(relPath) {
@@ -45,7 +45,7 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 			}
 			info, err := d.Info()
 			if err != nil || !info.Mode().IsRegular() {
-				return nil
+				return nil //nolint:nilerr // skip entries with unreadable metadata or non-regular files
 			}
 			if info.Size() > maxFileSize {
 				return nil
@@ -63,7 +63,7 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // skip unreadable files
 			}
 
 			if err := s.sendFn(&pb.FileUpdate{
@@ -83,16 +83,14 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 	}
 
 	// Files in knownFiles but not on disk → deleted.
-	if knownFiles != nil {
-		for relPath := range knownFiles {
-			if !seen[relPath] {
-				if err := s.sendFn(&pb.FileUpdate{
-					Path:       relPath,
-					Deleted:    true,
-					OriginNode: s.nodeID,
-				}); err != nil {
-					s.logger.Warn("reconcile: failed to send delete", "path", relPath, "error", err)
-				}
+	for relPath := range knownFiles {
+		if !seen[relPath] {
+			if err := s.sendFn(&pb.FileUpdate{
+				Path:       relPath,
+				Deleted:    true,
+				OriginNode: s.nodeID,
+			}); err != nil {
+				s.logger.Warn("reconcile: failed to send delete", "path", relPath, "error", err)
 			}
 		}
 	}
@@ -106,7 +104,7 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 func (s *FileSyncService) addWatchRecursive(w *fsnotify.Watcher, dir string) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible directories
 		}
 		if !d.IsDir() {
 			return nil
@@ -126,13 +124,13 @@ func (s *FileSyncService) addWatchRecursive(w *fsnotify.Watcher, dir string) err
 // pending change set. This handles the race where files are written inside a
 // new directory before fsnotify can register a watch on it.
 func (s *FileSyncService) scanNewDir(dir string, mu *sync.Mutex, pending map[string]bool, timer *time.Timer) {
-	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible entries and directories
 		}
 		relPath, err := filepath.Rel(s.rootDir, path)
 		if err != nil || shouldIgnore(relPath) {
-			return nil
+			return nil //nolint:nilerr // skip entries that can't be relativized or are ignored
 		}
 		if s.isEchoSuppressed(relPath) {
 			return nil

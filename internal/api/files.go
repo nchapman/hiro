@@ -15,7 +15,7 @@ import (
 	"github.com/nchapman/hiro/internal/watcher"
 )
 
-const maxFileReadSize = 2 << 20  // 2 MB — fits comfortably in the browser editor
+const maxFileReadSize = 2 << 20   // 2 MB — fits comfortably in the browser editor
 const maxFileWriteSize = 50 << 20 // 50 MB — generous limit for drag-and-drop uploads
 
 // resolveFilesPath validates and resolves a relative path within the
@@ -39,7 +39,7 @@ func resolveFilesPath(rootDir, relPath string) (string, error) {
 	}
 
 	// Symlink check: resolve symlinks and re-validate to prevent escape.
-	real, err := filepath.EvalSymlinks(cleaned)
+	realPath, err := filepath.EvalSymlinks(cleaned)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("path resolution failed: %w", err)
@@ -64,20 +64,20 @@ func resolveFilesPath(rootDir, relPath string) (string, error) {
 		return cleaned, nil
 	}
 
-	if !strings.HasPrefix(real, realRoot+string(filepath.Separator)) && real != realRoot {
+	if !strings.HasPrefix(realPath, realRoot+string(filepath.Separator)) && realPath != realRoot {
 		return "", fmt.Errorf("path escapes root")
 	}
-	return real, nil
+	return realPath, nil
 }
 
 // protectedPaths are platform-critical paths (relative to root) that cannot
 // be deleted or renamed through the file browser API.
 var protectedPaths = map[string]bool{
-	"agents":      true,
-	"instances":   true,
-	"skills":      true,
-	"workspace":   true,
-	"config":      true,
+	"agents":    true,
+	"instances": true,
+	"skills":    true,
+	"workspace": true,
+	"config":    true,
 }
 
 // isProtectedPath returns true if absPath is a platform-critical path that

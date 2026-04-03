@@ -67,12 +67,12 @@ func (c *Client) write(ctx context.Context, env Envelope) error {
 // and enters the message loop. Blocks until the context is cancelled
 // or the connection drops.
 func (c *Client) Connect(ctx context.Context) error {
-	conn, _, err := websocket.Dial(ctx, c.leaderURL, nil)
+	conn, _, err := websocket.Dial(ctx, c.leaderURL, nil) //nolint:bodyclose // websocket.Dial doesn't return an http.Response that needs closing
 	if err != nil {
 		return fmt.Errorf("dialing leader at %s: %w", c.leaderURL, err)
 	}
 	c.conn = conn
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// Send registration
 	regID := uuid.New().String()
@@ -127,7 +127,7 @@ func (c *Client) messageLoop(ctx context.Context) error {
 		var env Envelope
 		if err := wsjson.Read(ctx, c.conn, &env); err != nil {
 			if ctx.Err() != nil {
-				return nil // clean shutdown
+				return nil //nolint:nilerr // clean shutdown on context cancellation
 			}
 			return fmt.Errorf("reading message: %w", err)
 		}
@@ -141,7 +141,7 @@ func (c *Client) messageLoop(ctx context.Context) error {
 			}()
 
 		case TypeHeartbeat:
-			c.write(ctx, Envelope{
+			_ = c.write(ctx, Envelope{
 				Type:      TypeHeartbeat,
 				ID:        uuid.New().String(),
 				InReplyTo: env.ID,
@@ -172,7 +172,7 @@ func (c *Client) handleTask(ctx context.Context, env Envelope) {
 	result, err := c.handler(ctx, req.Skill, req.Prompt, req.Context)
 	if err != nil {
 		c.logger.Error("task failed", "task_id", req.TaskID, "error", err)
-		c.write(ctx, Envelope{
+		_ = c.write(ctx, Envelope{
 			Type:      TypeTaskError,
 			ID:        uuid.New().String(),
 			InReplyTo: env.ID,
@@ -187,7 +187,7 @@ func (c *Client) handleTask(ctx context.Context, env Envelope) {
 	}
 
 	c.logger.Info("task completed", "task_id", req.TaskID)
-	c.write(ctx, Envelope{
+	_ = c.write(ctx, Envelope{
 		Type:      TypeTaskResult,
 		ID:        uuid.New().String(),
 		InReplyTo: env.ID,

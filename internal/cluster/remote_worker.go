@@ -14,9 +14,9 @@ import (
 // remote instance. To the inference loop it looks identical to a local
 // gRPC worker client.
 type RemoteWorker struct {
-	leader     *LeaderStream
-	nodeID     NodeID
-	sessionID  string
+	leader    *LeaderStream
+	nodeID    NodeID
+	sessionID string
 
 	secretEnvFn func() []string // provides secrets for each tool call
 

@@ -59,7 +59,7 @@ func LoadOrCreateIdentity(rootDir string) (*NodeIdentity, error) {
 
 func identityFromSeed(seed []byte) *NodeIdentity {
 	priv := ed25519.NewKeyFromSeed(seed)
-	pub := priv.Public().(ed25519.PublicKey)
+	pub := priv.Public().(ed25519.PublicKey) //nolint:errcheck // infallible: ed25519 always returns PublicKey
 	hash := sha256.Sum256(pub)
 	return &NodeIdentity{
 		PrivateKey: priv,

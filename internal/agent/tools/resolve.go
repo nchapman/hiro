@@ -19,7 +19,7 @@ func getAllowedRoots() []string {
 	if v == nil {
 		return nil
 	}
-	s := v.([]string)
+	s := v.([]string) //nolint:errcheck // infallible: only []string is ever stored
 	if len(s) == 0 {
 		return nil
 	}
@@ -66,8 +66,8 @@ func resolveAndConfine(workingDir, path string) (string, error) {
 	// escapes. If the resolved real path is still inside roots, allow it.
 	// If the path doesn't exist yet, skip the symlink check — there's
 	// nothing on disk to exploit.
-	real, err := filepath.EvalSymlinks(resolved)
-	if err == nil && !isInsideRoots(real, roots) {
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err == nil && !isInsideRoots(realPath, roots) {
 		return "", fmt.Errorf("access denied: %s resolves outside the allowed workspace via symlink", path)
 	}
 

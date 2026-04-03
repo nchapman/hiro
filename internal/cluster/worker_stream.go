@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -213,8 +214,8 @@ func (w *WorkerStream) readLoop(ctx context.Context, stream pb.Cluster_NodeStrea
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			if err == io.EOF || ctx.Err() != nil {
-				return nil
+			if errors.Is(err, io.EOF) || ctx.Err() != nil {
+				return nil //nolint:nilerr // clean shutdown on EOF or context cancellation
 			}
 			return fmt.Errorf("receiving from leader: %w", err)
 		}
