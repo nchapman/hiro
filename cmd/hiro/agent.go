@@ -40,13 +40,8 @@ func runAgent() error {
 		return fmt.Errorf("reading spawn config: %w", err)
 	}
 
-	// When running under UID isolation, set a collaborative umask and
-	// verify we are running as the expected user.
-	if cfg.UID != 0 {
-		syscall.Umask(umaskCollaborative)
-		if uint32(os.Getuid()) != cfg.UID {
-			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
-		}
+	if err := configureAgentSecurity(cfg); err != nil {
+		return err
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -57,21 +52,70 @@ func runAgent() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	bg := setupBackgroundJobs(logger)
+	toolSet := buildWorkerTools(cfg.WorkingDir, bg.mgr, cfg.EffectiveTools)
+	executor := agent.ToolExecutorFromTools(toolSet)
+
+	worker := &toolWorker{
+		executor: executor,
+		cancel:   cancel,
+		logger:   logger,
+	}
+
+	srv, cleanup, err := startAgentGRPC(cfg, worker, bg, cancel, logger)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// Signal ready to the control plane.
+	fmt.Fprintln(os.Stdout, "ready")
+	logger.Info("agent worker ready")
+
+	<-ctx.Done()
+	srv.GracefulStop()
+	bg.mgr.KillAll()
+	logger.Info("agent worker stopped")
+	return nil
+}
+
+// configureAgentSecurity sets up UID isolation when running under the Unix user
+// pool. This includes: collaborative umask, UID verification, file tool
+// confinement to the platform root, and SSRF protection against cloud metadata
+// endpoints. The Bash tool is not confinable here — it relies on UID/group DAC.
+func configureAgentSecurity(cfg ipc.SpawnConfig) error {
+	if cfg.UID == 0 {
+		return nil
+	}
+
+	syscall.Umask(umaskCollaborative)
+	if uint32(os.Getuid()) != cfg.UID {
+		return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
+	}
+
+	// Confine file tools to the platform root — prevents reading/writing
+	// outside the workspace. Block SSRF to prevent hitting cloud metadata
+	// or internal services.
+	tools.SetAllowedRoots([]string{cfg.WorkingDir})
+	tools.SetSSRFProtection(true)
+	return nil
+}
+
+// backgroundJobs bundles the background job manager with its completion channel
+// and secret env callback for wiring into the gRPC server.
+type backgroundJobs struct {
+	mgr              *tools.BackgroundJobManager
+	completions      chan *pb.JobCompletion
+	setSecretEnvFunc func([]string)
+}
+
+// setupBackgroundJobs creates the background job manager and wires completion
+// events to a channel for the gRPC stream. Secret env vars are stored
+// atomically so background jobs inherit the latest set from each tool call.
+func setupBackgroundJobs(logger *slog.Logger) backgroundJobs {
 	// Secret env vars are received from the control plane with each tool call.
-	// Store the latest set atomically so the BackgroundJobManager can read them.
 	var secretEnvMu sync.Mutex
 	var secretEnv []string
-
-	// When running under UID isolation, enable additional security:
-	// 1. Confine file tools to the platform root (/hiro) — prevents reading/writing
-	//    outside the workspace (e.g. /opt/mise, /etc, other instance dirs).
-	// 2. Block SSRF in fetch — prevents hitting cloud metadata (169.254.169.254)
-	//    or internal services.
-	// Note: the bash tool is not confinable here — it relies on UID/group DAC.
-	if cfg.UID != 0 {
-		tools.SetAllowedRoots([]string{cfg.WorkingDir})
-		tools.SetSSRFProtection(true)
-	}
 
 	bgMgr := tools.NewBackgroundJobManager(func() []string {
 		secretEnvMu.Lock()
@@ -79,7 +123,6 @@ func runAgent() error {
 		return secretEnv
 	})
 
-	// Wire background job completion events to a channel for the gRPC stream.
 	completions := make(chan *pb.JobCompletion, jobCompletionBufSize)
 	bgMgr.OnComplete = func(job *tools.BackgroundJob) {
 		exitCode := int32(0)
@@ -104,17 +147,23 @@ func runAgent() error {
 		}
 	}
 
-	toolSet := buildWorkerTools(cfg.WorkingDir, bgMgr, cfg.EffectiveTools)
-
-	executor := agent.ToolExecutorFromTools(toolSet)
-
-	worker := &toolWorker{
-		executor: executor,
-		cancel:   cancel,
-		logger:   logger,
+	return backgroundJobs{
+		mgr:         bgMgr,
+		completions: completions,
+		setSecretEnvFunc: func(env []string) {
+			secretEnvMu.Lock()
+			secretEnv = env
+			secretEnvMu.Unlock()
+		},
 	}
+}
 
-	// Start gRPC server on Unix socket.
+// startAgentGRPC creates and starts the gRPC server on a Unix socket for
+// receiving ExecuteTool RPCs from the control plane. Returns the server (for
+// GracefulStop) and a cleanup function that removes the socket file. The cancel
+// func is called if the gRPC server encounters a fatal error, unblocking the
+// caller's ctx.Done() wait.
+func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJobs, cancel context.CancelFunc, logger *slog.Logger) (*grpc.Server, func(), error) {
 	socketPath := cfg.AgentSocket
 	if socketPath == "" {
 		socketPath = fmt.Sprintf("/tmp/hiro-agent-%s.sock", cfg.SessionID)
@@ -122,18 +171,14 @@ func runAgent() error {
 	os.Remove(socketPath)
 	lis, err := net.Listen("unix", socketPath)
 	if err != nil {
-		return fmt.Errorf("listening on %s: %w", socketPath, err)
+		return nil, nil, fmt.Errorf("listening on %s: %w", socketPath, err)
 	}
-	defer os.Remove(socketPath)
+	cleanup := func() { os.Remove(socketPath) }
 
 	srv := grpc.NewServer()
 	ws := grpcipc.NewWorkerServer(worker)
-	ws.SetSecretEnvCallback(func(env []string) {
-		secretEnvMu.Lock()
-		secretEnv = env
-		secretEnvMu.Unlock()
-	})
-	ws.SetCompletionChannel(completions)
+	ws.SetSecretEnvCallback(bg.setSecretEnvFunc)
+	ws.SetCompletionChannel(bg.completions)
 	ws.Register(srv)
 
 	go func() {
@@ -143,15 +188,7 @@ func runAgent() error {
 		}
 	}()
 
-	// Signal ready to the control plane.
-	fmt.Fprintln(os.Stdout, "ready")
-	logger.Info("agent worker ready")
-
-	<-ctx.Done()
-	srv.GracefulStop()
-	bgMgr.KillAll()
-	logger.Info("agent worker stopped")
-	return nil
+	return srv, cleanup, nil
 }
 
 // toolWorker implements ipc.AgentWorker as a thin tool executor.

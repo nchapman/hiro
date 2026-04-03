@@ -81,6 +81,7 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 		logger.Warn("failed to load pending nodes", "error", err)
 	}
 
+	// Bridge control plane node approval into cluster approval status.
 	leaderStream := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
 		switch cp.NodeApprovalCheck(nodeID) {
 		case controlplane.NodeStatusApproved:
@@ -92,19 +93,7 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 		}
 	}, pending, logger)
 
-	serverTLS := cluster.ServerTLSConfig(tlsCert)
-	grpcSrv := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(serverTLS)),
-		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time:    keepalivePingInterval,
-			Timeout: keepalivePingTimeout,
-		}),
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             keepaliveMinClientInterval,
-			PermitWithoutStream: true, // allow pings even with no active RPCs
-		}),
-	)
+	grpcSrv := newClusterGRPCServer(tlsCert)
 	leaderStream.Register(grpcSrv)
 
 	lis, err := net.Listen("tcp", clusterAddr)
@@ -113,24 +102,7 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	}
 
 	svc := cluster.NewLeaderService(leaderStream, registry, logger)
-
-	// File sync: leader watches workspace/agents/skills and pushes to nodes.
-	fileSync := cluster.NewFileSyncService(cluster.FileSyncConfig{
-		RootDir:  rootDir,
-		SyncDirs: []string{"agents", "skills", "workspace"},
-		NodeID:   "leader",
-		SendFn: func(update *pb.FileUpdate) error {
-			svc.BroadcastFileUpdate(update)
-			return nil
-		},
-		Logger: logger,
-	})
-	svc.SetFileSync(fileSync)
-	go func() {
-		if err := fileSync.WatchAndSync(); err != nil {
-			logger.Warn("file sync watcher stopped", "error", err)
-		}
-	}()
+	fileSync := startLeaderFileSync(rootDir, svc, logger)
 
 	go func() {
 		logger.Info("cluster gRPC server starting", "addr", clusterAddr)
@@ -148,6 +120,45 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 		registry:     registry,
 		pending:      pending,
 	}, nil
+}
+
+// startLeaderFileSync creates and starts the file sync service that pushes
+// workspace/agents/skills changes to connected worker nodes.
+func startLeaderFileSync(rootDir string, svc *cluster.LeaderService, logger *slog.Logger) *cluster.FileSyncService {
+	fileSync := cluster.NewFileSyncService(cluster.FileSyncConfig{
+		RootDir:  rootDir,
+		SyncDirs: []string{"agents", "skills", "workspace"},
+		NodeID:   "leader",
+		SendFn: func(update *pb.FileUpdate) error {
+			svc.BroadcastFileUpdate(update)
+			return nil
+		},
+		Logger: logger,
+	})
+	svc.SetFileSync(fileSync)
+	go func() {
+		if err := fileSync.WatchAndSync(); err != nil {
+			logger.Warn("file sync watcher stopped", "error", err)
+		}
+	}()
+	return fileSync
+}
+
+// newClusterGRPCServer creates a gRPC server configured with mTLS and keepalive.
+func newClusterGRPCServer(tlsCert tls.Certificate) *grpc.Server {
+	serverTLS := cluster.ServerTLSConfig(tlsCert)
+	return grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(serverTLS)),
+		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    keepalivePingInterval,
+			Timeout: keepalivePingTimeout,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             keepaliveMinClientInterval,
+			PermitWithoutStream: true, // allow pings even with no active RPCs
+		}),
+	)
 }
 
 // bootstrapCoordinator ensures the coordinator agent is running. It handles
