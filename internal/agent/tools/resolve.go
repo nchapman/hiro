@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 )
 
 // allowedRoots defines the directory prefixes that file tools may access.
@@ -98,7 +100,7 @@ func mkdirFor(filePath string) error {
 	if dir == "." || dir == "" {
 		return nil
 	}
-	return os.MkdirAll(dir, 0o755)
+	return os.MkdirAll(dir, fsperm.DirStandard)
 }
 
 // atomicWriteFile writes content to path via a temp file + rename so

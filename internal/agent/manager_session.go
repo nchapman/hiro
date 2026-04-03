@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
+
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hiro/internal/config"
@@ -164,11 +166,11 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	// Create new session directory.
 	newSessionID := uuid.Must(uuid.NewV7()).String()
 	sessDir := m.instanceSessionDir(instanceID, newSessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+	if err := os.MkdirAll(sessDir, fsperm.DirPrivate); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), fsperm.DirPrivate); err != nil {
 			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
 		}
 	}
@@ -426,7 +428,8 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 
 			// Model switch.
 			if model != inst.info.Model {
-				pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				const modelSwitchTimeout = 10 * time.Second
+				pushCtx, pushCancel := context.WithTimeout(context.Background(), modelSwitchTimeout)
 				lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(modelSpec.Provider), apiKey, baseURL, modelSpec.Model)
 				pushCancel()
 				if err != nil {

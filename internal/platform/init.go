@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 )
 
 //go:embed defaults/agents
@@ -44,9 +46,9 @@ func Init(dir string, logger *slog.Logger) error {
 	for _, d := range requiredDirs {
 		path := filepath.Join(dir, d)
 		// config/ contains secrets — restrict to owner only.
-		perm := os.FileMode(0o775)
+		perm := fsperm.DirShared
 		if d == "config" {
-			perm = 0o700
+			perm = fsperm.DirPrivate
 		}
 		if err := os.MkdirAll(path, perm); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
@@ -54,7 +56,7 @@ func Init(dir string, logger *slog.Logger) error {
 		// MkdirAll won't tighten perms on existing dirs. Ensure config/ is
 		// always restricted, even on upgrades from older installs.
 		if d == "config" {
-			if err := os.Chmod(path, 0o700); err != nil {
+			if err := os.Chmod(path, fsperm.DirPrivate); err != nil {
 				logger.Warn("failed to tighten config directory permissions", "error", err)
 			}
 		}
@@ -72,7 +74,7 @@ func Init(dir string, logger *slog.Logger) error {
 		if agentsGID >= 0 && d == "workspace" {
 			if err := os.Chown(path, -1, agentsGID); err != nil {
 				logger.Warn("failed to chown workspace to hiro-agents", "error", err)
-			} else if err := os.Chmod(path, 0o2775); err != nil {
+			} else if err := os.Chmod(path, fsperm.DirSetgid); err != nil {
 				logger.Warn("failed to set setgid on workspace", "error", err)
 			}
 		}
@@ -111,7 +113,7 @@ func seedDefaults(agentsDir string, coordGID int) error {
 		dest := filepath.Join(agentsDir, filepath.FromSlash(rel))
 
 		if d.IsDir() {
-			if err := os.MkdirAll(dest, 0o755); err != nil {
+			if err := os.MkdirAll(dest, fsperm.DirStandard); err != nil {
 				return err
 			}
 			// Setgid + group-writable so coordinator agents can
@@ -120,7 +122,7 @@ func seedDefaults(agentsDir string, coordGID int) error {
 				if err := os.Chown(dest, -1, coordGID); err != nil {
 					return fmt.Errorf("chown %s to hiro-coordinators: %w", rel, err)
 				}
-				if err := os.Chmod(dest, 0o2775); err != nil {
+				if err := os.Chmod(dest, fsperm.DirSetgid); err != nil {
 					return fmt.Errorf("chmod %s: %w", rel, err)
 				}
 			}
@@ -134,7 +136,7 @@ func seedDefaults(agentsDir string, coordGID int) error {
 		// Seeded files are 0o644 (not group-writable) intentionally —
 		// coordinators can create new agents but cannot rewrite the
 		// shipped defaults, preventing prompt injection persistence.
-		if err := os.WriteFile(dest, data, 0o644); err != nil {
+		if err := os.WriteFile(dest, data, fsperm.FileStandard); err != nil {
 			return fmt.Errorf("writing %s: %w", dest, err)
 		}
 		return nil
@@ -157,7 +159,7 @@ func applyCoordinatorOwnership(root string, coordGID int, logger *slog.Logger) e
 			logger.Warn("cannot chown directory to hiro-coordinators", "path", path, "error", err)
 			return nil // best-effort
 		}
-		if err := os.Chmod(path, 0o2775); err != nil {
+		if err := os.Chmod(path, fsperm.DirSetgid); err != nil {
 			logger.Warn("cannot set setgid on directory", "path", path, "error", err)
 		}
 		return nil

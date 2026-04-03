@@ -34,8 +34,8 @@ func TestContextWindow_KnownModel(t *testing.T) {
 
 func TestContextWindow_UnknownModel(t *testing.T) {
 	cw := ContextWindow("totally-fake-model-xyz")
-	if cw != defaultContextWindow {
-		t.Errorf("expected default %d, got %d", defaultContextWindow, cw)
+	if cw != DefaultContextWindow {
+		t.Errorf("expected default %d, got %d", DefaultContextWindow, cw)
 	}
 }
 

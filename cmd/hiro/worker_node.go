@@ -21,7 +21,30 @@ import (
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"github.com/nchapman/hiro/web"
+)
+
+const (
+	// workerReconnectDelay is how long to wait before reconnecting to the leader.
+	workerReconnectDelay = 5 * time.Second
+
+	// happyEyeballsTimeout is the overall timeout for dual-path connection attempts.
+	happyEyeballsTimeout = 15 * time.Second
+
+	// happyEyeballsDialTimeout is the timeout for the direct TCP dial.
+	happyEyeballsDialTimeout = 10 * time.Second
+
+	// happyEyeballsAttempts is the number of connection paths (direct + relay).
+	happyEyeballsAttempts = 2
+
+	// happyEyeballsRelayDelay is how long to wait before starting the relay attempt,
+	// giving the direct connection a head start.
+	happyEyeballsRelayDelay = 500 * time.Millisecond
+
+	// workerShutdownTimeout is the grace period for the worker's HTTP server shutdown.
+	// Intentionally shorter than the main server's shutdownTimeout (10s).
+	workerShutdownTimeout = 5 * time.Second
 )
 
 // runWorkerNode starts hiro in worker mode. It connects to the leader,
@@ -93,7 +116,7 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 
 	// Create workspace directories locally.
 	for _, dir := range []string{"workspace", "instances"} {
-		if err := os.MkdirAll(fmt.Sprintf("%s/%s", rootDir, dir), 0o755); err != nil {
+		if err := os.MkdirAll(fmt.Sprintf("%s/%s", rootDir, dir), fsperm.DirStandard); err != nil {
 			return fmt.Errorf("creating %s directory: %w", dir, err)
 		}
 	}
@@ -122,8 +145,8 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 	httpServer := &http.Server{
 		Addr:              listenAddr,
 		Handler:           httpSrv,
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
 	}
 	go func() {
 		logger.Info("worker HTTP server starting", "addr", listenAddr)
@@ -132,7 +155,7 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 		}
 	}()
 	defer func() {
-		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), workerShutdownTimeout)
 		defer shutCancel()
 		_ = httpServer.Shutdown(shutCtx)
 	}()
@@ -320,7 +343,7 @@ func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.L
 			logger.Warn("disconnected from leader, reconnecting...", "error", err)
 		}
 		select {
-		case <-time.After(5 * time.Second):
+		case <-time.After(workerReconnectDelay):
 		case <-ctx.Done():
 		}
 		if ctx.Err() != nil {
@@ -352,14 +375,14 @@ func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string,
 		err  error
 		via  string
 	}
-	ch := make(chan result, 2)
+	ch := make(chan result, happyEyeballsAttempts)
 
-	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
+	dialCtx, dialCancel := context.WithTimeout(ctx, happyEyeballsTimeout)
 	defer dialCancel()
 
 	// Direct attempt — starts immediately.
 	go func() {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		dialer := &net.Dialer{Timeout: happyEyeballsDialTimeout}
 		conn, err := dialer.DialContext(dialCtx, "tcp", directAddr)
 		ch <- result{conn, err, "direct"}
 	}()
@@ -367,7 +390,7 @@ func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string,
 	// Relay attempt — starts after 500ms delay to prefer direct.
 	go func() {
 		select {
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(happyEyeballsRelayDelay):
 		case <-dialCtx.Done():
 			ch <- result{nil, dialCtx.Err(), "relay"}
 			return
@@ -378,7 +401,7 @@ func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string,
 
 	// Take first success.
 	var firstErr error
-	for i := 0; i < 2; i++ {
+	for i := 0; i < happyEyeballsAttempts; i++ {
 		r := <-ch
 		if r.err == nil {
 			logger.Info("connected to leader", "via", r.via)

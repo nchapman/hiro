@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const maxSearchQueryLen = 512 // max byte length for FTS search queries
+
 // Message represents a stored conversation message.
 type Message struct {
 	ID        int64
@@ -532,8 +534,8 @@ func (d *DB) SearchMessages(ctx context.Context, sessionID, query string, limit 
 	if limit <= 0 {
 		limit = 20
 	}
-	if len(query) > 512 {
-		return nil, fmt.Errorf("search query too long (max 512 bytes)")
+	if len(query) > maxSearchQueryLen {
+		return nil, fmt.Errorf("search query too long (max %d bytes)", maxSearchQueryLen)
 	}
 	query = sanitizeFTSQuery(query)
 	rows, err := d.db.QueryContext(ctx, `
@@ -556,8 +558,8 @@ func (d *DB) SearchSummaries(ctx context.Context, sessionID, query string, limit
 	if limit <= 0 {
 		limit = 20
 	}
-	if len(query) > 512 {
-		return nil, fmt.Errorf("search query too long (max 512 bytes)")
+	if len(query) > maxSearchQueryLen {
+		return nil, fmt.Errorf("search query too long (max %d bytes)", maxSearchQueryLen)
 	}
 	query = sanitizeFTSQuery(query)
 	rows, err := d.db.QueryContext(ctx, `

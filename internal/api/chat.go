@@ -19,6 +19,10 @@ import (
 	"github.com/nchapman/hiro/internal/watcher"
 )
 
+// wsReadLimitChat is the WebSocket read limit for the chat endpoint (10 MB),
+// large enough for file attachments.
+const wsReadLimitChat = 10 * 1024 * 1024
+
 // ChatAttachment is a file attached to a chat message, base64-encoded.
 type ChatAttachment struct {
 	Filename  string `json:"filename"`
@@ -120,7 +124,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("chat connected", "instance_id", instanceID)
 
 	// Allow large messages for file attachments (default 32KB is too small).
-	conn.SetReadLimit(10 * 1024 * 1024) // 10 MB
+	conn.SetReadLimit(wsReadLimitChat)
 
 	ctx := r.Context()
 
@@ -370,6 +374,7 @@ func (s *Server) buildUsageInfo(ctx context.Context, instanceID string) *UsageIn
 const (
 	maxAttachmentSize = 5 * 1024 * 1024 // 5 MB per attachment
 	maxAttachments    = 10
+	bytesPerMB        = 1024 * 1024
 )
 
 // supportedMIME returns true for MIME types we accept as attachments.
@@ -409,14 +414,14 @@ func processAttachments(attachments []ChatAttachment) ([]fantasy.FilePart, error
 		}
 		// Reject before decoding to avoid allocating oversized buffers.
 		if len(att.Data) > maxAttachmentSize*4/3+1024 {
-			return nil, fmt.Errorf("attachment %s exceeds %d MB limit", att.Filename, maxAttachmentSize/(1024*1024))
+			return nil, fmt.Errorf("attachment %s exceeds %d MB limit", att.Filename, maxAttachmentSize/bytesPerMB)
 		}
 		data, err := base64.StdEncoding.DecodeString(att.Data)
 		if err != nil {
 			return nil, fmt.Errorf("invalid base64 for %s: %w", att.Filename, err)
 		}
 		if len(data) > maxAttachmentSize {
-			return nil, fmt.Errorf("attachment %s exceeds %d MB limit", att.Filename, maxAttachmentSize/(1024*1024))
+			return nil, fmt.Errorf("attachment %s exceeds %d MB limit", att.Filename, maxAttachmentSize/bytesPerMB)
 		}
 		files = append(files, fantasy.FilePart{
 			Filename:  att.Filename,

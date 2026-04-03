@@ -12,11 +12,18 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"github.com/nchapman/hiro/internal/watcher"
 )
 
 const maxFileReadSize = 2 << 20   // 2 MB — fits comfortably in the browser editor
 const maxFileWriteSize = 50 << 20 // 50 MB — generous limit for drag-and-drop uploads
+
+// maxTreeEntries caps the number of entries returned by the file tree endpoint.
+const maxTreeEntries = 1000
+
+// watchEventBufferSize is the channel buffer for file watch SSE subscribers.
+const watchEventBufferSize = 16
 
 // resolveFilesPath validates and resolves a relative path within the
 // platform root directory. It returns an error if the resolved path escapes
@@ -160,7 +167,7 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		result = append(result, te)
-		if len(result) >= 1000 {
+		if len(result) >= maxTreeEntries {
 			truncated = true
 			break
 		}
@@ -239,7 +246,7 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 	// Create parent directories if needed. Use 0o2775 (setgid + group-writable)
 	// so agent processes (hiro-agents group) can also write into these dirs.
 	dir := filepath.Dir(absPath)
-	if err := os.MkdirAll(dir, 0o2775); err != nil {
+	if err := os.MkdirAll(dir, fsperm.DirSetgid); err != nil {
 		s.logger.Error("files mkdir failed", "path", dir, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -271,7 +278,7 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	if err := tmp.Chmod(0o664); err != nil {
+	if err := tmp.Chmod(fsperm.FileCollaborative); err != nil {
 		s.logger.Error("files upload chmod failed", "path", tmpName, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -300,7 +307,7 @@ func (s *Server) handleFilesMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.MkdirAll(absPath, 0o2775); err != nil {
+	if err := os.MkdirAll(absPath, fsperm.DirSetgid); err != nil {
 		s.logger.Error("files mkdir failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -415,7 +422,7 @@ func (s *Server) handleFilesRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create parent dirs for destination if needed.
-	if err := os.MkdirAll(filepath.Dir(absTo), 0o2775); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absTo), fsperm.DirSetgid); err != nil {
 		s.logger.Error("files rename mkdir failed", "path", absTo, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -462,7 +469,7 @@ func (s *Server) handleFilesWatch(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	// Channel bridges the watcher goroutine to the SSE write loop.
-	ch := make(chan []watcher.Event, 16)
+	ch := make(chan []watcher.Event, watchEventBufferSize)
 
 	unsub := s.watcher.Subscribe("**", func(events []watcher.Event) {
 		select {

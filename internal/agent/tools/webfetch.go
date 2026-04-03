@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"charm.land/fantasy"
 )
@@ -46,7 +45,7 @@ var ssrfTransport = &http.Transport{
 		}
 
 		// Dial the first resolved address directly to avoid re-resolving.
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		dialer := &net.Dialer{Timeout: dialTimeout}
 		return dialer.DialContext(ctx, network, net.JoinHostPort(addrs[0], port))
 	},
 }

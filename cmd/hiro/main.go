@@ -29,6 +29,20 @@ import (
 	"github.com/nchapman/hiro/web"
 )
 
+const (
+	// maxRestarts caps the number of consecutive rapid restarts before exiting.
+	maxRestarts = 3
+
+	// readHeaderTimeout limits how long the HTTP server waits for request headers.
+	readHeaderTimeout = 5 * time.Second
+
+	// httpIdleTimeout is how long the HTTP server keeps idle connections open.
+	httpIdleTimeout = 120 * time.Second
+
+	// shutdownTimeout is the grace period for HTTP server shutdown.
+	shutdownTimeout = 10 * time.Second
+)
+
 // errRestartRequested is returned by run() when the setup API requests a
 // process restart (e.g. after switching to worker mode during onboarding).
 var errRestartRequested = fmt.Errorf("restart requested")
@@ -56,7 +70,7 @@ func main() {
 				restarts = 0 // ran long enough — not a crash loop
 			}
 			restarts++
-			if restarts > 3 {
+			if restarts > maxRestarts {
 				fmt.Fprintf(os.Stderr, "error: too many restarts\n")
 				os.Exit(1)
 			}
@@ -393,8 +407,8 @@ func run() error {
 	httpServer := &http.Server{
 		Addr:              listenAddr,
 		Handler:           srv,
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
 	}
 
 	go func() {
@@ -419,7 +433,7 @@ func run() error {
 		runErr = errRestartRequested
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	_ = httpServer.Shutdown(shutdownCtx)

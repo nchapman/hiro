@@ -12,6 +12,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	// sessionCookieMaxAge is 24 hours in seconds.
+	sessionCookieMaxAge = 86400
+
+	// maxLoginAttemptsPerMinute is the rate limit for failed login attempts per IP.
+	maxLoginAttemptsPerMinute = 5
+)
+
 // sessionCookieName returns a port-scoped cookie name so multiple instances
 // on the same host (e.g., localhost:8080 and localhost:8082) don't clobber
 // each other's sessions.
@@ -31,7 +39,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400, // 24 hours
+		MaxAge:   sessionCookieMaxAge,
 	})
 }
 
@@ -74,7 +82,7 @@ func (l *loginLimiter) allow(ip string) bool {
 	}
 	l.attempts[ip] = valid
 
-	return len(valid) < 5
+	return len(valid) < maxLoginAttemptsPerMinute
 }
 
 // record adds a failed attempt for the given IP.
@@ -189,7 +197,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.New) < 8 {
+	if len(req.New) < minPasswordLength {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}

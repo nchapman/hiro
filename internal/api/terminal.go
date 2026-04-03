@@ -16,6 +16,9 @@ const (
 	termMsgControl byte = 0x03 // bidirectional: JSON control
 )
 
+// wsReadLimitTerminal is the WebSocket read limit for the terminal endpoint (1 MB).
+const wsReadLimitTerminal = 1 * 1024 * 1024
+
 // sessionIDLen is the fixed width of the session ID field in the binary header.
 const sessionIDLen = 32
 
@@ -44,7 +47,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.CloseNow() }()
 
 	// Allow large pastes.
-	conn.SetReadLimit(1 * 1024 * 1024)
+	conn.SetReadLimit(wsReadLimitTerminal)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -63,7 +66,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	// If no sessions exist, auto-create one.
 	sessions := s.termSessions.List()
 	if len(sessions) == 0 {
-		ts.handleCreate(termControlMsg{NodeID: "home", Cols: 80, Rows: 24})
+		ts.handleCreate(termControlMsg{NodeID: "home", Cols: defaultTermCols, Rows: defaultTermRows})
 	}
 
 	// Read loop: client -> server.
@@ -222,10 +225,10 @@ func (ts *termSocket) handleCreate(ctrl termControlMsg) {
 	cols := ctrl.Cols
 	rows := ctrl.Rows
 	if cols == 0 {
-		cols = 80
+		cols = defaultTermCols
 	}
 	if rows == 0 {
-		rows = 24
+		rows = defaultTermRows
 	}
 
 	sess, err := ts.server.termSessions.Create(nodeID, cols, rows)

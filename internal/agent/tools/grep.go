@@ -354,8 +354,8 @@ func grepCount(ctx context.Context, pattern, searchPath, workingDir string, para
 	var output []string
 	totalMatches := 0
 	for _, line := range lines {
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
+		parts := strings.SplitN(line, ":", splitKeyValueParts)
+		if len(parts) != splitKeyValueParts {
 			continue
 		}
 		relPath := relativizePath(parts[0], workingDir)
@@ -653,7 +653,7 @@ func searchTextFile(path string, re *regexp.Regexp, modTime int64) []grepMatch {
 	defer f.Close()
 
 	// Check for binary content by looking for null bytes in the first 512 bytes
-	header := make([]byte, 512)
+	header := make([]byte, binaryDetectBufSize)
 	hn, err := f.Read(header)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil
@@ -672,7 +672,7 @@ func searchTextFile(path string, re *regexp.Regexp, modTime int64) []grepMatch {
 	var matches []grepMatch
 	scanner := bufio.NewScanner(f)
 	// Increase buffer size for long lines
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, scannerInitBufSize), scannerMaxBufSize)
 	n := 0
 	for scanner.Scan() {
 		n++

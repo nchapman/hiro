@@ -25,6 +25,10 @@ type SessionInfo struct {
 	CreatedAt  time.Time
 }
 
+// MaxSessionPrefix is the maximum length of a session ID prefix used in Unix
+// socket paths. Keeps paths under the 104-byte OS limit.
+const MaxSessionPrefix = 18
+
 // SpawnConfig is the configuration passed to an agent worker process at startup.
 // Workers are thin tool-execution sandboxes — they only need paths and UID info.
 type SpawnConfig struct {

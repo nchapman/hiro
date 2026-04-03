@@ -15,6 +15,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/ipc/grpcipc"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -71,13 +72,13 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	sessionDir := filepath.Join(nb.rootDir, msg.SessionDir)
 
 	// Create directories.
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessionDir, fsperm.DirStandard); err != nil {
 		nb.logger.Error("creating session dir", "error", err)
 		_ = nb.stream.SendSpawnResult(msg.RequestId, fmt.Sprintf("creating session dir: %v", err))
 		return
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessionDir, sub), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(sessionDir, sub), fsperm.DirStandard); err != nil {
 			nb.logger.Error("creating session subdir", "dir", sub, "error", err)
 		}
 	}
@@ -219,11 +220,11 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	// Create a private socket directory (0o700) so the socket is inaccessible
 	// to other processes from the moment it's created (no TOCTOU window).
 	sessPrefix := cfg.SessionID
-	if len(sessPrefix) > 18 {
-		sessPrefix = sessPrefix[:18]
+	if len(sessPrefix) > ipc.MaxSessionPrefix {
+		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
 	}
 	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
-	if err := os.MkdirAll(socketDir, 0o700); err != nil {
+	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}
 	socketPath := socketDir + "/a.sock"
@@ -254,7 +255,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	// Wait for readiness.
 	readyCh := make(chan error, 1)
 	go func() {
-		buf := make([]byte, 64)
+		buf := make([]byte, readyBufSize)
 		n, err := stdoutPipe.Read(buf)
 		if err != nil {
 			readyCh <- fmt.Errorf("reading ready signal: %w", err)

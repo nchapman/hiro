@@ -2,6 +2,16 @@ package toolrules
 
 import "strings"
 
+const (
+	// trailingSpaceStarLen is the length of the " *" suffix used for
+	// optional trailing-wildcard detection.
+	trailingSpaceStarLen = 2
+
+	// escapeSeqLen is the byte length of a backslash escape sequence
+	// (the backslash plus the escaped character).
+	escapeSeqLen = 2
+)
+
 // MatchWildcard reports whether text matches pattern.
 //
 // Special characters:
@@ -39,7 +49,7 @@ func trailingSpaceStarOptional(pattern string) bool {
 	}
 	// The * is escaped if preceded by an odd number of backslashes.
 	n := 0
-	for i := len(pattern) - 3; i >= 0 && pattern[i] == '\\'; i-- {
+	for i := len(pattern) - trailingSpaceStarLen - 1; i >= 0 && pattern[i] == '\\'; i-- {
 		n++
 	}
 	if n%2 != 0 {
@@ -113,7 +123,7 @@ func matchCore(pattern, text string) bool {
 // to advance past it.
 func patternChar(pattern string, px int) (byte, int) {
 	if pattern[px] == '\\' && px+1 < len(pattern) {
-		return pattern[px+1], 2
+		return pattern[px+1], escapeSeqLen
 	}
 	return pattern[px], 1
 }

@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -134,10 +136,10 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 				return fmt.Errorf("creating dir %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), fsperm.DirStandard); err != nil {
 				return err
 			}
-			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&0o666); err != nil {
+			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&filePermNoExec); err != nil {
 				return fmt.Errorf("writing file %s: %w", header.Name, err)
 			}
 		}

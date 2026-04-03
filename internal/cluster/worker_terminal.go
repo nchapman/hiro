@@ -107,7 +107,7 @@ func (m *WorkerTerminalManager) handleCreate(_ context.Context, msg *pb.CreateTe
 }
 
 func (m *WorkerTerminalManager) outputPump(sess *workerTermSession) {
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, termOutputBufSize)
 	for {
 		n, err := sess.ptmx.Read(buf)
 		if n > 0 {
@@ -185,7 +185,7 @@ func (m *WorkerTerminalManager) killSession(sess *workerTermSession) {
 	_ = sess.cmd.Process.Signal(syscall.SIGHUP)
 	select {
 	case <-sess.waitDone:
-	case <-time.After(3 * time.Second):
+	case <-time.After(termKillGracePeriod):
 		_ = sess.cmd.Process.Kill()
 		<-sess.waitDone
 	}

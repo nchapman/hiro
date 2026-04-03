@@ -11,6 +11,13 @@ import (
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
+// maxTailBudgetPercent is the maximum percentage of the token budget that the
+// fresh tail (most recent messages) may consume during context assembly.
+const maxTailBudgetPercent = 80
+
+// percentDivisor is the denominator for percentage calculations.
+const percentDivisor = 100
+
 // AssembleResult holds the assembled context for an LLM call.
 type AssembleResult struct {
 	Messages        []fantasy.Message
@@ -56,7 +63,7 @@ func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg Com
 
 	// Cap fresh tail to prevent budget overflow. Reserve at most 80% of the
 	// token budget for the tail; shrink from the oldest end if exceeded.
-	maxTailTokens := cfg.TokenBudget * 4 / 5
+	maxTailTokens := cfg.TokenBudget * maxTailBudgetPercent / percentDivisor
 	if tailTokens > maxTailTokens {
 		originalCount := len(freshTail)
 		for len(freshTail) > 1 && tailTokens > maxTailTokens {

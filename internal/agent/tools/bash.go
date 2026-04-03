@@ -65,7 +65,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 					bgMgr.Remove(job.ID)
 					stdout, stderr, _, execErr := job.GetOutput()
 					return formatBashResult(stdout, stderr, execErr), nil
-				case <-time.After(100 * time.Millisecond):
+				case <-time.After(outputPollInterval):
 				}
 
 				// Truly backgrounded — enable completion notification.
@@ -81,7 +81,7 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 			}
 			job.Description = params.Description
 
-			ticker := time.NewTicker(100 * time.Millisecond)
+			ticker := time.NewTicker(outputPollInterval)
 			defer ticker.Stop()
 			timeout := time.After(bgTimeout)
 
@@ -153,7 +153,7 @@ func truncateOutput(s string) string {
 	if len(s) <= maxOutputLen {
 		return s
 	}
-	half := maxOutputLen / 2
+	half := outputTruncateHalf
 	start := s[:half]
 	end := s[len(s)-half:]
 	skipped := strings.Count(s[half:len(s)-half], "\n")

@@ -11,6 +11,9 @@ import (
 	"github.com/nchapman/hiro/internal/provider"
 )
 
+// providerTestTimeout is the deadline for provider connectivity tests.
+const providerTestTimeout = 30 * time.Second
+
 type settingsResponse struct {
 	DefaultModel string `json:"default_model"` // "provider/model" format
 }
@@ -152,7 +155,7 @@ func (s *Server) handleTestProviderByType(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), providerTestTimeout)
 	defer cancel()
 
 	if err := provider.TestConnection(ctx, provider.Type(providerType), prov.APIKey, prov.BaseURL, model); err != nil {

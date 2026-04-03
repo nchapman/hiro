@@ -8,6 +8,10 @@ import (
 	"github.com/nchapman/hiro/internal/toolrules"
 )
 
+// minSubcommandArgs is the minimum number of arguments for commands that
+// require a verb plus at least one argument (e.g. "/tools set <agent> <tools>").
+const minSubcommandArgs = 2
+
 // HandleCommand parses and executes a slash command. Returns a
 // human-readable result string. Returns an error if the command is
 // unrecognized or the sub-command is invalid.
@@ -24,7 +28,7 @@ func (cp *ControlPlane) HandleCommand(input string) (string, error) {
 	if len(parts) > 1 {
 		verb = parts[1]
 	}
-	if len(parts) > 2 {
+	if len(parts) > minSubcommandArgs {
 		args = parts[2:]
 	}
 
@@ -106,7 +110,7 @@ func (cp *ControlPlane) handleSecrets(verb string, args []string) (string, bool,
 func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, error) {
 	switch verb {
 	case "set":
-		if len(args) < 2 {
+		if len(args) < minSubcommandArgs {
 			return "Usage: /tools set <agent> <tool1,tool2,...>", false, nil
 		}
 		agentName := args[0]
@@ -121,7 +125,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		return fmt.Sprintf("Allow rules for %q set to: %s\n\nTakes effect on the agent's next turn.", agentName, strings.Join(toolList, ", ")), true, nil
 
 	case "deny":
-		if len(args) < 2 {
+		if len(args) < minSubcommandArgs {
 			return "Usage: /tools deny <agent> <rule1,rule2,...>", false, nil
 		}
 		agentName := args[0]
@@ -215,7 +219,7 @@ func parseKeyValue(args []string) (name, value string, ok bool) {
 		return name, value, true
 	}
 	// "NAME VALUE" form
-	if len(args) >= 2 {
+	if len(args) >= minSubcommandArgs {
 		return args[0], strings.Join(args[1:], " "), true
 	}
 	return "", "", false

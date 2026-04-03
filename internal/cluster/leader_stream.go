@@ -16,6 +16,11 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+// recvResultBufSize is the channel buffer for the recv goroutine. A buffer
+// of 2 ensures the goroutine never blocks after readLoop exits — at most one
+// result is in-flight when done fires, plus one more before Recv unblocks.
+const recvResultBufSize = 2
+
 // ApprovalStatus represents the result of an atomic approval check.
 type ApprovalStatus int
 
@@ -153,8 +158,8 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 
 	// Sanitize node name to prevent oversized values in logs and storage.
 	nodeName := reg.NodeName
-	if len(nodeName) > 128 {
-		nodeName = nodeName[:128]
+	if len(nodeName) > maxNodeNameLen {
+		nodeName = nodeName[:maxNodeNameLen]
 	}
 
 	// Step 3: Check approval / revocation atomically (single lock acquisition).
@@ -162,8 +167,8 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 
 	if status != ApprovalGranted {
 		truncID := nodeID
-		if len(truncID) > 16 {
-			truncID = truncID[:16] + "..."
+		if len(truncID) > maxNodeIDDisplayLen {
+			truncID = truncID[:maxNodeIDDisplayLen] + "..."
 		}
 
 		if status == ApprovalRevoked {
@@ -284,11 +289,7 @@ func (s *LeaderStream) readLoop(conn *nodeConn) error {
 		msg *pb.NodeMessage
 		err error
 	}
-	// Buffer of 2 ensures the recv goroutine never blocks on a send after
-	// readLoop exits via the done channel — at most one result is in-flight
-	// when done fires, plus the goroutine may send one more before Recv
-	// unblocks from the stream context cancellation.
-	ch := make(chan recvResult, 2)
+	ch := make(chan recvResult, recvResultBufSize)
 
 	go func() {
 		for {

@@ -15,6 +15,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	maxNameLen          = 64   // max length for group and skill names
+	maxDescriptionLen   = 1024 // max length for skill description
+	maxCompatibilityLen = 500  // max length for skill compatibility field
+)
+
 // Frontmatter represents the YAML metadata at the top of a markdown file.
 type Frontmatter map[string]any
 
@@ -239,8 +245,8 @@ func validateGroupName(name string) error {
 	if name == "" {
 		return fmt.Errorf("group name is empty")
 	}
-	if len(name) > 64 {
-		return fmt.Errorf("group name %q exceeds 64 character limit", name)
+	if len(name) > maxNameLen {
+		return fmt.Errorf("group name %q exceeds %d character limit", name, maxNameLen)
 	}
 	if !validGroupName.MatchString(name) {
 		return fmt.Errorf("group name %q must be lowercase letters, numbers, and hyphens", name)
@@ -255,8 +261,8 @@ func ValidateSkillName(name string) error {
 	if name == "" {
 		return fmt.Errorf("skill name is required")
 	}
-	if len(name) > 64 {
-		return fmt.Errorf("skill name %q exceeds 64 character limit", name)
+	if len(name) > maxNameLen {
+		return fmt.Errorf("skill name %q exceeds %d character limit", name, maxNameLen)
 	}
 	if !validSkillName.MatchString(name) {
 		return fmt.Errorf("skill name %q must be kebab-case (letters, numbers, hyphens)", name)
@@ -428,11 +434,11 @@ func loadSkillFile(path string) (SkillConfig, error) {
 	if skill.Description == "" {
 		return SkillConfig{}, fmt.Errorf("skill %q at %s missing required 'description' field", skill.Name, path)
 	}
-	if len(skill.Description) > 1024 {
-		return SkillConfig{}, fmt.Errorf("skill %q description exceeds 1024 character limit", skill.Name)
+	if len(skill.Description) > maxDescriptionLen {
+		return SkillConfig{}, fmt.Errorf("skill %q description exceeds %d character limit", skill.Name, maxDescriptionLen)
 	}
-	if len(skill.Compatibility) > 500 {
-		return SkillConfig{}, fmt.Errorf("skill %q compatibility exceeds 500 character limit", skill.Name)
+	if len(skill.Compatibility) > maxCompatibilityLen {
+		return SkillConfig{}, fmt.Errorf("skill %q compatibility exceeds %d character limit", skill.Name, maxCompatibilityLen)
 	}
 
 	return skill, nil

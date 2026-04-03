@@ -189,7 +189,8 @@ func filterRules(rules []toolrules.Rule, effective map[string]bool) []toolrules.
 // must NOT be added here unconditionally. They are only available to
 // agents that explicitly declare them in allowed_tools.
 func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasSkills bool) map[string]bool {
-	allowed := make(map[string]bool, len(effective)+10)
+	const injectedToolSlack = 10 // extra capacity for injected tools (spawn, persistent, skills, memory)
+	allowed := make(map[string]bool, len(effective)+injectedToolSlack)
 	for t := range effective {
 		allowed[t] = true
 	}

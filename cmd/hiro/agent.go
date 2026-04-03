@@ -23,6 +23,14 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	// umaskCollaborative allows group writes for UID-isolated agents.
+	umaskCollaborative = 0o002
+
+	// jobCompletionBufSize is the channel buffer for background job completions.
+	jobCompletionBufSize = 64
+)
+
 // runAgent is the entry point for an agent worker process.
 // Workers are thin tool-execution sandboxes: they receive ExecuteTool
 // RPCs from the control plane and execute tools under an isolated UID.
@@ -35,7 +43,7 @@ func runAgent() error {
 	// When running under UID isolation, set a collaborative umask and
 	// verify we are running as the expected user.
 	if cfg.UID != 0 {
-		syscall.Umask(0o002)
+		syscall.Umask(umaskCollaborative)
 		if uint32(os.Getuid()) != cfg.UID {
 			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
 		}
@@ -72,7 +80,7 @@ func runAgent() error {
 	})
 
 	// Wire background job completion events to a channel for the gRPC stream.
-	completions := make(chan *pb.JobCompletion, 64)
+	completions := make(chan *pb.JobCompletion, jobCompletionBufSize)
 	bgMgr.OnComplete = func(job *tools.BackgroundJob) {
 		exitCode := int32(0)
 		failed := false

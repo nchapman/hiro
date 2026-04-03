@@ -12,6 +12,9 @@ import (
 	"strings"
 )
 
+// binaryCheckSize is the number of bytes to scan when detecting binary content.
+const binaryCheckSize = 8192
+
 // encryptPath encrypts a relative file path into an opaque hex token using AES-GCM.
 func (s *Server) encryptPath(relPath string) (string, error) {
 	secret, err := s.shareSecret()
@@ -224,8 +227,8 @@ func (s *Server) handleSharedFileRaw(w http.ResponseWriter, r *http.Request) {
 // isBinaryData checks if data contains null bytes (indicating binary content).
 func isBinaryData(data []byte) bool {
 	check := data
-	if len(check) > 8192 {
-		check = check[:8192]
+	if len(check) > binaryCheckSize {
+		check = check[:binaryCheckSize]
 	}
 	for _, b := range check {
 		if b == 0 {

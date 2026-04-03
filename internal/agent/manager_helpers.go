@@ -150,7 +150,8 @@ func (m *Manager) ListNodes() []ipc.NodeInfo {
 
 // extractAgentName extracts the agent name from a watcher path like "agents/foo/agent.md".
 func extractAgentName(path string) string {
-	parts := strings.SplitN(path, "/", 3)
+	const maxPathParts = 3
+	parts := strings.SplitN(path, "/", maxPathParts)
 	if len(parts) < 2 || parts[0] != "agents" {
 		return ""
 	}

@@ -11,6 +11,9 @@ import (
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
+// maxHistorySearchResults is the maximum number of results returned by history search queries.
+const maxHistorySearchResults = 20
+
 //go:embed history_search.md
 var historySearchDescription string
 
@@ -37,11 +40,11 @@ func buildHistoryTools(pdb *platformdb.DB, sessionID string) []fantasy.AgentTool
 				var err error
 				switch scope {
 				case "messages":
-					results, err = pdb.SearchMessages(ctx, sessionID, input.Query, 20)
+					results, err = pdb.SearchMessages(ctx, sessionID, input.Query, maxHistorySearchResults)
 				case "summaries":
-					results, err = pdb.SearchSummaries(ctx, sessionID, input.Query, 20)
+					results, err = pdb.SearchSummaries(ctx, sessionID, input.Query, maxHistorySearchResults)
 				default:
-					results, err = pdb.Search(ctx, sessionID, input.Query, 20)
+					results, err = pdb.Search(ctx, sessionID, input.Query, maxHistorySearchResults)
 				}
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("search failed: %v", err)), nil

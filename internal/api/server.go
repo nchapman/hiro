@@ -20,6 +20,9 @@ import (
 	"github.com/nchapman/hiro/internal/watcher"
 )
 
+// maxHistoryMessages is the number of messages to return from history endpoints.
+const maxHistoryMessages = 100
+
 // CommandHandler handles slash commands from the chat interface.
 type CommandHandler interface {
 	HandleCommand(input string) (string, error)
@@ -235,7 +238,7 @@ func (s *Server) handleInstanceMessages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	id := r.PathValue("id")
-	msgs, err := s.manager.GetHistory(r.Context(), id, 100)
+	msgs, err := s.manager.GetHistory(r.Context(), id, maxHistoryMessages)
 	if err != nil {
 		if errors.Is(err, agent.ErrInstanceNotFound) {
 			http.Error(w, "instance not found", http.StatusNotFound)
@@ -254,7 +257,7 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	msgs, err := s.manager.GetSessionHistory(r.Context(), id, 100)
+	msgs, err := s.manager.GetSessionHistory(r.Context(), id, maxHistoryMessages)
 	if err != nil {
 		s.logger.Error("failed to read session history", "id", id, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

@@ -9,10 +9,34 @@ import (
 	"charm.land/fantasy"
 )
 
+const (
+	// charsPerToken is the approximate characters-per-token ratio used for
+	// budget estimation throughout the inference package.
+	charsPerToken = 4
+
+	// imageTokensPerTenKB is the approximate token cost per 10 KB of image data.
+	imageTokensPerTenKB = 170
+
+	// minImageTokens is the floor token estimate for tiny images/thumbnails.
+	minImageTokens = 85
+
+	// maxImageTokens caps the token estimate for large images (resized down by providers).
+	maxImageTokens = 1600
+
+	// bytesPerTenKB is 10 KB in bytes, used as the divisor for image token estimation.
+	bytesPerTenKB = 10240
+
+	// pdfTokensPerPage is the approximate token cost per PDF page.
+	pdfTokensPerPage = 1600
+
+	// pdfBytesPerPage is the rough byte size per PDF page used for page count estimation.
+	pdfBytesPerPage = 50 * 1024
+)
+
 // EstimateTokens returns an approximate token count for a string.
 // Uses the ~4 characters per token heuristic.
 func EstimateTokens(s string) int {
-	n := len(s) / 4
+	n := len(s) / charsPerToken
 	if n == 0 && s != "" {
 		return 1
 	}
@@ -47,24 +71,24 @@ func estimateOneFile(f fantasy.FilePart) int {
 		// reasonable middle ground across providers. Floor at 85 (tiny
 		// thumbnails still cost something), cap at 1600 (large images
 		// get resized down).
-		tokens := size * 170 / 10240
-		if tokens < 85 {
-			return 85
+		tokens := size * imageTokensPerTenKB / bytesPerTenKB
+		if tokens < minImageTokens {
+			return minImageTokens
 		}
-		if tokens > 1600 {
-			return 1600
+		if tokens > maxImageTokens {
+			return maxImageTokens
 		}
 		return tokens
 
 	case f.MediaType == "application/pdf":
 		// Rough estimate: ~50KB per page, ~1600 tokens per page.
 		// Round up so we don't underestimate multi-page PDFs.
-		pages := (size + 50*1024 - 1) / (50 * 1024)
-		return pages * 1600
+		pages := (size + pdfBytesPerPage - 1) / pdfBytesPerPage
+		return pages * pdfTokensPerPage
 
 	default:
 		// Text, JSON, XML, code, etc. — treat as plain text.
-		tokens := size / 4
+		tokens := size / charsPerToken
 		if tokens == 0 {
 			return 1
 		}

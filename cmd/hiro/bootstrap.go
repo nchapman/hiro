@@ -20,6 +20,20 @@ import (
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
+const (
+	// grpcMaxConcurrentStreams limits per-connection gRPC streams.
+	grpcMaxConcurrentStreams = 64
+
+	// keepalivePingInterval is how often the gRPC server pings idle connections.
+	keepalivePingInterval = 30 * time.Second
+
+	// keepalivePingTimeout is how long to wait for a keepalive ping response.
+	keepalivePingTimeout = 10 * time.Second
+
+	// keepaliveMinClientInterval is the minimum allowed ping interval from clients.
+	keepaliveMinClientInterval = 10 * time.Second
+)
+
 // clusterState bundles all cluster infrastructure created at startup.
 type clusterState struct {
 	grpcServer   *grpc.Server
@@ -81,14 +95,14 @@ func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplan
 	serverTLS := cluster.ServerTLSConfig(tlsCert)
 	grpcSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(serverTLS)),
-		grpc.MaxConcurrentStreams(64), // per-connection; scales with worker count
+		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time:    30 * time.Second, // ping idle connections every 30s
-			Timeout: 10 * time.Second, // close if no response within 10s
+			Time:    keepalivePingInterval,
+			Timeout: keepalivePingTimeout,
 		}),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             10 * time.Second, // minimum ping interval from clients
-			PermitWithoutStream: true,             // allow pings even with no active RPCs
+			MinTime:             keepaliveMinClientInterval,
+			PermitWithoutStream: true, // allow pings even with no active RPCs
 		}),
 	)
 	leaderStream.Register(grpcSrv)

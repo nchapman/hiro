@@ -11,8 +11,8 @@ func GenerateSwarmCode() (string, error) {
 	const charset = "abcdefghjkmnpqrstuvwxyz23456789"
 	// Rejection threshold: largest multiple of len(charset) that fits in a byte.
 	// This eliminates modulo bias.
-	threshold := 256 - (256 % len(charset))
-	code := make([]byte, 8)
+	threshold := byteRange - (byteRange % len(charset))
+	code := make([]byte, swarmCodeLen)
 	var buf [1]byte
 	for i := 0; i < len(code); {
 		if _, err := rand.Read(buf[:]); err != nil {

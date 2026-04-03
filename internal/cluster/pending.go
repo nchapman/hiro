@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -163,5 +164,5 @@ func (r *PendingRegistry) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.filePath, data, 0o600)
+	return os.WriteFile(r.filePath, data, fsperm.FilePrivate)
 }

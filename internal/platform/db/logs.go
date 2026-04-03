@@ -78,6 +78,8 @@ func (d *DB) InsertLogs(ctx context.Context, entries []LogEntry) error {
 	return tx.Commit()
 }
 
+const maxLogQueryLimit = 1000
+
 // QueryLogs returns log entries matching the given filters, ordered newest-first.
 // Supports cursor-based pagination via the Before field.
 func (d *DB) QueryLogs(ctx context.Context, opts LogQuery) ([]LogEntry, error) {
@@ -85,8 +87,8 @@ func (d *DB) QueryLogs(ctx context.Context, opts LogQuery) ([]LogEntry, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	if limit > 1000 {
-		limit = 1000
+	if limit > maxLogQueryLimit {
+		limit = maxLogQueryLimit
 	}
 
 	var conditions []string

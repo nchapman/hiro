@@ -23,6 +23,10 @@ import (
 	"github.com/nchapman/hiro/internal/toolrules"
 )
 
+// defaultThinkingBudget is the token budget for extended thinking on older
+// Anthropic models that use the binary thinking toggle.
+const defaultThinkingBudget = 10_000
+
 // LoopConfig holds all configuration needed to create a Loop.
 type LoopConfig struct {
 	InstanceID     string
@@ -647,7 +651,7 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 		// Older models with binary thinking toggle.
 		return fantasy.ProviderOptions{
 			anthropic.Name: &anthropic.ProviderOptions{
-				Thinking: &anthropic.ThinkingProviderOption{BudgetTokens: 10_000},
+				Thinking: &anthropic.ThinkingProviderOption{BudgetTokens: defaultThinkingBudget},
 			},
 		}
 

@@ -15,12 +15,23 @@ var (
 	registry map[string]catwalk.Model
 )
 
-const defaultContextWindow = 200_000
+const (
+	// DefaultContextWindow is the assumed context window size when a model
+	// does not report one.
+	DefaultContextWindow = 200_000
+
+	// registryInitialCap is the initial capacity for the model registry map.
+	registryInitialCap = 128
+
+	// modelsPerProviderEstimate is the estimated number of models per provider,
+	// used to pre-allocate result slices.
+	modelsPerProviderEstimate = 10
+)
 
 func ensureInit() {
 	initOnce.Do(func() {
 		providers := embedded.GetAll()
-		registry = make(map[string]catwalk.Model, 128)
+		registry = make(map[string]catwalk.Model, registryInitialCap)
 		for _, p := range providers {
 			for _, m := range p.Models {
 				// First writer wins — if the same model ID appears in
@@ -41,11 +52,11 @@ func Lookup(modelID string) (catwalk.Model, bool) {
 }
 
 // ContextWindow returns the context window for a model.
-// Returns defaultContextWindow (200K) if the model is unknown.
+// Returns DefaultContextWindow (200K) if the model is unknown.
 func ContextWindow(modelID string) int {
 	m, ok := Lookup(modelID)
 	if !ok || m.ContextWindow <= 0 {
-		return defaultContextWindow
+		return DefaultContextWindow
 	}
 	return int(m.ContextWindow)
 }
@@ -91,7 +102,7 @@ func ModelsForProvider(providerType string) []ModelInfo {
 
 // ModelsForProviders returns models for multiple provider types.
 func ModelsForProviders(providerTypes []string) []ModelInfo {
-	result := make([]ModelInfo, 0, len(providerTypes)*10)
+	result := make([]ModelInfo, 0, len(providerTypes)*modelsPerProviderEstimate)
 	for _, pt := range providerTypes {
 		result = append(result, ModelsForProvider(pt)...)
 	}

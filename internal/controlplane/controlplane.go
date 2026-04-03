@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/nchapman/hiro/internal/auth"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -149,12 +150,12 @@ func (cp *ControlPlane) saveUnlocked() error {
 		return fmt.Errorf("marshaling control plane config: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cp.path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cp.path), fsperm.DirPrivate); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
 	// Write with restrictive permissions since this contains secrets.
-	if err := os.WriteFile(cp.path, data, 0o600); err != nil {
+	if err := os.WriteFile(cp.path, data, fsperm.FilePrivate); err != nil {
 		return fmt.Errorf("writing control plane config: %w", err)
 	}
 

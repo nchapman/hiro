@@ -55,7 +55,7 @@ type TerminalSession struct {
 // Caller may hold sess.mu — this method only acquires subsMu.
 func (s *TerminalSession) subscribe() (string, <-chan sessionEvent) {
 	id := generateSessionID()[:8]
-	ch := make(chan sessionEvent, 256)
+	ch := make(chan sessionEvent, subscriberBufferSize)
 	s.subsMu.Lock()
 	s.subs[id] = ch
 	s.subsMu.Unlock()
@@ -147,6 +147,24 @@ const maxReplayBytes = 100 * 1024
 
 // idleSessionTimeout is how long an unattached session lives before cleanup.
 const idleSessionTimeout = 24 * time.Hour
+
+// subscriberBufferSize is the channel buffer for per-subscriber event delivery.
+const subscriberBufferSize = 256
+
+// remoteCreateTimeout is how long to wait for a remote terminal creation response.
+const remoteCreateTimeout = 10 * time.Second
+
+// ptyReadBufferSize is the buffer size for reading PTY output.
+const ptyReadBufferSize = 32 * 1024
+
+// gracefulShutdownTimeout is how long to wait after SIGHUP before sending SIGKILL.
+const gracefulShutdownTimeout = 3 * time.Second
+
+// idleCleanupInterval is how often the cleanup loop checks for idle sessions.
+const idleCleanupInterval = 10 * time.Minute
+
+// sessionIDRandomBytes is the number of random bytes used to generate session IDs.
+const sessionIDRandomBytes = 16
 
 // NewTerminalSessionManager creates a new session manager and starts the
 // idle cleanup goroutine.
@@ -261,10 +279,10 @@ func (m *TerminalSessionManager) Create(nodeID string, cols, rows uint16) (*Term
 // createLocal spawns a local PTY session. Caller must pass a validated nodeID.
 func (m *TerminalSessionManager) createLocal(nodeID string, cols, rows uint16) (*TerminalSession, error) {
 	if cols == 0 {
-		cols = 80
+		cols = defaultTermCols
 	}
 	if rows == 0 {
-		rows = 24
+		rows = defaultTermRows
 	}
 
 	// Check limits before spawning the PTY to avoid wasted process creation.
@@ -347,10 +365,10 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 	}
 
 	if cols == 0 {
-		cols = 80
+		cols = defaultTermCols
 	}
 	if rows == 0 {
-		rows = 24
+		rows = defaultTermRows
 	}
 
 	now := time.Now()
@@ -394,7 +412,7 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 			m.mu.Unlock()
 			return nil, fmt.Errorf("remote terminal creation failed: %s", errMsg)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(remoteCreateTimeout):
 		m.mu.Lock()
 		delete(m.createChans, sess.ID)
 		delete(m.sessions, sess.ID)
@@ -412,7 +430,7 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 // The exit sentinel is never written to the replay buffer — it is delivered
 // only via the typed sessionEvent channel to avoid polluting replay data.
 func (m *TerminalSessionManager) outputPump(sess *TerminalSession) {
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, ptyReadBufferSize)
 	for {
 		n, err := sess.ptmx.Read(buf)
 		if n > 0 {
@@ -585,7 +603,7 @@ func (m *TerminalSessionManager) killSession(sess *TerminalSession) {
 	_ = sess.cmd.Process.Signal(syscall.SIGHUP)
 	select {
 	case <-sess.waitDone:
-	case <-time.After(3 * time.Second):
+	case <-time.After(gracefulShutdownTimeout):
 		_ = sess.cmd.Process.Kill()
 		<-sess.waitDone
 	}
@@ -640,7 +658,7 @@ func (m *TerminalSessionManager) Shutdown() {
 
 // cleanupLoop periodically removes idle sessions.
 func (m *TerminalSessionManager) cleanupLoop() {
-	ticker := time.NewTicker(10 * time.Minute)
+	ticker := time.NewTicker(idleCleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -687,23 +705,23 @@ type termControlMsg struct {
 
 func marshalControl(sessionID string, msg termControlMsg) []byte {
 	payload, _ := json.Marshal(msg)
-	frame := make([]byte, 1+32+len(payload))
-	frame[0] = 0x03 // control
-	copy(frame[1:33], padSessionID(sessionID))
-	copy(frame[33:], payload)
+	frame := make([]byte, 1+sessionIDLen+len(payload))
+	frame[0] = termMsgControl
+	copy(frame[1:1+sessionIDLen], padSessionID(sessionID))
+	copy(frame[1+sessionIDLen:], payload)
 	return frame
 }
 
 func marshalOutput(sessionID string, data []byte) []byte {
-	frame := make([]byte, 1+32+len(data))
-	frame[0] = 0x01 // output
-	copy(frame[1:33], padSessionID(sessionID))
-	copy(frame[33:], data)
+	frame := make([]byte, 1+sessionIDLen+len(data))
+	frame[0] = termMsgOutput
+	copy(frame[1:1+sessionIDLen], padSessionID(sessionID))
+	copy(frame[1+sessionIDLen:], data)
 	return frame
 }
 
 func padSessionID(id string) []byte {
-	b := make([]byte, 32)
+	b := make([]byte, sessionIDLen)
 	copy(b, id)
 	return b
 }
@@ -712,7 +730,7 @@ func padSessionID(id string) []byte {
 
 // generateSessionID creates a cryptographically random 32-char hex string.
 func generateSessionID() string {
-	b := make([]byte, 16)
+	b := make([]byte, sessionIDRandomBytes)
 	if _, err := rand.Read(b); err != nil {
 		panic("crypto/rand failed: " + err.Error())
 	}

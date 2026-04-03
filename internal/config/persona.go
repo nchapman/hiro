@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -84,7 +85,7 @@ func ReadPersonaFile(instanceDir string) (PersonaData, error) {
 // If name or description are non-empty, they are written as YAML frontmatter.
 func WritePersonaFile(instanceDir, name, description, body string) error {
 	path := filepath.Join(instanceDir, personaFileName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), fsperm.DirPrivate); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
 
@@ -104,5 +105,5 @@ func WritePersonaFile(instanceDir, name, description, body string) error {
 	}
 	sb.WriteString(body)
 
-	return atomicWrite(path, []byte(sb.String()), 0o600)
+	return atomicWrite(path, []byte(sb.String()), fsperm.FilePrivate)
 }

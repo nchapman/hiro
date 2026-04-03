@@ -17,6 +17,12 @@ import (
 
 const defaultTrackerURL = "https://discover.hellohiro.ai"
 
+// setupProviderTestTimeout is the deadline for provider tests during setup.
+const setupProviderTestTimeout = 15 * time.Second
+
+// swarmValidationTimeout is the deadline for swarm code validation.
+const swarmValidationTimeout = 10 * time.Second
+
 type setupRequest struct {
 	Password string `json:"password"`
 	Mode     string `json:"mode"`                // "standalone", "leader", or "worker"
@@ -52,7 +58,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Password) < 8 {
+	if len(req.Password) < minPasswordLength {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
@@ -201,7 +207,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// httpServer.Shutdown() interrupts the in-flight response.
 	if needsRestart && s.requestRestart != nil {
 		go func() {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(restartDelay)
 			s.requestRestart()
 		}()
 	}
@@ -243,7 +249,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), setupProviderTestTimeout)
 	defer cancel()
 
 	if err := provider.TestConnection(ctx, provider.Type(req.Type), req.APIKey, "", model); err != nil {
@@ -287,7 +293,7 @@ func (s *Server) handleValidateSwarm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), swarmValidationTimeout)
 	defer cancel()
 
 	result, err := cluster.CheckSwarm(ctx, defaultTrackerURL, req.SwarmCode, identity, s.logger)

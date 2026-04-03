@@ -13,6 +13,7 @@ import (
 
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/ipc/grpcipc"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -33,11 +34,11 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 	// is 0o700, owned by the agent's UID. Short path to stay under the 104-byte
 	// Unix socket limit.
 	sessPrefix := cfg.SessionID
-	if len(sessPrefix) > 18 {
-		sessPrefix = sessPrefix[:18]
+	if len(sessPrefix) > ipc.MaxSessionPrefix {
+		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
 	}
 	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
-	if err := os.MkdirAll(socketDir, 0o700); err != nil {
+	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
 		return nil, fmt.Errorf("creating socket dir: %w", err)
 	}
 	if cfg.UID != 0 {

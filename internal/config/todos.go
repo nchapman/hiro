@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,7 +51,7 @@ func WriteTodos(sessionDir string, todos []Todo) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(sessionDir, todosFileName), data, 0o600)
+	return atomicWrite(filepath.Join(sessionDir, todosFileName), data, fsperm.FilePrivate)
 }
 
 // FormatTodos renders a todo list as markdown for system prompt injection.

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 )
 
 const memoryFileName = "memory.md"
@@ -19,10 +21,10 @@ func ReadMemoryFile(instanceDir string) (string, error) {
 // so concurrent readers never see partial content.
 func WriteMemoryFile(instanceDir, content string) error {
 	path := filepath.Join(instanceDir, memoryFileName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), fsperm.DirPrivate); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
-	return atomicWrite(path, []byte(content), 0o600)
+	return atomicWrite(path, []byte(content), fsperm.FilePrivate)
 }
 
 // atomicWrite writes content to path via a temp file + rename.

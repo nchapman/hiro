@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 )
 
 const identityFile = "config/identity.key"
@@ -45,12 +47,12 @@ func LoadOrCreateIdentity(rootDir string) (*NodeIdentity, error) {
 	}
 
 	// Ensure config directory exists.
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), fsperm.DirPrivate); err != nil {
 		return nil, fmt.Errorf("creating config directory: %w", err)
 	}
 
 	// Write with restrictive permissions — this is a private key.
-	if err := os.WriteFile(path, seed, 0o600); err != nil {
+	if err := os.WriteFile(path, seed, fsperm.FilePrivate); err != nil {
 		return nil, fmt.Errorf("writing identity.key: %w", err)
 	}
 

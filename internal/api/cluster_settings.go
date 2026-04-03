@@ -116,7 +116,7 @@ func (s *Server) handleClusterReset(w http.ResponseWriter, r *http.Request) {
 
 	if s.requestRestart != nil {
 		go func() {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(restartDelay)
 			s.requestRestart()
 		}()
 	}

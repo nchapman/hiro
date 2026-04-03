@@ -73,7 +73,7 @@ func NewRelayClient(cfg RelayConfig) *RelayClient {
 // is passed to onConnection for the caller to use (typically as a gRPC conn).
 // Blocks until ctx is done.
 func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
-	backoff := 5 * time.Second
+	backoff := relayBackoffInitial
 	for {
 		wasConnected, err := rc.connectAndServe(ctx, onConnection)
 		if ctx.Err() != nil {
@@ -83,8 +83,8 @@ func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 		// Reset backoff after a healthy session; increase on immediate failures
 		// (e.g., conflict from stale entry that the relay hasn't cleaned up yet).
 		if wasConnected {
-			backoff = 5 * time.Second
-		} else if backoff < 120*time.Second {
+			backoff = relayBackoffInitial
+		} else if backoff < relayBackoffMax {
 			backoff *= 2
 		}
 
@@ -98,13 +98,13 @@ func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 }
 
 func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(net.Conn)) (wasConnected bool, err error) {
-	conn, err := net.DialTimeout("tcp", rc.relayAddr, 10*time.Second)
+	conn, err := net.DialTimeout("tcp", rc.relayAddr, relayDialTimeout)
 	if err != nil {
 		return false, fmt.Errorf("dialing relay: %w", err)
 	}
 	if tc, ok := conn.(*net.TCPConn); ok {
 		_ = tc.SetKeepAlive(true)
-		_ = tc.SetKeepAlivePeriod(15 * time.Second)
+		_ = tc.SetKeepAlivePeriod(relayKeepaliveInterval)
 	}
 
 	// Send leader handshake.
@@ -152,12 +152,12 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 
 	// Keepalive: send bytes every 15s to prevent NAT/proxy idle timeouts.
 	go func() {
-		ticker := time.NewTicker(15 * time.Second)
+		ticker := time.NewTicker(relayKeepaliveInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(relayWriteDeadline))
 				if _, err := conn.Write([]byte{0x00}); err != nil {
 					rc.logger.Warn("relay keepalive write failed", "error", err)
 					_ = conn.Close() // unblocks the read loop
@@ -200,7 +200,7 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 }
 
 func (rc *RelayClient) handleIncoming(ctx context.Context, onConnection func(net.Conn)) {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	dialer := &net.Dialer{Timeout: relayDialTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", rc.relayAddr)
 	if err != nil {
 		rc.logger.Error("failed to dial relay for data connection", "error", err)
@@ -239,7 +239,7 @@ func (rc *RelayClient) sendHandshake(conn net.Conn, role byte) error {
 	sig := ed25519.Sign(rc.identity.PrivateKey, buf[:74])
 	copy(buf[74:138], sig)
 
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(relayWriteDeadline))
 	_, err := conn.Write(buf[:])
 	_ = conn.SetWriteDeadline(time.Time{})
 	return err
@@ -250,7 +250,7 @@ func (rc *RelayClient) sendHandshake(conn net.Conn, role byte) error {
 func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity *NodeIdentity) (net.Conn, error) {
 	hash := sha256.Sum256([]byte(swarmCode))
 
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	dialer := &net.Dialer{Timeout: relayDialTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", relayAddr)
 	if err != nil {
 		return nil, fmt.Errorf("dialing relay: %w", err)
@@ -266,7 +266,7 @@ func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity
 	sig := ed25519.Sign(identity.PrivateKey, buf[:74])
 	copy(buf[74:138], sig)
 
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(relayWriteDeadline))
 	if _, err := conn.Write(buf[:]); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("writing handshake: %w", err)
@@ -304,7 +304,7 @@ func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
 		},
 	}
 	conn, err := tls.DialWithDialer(
-		&net.Dialer{Timeout: 3 * time.Second},
+		&net.Dialer{Timeout: relaySelfTestTimeout},
 		"tcp", addr, tlsCfg,
 	)
 	if err != nil {
@@ -315,7 +315,7 @@ func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
 }
 
 func readRelayStatus(conn net.Conn) (byte, error) {
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(relayStatusReadDeadline))
 	var status [1]byte
 	if _, err := io.ReadFull(conn, status[:]); err != nil {
 		return 0, err
@@ -353,7 +353,7 @@ type ChannelListener struct {
 
 func NewChannelListener(addr net.Addr) *ChannelListener {
 	return &ChannelListener{
-		ch:   make(chan net.Conn, 16),
+		ch:   make(chan net.Conn, relayListenerBuffer),
 		done: make(chan struct{}),
 		addr: addr,
 	}

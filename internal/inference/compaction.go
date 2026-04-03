@@ -14,6 +14,85 @@ import (
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
+const (
+	// maxSoftThresholdTokens caps the absolute soft-threshold token count.
+	// Beyond this, models show diminishing returns on synthesis tasks.
+	maxSoftThresholdTokens = 200_000
+
+	// maxHardThresholdTokens caps the absolute hard-threshold token count.
+	// Maintains a 100K gap above soft cap for async compaction headroom.
+	maxHardThresholdTokens = 300_000
+
+	// maxTokenBudget caps the assembly token budget above the hard threshold.
+	maxTokenBudget = 350_000
+
+	// defaultSoftThreshold is the fraction of context window that triggers async compaction.
+	defaultSoftThreshold = 0.60
+
+	// defaultHardThreshold is the fraction of context window that triggers sync compaction.
+	defaultHardThreshold = 0.85
+
+	// defaultMinFreshTail is the minimum number of recent messages kept in perfect recall.
+	defaultMinFreshTail = 20
+
+	// defaultMinLeafChunk is the minimum tokens per leaf summarization input.
+	defaultMinLeafChunk = 500
+
+	// defaultMinLeafTarget is the minimum tokens per leaf summary output.
+	defaultMinLeafTarget = 200
+
+	// defaultMinCondenseTarget is the minimum tokens per condensation summary output.
+	defaultMinCondenseTarget = 400
+
+	// defaultLeafMinFanout is the minimum number of leaves before summarization triggers.
+	defaultLeafMinFanout = 4
+
+	// defaultMinCondenseFanout is the lower bound for condensation fan-in.
+	defaultMinCondenseFanout = 3
+
+	// defaultMinSummaryDepth is the lower bound for maximum summary tree depth.
+	defaultMinSummaryDepth = 4
+
+	// budgetFloorTokens is the minimum token budget for any context window.
+	budgetFloorTokens = 1_000
+
+	// tailCountDivisor scales fresh tail count from context window size.
+	tailCountDivisor = 10_000
+
+	// leafChunkScaleDivisor scales leaf chunk tokens from context window size.
+	leafChunkScaleDivisor = 10
+
+	// leafTargetScaleDivisor scales leaf target tokens from context window size.
+	leafTargetScaleDivisor = 50
+
+	// condenseTargetScaleDivisor scales condense target tokens from context window size.
+	condenseTargetScaleDivisor = 25
+
+	// condenseFanoutScaleDivisor scales condensation fan-in from context window size.
+	condenseFanoutScaleDivisor = 100_000
+
+	// summaryDepthScaleDivisor scales max summary depth from context window size.
+	summaryDepthScaleDivisor = 50_000
+
+	// budgetFraction is the denominator in the token-budget fraction (9/10 of context window).
+	budgetFraction = 10
+
+	// maxLeafChunkTokens caps leaf chunk size for very large context windows.
+	maxLeafChunkTokens = 20_000
+
+	// maxLeafTargetTokens caps leaf summary output size.
+	maxLeafTargetTokens = 4_000
+
+	// maxCondenseTargetTokens caps condensation summary output size.
+	maxCondenseTargetTokens = 8_000
+
+	// maxCondenseFanout caps condensation fan-in for very large context windows.
+	maxCondenseFanout = 6
+
+	// maxSummaryDepth caps summary tree depth.
+	maxSummaryDepth = 8
+)
+
 // Summarizer generates summaries from text.
 type Summarizer interface {
 	Summarize(ctx context.Context, systemPrompt, input string) (string, error)
@@ -83,19 +162,19 @@ type CompactionConfig struct {
 // Capped at 200K — beyond this, models show diminishing returns on synthesis
 // tasks and compacted context outperforms raw messages.
 func (c CompactionConfig) SoftThresholdTokens() int {
-	return min(int(float64(c.ContextWindow)*c.SoftThreshold), 200_000)
+	return min(int(float64(c.ContextWindow)*c.SoftThreshold), maxSoftThresholdTokens)
 }
 
 // HardThresholdTokens returns the absolute token count for the hard threshold.
 // Capped at 300K to maintain a 100K gap above the soft cap for async
 // compaction to complete during normal conversation flow.
 func (c CompactionConfig) HardThresholdTokens() int {
-	return min(int(float64(c.ContextWindow)*c.HardThreshold), 300_000)
+	return min(int(float64(c.ContextWindow)*c.HardThreshold), maxHardThresholdTokens)
 }
 
 // DefaultCompactionConfig returns reasonable defaults for a 200K context window.
 func DefaultCompactionConfig() CompactionConfig {
-	return compactionConfigForWindow(200_000)
+	return compactionConfigForWindow(models.DefaultContextWindow)
 }
 
 // CompactionConfigForModel returns a config derived from the model's context window.
@@ -137,20 +216,20 @@ func CompactionConfigForModel(model string) CompactionConfig {
 // At   2M: chunk=20K,  leaf=4K,   condense=8K,   tail=200, fanout=6, soft=200K, hard=300K
 func compactionConfigForWindow(contextWindow int) CompactionConfig {
 	if contextWindow <= 0 {
-		contextWindow = 200_000
+		contextWindow = models.DefaultContextWindow
 	}
 	return CompactionConfig{
 		ContextWindow:        contextWindow,
-		SoftThreshold:        0.60,
-		HardThreshold:        0.85,
-		TokenBudget:          min(max(1_000, contextWindow*9/10), 350_000), // above hard cap (300K)
-		FreshTailCount:       max(20, contextWindow/10_000),
-		LeafChunkTokens:      clamp(500, contextWindow/10, 20_000),
-		LeafTargetTokens:     clamp(200, contextWindow/50, 4_000),
-		CondenseTargetTokens: clamp(400, contextWindow/25, 8_000),
-		LeafMinFanout:        4,
-		CondenseMinFanout:    clamp(3, contextWindow/100_000, 6),
-		MaxSummaryDepth:      clamp(4, contextWindow/50_000, 8),
+		SoftThreshold:        defaultSoftThreshold,
+		HardThreshold:        defaultHardThreshold,
+		TokenBudget:          min(max(budgetFloorTokens, contextWindow*9/budgetFraction), maxTokenBudget), // above hard cap (300K)
+		FreshTailCount:       max(defaultMinFreshTail, contextWindow/tailCountDivisor),
+		LeafChunkTokens:      clamp(defaultMinLeafChunk, contextWindow/leafChunkScaleDivisor, maxLeafChunkTokens),
+		LeafTargetTokens:     clamp(defaultMinLeafTarget, contextWindow/leafTargetScaleDivisor, maxLeafTargetTokens),
+		CondenseTargetTokens: clamp(defaultMinCondenseTarget, contextWindow/condenseTargetScaleDivisor, maxCondenseTargetTokens),
+		LeafMinFanout:        defaultLeafMinFanout,
+		CondenseMinFanout:    clamp(defaultMinCondenseFanout, contextWindow/condenseFanoutScaleDivisor, maxCondenseFanout),
+		MaxSummaryDepth:      clamp(defaultMinSummaryDepth, contextWindow/summaryDepthScaleDivisor, maxSummaryDepth),
 	}
 }
 
@@ -531,7 +610,7 @@ func summarizationPrompt(depth int, aggressive bool, targetTokens int, prevConte
 		result += "\n\nThe following summary immediately precedes this chunk — do not repeat or restate facts already covered there, even if phrased differently:\n<previous_context>\n" + prevContext + "\n</previous_context>"
 	}
 
-	result += fmt.Sprintf("\n\nBudget: ~%d tokens (~%d characters). Prioritize the most important facts if you cannot fit everything.", targetTokens, targetTokens*4)
+	result += fmt.Sprintf("\n\nBudget: ~%d tokens (~%d characters). Prioritize the most important facts if you cannot fit everything.", targetTokens, targetTokens*charsPerToken)
 
 	// Expand footer last — terminal instruction the model sees before generating.
 	result += expandFooter
@@ -668,7 +747,7 @@ func clamp(lo, v, hi int) int {
 // fits within the token budget. This preserves whole facts rather than
 // chopping mid-sentence.
 func truncateAtBullet(content string, maxTokens int) string {
-	maxChars := maxTokens * 4
+	maxChars := maxTokens * charsPerToken
 	if len(content) <= maxChars {
 		return content
 	}

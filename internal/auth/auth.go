@@ -13,6 +13,17 @@ import (
 	"time"
 )
 
+const (
+	// minSecretLen is the minimum length in bytes for a token signing secret.
+	minSecretLen = 32
+
+	// expiryFieldLen is the byte size of the encoded expiry timestamp (uint64).
+	expiryFieldLen = 8
+
+	// secretLen is the number of random bytes in a generated signing secret.
+	secretLen = 32
+)
+
 // TokenSigner creates and validates HMAC-signed session tokens.
 // Tokens encode an expiry timestamp signed with a secret key,
 // so no server-side session state is needed.
@@ -24,8 +35,8 @@ type TokenSigner struct {
 // NewTokenSigner creates a token signer with the given secret and TTL.
 // The secret must be at least 32 bytes.
 func NewTokenSigner(secret []byte, ttl time.Duration) (*TokenSigner, error) {
-	if len(secret) < 32 {
-		return nil, fmt.Errorf("token signing secret must be at least 32 bytes, got %d", len(secret))
+	if len(secret) < minSecretLen {
+		return nil, fmt.Errorf("token signing secret must be at least %d bytes, got %d", minSecretLen, len(secret))
 	}
 	return &TokenSigner{
 		secret: secret,
@@ -46,7 +57,7 @@ func (ts *TokenSigner) Create() string {
 }
 
 func (ts *TokenSigner) createWithExpiry(expiry int64) string {
-	eb := make([]byte, 8)
+	eb := make([]byte, expiryFieldLen)
 	binary.BigEndian.PutUint64(eb, uint64(expiry))
 
 	mac := hmac.New(sha256.New, ts.secret)
@@ -99,7 +110,7 @@ func (ts *TokenSigner) Valid(token string) bool {
 
 // GenerateSecret generates a cryptographically random 32-byte secret.
 func GenerateSecret() ([]byte, error) {
-	b := make([]byte, 32)
+	b := make([]byte, secretLen)
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}

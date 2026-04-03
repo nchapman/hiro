@@ -51,9 +51,21 @@ type sharedState struct {
 // New creates a Handler that writes to both stdout (via TextHandler) and
 // the platform database asynchronously. The handler extracts "component"
 // and "instance_id" attributes into dedicated DB columns.
+// Log handler buffer and batch sizes.
+const (
+	// entryBufSize is the channel capacity for the async DB writer.
+	entryBufSize = 512
+
+	// subscriberBufSize is the per-subscriber channel capacity.
+	subscriberBufSize = 64
+
+	// drainTimeout is how long the writer waits for in-flight entries on shutdown.
+	drainTimeout = 50 * time.Millisecond
+)
+
 func New(db *platformdb.DB, stdout io.Writer, level slog.Level) *Handler {
 	shared := &sharedState{
-		buf:  make(chan platformdb.LogEntry, 512),
+		buf:  make(chan platformdb.LogEntry, entryBufSize),
 		subs: newSubscriberRegistry(),
 		done: make(chan struct{}),
 	}
@@ -234,7 +246,7 @@ func (h *Handler) writeLoop() {
 		case <-h.shared.done:
 			// Drain remaining entries. Use a short timer to catch
 			// in-flight Handle() calls that haven't sent yet.
-			drainTimer := time.NewTimer(50 * time.Millisecond)
+			drainTimer := time.NewTimer(drainTimeout)
 			for {
 				select {
 				case e := <-h.shared.buf:
@@ -312,7 +324,7 @@ func (r *subscriberRegistry) subscribe() (<-chan platformdb.LogEntry, func(), er
 		return nil, nil, ErrSubscriberLimit
 	}
 
-	s := &subscriber{ch: make(chan platformdb.LogEntry, 64)}
+	s := &subscriber{ch: make(chan platformdb.LogEntry, subscriberBufSize)}
 	r.subs[s] = struct{}{}
 
 	unsub := func() {

@@ -24,6 +24,10 @@ const (
 	Rename
 )
 
+// defaultDebounce is the delay before delivering a batch of filesystem events,
+// allowing rapid successive changes to be coalesced into a single notification.
+const defaultDebounce = 100 * time.Millisecond
+
 func (o Op) String() string {
 	switch o {
 	case Create:
@@ -94,7 +98,7 @@ func New(root string, logger *slog.Logger, opts ...Option) (*Watcher, error) {
 		root:     absRoot,
 		fsw:      fsw,
 		logger:   logger.With("component", "watcher"),
-		debounce: 100 * time.Millisecond,
+		debounce: defaultDebounce,
 		subs:     make(map[uint64]subscription),
 		done:     make(chan struct{}),
 	}

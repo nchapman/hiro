@@ -19,6 +19,15 @@ import (
 	"time"
 )
 
+const (
+	// discoveryPollInterval is how often the client re-announces to the tracker.
+	discoveryPollInterval = 30 * time.Second
+
+	// announceRetryInterval is how often WaitForLeader re-announces while
+	// waiting for a leader to appear.
+	announceRetryInterval = 5 * time.Second
+)
+
 // DiscoveryConfig configures the tracker discovery client.
 type DiscoveryConfig struct {
 	TrackerURL     string // e.g. "https://discover.hellohiro.ai"
@@ -135,17 +144,17 @@ func NewDiscoveryClient(cfg DiscoveryConfig) *DiscoveryClient {
 		nodeName:       cfg.NodeName,
 		logger:         cfg.Logger,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: discoveryHTTPTimeout,
 		},
 	}
 }
 
 // Run announces periodically until ctx is cancelled. It blocks.
 func (d *DiscoveryClient) Run(ctx context.Context) {
-	// Announce immediately on start, then every 30s.
+	// Announce immediately on start, then every discoveryPollInterval.
 	d.announce(ctx)
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(discoveryPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -231,8 +240,8 @@ func (d *DiscoveryClient) WaitForLeader(ctx context.Context) (string, error) {
 		return addr, nil
 	}
 
-	// Re-announce every 5 seconds until a leader appears.
-	ticker := time.NewTicker(5 * time.Second)
+	// Re-announce every announceRetryInterval until a leader appears.
+	ticker := time.NewTicker(announceRetryInterval)
 	defer ticker.Stop()
 
 	for {
@@ -286,7 +295,7 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, discoveryErrorBodyLimit))
 		d.logger.Warn("tracker announce returned error",
 			"status", resp.StatusCode,
 			"body", string(respBody),
@@ -358,8 +367,8 @@ func CheckSwarm(ctx context.Context, trackerURL, swarmCode string, identity *Nod
 	}
 
 	name := leader.NodeID
-	if len(name) > 12 {
-		name = name[:12]
+	if len(name) > discoveryNodeIDDisplayLen {
+		name = name[:discoveryNodeIDDisplayLen]
 	}
 
 	return &SwarmCheckResult{

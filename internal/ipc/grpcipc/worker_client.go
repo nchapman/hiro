@@ -61,7 +61,8 @@ func (c *WorkerClient) WatchJobs(ctx context.Context, logger *slog.Logger) <-cha
 	if logger == nil {
 		logger = slog.Default()
 	}
-	ch := make(chan *pb.JobCompletion, 64)
+	const jobChannelBuffer = 64
+	ch := make(chan *pb.JobCompletion, jobChannelBuffer)
 	go func() {
 		defer close(ch)
 		stream, err := c.client.WatchJobs(ctx, &pb.WatchJobsRequest{})

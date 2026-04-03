@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
+
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hiro/internal/cluster"
@@ -257,7 +259,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	instDir := m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
 	dirIsNew := os.IsNotExist(statErr)
-	if err := os.MkdirAll(instDir, 0o700); err != nil {
+	if err := os.MkdirAll(instDir, fsperm.DirPrivate); err != nil {
 		return "", fmt.Errorf("creating instance dir: %w", err)
 	}
 
@@ -270,24 +272,24 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			}
 		} else {
 			// Seed empty persona.md.
-			if err := os.WriteFile(filepath.Join(instDir, "persona.md"), nil, 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(instDir, "persona.md"), nil, fsperm.FilePrivate); err != nil {
 				return "", fmt.Errorf("creating persona.md: %w", err)
 			}
 		}
 		// Seed empty memory.md.
 		memPath := filepath.Join(instDir, "memory.md")
-		if err := os.WriteFile(memPath, nil, 0o600); err != nil {
+		if err := os.WriteFile(memPath, nil, fsperm.FilePrivate); err != nil {
 			return "", fmt.Errorf("creating memory.md: %w", err)
 		}
 	}
 
 	// Create session directory with session-level state.
 	sessDir := m.instanceSessionDir(instanceID, sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+	if err := os.MkdirAll(sessDir, fsperm.DirPrivate); err != nil {
 		return "", fmt.Errorf("creating session dir: %w", err)
 	}
 	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessDir, sub), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(sessDir, sub), fsperm.DirPrivate); err != nil {
 			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
 		}
 	}

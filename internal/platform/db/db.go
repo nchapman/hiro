@@ -21,11 +21,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	_ "modernc.org/sqlite" // SQLite driver
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
+
+const (
+	sqlitePoolSize = 4 // concurrent readers in WAL mode
+)
 
 // DB wraps a SQLite database connection for the platform.
 type DB struct {
@@ -35,7 +40,7 @@ type DB struct {
 // Open opens (or creates) the platform database at the given path
 // and runs any pending migrations.
 func Open(path string) (*DB, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, fsperm.FilePrivate)
 	if err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)
 	}
@@ -62,8 +67,8 @@ func Open(path string) (*DB, error) {
 
 	// Allow concurrent readers in WAL mode. Writes still serialize via
 	// SQLite's internal lock, but reads proceed without blocking.
-	conn.SetMaxOpenConns(4)
-	conn.SetMaxIdleConns(4)
+	conn.SetMaxOpenConns(sqlitePoolSize)
+	conn.SetMaxIdleConns(sqlitePoolSize)
 
 	d := &DB{db: conn}
 	if err := d.migrate(); err != nil {
