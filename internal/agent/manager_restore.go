@@ -27,17 +27,12 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	// Separate stopped instances from running ones. Stopped instances are
 	// registered in two passes: first without groups (so all parents are
 	// in the registry), then groups are derived with parent intersection.
-	type stoppedEntry struct {
+	type restoreEntry struct {
 		dbInst platformdb.Instance
 		cfg    config.AgentConfig
 		mode   config.AgentMode
 	}
-	var stopped []stoppedEntry
-	var toStart []struct {
-		dbInst platformdb.Instance
-		cfg    config.AgentConfig
-		mode   config.AgentMode
-	}
+	var stopped, toStart []restoreEntry
 
 	var cleaned int
 	for _, dbInst := range instances {
@@ -62,14 +57,11 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			continue
 		}
 
+		entry := restoreEntry{dbInst, cfg, mode}
 		if dbInst.Status == "stopped" {
-			stopped = append(stopped, stoppedEntry{dbInst, cfg, mode})
+			stopped = append(stopped, entry)
 		} else {
-			toStart = append(toStart, struct {
-				dbInst platformdb.Instance
-				cfg    config.AgentConfig
-				mode   config.AgentMode
-			}{dbInst, cfg, mode})
+			toStart = append(toStart, entry)
 		}
 	}
 
@@ -96,25 +88,12 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		m.mu.Unlock()
 	}
 
-	// Pass 2: derive groups with parent intersection, now that all
-	// stopped instances are registered.
+	// Pass 2: resolve groups via the shared helper, now that all
+	// stopped instances are registered and parentGroupSet works.
 	var restored int
 	for _, e := range stopped {
 		if m.uidPool != nil {
-			parentGroups := m.parentGroupSet(e.dbInst.ParentID)
-			var groups []uint32
-			for _, g := range e.cfg.Groups {
-				gid := m.uidPool.GroupGID(g)
-				if gid == 0 {
-					continue
-				}
-				if parentGroups != nil && !parentGroups[gid] {
-					m.logger.Warn("restored instance declared group not held by parent, ignoring",
-						"instance", e.dbInst.ID, "agent", e.cfg.Name, "group", g)
-					continue
-				}
-				groups = append(groups, gid)
-			}
+			groups := m.resolveSupplementaryGroups(e.cfg, e.dbInst.ParentID)
 			m.mu.Lock()
 			m.instances[e.dbInst.ID].groups = groups
 			m.mu.Unlock()

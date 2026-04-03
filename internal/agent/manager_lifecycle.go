@@ -54,6 +54,33 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 	return id, err2
 }
 
+// resolveSupplementaryGroups resolves the supplementary Unix groups for an agent,
+// intersecting declared groups with the parent's groups. Returns nil if no UID
+// pool is configured. This is the single source of truth for group resolution —
+// used by both startInstance (running) and RestoreInstances (stopped).
+func (m *Manager) resolveSupplementaryGroups(cfg config.AgentConfig, parentID string) []uint32 {
+	if m.uidPool == nil {
+		return nil
+	}
+	parentGroups := m.parentGroupSet(parentID)
+	var groups []uint32
+	for _, g := range cfg.Groups {
+		groupGID := m.uidPool.GroupGID(g)
+		if groupGID == 0 {
+			m.logger.Warn("agent declared unknown group, ignoring",
+				"agent", cfg.Name, "group", g)
+			continue
+		}
+		if parentGroups != nil && !parentGroups[groupGID] {
+			m.logger.Warn("agent declared group not held by parent, ignoring",
+				"agent", cfg.Name, "group", g)
+			continue
+		}
+		groups = append(groups, groupGID)
+	}
+	return groups
+}
+
 // parentGroupSet returns the set of supplementary GIDs held by the parent instance.
 // Returns nil if there is no parent (root instance — no restriction).
 // Returns an empty non-nil map if the parent exists but has no groups, or if the
@@ -312,31 +339,12 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	// Acquire a dedicated Unix UID for this instance (if isolation is enabled).
 	var uid, gid uint32
-	var supplementaryGroups []uint32 // only declared groups, not the primary GID
+	supplementaryGroups := m.resolveSupplementaryGroups(cfg, parentID)
 	if m.uidPool != nil {
 		var err error
 		uid, gid, err = m.uidPool.Acquire(instanceID)
 		if err != nil {
 			return "", fmt.Errorf("acquiring UID: %w", err)
-		}
-		// Resolve supplementary groups from the agent definition,
-		// intersected with the parent's groups (a child cannot escalate
-		// beyond its parent's group membership). Root instances (no parent)
-		// get whatever they declare.
-		parentGroups := m.parentGroupSet(parentID)
-		for _, g := range cfg.Groups {
-			groupGID := m.uidPool.GroupGID(g)
-			if groupGID == 0 {
-				m.logger.Warn("agent declared unknown group, ignoring",
-					"agent", cfg.Name, "group", g)
-				continue
-			}
-			if parentGroups != nil && !parentGroups[groupGID] {
-				m.logger.Warn("agent declared group not held by parent, ignoring",
-					"agent", cfg.Name, "group", g)
-				continue
-			}
-			supplementaryGroups = append(supplementaryGroups, groupGID)
 		}
 		// Transfer ownership of the instance dir (and all contents) to the agent user.
 		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, err error) error {
