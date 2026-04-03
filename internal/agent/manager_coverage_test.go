@@ -14,6 +14,7 @@ import (
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/toolrules"
 )
 
 // --- tool_executor.go ---
@@ -273,8 +274,11 @@ func TestGetHistory_Ephemeral(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
-	id, _ := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "")
+	cfg, err := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
+	if err != nil {
+		t.Fatalf("load agent dir: %v", err)
+	}
+	id, err := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "")
 
 	msgs, err := mgr.GetHistory(t.Context(), id, 10)
 	if err != nil {
@@ -406,8 +410,14 @@ func TestInstanceByAgentName_PrefersRunning(t *testing.T) {
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	// Create two instances with the same agent name.
-	id1, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
-	id2, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id1, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create instance 1: %v", err)
+	}
+	id2, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create instance 2: %v", err)
+	}
 
 	// Stop the first one.
 	mgr.StopInstance(id1)
@@ -426,7 +436,10 @@ func TestInstanceByAgentName_ReturnsStopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	mgr.StopInstance(id)
 
 	found, running := mgr.InstanceByAgentName("test-agent")
@@ -468,10 +481,13 @@ func TestUpdateInstanceConfig_Stopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	mgr.StopInstance(id)
 
-	err := mgr.UpdateInstanceConfig(t.Context(), id, "model", nil)
+	err = mgr.UpdateInstanceConfig(t.Context(), id, "model", nil)
 	if err == nil {
 		t.Fatal("expected error for stopped instance")
 	}
@@ -482,9 +498,12 @@ func TestUpdateInstanceConfig_NoLoop(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
-	err := mgr.UpdateInstanceConfig(t.Context(), id, "", nil)
+	err = mgr.UpdateInstanceConfig(t.Context(), id, "", nil)
 	if err == nil {
 		t.Fatal("expected error for instance with no loop")
 	}
@@ -495,10 +514,13 @@ func TestUpdateInstanceConfig_NoLoopWithEffort(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	effort := "high"
-	err := mgr.UpdateInstanceConfig(t.Context(), id, "", &effort)
+	err = mgr.UpdateInstanceConfig(t.Context(), id, "", &effort)
 	if err == nil {
 		t.Fatal("expected error for instance with no loop")
 	}
@@ -508,9 +530,12 @@ func TestStartInstance_NotStopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
-	err := mgr.StartInstance(t.Context(), id)
+	err = mgr.StartInstance(t.Context(), id)
 	if err != ErrInstanceNotStopped {
 		t.Errorf("expected ErrInstanceNotStopped, got %v", err)
 	}
@@ -528,10 +553,13 @@ func TestSendMetaMessage_Stopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	mgr.StopInstance(id)
 
-	_, err := mgr.SendMetaMessage(t.Context(), id, "hello", nil)
+	_, err = mgr.SendMetaMessage(t.Context(), id, "hello", nil)
 	if err == nil {
 		t.Fatal("expected error for stopped instance")
 	}
@@ -541,9 +569,12 @@ func TestSendMetaMessage_NoLoop(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
-	_, err := mgr.SendMetaMessage(t.Context(), id, "hello", nil)
+	_, err = mgr.SendMetaMessage(t.Context(), id, "hello", nil)
 	if err == nil {
 		t.Fatal("expected error when no inference loop")
 	}
@@ -1084,7 +1115,10 @@ func TestSetInstanceStatus_WithPDB(t *testing.T) {
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	// Setting status should work.
 	mgr.setInstanceStatus(id, "stopped")
@@ -1224,26 +1258,6 @@ func TestMakeCleanup_NotNewDir(t *testing.T) {
 
 // --- Circular dependency detection ---
 
-func TestSendMessage_CircularDependency(t *testing.T) {
-	mgr, dir := setupTestManager(t)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
-
-	// Inject the instance ID into the call chain context to simulate circularity.
-	// acquireInstance checks this.
-	// We need to use the inference package's context functions.
-	// Since we can't easily import them here, test via SendMessage on a stopped instance
-	// after setting up the context directly would be tricky. Let's test via the public API.
-
-	// Just verify that nonexistent IDs give proper errors.
-	_, err := mgr.SendMessage(t.Context(), "nonexistent", "hello", nil)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	_ = id
-}
-
 func TestCreateInstance_InvalidName(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 	tests := []string{"", "../escape", "has space", "special!"}
@@ -1305,13 +1319,9 @@ func TestResolveModelString_NilCP(t *testing.T) {
 func TestResolveModelString_Empty(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 	s := mgr.resolveModelString("")
-	if s != "/" {
-		// empty ModelSpec String() returns "/"
-		// Actually, let's check what it returns
-		empty := models.ModelSpec{}
-		if s != empty.String() {
-			t.Errorf("got %q, want %q", s, empty.String())
-		}
+	want := models.ModelSpec{}.String()
+	if s != want {
+		t.Errorf("got %q, want %q", s, want)
 	}
 }
 
@@ -1332,10 +1342,13 @@ func TestNewSession_StoppedInstance(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	mgr.StopInstance(id)
 
-	_, err := mgr.NewSession(id)
+	_, err = mgr.NewSession(id)
 	if err == nil {
 		t.Fatal("expected error for stopped instance")
 	}
@@ -1355,8 +1368,14 @@ func TestShutdown_MixedStoppedAndRunning(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id1, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
-	id2, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id1, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create instance 1: %v", err)
+	}
+	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create instance 2: %v", err)
+	}
 	mgr.StopInstance(id1) // id1 is stopped
 
 	mgr.Shutdown()
@@ -1364,7 +1383,6 @@ func TestShutdown_MixedStoppedAndRunning(t *testing.T) {
 	if len(mgr.ListInstances()) != 0 {
 		t.Error("expected 0 instances after shutdown")
 	}
-	_ = id2
 }
 
 // --- DeleteInstance with stopped children ---
@@ -1405,23 +1423,38 @@ Child.`)
 func TestHasParameterized(t *testing.T) {
 	tests := []struct {
 		name  string
-		input []struct{ tool, pattern string }
+		rules []toolrules.Rule
 		want  bool
 	}{
 		{
 			name:  "empty",
-			input: nil,
+			rules: nil,
 			want:  false,
+		},
+		{
+			name:  "whole tool only",
+			rules: []toolrules.Rule{{Tool: "Bash"}},
+			want:  false,
+		},
+		{
+			name:  "parameterized rule",
+			rules: []toolrules.Rule{{Tool: "Bash", Pattern: "ls *"}},
+			want:  true,
+		},
+		{
+			name:  "mixed whole and parameterized",
+			rules: []toolrules.Rule{{Tool: "Read"}, {Tool: "Bash", Pattern: "ls *"}},
+			want:  true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Can't easily create toolrules.Rule without parsing, but we
-			// already have tests for this in the main test file.
-			// This is a placeholder to ensure the function is exercised.
+			got := hasParameterized(tt.rules)
+			if got != tt.want {
+				t.Errorf("hasParameterized() = %v, want %v", got, tt.want)
+			}
 		})
 	}
-	_ = tests
 }
 
 // --- buildInstance ---
@@ -1513,7 +1546,10 @@ func TestStopInstance_DoubleStopReturnsInfo(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	mgr.StopInstance(id)
 
 	info, err := mgr.StopInstance(id)
@@ -1544,7 +1580,10 @@ func TestUnregisterLocked_NoParent(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	mgr.mu.Lock()
 	inst := mgr.instances[id]
@@ -1629,16 +1668,6 @@ func TestCollectDescendants_NotFound(t *testing.T) {
 	}
 }
 
-func setupTestManagerWithCPAndFactory(t *testing.T, cp ControlPlane) (*Manager, string) {
-	t.Helper()
-	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{
-		WorkingDir: dir,
-	}, cp, logger, testWorkerFactory("ok"), nil, nil)
-	return mgr, dir
-}
-
 // --- StartInstance resumes latest session from PDB ---
 
 func TestStartInstance_ResumesLatestSession(t *testing.T) {
@@ -1650,7 +1679,10 @@ func TestStartInstance_ResumesLatestSession(t *testing.T) {
 	ctx := t.Context()
 	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, _ := mgr.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	origSession := mgr.ActiveSessionID(id)
 
 	mgr.StopInstance(id)
@@ -1707,7 +1739,10 @@ func TestGetHistory_FiltersByRole(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	sessID := mgr.ActiveSessionID(id)
 
 	// Insert various message roles.
@@ -1746,7 +1781,10 @@ func TestGetHistory_MetaMessages(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	sessID := mgr.ActiveSessionID(id)
 
 	pdb.AppendMessage(t.Context(), sessID, "user", "meta message", "", 0, true)
@@ -1773,14 +1811,17 @@ func TestDeleteInstance_WithPDB(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	if err := mgr.DeleteInstance(id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	// Instance should be gone from DB too.
-	_, err := pdb.GetInstance(t.Context(), id)
+	_, err = pdb.GetInstance(t.Context(), id)
 	if err == nil {
 		t.Error("instance should be deleted from DB")
 	}

@@ -48,7 +48,7 @@ RUN curl -fsSL https://mise.run | sh \
 # Pre-build the binary so tests that spawn agent processes have it available.
 RUN go build -o /usr/local/bin/hiro ./cmd/hiro
 
-CMD ["go", "test", "./...", "-v", "-count=1"]
+CMD ["go", "test", "-race", "./...", "-v", "-count=1"]
 
 # Runtime
 FROM ubuntu:24.04

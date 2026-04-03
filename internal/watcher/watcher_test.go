@@ -204,6 +204,8 @@ func TestWatchPatternNoMatch(t *testing.T) {
 
 	// Create a .txt file — should not match *.go pattern.
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
+	// Negative assertion: verify callback does NOT fire. A short sleep is
+	// the correct approach here since there's no event to wait for.
 	time.Sleep(200 * time.Millisecond)
 
 	if called.Load() {
@@ -227,6 +229,7 @@ func TestWatchUnsubscribe(t *testing.T) {
 	unsub()
 
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
+	// Negative assertion: verify callback does NOT fire after unsubscribe.
 	time.Sleep(200 * time.Millisecond)
 
 	if called.Load() {
@@ -351,6 +354,7 @@ func TestWatchSkipHiddenFiles(t *testing.T) {
 
 	// Create a hidden file.
 	os.WriteFile(filepath.Join(dir, ".hidden"), []byte("secret"), 0o644)
+	// Negative assertion: verify callback does NOT fire for hidden files.
 	time.Sleep(200 * time.Millisecond)
 
 	if called.Load() {

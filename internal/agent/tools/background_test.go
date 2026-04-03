@@ -124,9 +124,11 @@ func TestBackgroundJob_IDFormat(t *testing.T) {
 
 func TestNotifyOnComplete_FiresForBackgroundedJob(t *testing.T) {
 	var count atomic.Int32
+	done := make(chan struct{}, 1)
 	mgr := NewBackgroundJobManager(nil)
 	mgr.OnComplete = func(job *BackgroundJob) {
 		count.Add(1)
+		done <- struct{}{}
 	}
 
 	job, err := mgr.Start(t.TempDir(), "echo done")
@@ -138,8 +140,11 @@ func TestNotifyOnComplete_FiresForBackgroundedJob(t *testing.T) {
 	mgr.NotifyOnComplete(job.ID)
 	job.Wait(context.Background())
 
-	// Give the watcher goroutine time to fire.
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for completion callback")
+	}
 
 	if count.Load() != 1 {
 		t.Fatalf("expected 1 completion callback, got %d", count.Load())
@@ -162,7 +167,9 @@ func TestNotifyOnComplete_DoesNotFireForSyncJob(t *testing.T) {
 	job.Wait(context.Background())
 	mgr.Remove(job.ID)
 
-	time.Sleep(50 * time.Millisecond)
+	// Negative assertion: verify callback does NOT fire. A short sleep is
+	// the correct approach here since there's no event to wait for.
+	time.Sleep(100 * time.Millisecond)
 
 	if called {
 		t.Error("OnComplete should not fire for jobs that are consumed synchronously")
@@ -185,7 +192,8 @@ func TestNotifyOnComplete_SuppressedByKill(t *testing.T) {
 	mgr.NotifyOnComplete(job.ID)
 	mgr.Kill(job.ID)
 
-	time.Sleep(50 * time.Millisecond)
+	// Negative assertion: verify callback does NOT fire after Kill().
+	time.Sleep(100 * time.Millisecond)
 
 	if called {
 		t.Error("OnComplete should not fire when Kill() is called")
@@ -280,7 +288,8 @@ func TestNotifyOnComplete_AtMostOnce(t *testing.T) {
 	mgr.NotifyOnComplete(job.ID)
 	job.Wait(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the single expected callback, then verify no extras fire.
+	time.Sleep(100 * time.Millisecond)
 
 	if count.Load() != 1 {
 		t.Fatalf("expected exactly 1 callback, got %d", count.Load())

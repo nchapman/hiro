@@ -278,7 +278,8 @@ func TestTaskDelegation_WorkerDisconnectMidTask(t *testing.T) {
 		errCh <- err
 	}()
 
-	// Give the task time to be dispatched, then disconnect the worker
+	// Setup delay: give the task time to be dispatched before disconnecting.
+	// No signal available for dispatch completion in this test harness.
 	time.Sleep(200 * time.Millisecond)
 	workerCancel()
 
