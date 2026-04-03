@@ -37,79 +37,65 @@ func CreateLanguageModel(ctx context.Context, provider Type, apiKey, baseURL, mo
 	// Look up the catwalk provider to determine the underlying type.
 	cwProvider, cwType := lookupCatwalkProvider(string(provider))
 
-	var (
-		p   fantasy.Provider
-		err error
-	)
-
-	switch cwType {
-	case catwalk.TypeAnthropic:
-		opts := []anthropic.Option{anthropic.WithAPIKey(apiKey)}
+	// resolveBaseURL picks the effective base URL: explicit override first,
+	// then the catwalk-catalogued endpoint (if it's a real URL, not a placeholder).
+	resolveBaseURL := func() string {
 		if baseURL != "" {
-			opts = append(opts, anthropic.WithBaseURL(baseURL))
-		} else if cwProvider != nil && isRealURL(cwProvider.APIEndpoint) {
-			opts = append(opts, anthropic.WithBaseURL(cwProvider.APIEndpoint))
+			return baseURL
 		}
-		p, err = anthropic.New(opts...)
-
-	case catwalk.TypeOpenAI:
-		opts := []openai.Option{openai.WithAPIKey(apiKey)}
-		if baseURL != "" {
-			opts = append(opts, openai.WithBaseURL(baseURL))
-		} else if cwProvider != nil && isRealURL(cwProvider.APIEndpoint) {
-			opts = append(opts, openai.WithBaseURL(cwProvider.APIEndpoint))
+		if cwProvider != nil && isRealURL(cwProvider.APIEndpoint) {
+			return cwProvider.APIEndpoint
 		}
-		p, err = openai.New(opts...)
-
-	case catwalk.TypeOpenRouter:
-		opts := []openrouter.Option{openrouter.WithAPIKey(apiKey)}
-		p, err = openrouter.New(opts...)
-
-	case catwalk.TypeGoogle, catwalk.TypeVertexAI:
-		opts := []google.Option{google.WithGeminiAPIKey(apiKey)}
-		if baseURL != "" {
-			opts = append(opts, google.WithBaseURL(baseURL))
-		}
-		p, err = google.New(opts...)
-
-	case catwalk.TypeAzure:
-		opts := []azure.Option{azure.WithAPIKey(apiKey)}
-		if baseURL != "" {
-			opts = append(opts, azure.WithBaseURL(baseURL))
-		}
-		p, err = azure.New(opts...)
-
-	case catwalk.TypeBedrock:
-		opts := []bedrock.Option{bedrock.WithAPIKey(apiKey)}
-		if baseURL != "" {
-			opts = append(opts, bedrock.WithBaseURL(baseURL))
-		}
-		p, err = bedrock.New(opts...)
-
-	case catwalk.TypeVercel:
-		opts := []vercel.Option{vercel.WithAPIKey(apiKey)}
-		if baseURL != "" {
-			opts = append(opts, vercel.WithBaseURL(baseURL))
-		}
-		p, err = vercel.New(opts...)
-
-	case catwalk.TypeOpenAICompat:
-		opts := []openaicompat.Option{openaicompat.WithAPIKey(apiKey)}
-		if baseURL != "" {
-			opts = append(opts, openaicompat.WithBaseURL(baseURL))
-		} else if cwProvider != nil && isRealURL(cwProvider.APIEndpoint) {
-			opts = append(opts, openaicompat.WithBaseURL(cwProvider.APIEndpoint))
-		}
-		p, err = openaicompat.New(opts...)
-
-	default:
-		return nil, fmt.Errorf("unsupported provider: %q", provider)
+		return ""
 	}
 
+	p, err := createProvider(cwType, apiKey, baseURL, resolveBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("creating %s provider: %w", provider, err)
 	}
 	return p.LanguageModel(ctx, model)
+}
+
+// createProvider constructs the fantasy.Provider for the given catwalk type.
+func createProvider(cwType catwalk.Type, apiKey, baseURL string, resolveBaseURL func() string) (fantasy.Provider, error) {
+	switch cwType {
+	case catwalk.TypeAnthropic:
+		return newWithBaseURL(anthropic.WithAPIKey(apiKey), anthropic.WithBaseURL, resolveBaseURL(), anthropic.New)
+
+	case catwalk.TypeOpenAI:
+		return newWithBaseURL(openai.WithAPIKey(apiKey), openai.WithBaseURL, resolveBaseURL(), openai.New)
+
+	case catwalk.TypeOpenRouter:
+		return openrouter.New(openrouter.WithAPIKey(apiKey))
+
+	case catwalk.TypeGoogle, catwalk.TypeVertexAI:
+		return newWithBaseURL(google.WithGeminiAPIKey(apiKey), google.WithBaseURL, baseURL, google.New)
+
+	case catwalk.TypeAzure:
+		return newWithBaseURL(azure.WithAPIKey(apiKey), azure.WithBaseURL, baseURL, azure.New)
+
+	case catwalk.TypeBedrock:
+		return newWithBaseURL(bedrock.WithAPIKey(apiKey), bedrock.WithBaseURL, baseURL, bedrock.New)
+
+	case catwalk.TypeVercel:
+		return newWithBaseURL(vercel.WithAPIKey(apiKey), vercel.WithBaseURL, baseURL, vercel.New)
+
+	case catwalk.TypeOpenAICompat:
+		return newWithBaseURL(openaicompat.WithAPIKey(apiKey), openaicompat.WithBaseURL, resolveBaseURL(), openaicompat.New)
+
+	default:
+		return nil, fmt.Errorf("unsupported provider: %q", cwType)
+	}
+}
+
+// newWithBaseURL constructs a provider with an API key option and an optional
+// base URL. This captures the common pattern across most provider constructors.
+func newWithBaseURL[O any](keyOpt O, baseURLOpt func(string) O, url string, newFn func(...O) (fantasy.Provider, error)) (fantasy.Provider, error) {
+	opts := []O{keyOpt}
+	if url != "" {
+		opts = append(opts, baseURLOpt(url))
+	}
+	return newFn(opts...)
 }
 
 // TestConnection validates a provider's API key by sending a minimal request.

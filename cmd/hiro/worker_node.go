@@ -58,8 +58,8 @@ type workerNode struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	identity *cluster.NodeIdentity
-	tlsCert  tls.Certificate
+	identity  *cluster.NodeIdentity
+	tlsCert   tls.Certificate
 	discovery *cluster.DiscoveryClient
 
 	ws      *cluster.WorkerStream
@@ -168,7 +168,7 @@ func (wn *workerNode) startHTTPServer() {
 	webFS, _ := web.DistFS()
 	httpSrv := api.NewServer(wn.logger, webFS, wn.cp, nil, wn.rootDir)
 	httpSrv.SetWorkerStatus(func() string {
-		s := wn.connStatus.Load().(string) //nolint:errcheck // infallible: only strings are stored
+		s, _ := wn.connStatus.Load().(string)
 		return s
 	})
 	httpSrv.SetRestartFunc(func() {
@@ -472,7 +472,7 @@ func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string,
 
 	// Take first success.
 	var firstErr error
-	for i := 0; i < happyEyeballsAttempts; i++ {
+	for range happyEyeballsAttempts {
 		r := <-ch
 		if r.err == nil {
 			logger.Info("connected to leader", "via", r.via)

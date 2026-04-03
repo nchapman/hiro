@@ -160,8 +160,10 @@ func run() error {
 // initPlatform sets up the foundational infrastructure: env, logging, dirs, DB,
 // and control plane config. The returned app must be closed via app.close().
 func initPlatform() (*app, error) {
+	// Load .env file if present (does not override existing env vars).
 	_ = godotenv.Load()
 
+	// Parse log level from environment (default INFO).
 	logLevel := slog.LevelInfo
 	if lvl := os.Getenv("HIRO_LOG_LEVEL"); lvl != "" {
 		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
@@ -169,6 +171,7 @@ func initPlatform() (*app, error) {
 		}
 	}
 
+	// Temporary stdout-only logger for pre-DB initialization.
 	bootLogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel,
 	}))
@@ -243,7 +246,7 @@ func (a *app) initServer() error {
 	a.srv.SetWatcher(a.fsWatcher)
 	a.srv.SetLogHandler(a.lh)
 
-	// Reload config.yaml when it changes on disk.
+	// Reload config.yaml when it changes on disk (external edits, coordinator writes).
 	a.fsWatcher.Subscribe("config/config.yaml", func(events []watcher.Event) {
 		if err := a.cp.Reload(); err != nil {
 			a.logger.Warn("failed to reload config.yaml", "error", err)
@@ -254,7 +257,8 @@ func (a *app) initServer() error {
 		}
 	})
 
-	// Expose callbacks so the setup API can trigger cluster/manager start.
+	// Expose callbacks so the setup API can trigger cluster/manager start
+	// during onboarding (before providers are configured at boot time).
 	a.srv.SetStartManager(a.startManager)
 	a.srv.SetStartCluster(a.startCluster)
 	a.srv.SetRestartFunc(func() {
@@ -303,7 +307,8 @@ func (a *app) startCluster() error {
 }
 
 // startTrackerDiscovery starts tracker-based discovery and relay connectivity
-// if a tracker URL is configured. Called as part of startCluster.
+// if a tracker URL is configured. Called as part of startCluster. No-op if
+// no tracker URL is set.
 func (a *app) startTrackerDiscovery(identity *cluster.NodeIdentity, tlsCert tls.Certificate) error {
 	trackerURL := a.cp.ClusterTrackerURL()
 	if trackerURL == "" {

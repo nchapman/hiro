@@ -30,52 +30,7 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 			continue
 		}
 		err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil //nolint:nilerr // skip inaccessible entries
-			}
-			relPath, _ := filepath.Rel(s.rootDir, path)
-			if shouldIgnore(relPath) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil || !info.Mode().IsRegular() {
-				return nil //nolint:nilerr // skip entries with unreadable metadata or non-regular files
-			}
-			if info.Size() > maxFileSize {
-				return nil
-			}
-
-			seen[relPath] = true
-			mtime := info.ModTime().UnixNano()
-
-			// Skip if unchanged.
-			if knownFiles != nil {
-				if knownMtime, ok := knownFiles[relPath]; ok && knownMtime == mtime {
-					return nil
-				}
-			}
-
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil //nolint:nilerr // skip unreadable files
-			}
-
-			if err := s.sendFn(&pb.FileUpdate{
-				Path:           relPath,
-				Content:        content,
-				Mode:           uint32(info.Mode().Perm()),
-				MtimeUnixNanos: mtime,
-				OriginNode:     s.nodeID,
-			}); err != nil {
-				s.logger.Warn("reconcile: failed to send update", "path", relPath, "error", err)
-			}
-			return nil
+			return s.reconcileEntry(path, d, err, knownFiles, seen)
 		})
 		if err != nil {
 			return fmt.Errorf("reconcile walk %s: %w", dir, err)
@@ -96,6 +51,57 @@ func (s *FileSyncService) Reconcile(knownFiles map[string]int64) error {
 	}
 
 	s.logger.Info("reconciliation complete", "files_checked", len(seen))
+	return nil
+}
+
+// reconcileEntry processes a single entry during reconciliation, sending an
+// update if the file differs from the known state.
+func (s *FileSyncService) reconcileEntry(path string, d fs.DirEntry, walkErr error, knownFiles map[string]int64, seen map[string]bool) error {
+	if walkErr != nil {
+		return nil //nolint:nilerr // skip inaccessible entries
+	}
+	relPath, _ := filepath.Rel(s.rootDir, path)
+	if shouldIgnore(relPath) {
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+	if d.IsDir() {
+		return nil
+	}
+	info, err := d.Info()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil //nolint:nilerr // skip entries with unreadable metadata or non-regular files
+	}
+	if info.Size() > maxFileSize {
+		return nil
+	}
+
+	seen[relPath] = true
+	mtime := info.ModTime().UnixNano()
+
+	// Skip if unchanged.
+	if knownFiles != nil {
+		if knownMtime, ok := knownFiles[relPath]; ok && knownMtime == mtime {
+			return nil
+		}
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil //nolint:nilerr // skip unreadable files
+	}
+
+	if err := s.sendFn(&pb.FileUpdate{
+		Path:           relPath,
+		Content:        content,
+		Mode:           uint32(info.Mode().Perm()),
+		MtimeUnixNanos: mtime,
+		OriginNode:     s.nodeID,
+	}); err != nil {
+		s.logger.Warn("reconcile: failed to send update", "path", relPath, "error", err)
+	}
 	return nil
 }
 

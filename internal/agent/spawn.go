@@ -20,98 +20,53 @@ import (
 
 const spawnTimeout = 30 * time.Second
 
-// defaultWorkerFactory spawns an agent as an OS process using the same binary.
-// The agent process reads a SpawnConfig from stdin, starts a gRPC AgentWorker
-// server on a Unix socket, and writes "ready" to stdout when it's listening.
-func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("resolving executable: %w", err)
-	}
-
-	// Create a private socket directory so the socket is inaccessible to other
-	// agent UIDs from the moment it's created (no TOCTOU window). The directory
-	// is 0o700, owned by the agent's UID. Short path to stay under the 104-byte
-	// Unix socket limit.
+// prepareSocketDir creates a private socket directory for the agent process.
+// Returns the socket path.
+func prepareSocketDir(cfg ipc.SpawnConfig) (socketPath string, socketDir string, err error) {
 	sessPrefix := cfg.SessionID
 	if len(sessPrefix) > ipc.MaxSessionPrefix {
 		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
 	}
-	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
+	socketDir = fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
 	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
-		return nil, fmt.Errorf("creating socket dir: %w", err)
+		return "", "", fmt.Errorf("creating socket dir: %w", err)
 	}
 	if cfg.UID != 0 {
 		if err := os.Chown(socketDir, int(cfg.UID), int(cfg.GID)); err != nil {
-			return nil, fmt.Errorf("chowning socket dir: %w", err)
+			return "", "", fmt.Errorf("chowning socket dir: %w", err)
 		}
 	}
-	socketPath := socketDir + "/a.sock"
-	cfg.AgentSocket = socketPath
+	return socketDir + "/a.sock", socketDir, nil
+}
 
-	cmd := exec.CommandContext(ctx, self, "agent")
-
-	// When UID isolation is enabled, run the agent as a dedicated Unix user
-	// and build a minimal environment to avoid leaking control plane state.
-	if cfg.UID != 0 {
-		groups := cfg.Groups
-		if len(groups) == 0 {
-			groups = []uint32{cfg.GID}
-		}
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{
-				Uid:    cfg.UID,
-				Gid:    cfg.GID,
-				Groups: groups,
-			},
-		}
-		cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
+// configureIsolation sets up UID isolation credentials and environment on the command.
+func configureIsolation(cmd *exec.Cmd, cfg ipc.SpawnConfig) {
+	groups := cfg.Groups
+	if len(groups) == 0 {
+		groups = []uint32{cfg.GID}
 	}
-
-	// Pipe SpawnConfig as JSON to stdin.
-	stdinPipe, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("creating stdin pipe: %w", err)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    cfg.UID,
+			Gid:    cfg.GID,
+			Groups: groups,
+		},
 	}
+	cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
+}
 
-	// Capture stdout for the readiness signal.
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	// Capture stderr for error diagnostics.
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting agent process: %w", err)
-	}
-
-	// Write config to stdin and close.
-	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("writing spawn config: %w", err)
-	}
-	stdinPipe.Close()
-
-	// Wait for readiness: select on stdout readline, cmd.Wait (early exit), and timeout.
-	type readyResult struct {
-		err error
-	}
+// waitForReady waits for the agent process to signal readiness on stdout,
+// or returns an error if the process exits early or times out.
+// On success, callers must consume waitCh to reap the process.
+func waitForReady(cmd *exec.Cmd, stdoutPipe *bufio.Scanner, stderrBuf *bytes.Buffer, waitCh <-chan error) error {
+	type readyResult struct{ err error }
 	readyCh := make(chan readyResult, 1)
 	go func() {
-		scanner := bufio.NewScanner(stdoutPipe)
-		if scanner.Scan() {
+		if stdoutPipe.Scan() {
 			readyCh <- readyResult{}
 		} else {
 			readyCh <- readyResult{err: fmt.Errorf("agent process closed stdout without signaling ready")}
 		}
-	}()
-
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- cmd.Wait()
 	}()
 
 	select {
@@ -119,15 +74,80 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		if r.err != nil {
 			_ = cmd.Process.Kill()
 			<-waitCh
-			return nil, fmt.Errorf("%w; stderr: %s", r.err, stderrBuf.String())
+			return fmt.Errorf("%w; stderr: %s", r.err, stderrBuf.String())
 		}
+		return nil
 	case waitErr := <-waitCh:
-		// Process exited before signaling ready.
-		return nil, fmt.Errorf("agent process exited during startup: %w; stderr: %s", waitErr, stderrBuf.String())
+		return fmt.Errorf("agent process exited during startup: %w; stderr: %s", waitErr, stderrBuf.String())
 	case <-time.After(spawnTimeout):
 		_ = cmd.Process.Kill()
 		<-waitCh
-		return nil, fmt.Errorf("agent process startup timed out after %s; stderr: %s", spawnTimeout, stderrBuf.String())
+		return fmt.Errorf("agent process startup timed out after %s; stderr: %s", spawnTimeout, stderrBuf.String())
+	}
+}
+
+// startAgentProcess prepares, starts, and writes config to an agent process.
+// Returns the command, stderr buffer, and wait channel. The process is running
+// and has received its config, but readiness has not been confirmed.
+func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*exec.Cmd, *bytes.Buffer, <-chan error, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolving executable: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, self, "agent")
+	if cfg.UID != 0 {
+		configureIsolation(cmd, cfg)
+	}
+
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating stdin pipe: %w", err)
+	}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating stdout pipe: %w", err)
+	}
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return nil, nil, nil, fmt.Errorf("starting agent process: %w", err)
+	}
+
+	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, nil, nil, fmt.Errorf("writing spawn config: %w", err)
+	}
+	stdinPipe.Close()
+
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+
+	if err := waitForReady(cmd, bufio.NewScanner(stdoutPipe), &stderrBuf, waitCh); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return cmd, &stderrBuf, waitCh, nil
+}
+
+// defaultWorkerFactory spawns an agent as an OS process using the same binary.
+// The agent process reads a SpawnConfig from stdin, starts a gRPC AgentWorker
+// server on a Unix socket, and writes "ready" to stdout when it's listening.
+func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+	// Create a private socket directory so the socket is inaccessible to other
+	// agent UIDs from the moment it's created (no TOCTOU window). Short path
+	// to stay under the 104-byte Unix socket limit.
+	socketPath, socketDir, err := prepareSocketDir(cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.AgentSocket = socketPath
+
+	cmd, _, waitCh, err := startAgentProcess(ctx, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Connect gRPC client to the agent's worker socket.
@@ -143,10 +163,6 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 	worker := grpcipc.NewWorkerClient(conn)
 
 	// Death-watcher: closes done when the process exits.
-	// The wait goroutine (line ~79) calls cmd.Wait() exactly once and sends
-	// to waitCh (buffered). The startup select may have already drained
-	// waitCh (process exited early and we returned an error above). If we
-	// reached this point, the process is alive and waitCh hasn't been read.
 	done := make(chan struct{})
 	go func() {
 		<-waitCh

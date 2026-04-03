@@ -405,71 +405,83 @@ func (c *Compactor) condensationPass(ctx context.Context) (bool, error) {
 		maxAllowedDepth = c.config.MaxSummaryDepth - 1 // -1 because output is at depth+1
 	}
 
-	for depth := 0; depth <= maxAllowedDepth; depth++ {
-		items, sums, err := c.pdb.ContiguousSummariesAtDepth(ctx, c.sessionID, depth, c.config.CondenseMinFanout)
+	for depth := range maxAllowedDepth + 1 {
+		condensed, err := c.condenseAtDepth(ctx, depth, allContextItems)
 		if err != nil {
 			return false, err
 		}
-		if len(sums) == 0 {
-			continue
+		if condensed {
+			return true, nil
 		}
-
-		// Look for a summary immediately preceding this run for dedup context.
-		prevContext := c.precedingSummaryContent(ctx, items[0].Ordinal, allContextItems)
-
-		input := buildCondensationInput(sums)
-		sourceTokens := 0
-		var childIDs []string
-		for _, s := range sums {
-			sourceTokens += s.Tokens
-			childIDs = append(childIDs, s.ID)
-		}
-
-		summary, err := c.summarizeWithEscalation(ctx, depth+1, input, prevContext)
-		if err != nil {
-			return false, err
-		}
-
-		summaryID := generateSummaryID()
-		summaryTokens := EstimateTokens(summary)
-
-		sum := platformdb.Summary{
-			ID:           summaryID,
-			SessionID:    c.sessionID,
-			Kind:         "condensed",
-			Depth:        depth + 1,
-			Content:      summary,
-			Tokens:       summaryTokens,
-			EarliestAt:   sums[0].EarliestAt,
-			LatestAt:     sums[len(sums)-1].LatestAt,
-			SourceTokens: sourceTokens,
-		}
-
-		if err := c.pdb.CreateSummary(ctx, sum); err != nil {
-			return false, fmt.Errorf("creating condensed summary: %w", err)
-		}
-		if err := c.pdb.LinkSummaryParents(ctx, summaryID, childIDs); err != nil {
-			return false, fmt.Errorf("linking parents: %w", err)
-		}
-		if err := c.pdb.ReplaceContextItems(ctx, c.sessionID, items[0].Ordinal, items[len(items)-1].Ordinal, summaryID); err != nil {
-			return false, fmt.Errorf("replacing context items: %w", err)
-		}
-
-		c.logger.Info("condensation complete",
-			"summary_id", summaryID,
-			"depth", depth+1,
-			"inputs", len(sums),
-			"source_tokens", sourceTokens,
-			"summary_tokens", summaryTokens,
-		)
-		return true, nil
 	}
 	return false, nil
 }
 
+// condenseAtDepth attempts to condense contiguous summaries at the given depth.
+// Returns true if a condensation was performed.
+func (c *Compactor) condenseAtDepth(ctx context.Context, depth int, allContextItems []platformdb.ContextItem) (bool, error) {
+	items, sums, err := c.pdb.ContiguousSummariesAtDepth(ctx, c.sessionID, depth, c.config.CondenseMinFanout)
+	if err != nil {
+		return false, err
+	}
+	if len(sums) == 0 {
+		return false, nil
+	}
+
+	// Look for a summary immediately preceding this run for dedup context.
+	prevContext := c.precedingSummaryContent(ctx, items[0].Ordinal, allContextItems)
+
+	input := buildCondensationInput(sums)
+	sourceTokens := 0
+	var childIDs []string
+	for _, s := range sums {
+		sourceTokens += s.Tokens
+		childIDs = append(childIDs, s.ID)
+	}
+
+	summary, err := c.summarizeWithEscalation(ctx, depth+1, input, prevContext)
+	if err != nil {
+		return false, err
+	}
+
+	summaryID := generateSummaryID()
+	summaryTokens := EstimateTokens(summary)
+
+	sum := platformdb.Summary{
+		ID:           summaryID,
+		SessionID:    c.sessionID,
+		Kind:         "condensed",
+		Depth:        depth + 1,
+		Content:      summary,
+		Tokens:       summaryTokens,
+		EarliestAt:   sums[0].EarliestAt,
+		LatestAt:     sums[len(sums)-1].LatestAt,
+		SourceTokens: sourceTokens,
+	}
+
+	if err := c.pdb.CreateSummary(ctx, sum); err != nil {
+		return false, fmt.Errorf("creating condensed summary: %w", err)
+	}
+	if err := c.pdb.LinkSummaryParents(ctx, summaryID, childIDs); err != nil {
+		return false, fmt.Errorf("linking parents: %w", err)
+	}
+	if err := c.pdb.ReplaceContextItems(ctx, c.sessionID, items[0].Ordinal, items[len(items)-1].Ordinal, summaryID); err != nil {
+		return false, fmt.Errorf("replacing context items: %w", err)
+	}
+
+	c.logger.Info("condensation complete",
+		"summary_id", summaryID,
+		"depth", depth+1,
+		"inputs", len(sums),
+		"source_tokens", sourceTokens,
+		"summary_tokens", summaryTokens,
+	)
+	return true, nil
+}
+
 func (c *Compactor) fullSweep(ctx context.Context) error {
 	const maxIterations = 10
-	for i := 0; i < maxIterations; i++ {
+	for range maxIterations {
 		tokensOutside, err := c.pdb.MessageTokensOutsideTail(ctx, c.sessionID, c.config.FreshTailCount)
 		if err != nil {
 			return err

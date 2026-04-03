@@ -177,7 +177,7 @@ func (d *DB) LatestSessionByInstance(ctx context.Context, instanceID string) (Se
 // stopped_at is set to now.
 func (d *DB) UpdateSessionStatus(ctx context.Context, id, status string) error {
 	var stoppedAt *string
-	if status == "stopped" {
+	if status == statusStopped {
 		now := time.Now().UTC().Format("2006-01-02 15:04:05")
 		stoppedAt = &now
 	}

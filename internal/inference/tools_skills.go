@@ -77,56 +77,68 @@ func buildSkillTool(cfg *config.AgentConfig, allowedDirs []string, onExpand Skil
 			result.WriteString(parsed.Body)
 
 			if filepath.Base(realPath) == "SKILL.md" {
-				skillDir := filepath.Dir(realPath)
-				entries, err := os.ReadDir(skillDir)
-				if err == nil {
-					const maxResources = 50
-					var resources []string
-					truncated := false
-					for _, e := range entries {
-						if len(resources) >= maxResources {
-							truncated = true
-							break
-						}
-						name := e.Name()
-						if name == "SKILL.md" {
-							continue
-						}
-						if e.IsDir() {
-							resources = append(resources, name+"/")
-							subEntries, subErr := os.ReadDir(filepath.Join(skillDir, name))
-							if subErr == nil {
-								for _, sub := range subEntries {
-									if len(resources) >= maxResources {
-										truncated = true
-										break
-									}
-									subName := name + "/" + sub.Name()
-									if sub.IsDir() {
-										subName += "/"
-									}
-									resources = append(resources, "  "+subName)
-								}
-							}
-						} else {
-							resources = append(resources, name)
-						}
-					}
-					if truncated {
-						resources = append(resources, "... (truncated)")
-					}
-					if len(resources) > 0 {
-						result.WriteString("\n\n## Bundled Resources\n\n")
-						for _, r := range resources {
-							fmt.Fprintf(&result, "- %s\n", r)
-						}
-					}
-				}
+				appendBundledResources(&result, filepath.Dir(realPath))
 			}
 
 			return fantasy.NewTextResponse(result.String()), nil
 		},
 	)
+}
+
+// appendBundledResources lists the files in a directory skill's folder
+// and appends them as a "Bundled Resources" section to the builder.
+func appendBundledResources(result *strings.Builder, skillDir string) {
+	entries, err := os.ReadDir(skillDir)
+	if err != nil {
+		return
+	}
+	const maxResources = 50
+	var resources []string
+	truncated := false
+	for _, e := range entries {
+		if len(resources) >= maxResources {
+			truncated = true
+			break
+		}
+		name := e.Name()
+		if name == "SKILL.md" {
+			continue
+		}
+		if e.IsDir() {
+			resources = append(resources, name+"/")
+			resources, truncated = appendSubdirEntries(resources, skillDir, name, maxResources, truncated)
+		} else {
+			resources = append(resources, name)
+		}
+	}
+	if truncated {
+		resources = append(resources, "... (truncated)")
+	}
+	if len(resources) > 0 {
+		result.WriteString("\n\n## Bundled Resources\n\n")
+		for _, r := range resources {
+			fmt.Fprintf(result, "- %s\n", r)
+		}
+	}
+}
+
+// appendSubdirEntries adds entries from a subdirectory to the resource list.
+func appendSubdirEntries(resources []string, skillDir, dirName string, maxResources int, truncated bool) ([]string, bool) {
+	subEntries, err := os.ReadDir(filepath.Join(skillDir, dirName))
+	if err != nil {
+		return resources, truncated
+	}
+	for _, sub := range subEntries {
+		if len(resources) >= maxResources {
+			return resources, true
+		}
+		subName := dirName + "/" + sub.Name()
+		if sub.IsDir() {
+			subName += "/"
+		}
+		resources = append(resources, "  "+subName)
+	}
+	return resources, truncated
 }
 
 func isUnderAllowedDir(path string, allowedDirs []string) bool {

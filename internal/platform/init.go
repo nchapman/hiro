@@ -118,15 +118,7 @@ func seedDefaults(agentsDir string, coordGID int) error {
 			}
 			// Setgid + group-writable so coordinator agents can
 			// create new files inside seeded agent directories.
-			if coordGID >= 0 {
-				if err := os.Chown(dest, -1, coordGID); err != nil {
-					return fmt.Errorf("chown %s to hiro-coordinators: %w", rel, err)
-				}
-				if err := os.Chmod(dest, fsperm.DirSetgid); err != nil {
-					return fmt.Errorf("chmod %s: %w", rel, err)
-				}
-			}
-			return nil
+			return setCoordinatorDir(dest, rel, coordGID)
 		}
 
 		data, err := defaultAgents.ReadFile(path)
@@ -141,6 +133,21 @@ func seedDefaults(agentsDir string, coordGID int) error {
 		}
 		return nil
 	})
+}
+
+// setCoordinatorDir sets hiro-coordinators group and setgid on a single directory.
+// No-op when coordGID is negative (group not available).
+func setCoordinatorDir(dest, rel string, coordGID int) error {
+	if coordGID < 0 {
+		return nil
+	}
+	if err := os.Chown(dest, -1, coordGID); err != nil {
+		return fmt.Errorf("chown %s to hiro-coordinators: %w", rel, err)
+	}
+	if err := os.Chmod(dest, fsperm.DirSetgid); err != nil {
+		return fmt.Errorf("chmod %s: %w", rel, err)
+	}
+	return nil
 }
 
 // applyCoordinatorOwnership sets hiro-coordinators group and setgid on a

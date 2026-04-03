@@ -277,7 +277,7 @@ func runCodeEval(t *testing.T, lm fantasy.LanguageModel, compact bool) codeEvalS
 			estimated := preTokens
 
 			const maxRounds = 5
-			for round := 0; round < maxRounds; round++ {
+			for round := range maxRounds {
 				compactor := NewCompactor(pdb, sessionID, summarizer, cfg, logger)
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				_, err := compactor.CompactIfNeeded(ctx, int64(estimated))

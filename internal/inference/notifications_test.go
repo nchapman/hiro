@@ -109,7 +109,7 @@ func TestNotificationQueue_MaxDepth(t *testing.T) {
 	q := NewNotificationQueue(notifyTestLogger)
 
 	// Fill to capacity.
-	for i := 0; i < maxNotifications; i++ {
+	for range maxNotifications {
 		q.Push(Notification{Content: "msg"})
 	}
 	if q.Len() != maxNotifications {
@@ -152,14 +152,14 @@ func TestNotificationQueue_ConcurrentPush(t *testing.T) {
 	done := make(chan struct{})
 	n := 100
 
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			q.Push(Notification{Content: "msg"})
 			done <- struct{}{}
 		}()
 	}
 
-	for i := 0; i < n; i++ {
+	for range n {
 		<-done
 	}
 

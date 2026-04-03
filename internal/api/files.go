@@ -106,6 +106,8 @@ func isProtectedPath(rootDir, absPath string) bool {
 	return false
 }
 
+const treeEntryTypeDir = "dir"
+
 type treeEntry struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
@@ -140,6 +142,17 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result, truncated := buildTreeEntries(entries, absPath, realRoot)
+
+	if truncated {
+		w.Header().Set("X-Truncated", "true")
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// buildTreeEntries converts directory entries into sorted treeEntry values,
+// skipping hidden files and symlinks. Returns whether the result was truncated.
+func buildTreeEntries(entries []os.DirEntry, absPath, realRoot string) ([]treeEntry, bool) {
 	result := make([]treeEntry, 0, len(entries))
 	truncated := false
 	for _, e := range entries {
@@ -154,12 +167,9 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 		entryAbs := filepath.Join(absPath, e.Name())
 		entryRel, _ := filepath.Rel(realRoot, entryAbs)
 
-		te := treeEntry{
-			Name: e.Name(),
-			Path: entryRel,
-		}
+		te := treeEntry{Name: e.Name(), Path: entryRel}
 		if e.IsDir() {
-			te.Type = "dir"
+			te.Type = treeEntryTypeDir
 		} else {
 			te.Type = "file"
 			if info, err := e.Info(); err == nil {
@@ -176,15 +186,12 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	// Sort: directories first, then alphabetical.
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Type != result[j].Type {
-			return result[i].Type == "dir"
+			return result[i].Type == treeEntryTypeDir
 		}
 		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 	})
 
-	if truncated {
-		w.Header().Set("X-Truncated", "true")
-	}
-	writeJSON(w, http.StatusOK, result)
+	return result, truncated
 }
 
 func (s *Server) handleFilesFileRead(w http.ResponseWriter, r *http.Request) {
@@ -252,13 +259,22 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.writeUploadToFile(absPath, dir, r.Body); err != nil {
+		s.handleWriteUploadError(w, absPath, dir, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeUploadToFile streams the request body to a temp file and atomically
+// renames it to absPath.
+func (s *Server) writeUploadToFile(absPath, dir string, body io.Reader) error {
 	// Stream to a temp file to avoid buffering large uploads in RAM.
 	// The temp file lives in the same directory so os.Rename is atomic.
 	tmp, err := os.CreateTemp(dir, ".upload-*")
 	if err != nil {
-		s.logger.Error("files upload temp create failed", "path", dir, "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return &uploadError{op: "create_temp", path: dir, err: err}
 	}
 	tmpName := tmp.Name()
 	defer func() {
@@ -268,31 +284,64 @@ func (s *Server) handleFilesFileWrite(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	n, err := io.Copy(tmp, io.LimitReader(r.Body, maxFileWriteSize+1))
+	n, err := io.Copy(tmp, io.LimitReader(body, maxFileWriteSize+1))
 	if err != nil {
-		s.logger.Error("files upload copy failed", "path", absPath, "error", err)
-		http.Error(w, "read error", http.StatusInternalServerError)
-		return
+		return &uploadError{op: "copy", path: absPath, err: err}
 	}
 	if n > maxFileWriteSize {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return
+		return &uploadError{op: "too_large"}
 	}
 	if err := tmp.Chmod(fsperm.FileCollaborative); err != nil {
-		s.logger.Error("files upload chmod failed", "path", tmpName, "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return &uploadError{op: "chmod", path: tmpName, err: err}
 	}
 	tmp.Close()
 
 	if err := os.Rename(tmpName, absPath); err != nil {
-		s.logger.Error("files file write failed", "path", absPath, "error", err)
+		return &uploadError{op: "rename", path: absPath, err: err}
+	}
+	tmpName = "" // disarm deferred remove
+	return nil
+}
+
+// uploadError captures structured information about a file upload failure.
+type uploadError struct {
+	op   string // "create_temp", "copy", "too_large", "chmod", "rename"
+	path string
+	err  error
+}
+
+func (e *uploadError) Error() string {
+	if e.err != nil {
+		return fmt.Sprintf("upload %s: %v", e.op, e.err)
+	}
+	return "upload " + e.op
+}
+
+func (e *uploadError) Unwrap() error { return e.err }
+
+// handleWriteUploadError maps an upload error to the appropriate HTTP response.
+func (s *Server) handleWriteUploadError(w http.ResponseWriter, absPath, dir string, err error) {
+	var ue *uploadError
+	if !errors.As(err, &ue) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	tmpName = "" // disarm deferred remove
-
-	w.WriteHeader(http.StatusNoContent)
+	switch ue.op {
+	case "create_temp":
+		s.logger.Error("files upload temp create failed", "path", dir, "error", ue.err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	case "copy":
+		s.logger.Error("files upload copy failed", "path", absPath, "error", ue.err)
+		http.Error(w, "read error", http.StatusInternalServerError)
+	case "too_large":
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+	case "chmod":
+		s.logger.Error("files upload chmod failed", "path", ue.path, "error", ue.err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	case "rename":
+		s.logger.Error("files file write failed", "path", absPath, "error", ue.err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleFilesMkdir(w http.ResponseWriter, r *http.Request) {

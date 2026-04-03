@@ -35,34 +35,49 @@ func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg Com
 		return AssembleResult{}, nil
 	}
 
-	type resolved struct {
-		msg    fantasy.Message
-		tokens int
-	}
-	all := make([]resolved, len(items))
-	for i, item := range items {
-		msg, tokens, err := resolveItem(ctx, pdb, item)
-		if err != nil {
-			return AssembleResult{}, fmt.Errorf("resolving item %d: %w", item.Ordinal, err)
-		}
-		all[i] = resolved{msg: msg, tokens: tokens}
+	all, err := resolveAllItems(ctx, pdb, items)
+	if err != nil {
+		return AssembleResult{}, err
 	}
 
 	// Split into evictable prefix and protected fresh tail.
-	tailStart := len(all) - cfg.FreshTailCount
-	if tailStart < 0 {
-		tailStart = 0
-	}
+	tailStart := max(0, len(all)-cfg.FreshTailCount)
 	freshTail := all[tailStart:]
 	evictable := all[:tailStart]
 
+	freshTail, evictable, tailTokens := capFreshTail(freshTail, evictable, all, cfg)
+
+	// Fill remaining budget from evictable, newest first.
+	kept := fillBudget(evictable, cfg.TokenBudget-tailTokens)
+
+	return assembleMessages(kept, freshTail), nil
+}
+
+type resolvedItem struct {
+	msg    fantasy.Message
+	tokens int
+}
+
+func resolveAllItems(ctx context.Context, pdb *platformdb.DB, items []platformdb.ContextItem) ([]resolvedItem, error) {
+	all := make([]resolvedItem, len(items))
+	for i, item := range items {
+		msg, tokens, err := resolveItem(ctx, pdb, item)
+		if err != nil {
+			return nil, fmt.Errorf("resolving item %d: %w", item.Ordinal, err)
+		}
+		all[i] = resolvedItem{msg: msg, tokens: tokens}
+	}
+	return all, nil
+}
+
+// capFreshTail ensures the fresh tail doesn't exceed 80% of the token budget.
+// Returns the (possibly truncated) tail, updated evictable slice, and tail token count.
+func capFreshTail(freshTail, evictable, all []resolvedItem, cfg CompactionConfig) ([]resolvedItem, []resolvedItem, int) {
 	tailTokens := 0
 	for _, r := range freshTail {
 		tailTokens += r.tokens
 	}
 
-	// Cap fresh tail to prevent budget overflow. Reserve at most 80% of the
-	// token budget for the tail; shrink from the oldest end if exceeded.
 	maxTailTokens := cfg.TokenBudget * maxTailBudgetPercent / percentDivisor
 	if tailTokens > maxTailTokens {
 		originalCount := len(freshTail)
@@ -70,8 +85,7 @@ func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg Com
 			tailTokens -= freshTail[0].tokens
 			freshTail = freshTail[1:]
 		}
-		tailStart = len(all) - len(freshTail)
-		evictable = all[:tailStart]
+		evictable = all[:len(all)-len(freshTail)]
 		slog.Warn("fresh tail truncated to fit token budget",
 			"original_count", originalCount,
 			"kept_count", len(freshTail),
@@ -79,10 +93,13 @@ func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg Com
 			"max_tail_tokens", maxTailTokens,
 		)
 	}
+	return freshTail, evictable, tailTokens
+}
 
-	// Fill remaining budget from evictable, newest first.
-	remaining := cfg.TokenBudget - tailTokens
-	var keptReverse []resolved
+// fillBudget selects items from evictable (newest first) that fit within the
+// remaining token budget, returned in chronological order.
+func fillBudget(evictable []resolvedItem, remaining int) []resolvedItem {
+	var keptReverse []resolvedItem
 	for i := len(evictable) - 1; i >= 0; i-- {
 		if remaining <= 0 || evictable[i].tokens > remaining {
 			break
@@ -91,11 +108,14 @@ func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg Com
 		remaining -= evictable[i].tokens
 	}
 	// Reverse to restore chronological order.
-	kept := make([]resolved, len(keptReverse))
+	kept := make([]resolvedItem, len(keptReverse))
 	for i, r := range keptReverse {
 		kept[len(keptReverse)-1-i] = r
 	}
+	return kept
+}
 
+func assembleMessages(kept, freshTail []resolvedItem) AssembleResult {
 	messages := make([]fantasy.Message, 0, len(kept)+len(freshTail))
 	totalTokens := 0
 	for _, r := range kept {
@@ -106,11 +126,10 @@ func Assemble(ctx context.Context, pdb *platformdb.DB, sessionID string, cfg Com
 		messages = append(messages, r.msg)
 		totalTokens += r.tokens
 	}
-
 	return AssembleResult{
 		Messages:        messages,
 		EstimatedTokens: totalTokens,
-	}, nil
+	}
 }
 
 // resolveItem converts a context item to a fantasy.Message.

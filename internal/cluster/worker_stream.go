@@ -219,83 +219,58 @@ func (w *WorkerStream) readLoop(ctx context.Context, stream pb.Cluster_NodeStrea
 			}
 			return fmt.Errorf("receiving from leader: %w", err)
 		}
-
-		switch m := msg.Msg.(type) {
-		case *pb.LeaderMessage_SpawnWorker:
-			if w.onSpawnWorker != nil {
-				go func() {
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					w.onSpawnWorker(ctx, m.SpawnWorker)
-				}()
-			}
-
-		case *pb.LeaderMessage_ExecuteTool:
-			if w.onExecuteTool != nil {
-				go func() {
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					w.onExecuteTool(ctx, m.ExecuteTool)
-				}()
-			}
-
-		case *pb.LeaderMessage_ShutdownWorker:
-			if w.onShutdownWorker != nil {
-				go func() {
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					w.onShutdownWorker(ctx, m.ShutdownWorker)
-				}()
-			}
-
-		case *pb.LeaderMessage_KillWorker:
-			if w.onKillWorker != nil {
-				go func() {
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					w.onKillWorker(ctx, m.KillWorker)
-				}()
-			}
-
-		case *pb.LeaderMessage_FileSync:
-			if w.onFileSync != nil {
-				w.onFileSync(ctx, m.FileSync)
-			}
-
-		case *pb.LeaderMessage_FileUpdate:
-			if w.onFileUpdate != nil {
-				w.onFileUpdate(ctx, m.FileUpdate)
-			}
-
-		case *pb.LeaderMessage_CreateTerminal:
-			if w.onCreateTerminal != nil {
-				go func() {
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					w.onCreateTerminal(ctx, m.CreateTerminal)
-				}()
-			}
-
-		case *pb.LeaderMessage_TerminalInput:
-			if w.onTerminalInput != nil {
-				w.onTerminalInput(ctx, m.TerminalInput)
-			}
-
-		case *pb.LeaderMessage_TerminalResize:
-			if w.onTerminalResize != nil {
-				w.onTerminalResize(ctx, m.TerminalResize)
-			}
-
-		case *pb.LeaderMessage_CloseTerminal:
-			if w.onCloseTerminal != nil {
-				go func() {
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					w.onCloseTerminal(ctx, m.CloseTerminal)
-				}()
-			}
-		}
+		w.dispatchLeaderMessage(ctx, sem, msg)
 	}
+}
+
+// dispatchLeaderMessage routes a received leader message to the appropriate handler.
+// Commands that may block (spawn, execute, shutdown, kill, create terminal, close terminal)
+// run in goroutines bounded by sem. Streaming messages (file sync/update, terminal I/O)
+// run inline to preserve ordering.
+func (w *WorkerStream) dispatchLeaderMessage(ctx context.Context, sem chan struct{}, msg *pb.LeaderMessage) {
+	switch m := msg.Msg.(type) {
+	case *pb.LeaderMessage_SpawnWorker:
+		runConcurrent(ctx, sem, w.onSpawnWorker, m.SpawnWorker)
+	case *pb.LeaderMessage_ExecuteTool:
+		runConcurrent(ctx, sem, w.onExecuteTool, m.ExecuteTool)
+	case *pb.LeaderMessage_ShutdownWorker:
+		runConcurrent(ctx, sem, w.onShutdownWorker, m.ShutdownWorker)
+	case *pb.LeaderMessage_KillWorker:
+		runConcurrent(ctx, sem, w.onKillWorker, m.KillWorker)
+	case *pb.LeaderMessage_FileSync:
+		if w.onFileSync != nil {
+			w.onFileSync(ctx, m.FileSync)
+		}
+	case *pb.LeaderMessage_FileUpdate:
+		if w.onFileUpdate != nil {
+			w.onFileUpdate(ctx, m.FileUpdate)
+		}
+	case *pb.LeaderMessage_CreateTerminal:
+		runConcurrent(ctx, sem, w.onCreateTerminal, m.CreateTerminal)
+	case *pb.LeaderMessage_TerminalInput:
+		if w.onTerminalInput != nil {
+			w.onTerminalInput(ctx, m.TerminalInput)
+		}
+	case *pb.LeaderMessage_TerminalResize:
+		if w.onTerminalResize != nil {
+			w.onTerminalResize(ctx, m.TerminalResize)
+		}
+	case *pb.LeaderMessage_CloseTerminal:
+		runConcurrent(ctx, sem, w.onCloseTerminal, m.CloseTerminal)
+	}
+}
+
+// runConcurrent runs a handler in a goroutine bounded by the semaphore.
+// If the handler is nil, it's a no-op.
+func runConcurrent[T any](ctx context.Context, sem chan struct{}, handler func(context.Context, T), msg T) {
+	if handler == nil {
+		return
+	}
+	go func() {
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		handler(ctx, msg)
+	}()
 }
 
 // Send sends a message to the leader with write serialization.

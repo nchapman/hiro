@@ -255,7 +255,7 @@ func TestCompaction_Workflow(t *testing.T) {
 	d.CreateSession(ctx, Session{ID: "s1", AgentName: "test", Mode: "persistent"})
 
 	// Add messages.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		d.AppendMessage(ctx, "s1", "user", "msg", "{}", 100)
 	}
 

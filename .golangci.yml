@@ -26,6 +26,14 @@ linters:
     - wastedassign
     - mnd
     - goconst
+    - gocognit
+    - funlen
+    - nestif
+    - intrange
+    - forcetypeassert
+    - dupword
+    - nakedret
+    - loggercheck
 
   settings:
     gocritic:
@@ -60,6 +68,13 @@ linters:
         - name: unreachable-code
         - name: redefines-builtin-id
         - name: empty-block
+    gocognit:
+      min-complexity: 30
+    funlen:
+      lines: 60
+      statements: 40
+    nestif:
+      min-complexity: 5
     errcheck:
       check-type-assertions: true
     errorlint:
@@ -89,6 +104,10 @@ linters:
           - revive
           - mnd
           - goconst
+          - funlen
+          - gocognit
+          - nestif
+          - forcetypeassert
       # Generated protobuf code
       - path: \.pb\.go$
         linters:

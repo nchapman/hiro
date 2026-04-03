@@ -11,6 +11,13 @@ import (
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
+// restoreEntry holds the data needed to restore a single instance.
+type restoreEntry struct {
+	dbInst platformdb.Instance
+	cfg    config.AgentConfig
+	mode   config.AgentMode
+}
+
 // RestoreInstances reads persistent instances from the platform database
 // and restarts them. Call once after NewManager.
 func (m *Manager) RestoreInstances(ctx context.Context) error {
@@ -26,11 +33,6 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	// Separate stopped instances from running ones. Stopped instances are
 	// registered in two passes: first without groups (so all parents are
 	// in the registry), then groups are derived with parent intersection.
-	type restoreEntry struct {
-		dbInst platformdb.Instance
-		cfg    config.AgentConfig
-		mode   config.AgentMode
-	}
 	var stopped, toStart []restoreEntry
 
 	var cleaned int
@@ -64,6 +66,26 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 	}
 
+	// Register stopped instances in two passes: first without groups (so all
+	// parents are in the registry), then resolve groups with parent intersection.
+	restored := m.registerStoppedInstances(stopped)
+
+	// Start running instances.
+	for _, e := range toStart {
+		if m.restoreRunningInstance(ctx, e) {
+			restored++
+		}
+	}
+
+	if restored > 0 || cleaned > 0 {
+		m.logger.Info("instance restore complete", "restored", restored, "ephemeral_cleaned", cleaned)
+	}
+	return nil
+}
+
+// registerStoppedInstances registers stopped instances in the manager's registry
+// and resolves their supplementary groups. Returns the count registered.
+func (m *Manager) registerStoppedInstances(stopped []restoreEntry) int {
 	// Pass 1: register all stopped instances (without groups) so
 	// parentGroupSet can find parents regardless of restore order.
 	for _, e := range stopped {
@@ -91,7 +113,6 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 
 	// Pass 2: resolve groups via the shared helper, now that all
 	// stopped instances are registered and parentGroupSet works.
-	var restored int
 	for _, e := range stopped {
 		if m.uidPool != nil {
 			groups := m.resolveSupplementaryGroups(e.cfg, e.dbInst.ParentID)
@@ -101,59 +122,69 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 		m.logger.Info("restored stopped instance",
 			"id", e.dbInst.ID, "name", e.cfg.Name)
-		restored++
+	}
+	return len(stopped)
+}
+
+// restoreRunningInstance restarts a single persistent instance from its DB record.
+// Returns true if the instance was successfully restored.
+func (m *Manager) restoreRunningInstance(ctx context.Context, e restoreEntry) bool {
+	// Verify instance dir exists.
+	if _, err := os.Stat(m.instanceDir(e.dbInst.ID)); os.IsNotExist(err) {
+		m.logger.Warn("instance dir missing, removing orphaned DB record",
+			"id", e.dbInst.ID, "agent", e.dbInst.AgentName)
+		_ = m.pdb.DeleteInstance(ctx, e.dbInst.ID)
+		return false
 	}
 
-	// Start running instances.
-	for _, e := range toStart {
-		// Verify instance dir exists.
-		if _, err := os.Stat(m.instanceDir(e.dbInst.ID)); os.IsNotExist(err) {
-			m.logger.Warn("instance dir missing, removing orphaned DB record",
-				"id", e.dbInst.ID, "agent", e.dbInst.AgentName)
-			_ = m.pdb.DeleteInstance(ctx, e.dbInst.ID)
-			continue
-		}
+	// Resume the latest session if one exists, otherwise create a new one.
+	sessionID := m.resolveSessionForRestore(ctx, e.dbInst.ID, e.dbInst.AgentName)
 
-		// Resume the latest session if one exists, otherwise create a new one.
-		var sessionID string
-		sess, ok, sessErr := m.pdb.LatestSessionByInstance(ctx, e.dbInst.ID)
-		if sessErr != nil {
-			m.logger.Warn("failed to query latest session, creating new one",
-				"instance", e.dbInst.ID, "error", sessErr)
-		}
-		if ok {
-			sessionID = sess.ID
-			m.logger.Info("resuming existing session",
-				"instance", e.dbInst.ID, "session", sessionID, "agent", e.dbInst.AgentName)
-		} else {
-			sessionID = uuid.Must(uuid.NewV7()).String()
-			m.logger.Info("creating new session (no previous session found)",
-				"instance", e.dbInst.ID, "session", sessionID, "agent", e.dbInst.AgentName)
-		}
-		// Pass empty display name/desc — startInstance reads persona.md for existing instances.
-		// Use the persisted node_id so instances restart on their original node.
-		_, err = m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "")
-		if err != nil {
-			m.logger.Warn("failed to restore instance",
-				"id", e.dbInst.ID, "agent", e.dbInst.AgentName, "error", err)
-			continue
-		}
-
-		// Restore per-instance config (model override, reasoning effort).
-		if instCfg, cfgErr := m.pdb.GetInstanceConfig(ctx, e.dbInst.ID); cfgErr == nil {
-			if instCfg.ModelOverride != "" || instCfg.ReasoningEffort != "" {
-				effort := instCfg.ReasoningEffort
-				if err := m.UpdateInstanceConfig(ctx, e.dbInst.ID, instCfg.ModelOverride, &effort); err != nil {
-					m.logger.Warn("failed to restore instance config",
-						"instance", e.dbInst.ID, "error", err)
-				}
-			}
-		}
-		restored++
+	// Pass empty display name/desc — startInstance reads persona.md for existing instances.
+	// Use the persisted node_id so instances restart on their original node.
+	_, err := m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "")
+	if err != nil {
+		m.logger.Warn("failed to restore instance",
+			"id", e.dbInst.ID, "agent", e.dbInst.AgentName, "error", err)
+		return false
 	}
 
-	if restored > 0 || cleaned > 0 {
-		m.logger.Info("instance restore complete", "restored", restored, "ephemeral_cleaned", cleaned)
+	// Restore per-instance config (model override, reasoning effort).
+	m.restoreInstanceConfig(ctx, e.dbInst.ID)
+	return true
+}
+
+// resolveSessionForRestore finds the latest session for an instance or creates a new ID.
+func (m *Manager) resolveSessionForRestore(ctx context.Context, instanceID, agentName string) string {
+	sess, ok, err := m.pdb.LatestSessionByInstance(ctx, instanceID)
+	if err != nil {
+		m.logger.Warn("failed to query latest session, creating new one",
+			"instance", instanceID, "error", err)
 	}
-	return nil
+	if ok {
+		m.logger.Info("resuming existing session",
+			"instance", instanceID, "session", sess.ID, "agent", agentName)
+		return sess.ID
+	}
+	sessionID := uuid.Must(uuid.NewV7()).String()
+	m.logger.Info("creating new session (no previous session found)",
+		"instance", instanceID, "session", sessionID, "agent", agentName)
+	return sessionID
+}
+
+// restoreInstanceConfig restores per-instance config (model override, reasoning effort)
+// from the platform database.
+func (m *Manager) restoreInstanceConfig(ctx context.Context, instanceID string) {
+	instCfg, err := m.pdb.GetInstanceConfig(ctx, instanceID)
+	if err != nil {
+		return
+	}
+	if instCfg.ModelOverride == "" && instCfg.ReasoningEffort == "" {
+		return
+	}
+	effort := instCfg.ReasoningEffort
+	if err := m.UpdateInstanceConfig(ctx, instanceID, instCfg.ModelOverride, &effort); err != nil {
+		m.logger.Warn("failed to restore instance config",
+			"instance", instanceID, "error", err)
+	}
 }

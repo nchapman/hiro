@@ -30,57 +30,8 @@ func (s *FileSyncService) CreateInitialSync() ([]byte, error) {
 		if _, err := os.Stat(absDir); os.IsNotExist(err) {
 			continue
 		}
-		err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				s.logger.Warn("initial sync: walk error", "path", path, "error", err)
-				return nil // skip inaccessible paths
-			}
-			relPath, relErr := filepath.Rel(s.rootDir, path)
-			if relErr != nil {
-				return nil
-			}
-			if shouldIgnore(relPath) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil {
-				s.logger.Warn("initial sync: stat error", "path", relPath, "error", err)
-				return nil
-			}
-
-			header, err := tar.FileInfoHeader(info, "")
-			if err != nil {
-				s.logger.Warn("initial sync: header error", "path", relPath, "error", err)
-				return nil
-			}
-			header.Name = relPath
-
-			if d.IsDir() {
-				header.Name += "/"
-				return tw.WriteHeader(header)
-			}
-
-			if !info.Mode().IsRegular() {
-				return nil
-			}
-			if info.Size() > maxFileSize {
-				s.logger.Warn("skipping large file in initial sync", "path", relPath, "size", info.Size())
-				return nil
-			}
-
-			if err := tw.WriteHeader(header); err != nil {
-				return err
-			}
-			f, err := os.Open(path)
-			if err != nil {
-				return nil
-			}
-			defer func() { _ = f.Close() }()
-			_, err = io.Copy(tw, f)
-			return err
+		err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, walkErr error) error {
+			return s.tarEntry(tw, path, d, walkErr)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("walking %s: %w", dir, err)
@@ -94,6 +45,60 @@ func (s *FileSyncService) CreateInitialSync() ([]byte, error) {
 		return nil, fmt.Errorf("closing zstd: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// tarEntry adds a single filesystem entry to the tar archive during initial sync.
+func (s *FileSyncService) tarEntry(tw *tar.Writer, path string, d fs.DirEntry, walkErr error) error {
+	if walkErr != nil {
+		s.logger.Warn("initial sync: walk error", "path", path, "error", walkErr)
+		return nil // skip inaccessible paths
+	}
+	relPath, relErr := filepath.Rel(s.rootDir, path)
+	if relErr != nil {
+		return nil
+	}
+	if shouldIgnore(relPath) {
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+	info, err := d.Info()
+	if err != nil {
+		s.logger.Warn("initial sync: stat error", "path", relPath, "error", err)
+		return nil
+	}
+
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		s.logger.Warn("initial sync: header error", "path", relPath, "error", err)
+		return nil
+	}
+	header.Name = relPath
+
+	if d.IsDir() {
+		header.Name += "/"
+		return tw.WriteHeader(header)
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	if info.Size() > maxFileSize {
+		s.logger.Warn("skipping large file in initial sync", "path", relPath, "size", info.Size())
+		return nil
+	}
+
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	_, err = io.Copy(tw, f)
+	return err
 }
 
 // ApplyInitialSyncStream extracts a zstd-compressed tar from a streaming

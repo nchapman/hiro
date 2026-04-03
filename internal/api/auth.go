@@ -26,10 +26,12 @@ const (
 func sessionCookieName(r *http.Request) string {
 	_, port, err := net.SplitHostPort(r.Host)
 	if err != nil || port == "" || port == "80" || port == "443" {
-		return "hiro_session"
+		return sessionCookieBase
 	}
-	return "hiro_session_" + port
+	return sessionCookieBase + "_" + port
 }
+
+const sessionCookieBase = "hiro_session"
 
 // setSessionCookie writes a session token cookie to the response.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {

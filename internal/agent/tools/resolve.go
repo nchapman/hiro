@@ -21,7 +21,7 @@ func getAllowedRoots() []string {
 	if v == nil {
 		return nil
 	}
-	s := v.([]string) //nolint:errcheck // infallible: only []string is ever stored
+	s, _ := v.([]string)
 	if len(s) == 0 {
 		return nil
 	}

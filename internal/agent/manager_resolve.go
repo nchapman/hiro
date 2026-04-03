@@ -58,52 +58,12 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 		allowLayers = append(allowLayers, agentAllow)
 	}
 
-	// Intersect with control plane override if present.
-	if m.cp != nil {
-		if cpToolStrs, ok := m.cp.AgentTools(cfg.Name); ok {
-			cpAllow, parseErr := toolrules.ParseRules(cpToolStrs)
-			if parseErr != nil {
-				return nil, nil, nil, fmt.Errorf("parsing control plane tool rules: %w", parseErr)
-			}
-			cpNames := make(map[string]bool, len(cpAllow))
-			for _, r := range cpAllow {
-				cpNames[r.Tool] = true
-			}
-			for t := range effective {
-				if !cpNames[t] {
-					delete(effective, t)
-				}
-			}
-			if hasParameterized(cpAllow) {
-				allowLayers = append(allowLayers, filterRules(cpAllow, effective))
-			}
-		}
-
-		// Control plane deny rules.
-		if cpDenyStrs := m.cp.AgentDisallowedTools(cfg.Name); len(cpDenyStrs) > 0 {
-			cpDeny, parseErr := toolrules.ParseRules(cpDenyStrs)
-			if parseErr != nil {
-				return nil, nil, nil, fmt.Errorf("parsing control plane deny rules: %w", parseErr)
-			}
-			denyRules = append(denyRules, cpDeny...)
-		}
+	// Intersect with control plane and parent rules.
+	allowLayers, denyRules, err = m.intersectControlPlaneRules(cfg.Name, effective, allowLayers, denyRules)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-
-	// Intersect with parent's effective tools and inherit its rules.
-	if parentID != "" {
-		m.mu.RLock()
-		parent, ok := m.instances[parentID]
-		m.mu.RUnlock()
-		if ok && parent.effectiveTools != nil {
-			for t := range effective {
-				if !parent.effectiveTools[t] {
-					delete(effective, t)
-				}
-			}
-			allowLayers = append(allowLayers, parent.allowLayers...)
-			denyRules = append(denyRules, parent.denyRules...)
-		}
-	}
+	allowLayers, denyRules = m.intersectParentRules(parentID, effective, allowLayers, denyRules)
 
 	// Filter all allow layers to only include rules for effective tools,
 	// and strip whole-tool grants that would silently nullify parameterized
@@ -123,6 +83,65 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 	denyRules = filterRules(denyRules, effective)
 
 	return effective, allowLayers, denyRules, nil
+}
+
+// intersectControlPlaneRules intersects the effective tool set with control plane
+// overrides and collects CP deny rules. Modifies effective in place.
+func (m *Manager) intersectControlPlaneRules(agentName string, effective map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) ([][]toolrules.Rule, []toolrules.Rule, error) {
+	if m.cp == nil {
+		return allowLayers, denyRules, nil
+	}
+
+	if cpToolStrs, ok := m.cp.AgentTools(agentName); ok {
+		cpAllow, parseErr := toolrules.ParseRules(cpToolStrs)
+		if parseErr != nil {
+			return nil, nil, fmt.Errorf("parsing control plane tool rules: %w", parseErr)
+		}
+		cpNames := make(map[string]bool, len(cpAllow))
+		for _, r := range cpAllow {
+			cpNames[r.Tool] = true
+		}
+		for t := range effective {
+			if !cpNames[t] {
+				delete(effective, t)
+			}
+		}
+		if hasParameterized(cpAllow) {
+			allowLayers = append(allowLayers, filterRules(cpAllow, effective))
+		}
+	}
+
+	if cpDenyStrs := m.cp.AgentDisallowedTools(agentName); len(cpDenyStrs) > 0 {
+		cpDeny, parseErr := toolrules.ParseRules(cpDenyStrs)
+		if parseErr != nil {
+			return nil, nil, fmt.Errorf("parsing control plane deny rules: %w", parseErr)
+		}
+		denyRules = append(denyRules, cpDeny...)
+	}
+
+	return allowLayers, denyRules, nil
+}
+
+// intersectParentRules intersects the effective tool set with the parent instance's
+// effective tools and inherits its allow/deny rules. Modifies effective in place.
+func (m *Manager) intersectParentRules(parentID string, effective map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) ([][]toolrules.Rule, []toolrules.Rule) {
+	if parentID == "" {
+		return allowLayers, denyRules
+	}
+	m.mu.RLock()
+	parent, ok := m.instances[parentID]
+	m.mu.RUnlock()
+	if !ok || parent.effectiveTools == nil {
+		return allowLayers, denyRules
+	}
+	for t := range effective {
+		if !parent.effectiveTools[t] {
+			delete(effective, t)
+		}
+	}
+	allowLayers = append(allowLayers, parent.allowLayers...)
+	denyRules = append(denyRules, parent.denyRules...)
+	return allowLayers, denyRules
 }
 
 // hasParameterized reports whether any rule has a non-empty pattern.
@@ -240,31 +259,35 @@ func (m *Manager) resolveModelSpec(agentModel string) (spec models.ModelSpec, ap
 
 	// 2. Agent definition override.
 	if agentModel != "" {
-		agentSpec := models.ParseModelSpec(agentModel)
-		spec.Model = agentSpec.Model
-		if agentSpec.Provider != "" {
-			spec.Provider = agentSpec.Provider
-		} else {
-			// Bare model name — clear inherited provider so the
-			// fallback search resolves the correct provider.
-			spec.Provider = ""
-		}
+		applyModelOverride(&spec, agentModel)
 	}
 
 	// 3. Env override (highest priority).
 	if m.opts.Model != "" {
-		envSpec := models.ParseModelSpec(m.opts.Model)
-		spec.Model = envSpec.Model
-		if envSpec.Provider != "" {
-			spec.Provider = envSpec.Provider
-		} else {
-			spec.Provider = ""
-		}
+		applyModelOverride(&spec, m.opts.Model)
 	}
 
+	return m.resolveProviderCredentials(spec)
+}
+
+// applyModelOverride merges a model string into a spec. A bare model name
+// (no provider prefix) clears the inherited provider so the fallback search
+// resolves the correct provider.
+func applyModelOverride(spec *models.ModelSpec, model string) {
+	parsed := models.ParseModelSpec(model)
+	spec.Model = parsed.Model
+	if parsed.Provider != "" {
+		spec.Provider = parsed.Provider
+	} else {
+		spec.Provider = ""
+	}
+}
+
+// resolveProviderCredentials resolves API key and base URL for a model spec
+// using the control plane's configured providers.
+func (m *Manager) resolveProviderCredentials(spec models.ModelSpec) (models.ModelSpec, string, string, error) {
 	if spec.IsEmpty() {
-		// No model specified anywhere — fall back to default provider
-		// credentials. The provider SDK will use its own default model.
+		// No model specified anywhere — fall back to default provider credentials.
 		pt, apiKey, baseURL, ok := m.cp.ProviderInfo()
 		if !ok {
 			return spec, "", "", nil
@@ -273,7 +296,6 @@ func (m *Manager) resolveModelSpec(agentModel string) (spec models.ModelSpec, ap
 		return spec, apiKey, baseURL, nil
 	}
 
-	// Resolve provider credentials.
 	if spec.Provider != "" {
 		apiKey, baseURL, ok := m.cp.ProviderByType(spec.Provider)
 		if !ok {

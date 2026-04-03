@@ -95,15 +95,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.hasManager() || s.leaderID == "" {
-		http.Error(w, "no agent configured", http.StatusServiceUnavailable)
+	instanceID, err := s.resolveChatInstance(r)
+	if err != "" {
+		http.Error(w, err, http.StatusServiceUnavailable)
 		return
-	}
-
-	// Allow targeting a specific instance via query param, default to leader
-	instanceID := r.URL.Query().Get("instance_id")
-	if instanceID == "" {
-		instanceID = s.leaderID
 	}
 	info, ok := s.manager.GetInstance(instanceID)
 	if !ok || info.Mode == config.ModeEphemeral {
@@ -115,14 +110,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+	conn, err2 := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// Restrict to same-origin. In development, Vite proxies WebSocket
 		// requests so the origin matches. In production, the embedded UI
 		// is served from the same host.
 		OriginPatterns: []string{r.Host},
 	})
-	if err != nil {
-		s.logger.Error("chat websocket accept failed", "error", err)
+	if err2 != nil {
+		s.logger.Error("chat websocket accept failed", "error", err2)
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
@@ -133,7 +128,26 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(wsReadLimitChat)
 
 	ctx := r.Context()
+	onEvent, sendDone := s.chatEventHandlers(ctx, conn, instanceID)
+	s.chatEventLoop(ctx, conn, instanceID, onEvent, sendDone)
+}
 
+// resolveChatInstance validates the manager is ready and returns the target
+// instance ID. Returns a non-empty error string on failure.
+func (s *Server) resolveChatInstance(r *http.Request) (string, string) {
+	if !s.hasManager() || s.leaderID == "" {
+		return "", "no agent configured"
+	}
+	instanceID := r.URL.Query().Get("instance_id")
+	if instanceID == "" {
+		instanceID = s.leaderID
+	}
+	return instanceID, ""
+}
+
+// chatEventHandlers builds the onEvent and sendDone callbacks for a chat
+// WebSocket connection.
+func (s *Server) chatEventHandlers(ctx context.Context, conn *websocket.Conn, instanceID string) (func(ipc.ChatEvent) error, func() error) {
 	// onEvent streams inference events to the WebSocket. Shared between
 	// user-triggered and notification-triggered turns.
 	onEvent := func(evt ipc.ChatEvent) error {
@@ -163,8 +177,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return wsjson.Write(ctx, conn, done)
 	}
 
-	// Read user messages in a goroutine so we can select on both user
-	// input and notification signals.
+	return onEvent, sendDone
+}
+
+// chatEventLoop reads user messages and notifications, dispatching them until
+// the connection closes.
+func (s *Server) chatEventLoop(ctx context.Context, conn *websocket.Conn, instanceID string, onEvent func(ipc.ChatEvent) error, sendDone func() error) {
 	type readResult struct {
 		msg ChatMessage
 		err error
@@ -221,15 +239,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, instanceID string, msg ChatMessage, onEvent func(ipc.ChatEvent) error, sendDone func() error) error {
 	// Handle config changes (model switch, reasoning toggle).
 	if msg.Type == msgTypeConfig {
-		if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
-			s.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
-			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
-		} else {
-			s.logger.Info("config updated", "instance_id", instanceID, "model", msg.Model)
-			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
-		}
-		done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(ctx, instanceID)}
-		return wsjson.Write(ctx, conn, done)
+		return s.handleConfigMessage(ctx, conn, instanceID, msg)
 	}
 
 	if msg.Type != msgTypeMessage || (msg.Content == "" && len(msg.Attachments) == 0) {
@@ -238,49 +248,7 @@ func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, in
 
 	// Intercept slash commands before processing attachments.
 	if strings.HasPrefix(msg.Content, "/") {
-		trimmed := strings.TrimPrefix(msg.Content, "/")
-		cmd := strings.Fields(trimmed)
-		if len(cmd) == 0 {
-			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Type /help for available commands."})
-			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
-		}
-
-		// /clear — start a new session (handled here because it needs the manager).
-		// Send the clear message immediately so the UI resets instantly;
-		// NewSession (which tears down the old worker and spawns a new one)
-		// runs in the background.
-		if cmd[0] == "clear" {
-			if s.hasManager() {
-				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "clear"})
-				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
-				go func() {
-					if _, err := s.manager.NewSession(instanceID); err != nil {
-						s.logger.Warn("failed to create new session after /clear", "instance_id", instanceID, "error", err)
-						_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "Session reset failed: " + err.Error()})
-					}
-				}()
-				return nil
-			}
-			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "No instance manager available."})
-			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
-		}
-
-		if s.cmdHandler != nil {
-			result, err := s.cmdHandler.HandleCommand(msg.Content)
-			if err == nil {
-				if writeErr := wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: result}); writeErr != nil {
-					return writeErr
-				}
-				return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
-			}
-			// Surface the specific error (e.g. "unknown secrets command: badverb").
-			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: err.Error() + "\nType /help for available commands."})
-			return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
-		}
-
-		// No command handler — show generic error.
-		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: fmt.Sprintf("Unknown command: %s\nType /help for available commands.", cmd[0])})
-		return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+		return s.handleSlashCommand(ctx, conn, instanceID, msg.Content)
 	}
 
 	// Decode attachments into fantasy.FileParts.
@@ -297,6 +265,78 @@ func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, in
 		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: streamErr.Error()})
 	}
 	return sendDone()
+}
+
+// handleConfigMessage processes a config change (model switch, reasoning toggle)
+// and sends the done marker. Returns a non-nil error if the connection should be closed.
+func (s *Server) handleConfigMessage(ctx context.Context, conn *websocket.Conn, instanceID string, msg ChatMessage) error {
+	if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
+		s.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
+	} else {
+		s.logger.Info("config updated", "instance_id", instanceID, "model", msg.Model)
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Configuration updated."})
+	}
+	done := ChatMessage{Type: "done", Usage: s.buildUsageInfo(ctx, instanceID)}
+	return wsjson.Write(ctx, conn, done)
+}
+
+// handleSlashCommand dispatches a slash command from the chat WebSocket.
+// Returns a non-nil error if the connection should be closed.
+func (s *Server) handleSlashCommand(ctx context.Context, conn *websocket.Conn, instanceID, content string) error {
+	trimmed := strings.TrimPrefix(content, "/")
+	cmd := strings.Fields(trimmed)
+	if len(cmd) == 0 {
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: "Type /help for available commands."})
+		return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+	}
+
+	// /clear — start a new session (handled here because it needs the manager).
+	// Send the clear message immediately so the UI resets instantly;
+	// NewSession (which tears down the old worker and spawns a new one)
+	// runs in the background.
+	if cmd[0] == "clear" {
+		return s.handleClearCommand(ctx, conn, instanceID)
+	}
+
+	if s.cmdHandler != nil {
+		return s.dispatchCommand(ctx, conn, content)
+	}
+
+	// No command handler — show generic error.
+	_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: fmt.Sprintf("Unknown command: %s\nType /help for available commands.", cmd[0])})
+	return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+}
+
+// handleClearCommand processes the /clear slash command.
+func (s *Server) handleClearCommand(ctx context.Context, conn *websocket.Conn, instanceID string) error {
+	if s.hasManager() {
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "clear"})
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+		go func() {
+			if _, err := s.manager.NewSession(instanceID); err != nil {
+				s.logger.Warn("failed to create new session after /clear", "instance_id", instanceID, "error", err)
+				_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "Session reset failed: " + err.Error()})
+			}
+		}()
+		return nil
+	}
+	_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "No instance manager available."})
+	return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+}
+
+// dispatchCommand runs a slash command through the command handler.
+func (s *Server) dispatchCommand(ctx context.Context, conn *websocket.Conn, content string) error {
+	result, err := s.cmdHandler.HandleCommand(content)
+	if err == nil {
+		if writeErr := wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: result}); writeErr != nil {
+			return writeErr
+		}
+		return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
+	}
+	// Surface the specific error (e.g. "unknown secrets command: badverb").
+	_ = wsjson.Write(ctx, conn, ChatMessage{Type: "system", Content: err.Error() + "\nType /help for available commands."})
+	return wsjson.Write(ctx, conn, ChatMessage{Type: "done"})
 }
 
 // drainNotifications processes all pending notifications for an instance,

@@ -215,41 +215,10 @@ func (l *Loop) expandToolsForSkill(skill *config.SkillConfig) error {
 		wantTools[r.Tool] = true
 	}
 
-	// Build set of tools already available.
 	l.updateMu.Lock()
 	defer l.updateMu.Unlock()
 
-	haveTools := make(map[string]bool, len(l.tools))
-	for _, t := range l.tools {
-		haveTools[t.Info().Name] = true
-	}
-
-	// Build set of wholly denied tools.
-	denied := make(map[string]bool)
-	for _, r := range l.baseDenyRules {
-		if r.IsWholeTool() {
-			denied[r.Tool] = true
-		}
-	}
-
-	// Determine which tools to add.
-	var newToolNames []string
-	for name := range wantTools {
-		if haveTools[name] {
-			continue // already available
-		}
-		if denied[name] {
-			l.logger.Warn("skill requests denied tool, skipping",
-				"skill", skill.Name, "tool", name)
-			continue
-		}
-		if !tools.RemoteToolNames[name] {
-			l.logger.Warn("skill requests non-remote tool, skipping",
-				"skill", skill.Name, "tool", name)
-			continue
-		}
-		newToolNames = append(newToolNames, name)
-	}
+	newToolNames := l.filterNewTools(skill.Name, wantTools)
 
 	// Only accumulate rules and create proxies if there are new tools to add.
 	// Skills are additive only — they don't restrict existing tools.
@@ -257,40 +226,76 @@ func (l *Loop) expandToolsForSkill(skill *config.SkillConfig) error {
 		return nil
 	}
 
-	// Accumulate skill rules into a single allow layer.
 	l.skillAllowLayer = append(l.skillAllowLayer, rules...)
+	l.addSkillProxyTools(skill.Name, newToolNames)
 
-	// Build the combined allow layers for skill-granted proxy tools:
-	// base layers + skill layer.
+	return nil
+}
+
+// filterNewTools determines which tools from wantTools need to be added.
+// Must be called with updateMu held.
+func (l *Loop) filterNewTools(skillName string, wantTools map[string]bool) []string {
+	haveTools := make(map[string]bool, len(l.tools))
+	for _, t := range l.tools {
+		haveTools[t.Info().Name] = true
+	}
+
+	denied := make(map[string]bool)
+	for _, r := range l.baseDenyRules {
+		if r.IsWholeTool() {
+			denied[r.Tool] = true
+		}
+	}
+
+	var newToolNames []string
+	for name := range wantTools {
+		if haveTools[name] {
+			continue
+		}
+		if denied[name] {
+			l.logger.Warn("skill requests denied tool, skipping",
+				"skill", skillName, "tool", name)
+			continue
+		}
+		if !tools.RemoteToolNames[name] {
+			l.logger.Warn("skill requests non-remote tool, skipping",
+				"skill", skillName, "tool", name)
+			continue
+		}
+		newToolNames = append(newToolNames, name)
+	}
+	return newToolNames
+}
+
+// addSkillProxyTools creates proxy tools for newly granted remote tools
+// and registers them in the loop's tool set.
+// Must be called with updateMu held.
+func (l *Loop) addSkillProxyTools(skillName string, newToolNames []string) {
+	// Build the combined allow layers: base layers + skill layer.
 	skillLayers := make([][]toolrules.Rule, len(l.baseAllowLayers)+1)
 	copy(skillLayers, l.baseAllowLayers)
 	skillLayers[len(skillLayers)-1] = l.skillAllowLayer
 
-	// Create proxy tools for newly granted remote tools.
-	{
-		newNames := make(map[string]bool, len(newToolNames))
-		for _, n := range newToolNames {
-			newNames[n] = true
-		}
-		for _, info := range tools.RemoteToolInfos(l.workingDir) {
-			if !newNames[info.Name] {
-				continue
-			}
-			l.tools = append(l.tools, &proxyTool{
-				info:        info,
-				executor:    l.executor,
-				redactor:    l.redactor,
-				logger:      l.logger,
-				allowLayers: skillLayers,
-				denyRules:   l.baseDenyRules,
-			})
-		}
-		l.skillExpanded = true
-		l.logger.Info("skill expanded tools",
-			"skill", skill.Name, "new_tools", newToolNames)
+	newNames := make(map[string]bool, len(newToolNames))
+	for _, n := range newToolNames {
+		newNames[n] = true
 	}
-
-	return nil
+	for _, info := range tools.RemoteToolInfos(l.workingDir) {
+		if !newNames[info.Name] {
+			continue
+		}
+		l.tools = append(l.tools, &proxyTool{
+			info:        info,
+			executor:    l.executor,
+			redactor:    l.redactor,
+			logger:      l.logger,
+			allowLayers: skillLayers,
+			denyRules:   l.baseDenyRules,
+		})
+	}
+	l.skillExpanded = true
+	l.logger.Info("skill expanded tools",
+		"skill", skillName, "new_tools", newToolNames)
 }
 
 // Notify pushes a notification into the queue. The session driver (WebSocket
@@ -323,8 +328,6 @@ func (l *Loop) ChatMeta(ctx context.Context, prompt string, onEvent func(ipc.Cha
 }
 
 func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart, meta bool, onEvent func(ipc.ChatEvent) error) (string, error) {
-	var messages []fantasy.Message
-
 	// Snapshot mutable state under the update lock to avoid races with UpdateModel/SetReasoningEffort.
 	l.updateMu.Lock()
 	agent := l.agent
@@ -334,45 +337,7 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 	providerOpts := l.buildReasoningOptionsLocked()
 	l.updateMu.Unlock()
 
-	if l.mode.IsPersistent() && l.pdb != nil {
-		cfg := CompactionConfigForModel(agentModel)
-
-		// Check whether compaction is needed before assembly. This fires in
-		// two cases: (1) the hard threshold was exceeded on the previous turn
-		// (needsCompaction flag), or (2) the last known context size exceeds
-		// the current model's soft threshold — which catches model switches
-		// (e.g., 200K → 32K) where the old context is suddenly over-full.
-		lastTokens := l.lastInputTokens.Load()
-		needsSync := l.needsCompaction.CompareAndSwap(true, false) ||
-			(lastTokens > 0 && lastTokens >= int64(cfg.SoftThresholdTokens()))
-
-		if needsSync {
-			l.compactMu.Lock()
-			compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm, providerOptions: providerOpts}, cfg, l.logger)
-			if result, err := compactor.CompactIfNeeded(ctx, lastTokens); err != nil {
-				l.logger.Warn("synchronous compaction failed", "error", err)
-			} else if result.HardThresholdExceeded {
-				l.logger.Warn("context still exceeds hard threshold after synchronous compaction")
-			}
-			l.compactMu.Unlock()
-		}
-
-		// Assemble intentionally runs outside compactMu. If a prior turn's
-		// async compaction is still in progress, SQLite WAL snapshot isolation
-		// ensures Assemble sees a consistent pre- or post-compaction state.
-		assembled, err := Assemble(ctx, l.pdb, l.sessionID, cfg)
-		if err != nil {
-			l.logger.Error("failed to assemble context, proceeding with empty history", "error", err)
-		}
-		if assembled.Messages != nil {
-			messages = assembled.Messages
-		}
-	} else {
-		l.ephemeralMu.Lock()
-		messages = make([]fantasy.Message, len(l.ephemeralMsgs))
-		copy(messages, l.ephemeralMsgs)
-		l.ephemeralMu.Unlock()
-	}
+	messages := l.assembleMessages(ctx, agentModel, lm, providerOpts)
 
 	emit := func(evt ipc.ChatEvent) error {
 		if onEvent != nil {
@@ -383,7 +348,91 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 
 	l.logger.Info("inference turn started", "model", agentModel, "provider", agentProvider, "history_messages", len(messages))
 
-	call := fantasy.AgentStreamCall{
+	call := l.buildStreamCall(prompt, files, messages, providerOpts, emit)
+
+	result, err := agent.Stream(ctx, call)
+	if err != nil {
+		l.logger.Error("inference turn failed", "error", err)
+		return "", fmt.Errorf("agent stream: %w", err)
+	}
+
+	l.logger.Info("inference turn completed", "steps", len(result.Steps))
+
+	// Persist results.
+	if l.mode.IsPersistent() && l.pdb != nil {
+		l.persistTurn(ctx, prompt, files, meta, result, lm, agentModel, providerOpts)
+	} else {
+		l.ephemeralMu.Lock()
+		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
+		for _, step := range result.Steps {
+			l.ephemeralMsgs = append(l.ephemeralMsgs, step.Messages...)
+		}
+		l.ephemeralMu.Unlock()
+	}
+
+	// Record usage.
+	if l.pdb != nil {
+		l.recordUsage(ctx, result, agentModel, agentProvider)
+	}
+
+	return result.Response.Content.Text(), nil
+}
+
+// assembleMessages loads conversation history for the next inference turn.
+// For persistent sessions, runs synchronous compaction if needed, then
+// assembles from the platform DB. For ephemeral sessions, copies the
+// in-memory buffer.
+func (l *Loop) assembleMessages(ctx context.Context, model string, lm fantasy.LanguageModel, providerOpts fantasy.ProviderOptions) []fantasy.Message {
+	if !l.mode.IsPersistent() || l.pdb == nil {
+		l.ephemeralMu.Lock()
+		messages := make([]fantasy.Message, len(l.ephemeralMsgs))
+		copy(messages, l.ephemeralMsgs)
+		l.ephemeralMu.Unlock()
+		return messages
+	}
+
+	cfg := CompactionConfigForModel(model)
+	l.syncCompactIfNeeded(ctx, cfg, lm, providerOpts)
+
+	// Assemble intentionally runs outside compactMu. If a prior turn's
+	// async compaction is still in progress, SQLite WAL snapshot isolation
+	// ensures Assemble sees a consistent pre- or post-compaction state.
+	assembled, err := Assemble(ctx, l.pdb, l.sessionID, cfg)
+	if err != nil {
+		l.logger.Error("failed to assemble context, proceeding with empty history", "error", err)
+	}
+	if assembled.Messages != nil {
+		return assembled.Messages
+	}
+	return nil
+}
+
+// syncCompactIfNeeded runs synchronous compaction before assembly when the
+// hard threshold was exceeded on the previous turn, or when the last known
+// context size exceeds the current model's soft threshold (catches model
+// switches, e.g. 200K → 32K).
+func (l *Loop) syncCompactIfNeeded(ctx context.Context, cfg CompactionConfig, lm fantasy.LanguageModel, providerOpts fantasy.ProviderOptions) {
+	lastTokens := l.lastInputTokens.Load()
+	needsSync := l.needsCompaction.CompareAndSwap(true, false) ||
+		(lastTokens > 0 && lastTokens >= int64(cfg.SoftThresholdTokens()))
+
+	if !needsSync {
+		return
+	}
+
+	l.compactMu.Lock()
+	defer l.compactMu.Unlock()
+	compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm, providerOptions: providerOpts}, cfg, l.logger)
+	if result, err := compactor.CompactIfNeeded(ctx, lastTokens); err != nil {
+		l.logger.Warn("synchronous compaction failed", "error", err)
+	} else if result.HardThresholdExceeded {
+		l.logger.Warn("context still exceeds hard threshold after synchronous compaction")
+	}
+}
+
+// buildStreamCall constructs the AgentStreamCall with all callbacks.
+func (l *Loop) buildStreamCall(prompt string, files []fantasy.FilePart, messages []fantasy.Message, providerOpts fantasy.ProviderOptions, emit func(ipc.ChatEvent) error) fantasy.AgentStreamCall {
+	return fantasy.AgentStreamCall{
 		Prompt:          prompt,
 		Files:           files,
 		Messages:        messages,
@@ -438,33 +487,6 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 			})
 		},
 	}
-
-	result, err := agent.Stream(ctx, call)
-	if err != nil {
-		l.logger.Error("inference turn failed", "error", err)
-		return "", fmt.Errorf("agent stream: %w", err)
-	}
-
-	l.logger.Info("inference turn completed", "steps", len(result.Steps))
-
-	// Persist results.
-	if l.mode.IsPersistent() && l.pdb != nil {
-		l.persistTurn(ctx, prompt, files, meta, result, lm, agentModel, providerOpts)
-	} else {
-		l.ephemeralMu.Lock()
-		l.ephemeralMsgs = append(l.ephemeralMsgs, fantasy.NewUserMessage(prompt, files...))
-		for _, step := range result.Steps {
-			l.ephemeralMsgs = append(l.ephemeralMsgs, step.Messages...)
-		}
-		l.ephemeralMu.Unlock()
-	}
-
-	// Record usage.
-	if l.pdb != nil {
-		l.recordUsage(ctx, result, agentModel, agentProvider)
-	}
-
-	return result.Response.Content.Text(), nil
 }
 
 // persistTurn stores the user message and all step messages in the platform DB,
@@ -699,59 +721,10 @@ func (l *Loop) currentSystemPrompt() string {
 // config snapshot. Does not acquire updateMu — safe to call from UpdateModel
 // which already holds the lock.
 func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
-	persona := ""
-	memory := ""
-	todos := ""
-	// Persona and memory are instance-level state.
-	if l.instanceDir != "" {
-		if pd, err := config.ReadPersonaFile(l.instanceDir); err != nil {
-			l.logger.Warn("could not read persona.md", "error", err)
-		} else {
-			persona = pd.ForPrompt()
-		}
-		if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
-			l.logger.Warn("could not read memory.md", "error", err)
-		} else {
-			memory = mem
-		}
-	}
-	// Todos are session-level state.
-	if l.sessionDir != "" {
-		if t, err := config.ReadTodos(l.sessionDir); err != nil {
-			l.logger.Warn("could not read todos.yaml", "error", err)
-		} else {
-			todos = config.FormatTodos(t)
-		}
-	}
+	persona, memory := l.readInstanceState()
+	todos := l.readSessionTodos()
 
-	if l.agentDefDir != "" {
-		prompt, err := config.ReloadAgentTexts(l.agentDefDir)
-		if err != nil {
-			l.logger.Warn("could not reload agent texts", "error", err)
-		} else {
-			cfg.Prompt = prompt
-		}
-	}
-
-	if l.agentDefDir != "" {
-		agentSkills, err := config.LoadSkills(filepath.Join(l.agentDefDir, "skills"))
-		if err != nil {
-			l.logger.Warn("could not reload agent skills", "error", err)
-		} else {
-			sharedSkills, sharedErr := config.LoadSkills(l.sharedSkillDir)
-
-			l.skillsMu.Lock()
-			if sharedErr != nil {
-				l.logger.Warn("could not reload shared skills", "error", sharedErr)
-				sharedSkills = l.lastShared
-			} else {
-				l.lastShared = sharedSkills
-			}
-			l.skillsMu.Unlock()
-
-			cfg.Skills = config.MergeSkills(agentSkills, sharedSkills)
-		}
-	}
+	l.reloadAgentDefinition(&cfg)
 
 	var secretNames []string
 	if l.secretNamesFn != nil {
@@ -765,6 +738,67 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		Mode:        l.mode,
 	}
 	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames)
+}
+
+// readInstanceState reads persona and memory from the instance directory.
+func (l *Loop) readInstanceState() (persona, memory string) {
+	if l.instanceDir == "" {
+		return "", ""
+	}
+	if pd, err := config.ReadPersonaFile(l.instanceDir); err != nil {
+		l.logger.Warn("could not read persona.md", "error", err)
+	} else {
+		persona = pd.ForPrompt()
+	}
+	if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
+		l.logger.Warn("could not read memory.md", "error", err)
+	} else {
+		memory = mem
+	}
+	return persona, memory
+}
+
+// readSessionTodos reads the todo list from the session directory.
+func (l *Loop) readSessionTodos() string {
+	if l.sessionDir == "" {
+		return ""
+	}
+	t, err := config.ReadTodos(l.sessionDir)
+	if err != nil {
+		l.logger.Warn("could not read todos.yaml", "error", err)
+		return ""
+	}
+	return config.FormatTodos(t)
+}
+
+// reloadAgentDefinition reloads agent prompt text and skills from disk.
+func (l *Loop) reloadAgentDefinition(cfg *config.AgentConfig) {
+	if l.agentDefDir == "" {
+		return
+	}
+	if prompt, err := config.ReloadAgentTexts(l.agentDefDir); err != nil {
+		l.logger.Warn("could not reload agent texts", "error", err)
+	} else {
+		cfg.Prompt = prompt
+	}
+
+	agentSkills, err := config.LoadSkills(filepath.Join(l.agentDefDir, "skills"))
+	if err != nil {
+		l.logger.Warn("could not reload agent skills", "error", err)
+		return
+	}
+	sharedSkills, sharedErr := config.LoadSkills(l.sharedSkillDir)
+
+	l.skillsMu.Lock()
+	if sharedErr != nil {
+		l.logger.Warn("could not reload shared skills", "error", sharedErr)
+		sharedSkills = l.lastShared
+	} else {
+		l.lastShared = sharedSkills
+	}
+	l.skillsMu.Unlock()
+
+	cfg.Skills = config.MergeSkills(agentSkills, sharedSkills)
 }
 
 // buildLocalTools creates tools that run in the control plane process.

@@ -91,6 +91,19 @@ func (d *DB) QueryLogs(ctx context.Context, opts LogQuery) ([]LogEntry, error) {
 		limit = maxLogQueryLimit
 	}
 
+	query, args := buildLogQuery(opts, limit)
+
+	rows, err := d.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying logs: %w", err)
+	}
+	defer rows.Close()
+
+	return scanLogRows(rows)
+}
+
+// buildLogQuery constructs the SQL query and arguments for log filtering.
+func buildLogQuery(opts LogQuery, limit int) (string, []any) {
 	var conditions []string
 	var args []any
 
@@ -119,12 +132,11 @@ func (d *DB) QueryLogs(ctx context.Context, opts LogQuery) ([]LogEntry, error) {
 	query += " ORDER BY id DESC LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := d.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("querying logs: %w", err)
-	}
-	defer rows.Close()
+	return query, args
+}
 
+// scanLogRows reads all log entries from the result set.
+func scanLogRows(rows *sql.Rows) ([]LogEntry, error) {
 	var results []LogEntry
 	for rows.Next() {
 		var e LogEntry

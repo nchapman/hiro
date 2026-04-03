@@ -41,76 +41,87 @@ func NewBashTool(workingDir string, bgMgr *BackgroundJobManager) fantasy.AgentTo
 				dir = resolvePath(workingDir, params.WorkingDir)
 			}
 
-			// Resolve timeout: use param if provided, else default.
-			bgTimeout := autoBackgroundAfter
-			if params.Timeout > 0 {
-				t := params.Timeout
-				if t > maxBashTimeout {
-					t = maxBashTimeout
-				}
-				bgTimeout = time.Duration(t) * time.Millisecond
-			}
+			bgTimeout := resolveBashTimeout(params.Timeout)
 
-			// Explicit background mode.
 			if params.RunInBackground {
-				job, err := bgMgr.Start(dir, params.Command)
-				if err != nil {
-					return fantasy.NewTextErrorResponse(err.Error()), nil
-				}
-				job.Description = params.Description
-
-				// Quick check for fast failures (syntax errors, missing commands).
-				select {
-				case <-job.done:
-					bgMgr.Remove(job.ID)
-					stdout, stderr, _, execErr := job.GetOutput()
-					return formatBashResult(stdout, stderr, execErr), nil
-				case <-time.After(outputPollInterval):
-				}
-
-				// Truly backgrounded — enable completion notification.
-				bgMgr.NotifyOnComplete(job.ID)
-				return fantasy.NewTextResponse(
-					fmt.Sprintf("Background task started with ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
+				return runBashBackground(bgMgr, dir, params)
 			}
-
-			// Synchronous execution with auto-background on timeout.
-			job, err := bgMgr.Start(dir, params.Command)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
-			job.Description = params.Description
-
-			ticker := time.NewTicker(outputPollInterval)
-			defer ticker.Stop()
-			timeout := time.After(bgTimeout)
-
-			for {
-				select {
-				case <-ticker.C:
-					stdout, stderr, done, execErr := job.GetOutput()
-					if done {
-						bgMgr.Remove(job.ID)
-						return formatBashResult(stdout, stderr, execErr), nil
-					}
-				case <-timeout:
-					// Check one last time — job may have finished at the boundary.
-					stdout, stderr, done, execErr := job.GetOutput()
-					if done {
-						bgMgr.Remove(job.ID)
-						return formatBashResult(stdout, stderr, execErr), nil
-					}
-					// Auto-backgrounded — enable completion notification.
-					bgMgr.NotifyOnComplete(job.ID)
-					return fantasy.NewTextResponse(
-						fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground task ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
-				case <-ctx.Done():
-					_ = bgMgr.Kill(job.ID)
-					return fantasy.NewTextErrorResponse("command cancelled"), nil
-				}
-			}
+			return runBashSync(ctx, bgMgr, dir, params, bgTimeout)
 		},
 	)
+}
+
+// resolveBashTimeout returns the effective timeout duration from a param value.
+func resolveBashTimeout(timeoutMs int) time.Duration {
+	if timeoutMs <= 0 {
+		return autoBackgroundAfter
+	}
+	if timeoutMs > maxBashTimeout {
+		timeoutMs = maxBashTimeout
+	}
+	return time.Duration(timeoutMs) * time.Millisecond
+}
+
+// runBashBackground starts a command in the background and returns immediately
+// (unless it fails fast, in which case the result is returned inline).
+func runBashBackground(bgMgr *BackgroundJobManager, dir string, params BashParams) (fantasy.ToolResponse, error) {
+	job, err := bgMgr.Start(dir, params.Command)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	job.Description = params.Description
+
+	// Quick check for fast failures (syntax errors, missing commands).
+	select {
+	case <-job.done:
+		bgMgr.Remove(job.ID)
+		stdout, stderr, _, execErr := job.GetOutput()
+		return formatBashResult(stdout, stderr, execErr), nil
+	case <-time.After(outputPollInterval):
+	}
+
+	// Truly backgrounded — enable completion notification.
+	bgMgr.NotifyOnComplete(job.ID)
+	return fantasy.NewTextResponse(
+		fmt.Sprintf("Background task started with ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
+}
+
+// runBashSync runs a command synchronously, auto-backgrounding if it exceeds the timeout.
+func runBashSync(ctx context.Context, bgMgr *BackgroundJobManager, dir string, params BashParams, bgTimeout time.Duration) (fantasy.ToolResponse, error) {
+	job, err := bgMgr.Start(dir, params.Command)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	job.Description = params.Description
+
+	ticker := time.NewTicker(outputPollInterval)
+	defer ticker.Stop()
+	timeout := time.After(bgTimeout)
+
+	for {
+		select {
+		case <-ticker.C:
+			stdout, stderr, done, execErr := job.GetOutput()
+			if done {
+				bgMgr.Remove(job.ID)
+				return formatBashResult(stdout, stderr, execErr), nil
+			}
+		case <-timeout:
+			// Check one last time — job may have finished at the boundary.
+			stdout, stderr, done, execErr := job.GetOutput()
+			if done {
+				bgMgr.Remove(job.ID)
+				return formatBashResult(stdout, stderr, execErr), nil
+			}
+			// Auto-backgrounded — enable completion notification.
+			bgMgr.NotifyOnComplete(job.ID)
+			return fantasy.NewTextResponse(
+				fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground task ID: %s\n\nUse TaskOutput to view output or TaskStop to terminate.", job.ID)), nil
+		case <-ctx.Done():
+			_ = bgMgr.Kill(job.ID)
+			return fantasy.NewTextErrorResponse("command cancelled"), nil
+		}
+	}
 }
 
 func formatBashResult(stdout, stderr string, execErr error) fantasy.ToolResponse {

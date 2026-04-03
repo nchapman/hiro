@@ -92,7 +92,7 @@ func TestAssemble_RespectsBudget(t *testing.T) {
 	createTestSession(t, pdb, "s1")
 
 	// Add many messages that exceed the token budget.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		appendMsg(t, pdb, "s1", "user", "message content here", 5000)
 	}
 
@@ -122,7 +122,7 @@ func TestAssemble_TailTruncation(t *testing.T) {
 	createTestSession(t, pdb, "s1")
 
 	// 10 messages, 3000 tokens each = 30,000 total.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		appendMsg(t, pdb, "s1", "user", "message content here", 3000)
 	}
 

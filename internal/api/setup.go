@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -58,37 +59,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Password) < minPasswordLength {
-		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+	if errMsg := req.validate(); errMsg != "" {
+		http.Error(w, errMsg, http.StatusBadRequest)
 		return
-	}
-
-	// Validate mode
-	switch req.Mode {
-	case roleStandalone, roleLeader, roleWorker:
-		// ok
-	case "":
-		http.Error(w, "mode is required", http.StatusBadRequest)
-		return
-	default:
-		http.Error(w, "mode must be standalone, leader, or worker", http.StatusBadRequest)
-		return
-	}
-
-	// Standalone and leader require a provider; worker does not.
-	if req.Mode != roleWorker {
-		if req.ProviderType == "" || req.APIKey == "" {
-			http.Error(w, "provider_type and api_key are required", http.StatusBadRequest)
-			return
-		}
-	}
-
-	// Worker requires either a swarm code or a direct leader address.
-	if req.Mode == roleWorker {
-		if req.WorkerSwarmCode == "" && req.WorkerLeaderAddr == "" {
-			http.Error(w, "worker mode requires worker_swarm_code or worker_leader_addr", http.StatusBadRequest)
-			return
-		}
 	}
 
 	// Hash password
@@ -102,28 +75,122 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Validate provider config before mutating any state, so a bad provider
 	// type doesn't leave the control plane in a half-configured state.
 	if req.Mode != roleWorker {
-		if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
-			APIKey: req.APIKey,
-		}); err != nil {
+		if err := s.applyProviderConfig(req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if req.DefaultModel != "" {
-			spec := models.ParseModelSpec(req.DefaultModel)
-			if spec.Provider == "" {
-				spec.Provider = req.ProviderType
-			}
-			s.cp.SetDefaultModelSpec(spec)
-		}
-		// When no model specified, ProviderInfo() resolves the default
-		// provider from the configured providers map.
 	}
 
-	// Apply common config — all validation has passed at this point.
-	s.cp.SetPasswordHash(string(hash))
-	s.cp.SetClusterMode(req.Mode)
+	resp, err := s.applySetupConfig(req, string(hash))
+	if err != nil {
+		s.logger.Error("setup config failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	nodeName := req.NodeName
+	needsRestart := s.startServicesForMode(req.Mode)
+
+	if !s.issueSessionCookie(w, r) {
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+
+	// Request restart AFTER the response is written to avoid a race where
+	// httpServer.Shutdown() interrupts the in-flight response.
+	if needsRestart && s.requestRestart != nil {
+		go func() {
+			time.Sleep(restartDelay)
+			s.requestRestart()
+		}()
+	}
+}
+
+// applySetupConfig applies all post-validation config and persists it.
+func (s *Server) applySetupConfig(req setupRequest, passwordHash string) (map[string]any, error) {
+	s.cp.SetPasswordHash(passwordHash)
+	s.cp.SetClusterMode(req.Mode)
+	s.applyNodeName(req.NodeName)
+
+	resp := map[string]any{"ok": true}
+	if err := s.applyClusterConfig(req, resp); err != nil {
+		return nil, fmt.Errorf("internal error")
+	}
+
+	if err := s.cp.Save(); err != nil {
+		return nil, fmt.Errorf("failed to save configuration")
+	}
+	return resp, nil
+}
+
+// issueSessionCookie creates a signed session token and sets it as a cookie.
+// Returns false if the token signer is unavailable (writes the HTTP error).
+func (s *Server) issueSessionCookie(w http.ResponseWriter, r *http.Request) bool {
+	signer := s.tokenSigner()
+	if signer == nil {
+		s.logger.Error("failed to get token signer after setup")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return false
+	}
+	token := signer.Create()
+	setSessionCookie(w, r, token)
+	return true
+}
+
+// validate checks the setup request fields and returns an error message
+// string (empty if valid).
+func (req *setupRequest) validate() string {
+	if len(req.Password) < minPasswordLength {
+		return "password must be at least 8 characters"
+	}
+
+	switch req.Mode {
+	case roleStandalone, roleLeader, roleWorker:
+		// ok
+	case "":
+		return "mode is required"
+	default:
+		return "mode must be standalone, leader, or worker"
+	}
+
+	// Standalone and leader require a provider; worker does not.
+	if req.Mode != roleWorker {
+		if req.ProviderType == "" || req.APIKey == "" {
+			return "provider_type and api_key are required"
+		}
+	}
+
+	// Worker requires either a swarm code or a direct leader address.
+	if req.Mode == roleWorker {
+		if req.WorkerSwarmCode == "" && req.WorkerLeaderAddr == "" {
+			return "worker mode requires worker_swarm_code or worker_leader_addr"
+		}
+	}
+
+	return ""
+}
+
+// applyProviderConfig sets the provider and default model on the control plane.
+func (s *Server) applyProviderConfig(req setupRequest) error {
+	if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
+		APIKey: req.APIKey,
+	}); err != nil {
+		return err
+	}
+	if req.DefaultModel != "" {
+		spec := models.ParseModelSpec(req.DefaultModel)
+		if spec.Provider == "" {
+			spec.Provider = req.ProviderType
+		}
+		s.cp.SetDefaultModelSpec(spec)
+	}
+	// When no model specified, ProviderInfo() resolves the default
+	// provider from the configured providers map.
+	return nil
+}
+
+// applyNodeName resolves and sets the cluster node name.
+func (s *Server) applyNodeName(nodeName string) {
 	if nodeName == "" {
 		if h, err := os.Hostname(); err == nil {
 			nodeName = h
@@ -132,17 +199,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if nodeName != "" {
 		s.cp.SetClusterNodeName(nodeName)
 	}
+}
 
-	// Apply mode-specific cluster config
-	resp := map[string]any{"ok": true}
-
+// applyClusterConfig sets mode-specific cluster fields on the control plane
+// and populates the response map.
+func (s *Server) applyClusterConfig(req setupRequest, resp map[string]any) error {
 	switch req.Mode {
 	case roleLeader:
 		swarmCode, err := cluster.GenerateSwarmCode()
 		if err != nil {
-			s.logger.Error("failed to generate swarm code", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return err
 		}
 		s.cp.SetClusterTrackerURL(defaultTrackerURL)
 		s.cp.SetClusterSwarmCode(swarmCode)
@@ -158,17 +224,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["restart_required"] = true
 	}
+	return nil
+}
 
-	// Persist immediately
-	if err := s.cp.Save(); err != nil {
-		s.logger.Error("failed to save config after setup", "error", err)
-		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
-		return
-	}
-
-	// Start services based on mode (worker restart is deferred until after response).
-	needsRestart := false
-	switch req.Mode {
+// startServicesForMode starts the appropriate services after setup completes.
+// Returns true if a process restart is needed (worker mode).
+func (s *Server) startServicesForMode(mode string) bool {
+	switch mode {
 	case roleStandalone:
 		if s.startManager != nil {
 			if err := s.startManager(); err != nil {
@@ -188,29 +250,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case roleWorker:
-		needsRestart = true
+		return true
 	}
-
-	// Create a signed session token so the user is logged in
-	signer := s.tokenSigner()
-	if signer == nil {
-		s.logger.Error("failed to get token signer after setup")
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	token := signer.Create()
-	setSessionCookie(w, r, token)
-
-	writeJSON(w, http.StatusOK, resp)
-
-	// Request restart AFTER the response is written to avoid a race where
-	// httpServer.Shutdown() interrupts the in-flight response.
-	if needsRestart && s.requestRestart != nil {
-		go func() {
-			time.Sleep(restartDelay)
-			s.requestRestart()
-		}()
-	}
+	return false
 }
 
 func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {

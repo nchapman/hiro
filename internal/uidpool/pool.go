@@ -60,7 +60,7 @@ func (p *Pool) Acquire(sessionID string) (uid, gid uint32, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	for i := 0; i < p.size; i++ {
+	for i := range p.size {
 		candidate := p.baseUID + uint32(i)
 		if _, taken := p.inUse[candidate]; !taken {
 			p.inUse[candidate] = sessionID

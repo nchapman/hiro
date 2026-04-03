@@ -137,42 +137,9 @@ func (s *LeaderService) SpawnOnNode(ctx context.Context, nodeID NodeID, cfg Spaw
 	s.spawnChans[requestID] = spawnCh
 	s.mu.Unlock()
 
-	// Send spawn request.
-	err := s.stream.SendToNode(nodeID, &pb.LeaderMessage{
-		Msg: &pb.LeaderMessage_SpawnWorker{
-			SpawnWorker: &pb.SpawnWorker{
-				RequestId:      requestID,
-				InstanceId:     cfg.InstanceID,
-				SessionId:      cfg.SessionID,
-				AgentName:      cfg.AgentName,
-				EffectiveTools: cfg.EffectiveTools,
-				WorkingDir:     cfg.WorkingDir,
-				SessionDir:     cfg.SessionDir,
-			},
-		},
-	})
-	if err != nil {
-		s.cleanupSpawn(cfg.SessionID, requestID)
-		rw.Close()
-		return nil, fmt.Errorf("sending spawn request to node %s: %w", nodeID, err)
-	}
-
-	// Wait for spawn result.
-	select {
-	case errMsg := <-spawnCh:
-		if errMsg != "" {
-			s.cleanupSpawn(cfg.SessionID, requestID)
-			rw.Close()
-			return nil, fmt.Errorf("remote spawn on node %s failed: %s", nodeID, errMsg)
-		}
-	case <-time.After(spawnTimeout):
-		s.cleanupSpawn(cfg.SessionID, requestID)
-		rw.Close()
-		return nil, fmt.Errorf("remote spawn on node %s timed out", nodeID)
-	case <-ctx.Done():
-		s.cleanupSpawn(cfg.SessionID, requestID)
-		rw.Close()
-		return nil, ctx.Err()
+	// Send spawn request and wait for result.
+	if err := s.sendAndAwaitSpawn(ctx, nodeID, cfg, rw, requestID, spawnCh); err != nil {
+		return nil, err
 	}
 
 	s.registry.IncrementActive(nodeID)
@@ -196,6 +163,47 @@ func (s *LeaderService) SpawnOnNode(ctx context.Context, nodeID NodeID, cfg Spaw
 		},
 		Done: rw.Done(),
 	}, nil
+}
+
+// sendAndAwaitSpawn sends a spawn request to the node and blocks until the
+// worker reports success, an error, a timeout, or context cancellation.
+func (s *LeaderService) sendAndAwaitSpawn(ctx context.Context, nodeID NodeID, cfg SpawnRequest, rw *RemoteWorker, requestID string, spawnCh chan string) error {
+	err := s.stream.SendToNode(nodeID, &pb.LeaderMessage{
+		Msg: &pb.LeaderMessage_SpawnWorker{
+			SpawnWorker: &pb.SpawnWorker{
+				RequestId:      requestID,
+				InstanceId:     cfg.InstanceID,
+				SessionId:      cfg.SessionID,
+				AgentName:      cfg.AgentName,
+				EffectiveTools: cfg.EffectiveTools,
+				WorkingDir:     cfg.WorkingDir,
+				SessionDir:     cfg.SessionDir,
+			},
+		},
+	})
+	if err != nil {
+		s.cleanupSpawn(cfg.SessionID, requestID)
+		rw.Close()
+		return fmt.Errorf("sending spawn request to node %s: %w", nodeID, err)
+	}
+
+	select {
+	case errMsg := <-spawnCh:
+		if errMsg != "" {
+			s.cleanupSpawn(cfg.SessionID, requestID)
+			rw.Close()
+			return fmt.Errorf("remote spawn on node %s failed: %s", nodeID, errMsg)
+		}
+		return nil
+	case <-time.After(spawnTimeout):
+		s.cleanupSpawn(cfg.SessionID, requestID)
+		rw.Close()
+		return fmt.Errorf("remote spawn on node %s timed out", nodeID)
+	case <-ctx.Done():
+		s.cleanupSpawn(cfg.SessionID, requestID)
+		rw.Close()
+		return ctx.Err()
+	}
 }
 
 // deliverToolResult routes a tool result directly to the owning RemoteWorker

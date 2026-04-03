@@ -73,7 +73,7 @@ func TestBackgroundJob_MaxJobs(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
 
 	var jobs []*BackgroundJob
-	for i := 0; i < MaxBackgroundJobs; i++ {
+	for i := range MaxBackgroundJobs {
 		j, err := mgr.Start(t.TempDir(), "sleep 60")
 		if err != nil {
 			t.Fatalf("Start job %d: %v", i, err)

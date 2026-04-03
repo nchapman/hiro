@@ -257,7 +257,7 @@ func TestWatchDebounce(t *testing.T) {
 	})
 
 	// Rapid writes — should be coalesced into one batch.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		os.WriteFile(f, []byte("v"+string(rune('1'+i))), 0o644)
 		time.Sleep(10 * time.Millisecond)
 	}

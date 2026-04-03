@@ -258,6 +258,29 @@ func (d *DiscoveryClient) WaitForLeader(ctx context.Context) (string, error) {
 }
 
 func (d *DiscoveryClient) announce(ctx context.Context) {
+	announceResp, err := d.postAnnounce(ctx)
+	if err != nil {
+		d.logger.Warn("tracker announce failed", "error", err)
+		return
+	}
+
+	peers := d.parsePeers(announceResp.Peers)
+
+	d.mu.Lock()
+	d.peers = peers
+	d.relayURL = announceResp.RelayURL
+	d.yourIP = announceResp.YourIP
+	d.mu.Unlock()
+
+	d.logger.Debug("tracker announce successful",
+		"peers", len(peers),
+		"your_ip", announceResp.YourIP,
+		"relay_url", announceResp.RelayURL,
+	)
+}
+
+// postAnnounce sends a signed announce request to the tracker and returns the response.
+func (d *DiscoveryClient) postAnnounce(ctx context.Context) (*announceResponse, error) {
 	req := &announceRequest{
 		SwarmHash:      d.swarmHash,
 		PublicKey:      base64.StdEncoding.EncodeToString(d.identity.PublicKey),
@@ -270,48 +293,42 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 		},
 	}
 
-	// Sign the announcement.
 	sig := ed25519.Sign(d.identity.PrivateKey, req.signedMessage())
 	req.Signature = base64.StdEncoding.EncodeToString(sig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		d.logger.Error("failed to marshal announce request", "error", err)
-		return
+		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.trackerURL+"/announce", bytes.NewReader(body))
 	if err != nil {
-		d.logger.Error("failed to create announce request", "error", err)
-		return
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := d.client.Do(httpReq)
 	if err != nil {
-		d.logger.Warn("tracker announce failed", "error", err)
-		return
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, discoveryErrorBodyLimit))
-		d.logger.Warn("tracker announce returned error",
-			"status", resp.StatusCode,
-			"body", string(respBody),
-		)
-		return
+		return nil, fmt.Errorf("tracker returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var announceResp announceResponse
 	if err := json.NewDecoder(resp.Body).Decode(&announceResp); err != nil {
-		d.logger.Warn("failed to decode tracker response", "error", err)
-		return
+		return nil, fmt.Errorf("decoding response: %w", err)
 	}
+	return &announceResp, nil
+}
 
-	// Update cached peers.
-	peers := make([]DiscoveredPeer, 0, len(announceResp.Peers))
-	for _, p := range announceResp.Peers {
+// parsePeers converts raw announce JSON peers into typed DiscoveredPeer values.
+func (d *DiscoveryClient) parsePeers(raw []announceJSON) []DiscoveredPeer {
+	peers := make([]DiscoveredPeer, 0, len(raw))
+	for _, p := range raw {
 		lastSeen, err := time.Parse(time.RFC3339, p.LastSeen)
 		if err != nil && p.LastSeen != "" {
 			d.logger.Debug("failed to parse peer LastSeen", "value", p.LastSeen, "error", err)
@@ -326,18 +343,7 @@ func (d *DiscoveryClient) announce(ctx context.Context) {
 			LastSeen:       lastSeen,
 		})
 	}
-
-	d.mu.Lock()
-	d.peers = peers
-	d.relayURL = announceResp.RelayURL
-	d.yourIP = announceResp.YourIP
-	d.mu.Unlock()
-
-	d.logger.Debug("tracker announce successful",
-		"peers", len(peers),
-		"your_ip", announceResp.YourIP,
-		"relay_url", announceResp.RelayURL,
-	)
+	return peers
 }
 
 // SwarmCheckResult is the result of a one-shot swarm validation.

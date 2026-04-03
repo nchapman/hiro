@@ -74,22 +74,34 @@ func NewServer(logger *slog.Logger, webFS fs.FS, cp *controlplane.ControlPlane, 
 func (s *Server) hasManager() bool { return s.manager != nil }
 
 func (s *Server) routes() {
-	// Auth routes (unauthenticated)
+	s.authRoutes()
+	s.setupRoutes()
+	s.settingsRoutes()
+	s.instanceRoutes()
+	s.usageRoutes()
+	s.logRoutes()
+	s.fileRoutes()
+	s.terminalRoutes()
+	s.webSocketRoutes()
+	s.catchAllRoute()
+}
+
+func (s *Server) authRoutes() {
 	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
-
-	// Auth routes (authenticated)
 	s.mux.HandleFunc("POST /api/auth/logout", s.requireAuth(s.handleLogout))
 	s.mux.HandleFunc("POST /api/auth/password", s.requireAuth(s.handleChangePassword))
+}
 
-	// Setup routes (unauthenticated, only work when needsSetup is true)
+func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 	s.mux.HandleFunc("POST /api/setup/test-provider", s.handleTestProvider)
 	s.mux.HandleFunc("POST /api/setup/validate-swarm", s.handleValidateSwarm)
 	s.mux.HandleFunc("GET /api/setup/provider-types", s.handleListProviderTypes)
 	s.mux.HandleFunc("GET /api/setup/models", s.handleListModels)
+}
 
-	// Settings routes (authenticated)
+func (s *Server) settingsRoutes() {
 	s.mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleGetSettings))
 	s.mux.HandleFunc("PUT /api/settings", s.requireAuth(s.handleUpdateSettings))
 	s.mux.HandleFunc("GET /api/settings/cluster", s.requireAuth(s.handleGetClusterSettings))
@@ -104,8 +116,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/settings/providers/{type}", s.requireAuth(s.handlePutProvider))
 	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))
 	s.mux.HandleFunc("POST /api/settings/providers/{type}/test", s.requireAuth(s.handleTestProviderByType))
+}
 
-	// Instance API routes (authenticated)
+func (s *Server) instanceRoutes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/instances", s.requireAuth(s.handleListInstances))
 	s.mux.HandleFunc("GET /api/instances/{id}/messages", s.requireAuth(s.handleInstanceMessages))
@@ -114,23 +127,24 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/instances/{id}/clear", s.requireAuth(s.handleClearInstance))
 	s.mux.HandleFunc("DELETE /api/instances/{id}", s.requireAuth(s.handleDeleteInstance))
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleSessionMessages))
-
-	// Models & provider types API (authenticated)
 	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
 	s.mux.HandleFunc("GET /api/provider-types", s.requireAuth(s.handleListProviderTypes))
+}
 
-	// Usage API routes (authenticated)
+func (s *Server) usageRoutes() {
 	s.mux.HandleFunc("GET /api/instances/{id}/usage", s.requireAuth(s.handleInstanceUsage))
 	s.mux.HandleFunc("GET /api/usage", s.requireAuth(s.handleTotalUsage))
 	s.mux.HandleFunc("GET /api/usage/models", s.requireAuth(s.handleUsageByModel))
 	s.mux.HandleFunc("GET /api/usage/daily", s.requireAuth(s.handleUsageByDay))
+}
 
-	// Logs API routes (strict auth — never accessible during setup)
+func (s *Server) logRoutes() {
 	s.mux.HandleFunc("GET /api/logs", s.requireStrictAuth(s.handleQueryLogs))
 	s.mux.HandleFunc("GET /api/logs/stream", s.requireStrictAuth(s.handleLogStream))
 	s.mux.HandleFunc("GET /api/logs/sources", s.requireStrictAuth(s.handleLogSources))
+}
 
-	// File browser (authenticated)
+func (s *Server) fileRoutes() {
 	s.mux.HandleFunc("GET /api/files/tree", s.requireAuth(s.handleFilesTree))
 	s.mux.HandleFunc("GET /api/files/file", s.requireAuth(s.handleFilesFileRead))
 	s.mux.HandleFunc("PUT /api/files/file", s.requireAuth(s.handleFilesFileWrite))
@@ -138,21 +152,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/files/file", s.requireAuth(s.handleFilesDelete))
 	s.mux.HandleFunc("POST /api/files/rename", s.requireAuth(s.handleFilesRename))
 	s.mux.HandleFunc("GET /api/files/events", s.requireAuth(s.handleFilesWatch))
-
-	// Shared file viewer (unauthenticated — token is the access control)
 	s.mux.HandleFunc("POST /api/files/share", s.requireAuth(s.handleShareCreate))
 	s.mux.HandleFunc("GET /api/shared/{token}", s.handleSharedFileInfo)
 	s.mux.HandleFunc("GET /api/shared/{token}/raw", s.handleSharedFileRaw)
+}
 
-	// Terminal API routes (authenticated, read-only — mutations go via WebSocket)
+func (s *Server) terminalRoutes() {
 	s.mux.HandleFunc("GET /api/terminal/sessions", s.requireAuth(s.handleTerminalSessions))
 	s.mux.HandleFunc("GET /api/terminal/nodes", s.requireAuth(s.handleTerminalNodes))
+}
 
-	// WebSocket endpoints
+func (s *Server) webSocketRoutes() {
 	s.mux.HandleFunc("/ws/chat", s.handleChat)
 	s.mux.HandleFunc("/ws/terminal", s.requireAuth(s.handleTerminal))
+}
 
-	// Catch-all: serve web UI or 404
+func (s *Server) catchAllRoute() {
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Unmatched /api/ paths get a proper 404
 		if strings.HasPrefix(r.URL.Path, "/api/") {

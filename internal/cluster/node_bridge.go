@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -64,32 +65,11 @@ func NewNodeBridge(rootDir string, stream *WorkerStream, logger *slog.Logger) *N
 func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	nb.logger.Info("spawning worker", "instance_id", msg.InstanceId, "session_id", msg.SessionId, "agent", msg.AgentName)
 
-	// Translate paths to local filesystem.
-	workingDir := nb.rootDir
-	if msg.WorkingDir != "" && msg.WorkingDir != "." {
-		workingDir = filepath.Join(nb.rootDir, msg.WorkingDir)
-	}
-	sessionDir := filepath.Join(nb.rootDir, msg.SessionDir)
-
-	// Create directories.
-	if err := os.MkdirAll(sessionDir, fsperm.DirStandard); err != nil {
-		nb.logger.Error("creating session dir", "error", err)
-		_ = nb.stream.SendSpawnResult(msg.RequestId, fmt.Sprintf("creating session dir: %v", err))
+	cfg, err := nb.prepareSpawnConfig(msg)
+	if err != nil {
+		nb.logger.Error("preparing spawn", "error", err)
+		_ = nb.stream.SendSpawnResult(msg.RequestId, err.Error())
 		return
-	}
-	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessionDir, sub), fsperm.DirStandard); err != nil {
-			nb.logger.Error("creating session subdir", "dir", sub, "error", err)
-		}
-	}
-
-	cfg := ipc.SpawnConfig{
-		InstanceID:     msg.InstanceId,
-		SessionID:      msg.SessionId,
-		AgentName:      msg.AgentName,
-		EffectiveTools: msg.EffectiveTools,
-		WorkingDir:     workingDir,
-		SessionDir:     sessionDir,
 	}
 
 	handle, err := nb.spawnLocalWorker(ctx, cfg)
@@ -104,41 +84,76 @@ func (nb *NodeBridge) handleSpawn(ctx context.Context, msg *pb.SpawnWorker) {
 	nb.mu.Unlock()
 
 	// Watch for unexpected worker exit.
-	go func() {
-		<-handle.done
-		nb.mu.Lock()
-		delete(nb.workers, msg.SessionId)
-		nb.mu.Unlock()
-		_ = nb.stream.SendWorkerExited(msg.SessionId, "")
-		nb.logger.Info("worker exited", "session_id", msg.SessionId)
-	}()
+	go nb.watchWorkerExit(msg.SessionId, handle)
 
 	// Forward background job completions from this worker to the leader.
 	if wc, ok := handle.worker.(*grpcipc.WorkerClient); ok {
-		go func() {
-			ch := wc.WatchJobs(ctx, nb.logger)
-			for c := range ch {
-				if err := nb.stream.Send(&pb.NodeMessage{
-					Msg: &pb.NodeMessage_JobCompletion{
-						JobCompletion: &pb.JobCompletionNotify{
-							SessionId:   msg.SessionId,
-							TaskId:      c.TaskId,
-							Command:     c.Command,
-							Description: c.Description,
-							ExitCode:    c.ExitCode,
-							Failed:      c.Failed,
-						},
-					},
-				}); err != nil {
-					nb.logger.Debug("failed to forward job completion", "session_id", msg.SessionId, "error", err)
-					return
-				}
-			}
-		}()
+		go nb.forwardJobCompletions(ctx, msg.SessionId, wc)
 	}
 
 	_ = nb.stream.SendSpawnResult(msg.RequestId, "")
 	nb.logger.Info("worker spawned", "session_id", msg.SessionId)
+}
+
+// prepareSpawnConfig translates a SpawnWorker message into a local SpawnConfig,
+// creating the required session directories.
+func (nb *NodeBridge) prepareSpawnConfig(msg *pb.SpawnWorker) (ipc.SpawnConfig, error) {
+	workingDir := nb.rootDir
+	if msg.WorkingDir != "" && msg.WorkingDir != "." {
+		workingDir = filepath.Join(nb.rootDir, msg.WorkingDir)
+	}
+	sessionDir := filepath.Join(nb.rootDir, msg.SessionDir)
+
+	if err := os.MkdirAll(sessionDir, fsperm.DirStandard); err != nil {
+		return ipc.SpawnConfig{}, fmt.Errorf("creating session dir: %w", err)
+	}
+	for _, sub := range []string{"scratch", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(sessionDir, sub), fsperm.DirStandard); err != nil {
+			nb.logger.Error("creating session subdir", "dir", sub, "error", err)
+		}
+	}
+
+	return ipc.SpawnConfig{
+		InstanceID:     msg.InstanceId,
+		SessionID:      msg.SessionId,
+		AgentName:      msg.AgentName,
+		EffectiveTools: msg.EffectiveTools,
+		WorkingDir:     workingDir,
+		SessionDir:     sessionDir,
+	}, nil
+}
+
+// watchWorkerExit monitors a worker's done channel and cleans up on exit.
+func (nb *NodeBridge) watchWorkerExit(sessionID string, handle *localWorker) {
+	<-handle.done
+	nb.mu.Lock()
+	delete(nb.workers, sessionID)
+	nb.mu.Unlock()
+	_ = nb.stream.SendWorkerExited(sessionID, "")
+	nb.logger.Info("worker exited", "session_id", sessionID)
+}
+
+// forwardJobCompletions relays background job completion notifications
+// from a local worker to the leader.
+func (nb *NodeBridge) forwardJobCompletions(ctx context.Context, sessionID string, wc *grpcipc.WorkerClient) {
+	ch := wc.WatchJobs(ctx, nb.logger)
+	for c := range ch {
+		if err := nb.stream.Send(&pb.NodeMessage{
+			Msg: &pb.NodeMessage_JobCompletion{
+				JobCompletion: &pb.JobCompletionNotify{
+					SessionId:   sessionID,
+					TaskId:      c.TaskId,
+					Command:     c.Command,
+					Description: c.Description,
+					ExitCode:    c.ExitCode,
+					Failed:      c.Failed,
+				},
+			},
+		}); err != nil {
+			nb.logger.Debug("failed to forward job completion", "session_id", sessionID, "error", err)
+			return
+		}
+	}
 }
 
 // handleExecuteTool forwards a tool call to the local worker.
@@ -217,71 +232,19 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	// Create a private socket directory (0o700) so the socket is inaccessible
-	// to other processes from the moment it's created (no TOCTOU window).
-	sessPrefix := cfg.SessionID
-	if len(sessPrefix) > ipc.MaxSessionPrefix {
-		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
+	socketDir, socketPath, err := nb.createWorkerSocket(cfg.SessionID)
+	if err != nil {
+		return nil, err
 	}
-	socketDir := fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
-	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
-		return nil, fmt.Errorf("creating socket dir: %w", err)
-	}
-	socketPath := socketDir + "/a.sock"
 	cfg.AgentSocket = socketPath
 
-	cmd := exec.CommandContext(ctx, self, "agent")
-	stdinPipe, err := cmd.StdinPipe()
+	cmd, stdoutPipe, err := nb.startWorkerProcess(ctx, self, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("creating stdin pipe: %w", err)
-	}
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting agent: %w", err)
+		return nil, err
 	}
 
-	// Write spawn config.
-	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("writing spawn config: %w", err)
-	}
-	_ = stdinPipe.Close()
-
-	// Wait for readiness.
-	readyCh := make(chan error, 1)
-	go func() {
-		buf := make([]byte, readyBufSize)
-		n, err := stdoutPipe.Read(buf)
-		if err != nil {
-			readyCh <- fmt.Errorf("reading ready signal: %w", err)
-			return
-		}
-		if n == 0 {
-			readyCh <- fmt.Errorf("empty ready signal")
-			return
-		}
-		sig := strings.TrimSpace(string(buf[:n]))
-		if sig != "ready" {
-			readyCh <- fmt.Errorf("unexpected ready signal: %q", sig)
-			return
-		}
-		readyCh <- nil
-	}()
-
-	select {
-	case err := <-readyCh:
-		if err != nil {
-			_ = cmd.Process.Kill()
-			return nil, err
-		}
-	case <-time.After(workerSpawnTimeout):
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("worker did not become ready within %v", workerSpawnTimeout)
+	if err := nb.awaitWorkerReady(stdoutPipe, cmd); err != nil {
+		return nil, err
 	}
 
 	// Connect gRPC client.
@@ -316,4 +279,81 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 		},
 		done: done,
 	}, nil
+}
+
+// createWorkerSocket creates a private socket directory and returns the
+// directory path and socket path.
+func (nb *NodeBridge) createWorkerSocket(sessionID string) (socketDir, socketPath string, err error) {
+	sessPrefix := sessionID
+	if len(sessPrefix) > ipc.MaxSessionPrefix {
+		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
+	}
+	socketDir = fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
+	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
+		return "", "", fmt.Errorf("creating socket dir: %w", err)
+	}
+	return socketDir, socketDir + "/a.sock", nil
+}
+
+// startWorkerProcess starts a hiro agent subprocess, writes the spawn config
+// to its stdin, and returns the command and stdout pipe for ready-signal reading.
+func (nb *NodeBridge) startWorkerProcess(ctx context.Context, executable string, cfg ipc.SpawnConfig) (*exec.Cmd, io.ReadCloser, error) {
+	cmd := exec.CommandContext(ctx, executable, "agent")
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating stdin pipe: %w", err)
+	}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating stdout pipe: %w", err)
+	}
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("starting agent: %w", err)
+	}
+
+	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, nil, fmt.Errorf("writing spawn config: %w", err)
+	}
+	_ = stdinPipe.Close()
+
+	return cmd, stdoutPipe, nil
+}
+
+// awaitWorkerReady waits for the worker to print "ready" on stdout.
+// Kills the process on timeout or unexpected signal.
+func (nb *NodeBridge) awaitWorkerReady(stdoutPipe io.ReadCloser, cmd *exec.Cmd) error {
+	readyCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, readyBufSize)
+		n, err := stdoutPipe.Read(buf)
+		if err != nil {
+			readyCh <- fmt.Errorf("reading ready signal: %w", err)
+			return
+		}
+		if n == 0 {
+			readyCh <- fmt.Errorf("empty ready signal")
+			return
+		}
+		sig := strings.TrimSpace(string(buf[:n]))
+		if sig != "ready" {
+			readyCh <- fmt.Errorf("unexpected ready signal: %q", sig)
+			return
+		}
+		readyCh <- nil
+	}()
+
+	select {
+	case err := <-readyCh:
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return err
+		}
+		return nil
+	case <-time.After(workerSpawnTimeout):
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("worker did not become ready within %v", workerSpawnTimeout)
+	}
 }

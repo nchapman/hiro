@@ -74,46 +74,16 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 			}
 
 			callerID := callerIDFromContext(ctx)
-			nodeID := input.Node
-
 			logger.Info("tool call", "tool", "SpawnInstance", "agent", input.Agent, "background", input.Background)
 
 			if input.Background {
-				bgCtx := context.WithoutCancel(ctx)
-				go func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.Error("background SpawnInstance panicked", "agent", input.Agent, "panic", r)
-							notifications.Push(Notification{
-								Content:   fmt.Sprintf("<agent-notification>\n<agent>%s</agent>\n<status>failed</status>\n<summary>Agent %q crashed unexpectedly</summary>\n<result></result>\n</agent-notification>", input.Agent, input.Agent),
-								Source:    "agent-completion",
-								SessionID: sessionID,
-							})
-						}
-					}()
-					result, err := mgr.SpawnEphemeral(bgCtx, input.Agent, input.Prompt, callerID, nodeID, nil)
-					status := "completed"
-					summary := fmt.Sprintf("Agent %q finished", input.Agent)
-					if err != nil {
-						status = "failed"
-						summary = fmt.Sprintf("Agent %q failed: %v", input.Agent, err)
-						result = ""
-						logger.Warn("background SpawnInstance failed", "agent", input.Agent, "error", err)
-					}
-					content := fmt.Sprintf(
-						"<agent-notification>\n<agent>%s</agent>\n<status>%s</status>\n<summary>%s</summary>\n<result>%s</result>\n</agent-notification>",
-						input.Agent, status, summary, truncateResult(result))
-					notifications.Push(Notification{
-						Content:   content,
-						Source:    "agent-completion",
-						SessionID: sessionID,
-					})
-				}()
+				launchBackgroundSpawn(context.WithoutCancel(ctx), mgr, notifications, sessionID, logger,
+					input.Agent, input.Prompt, callerID, input.Node)
 				return fantasy.NewTextResponse(
 					fmt.Sprintf("Agent %q launched in background. You'll be notified when it completes.", input.Agent)), nil
 			}
 
-			result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, nodeID, nil)
+			result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, input.Node, nil)
 			if err != nil {
 				logger.Warn("SpawnInstance failed", "agent", input.Agent, "error", err)
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
@@ -121,6 +91,38 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 			return fantasy.NewTextResponse(truncateResult(result)), nil
 		},
 	)
+}
+
+func launchBackgroundSpawn(ctx context.Context, mgr ipc.HostManager, notifications *NotificationQueue, sessionID string, logger *slog.Logger, agent, prompt, callerID, nodeID string) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("background SpawnInstance panicked", "agent", agent, "panic", r)
+				notifications.Push(Notification{
+					Content:   fmt.Sprintf("<agent-notification>\n<agent>%s</agent>\n<status>failed</status>\n<summary>Agent %q crashed unexpectedly</summary>\n<result></result>\n</agent-notification>", agent, agent),
+					Source:    "agent-completion",
+					SessionID: sessionID,
+				})
+			}
+		}()
+		result, err := mgr.SpawnEphemeral(ctx, agent, prompt, callerID, nodeID, nil)
+		status := "completed"
+		summary := fmt.Sprintf("Agent %q finished", agent)
+		if err != nil {
+			status = "failed"
+			summary = fmt.Sprintf("Agent %q failed: %v", agent, err)
+			result = ""
+			logger.Warn("background SpawnInstance failed", "agent", agent, "error", err)
+		}
+		content := fmt.Sprintf(
+			"<agent-notification>\n<agent>%s</agent>\n<status>%s</status>\n<summary>%s</summary>\n<result>%s</result>\n</agent-notification>",
+			agent, status, summary, truncateResult(result))
+		notifications.Push(Notification{
+			Content:   content,
+			Source:    "agent-completion",
+			SessionID: sessionID,
+		})
+	}()
 }
 
 // --- CreatePersistentInstance tool ---

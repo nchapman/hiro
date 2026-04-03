@@ -46,49 +46,62 @@ func (s *FileSyncService) WatchAndSync() error {
 			if !ok {
 				return nil
 			}
-			relPath, err := filepath.Rel(s.rootDir, event.Name)
-			if err != nil || shouldIgnore(relPath) {
-				continue
-			}
-			if s.isEchoSuppressed(relPath) {
-				continue
-			}
-
-			// If a new directory was created, watch it recursively and
-			// scan for files that were written before the watch was added.
-			// This covers the race where mkdir + write happens atomically
-			// (e.g., API file upload creates parent dirs then writes the file
-			// before fsnotify processes the directory creation event).
-			if event.Has(fsnotify.Create) {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					_ = s.addWatchRecursive(watcher, event.Name)
-					s.scanNewDir(event.Name, &mu, pending, timer)
-				}
-			}
-
-			mu.Lock()
-			deleted := event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
-			pending[relPath] = deleted
-			timer.Reset(debounceInterval)
-			mu.Unlock()
+			s.handleFSEvent(watcher, event, &mu, pending, timer)
 
 		case <-timer.C:
-			mu.Lock()
-			batch := pending
-			pending = make(map[string]bool)
-			mu.Unlock()
-
-			for relPath, deleted := range batch {
-				if err := s.sendChange(relPath, deleted); err != nil {
-					s.logger.Warn("failed to send file change", "path", relPath, "error", err)
-				}
-			}
+			s.flushPending(&mu, pending)
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
 			}
 			s.logger.Warn("watcher error", "error", err)
+		}
+	}
+}
+
+// handleFSEvent processes a single fsnotify event, updating the pending
+// change set and watching newly created directories.
+func (s *FileSyncService) handleFSEvent(watcher *fsnotify.Watcher, event fsnotify.Event, mu *sync.Mutex, pending map[string]bool, timer *time.Timer) {
+	relPath, err := filepath.Rel(s.rootDir, event.Name)
+	if err != nil || shouldIgnore(relPath) {
+		return
+	}
+	if s.isEchoSuppressed(relPath) {
+		return
+	}
+
+	// If a new directory was created, watch it recursively and
+	// scan for files that were written before the watch was added.
+	if event.Has(fsnotify.Create) {
+		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+			_ = s.addWatchRecursive(watcher, event.Name)
+			s.scanNewDir(event.Name, mu, pending, timer)
+		}
+	}
+
+	mu.Lock()
+	deleted := event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
+	pending[relPath] = deleted
+	timer.Reset(debounceInterval)
+	mu.Unlock()
+}
+
+// flushPending sends all accumulated file changes and resets the pending map.
+func (s *FileSyncService) flushPending(mu *sync.Mutex, pending map[string]bool) {
+	mu.Lock()
+	batch := make(map[string]bool, len(pending))
+	for k, v := range pending {
+		batch[k] = v
+	}
+	for k := range pending {
+		delete(pending, k)
+	}
+	mu.Unlock()
+
+	for relPath, deleted := range batch {
+		if err := s.sendChange(relPath, deleted); err != nil {
+			s.logger.Warn("failed to send file change", "path", relPath, "error", err)
 		}
 	}
 }
@@ -172,37 +185,8 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 	// Conflict detection: a conflict is real only when the local file was
 	// modified independently (local mtime > last-received mtime). This
 	// avoids false positives from files we wrote ourselves via sync.
-	if update.MtimeUnixNanos > 0 {
-		if localInfo, err := os.Stat(absPath); err == nil {
-			localMtime := localInfo.ModTime().UnixNano()
-
-			s.receivedMu.Lock()
-			lastReceived, tracked := s.receivedMtime[update.Path]
-			s.receivedMu.Unlock()
-
-			// If the file is tracked and local mtime exceeds the last
-			// version we synced, a local write happened independently.
-			if tracked && localMtime > lastReceived {
-				conflictPath := fmt.Sprintf("%s.conflict.%s.%d",
-					absPath, sanitizeNodeID(update.OriginNode), time.Now().Unix())
-				s.logger.Warn("file conflict detected, preserving both versions",
-					"path", update.Path,
-					"local_mtime", localMtime,
-					"last_received", lastReceived,
-					"conflict_file", conflictPath,
-				)
-				// Save incoming version as the conflict file (local stays as-is).
-				if err := os.WriteFile(conflictPath, update.Content, os.FileMode(update.Mode)); err != nil {
-					s.logger.Warn("failed to write conflict file", "path", conflictPath, "error", err)
-				}
-				// Still update the received mtime so future updates don't
-				// keep creating conflict files for the same divergence.
-				s.receivedMu.Lock()
-				s.receivedMtime[update.Path] = update.MtimeUnixNanos
-				s.receivedMu.Unlock()
-				return nil
-			}
-		}
+	if s.detectAndHandleConflict(absPath, update) {
+		return nil
 	}
 
 	// Write the file atomically (temp + rename) so concurrent readers
@@ -236,6 +220,48 @@ func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
 
 	s.logger.Debug("file synced", "path", update.Path, "size", len(update.Content))
 	return nil
+}
+
+// detectAndHandleConflict checks if the local file was modified independently
+// since the last received sync. If a conflict is detected, the incoming version
+// is saved as a .conflict file and the method returns true (caller should skip
+// the normal write). Returns false if no conflict was detected.
+func (s *FileSyncService) detectAndHandleConflict(absPath string, update *pb.FileUpdate) bool {
+	if update.MtimeUnixNanos == 0 {
+		return false
+	}
+	localInfo, err := os.Stat(absPath)
+	if err != nil {
+		return false
+	}
+	localMtime := localInfo.ModTime().UnixNano()
+
+	s.receivedMu.Lock()
+	lastReceived, tracked := s.receivedMtime[update.Path]
+	s.receivedMu.Unlock()
+
+	if !tracked || localMtime <= lastReceived {
+		return false
+	}
+
+	// Local file was modified independently — save incoming as conflict file.
+	conflictPath := fmt.Sprintf("%s.conflict.%s.%d",
+		absPath, sanitizeNodeID(update.OriginNode), time.Now().Unix())
+	s.logger.Warn("file conflict detected, preserving both versions",
+		"path", update.Path,
+		"local_mtime", localMtime,
+		"last_received", lastReceived,
+		"conflict_file", conflictPath,
+	)
+	if err := os.WriteFile(conflictPath, update.Content, os.FileMode(update.Mode)); err != nil {
+		s.logger.Warn("failed to write conflict file", "path", conflictPath, "error", err)
+	}
+	// Still update the received mtime so future updates don't
+	// keep creating conflict files for the same divergence.
+	s.receivedMu.Lock()
+	s.receivedMtime[update.Path] = update.MtimeUnixNanos
+	s.receivedMu.Unlock()
+	return true
 }
 
 // suppressEcho marks a path as recently written so fsnotify events for it

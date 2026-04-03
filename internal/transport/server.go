@@ -84,59 +84,9 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Conn, cancel context.CancelFunc) {
 	defer func() { _ = conn.CloseNow() }()
 
-	// First message must be a register message — enforce a deadline
-	regCtx, regCancel := context.WithTimeout(ctx, registrationTimeout)
-	defer regCancel()
-
-	var env Envelope
-	if err := wsjson.Read(regCtx, conn, &env); err != nil {
-		s.logger.Error("failed to read register message", "error", err)
-		return
-	}
-
-	if env.Type != TypeRegister {
-		s.logger.Error("expected register message", "got", env.Type)
-		_ = conn.Close(websocket.StatusPolicyViolation, "first message must be register")
-		return
-	}
-
-	// Parse register payload
-	payloadBytes, err := json.Marshal(env.Payload)
+	env, reg, err := s.readRegistration(ctx, conn)
 	if err != nil {
-		s.logger.Error("failed to marshal register payload", "error", err)
-		return
-	}
-	var reg RegisterPayload
-	if err := json.Unmarshal(payloadBytes, &reg); err != nil {
-		s.logger.Error("failed to parse register payload", "error", err)
-		return
-	}
-
-	// Validate swarm code — constant-time comparison
-	if subtle.ConstantTimeCompare([]byte(reg.SwarmCode), []byte(s.swarm.Code())) != 1 {
-		s.logger.Warn("invalid swarm code attempt", "agent", reg.AgentName)
-		_ = conn.Close(websocket.StatusPolicyViolation, "invalid swarm code")
-		return
-	}
-
-	// Validate registration fields
-	if reg.AgentName == "" || len(reg.AgentName) > maxAgentNameLen {
-		_ = conn.Close(websocket.StatusPolicyViolation, "invalid agent name")
-		return
-	}
-	if len(reg.Description) > maxDescriptionLen {
-		_ = conn.Close(websocket.StatusPolicyViolation, "description too long")
-		return
-	}
-	if len(reg.Skills) > maxSkills {
-		_ = conn.Close(websocket.StatusPolicyViolation, "too many skills")
-		return
-	}
-	for _, skill := range reg.Skills {
-		if skill == "" || len(skill) > maxSkillNameLen {
-			_ = conn.Close(websocket.StatusPolicyViolation, "invalid skill name")
-			return
-		}
+		return // errors already logged/conn closed by readRegistration
 	}
 
 	// Register the worker
@@ -188,6 +138,75 @@ func (s *Server) handleWorkerConnection(ctx context.Context, conn *websocket.Con
 	// Read messages until disconnect
 	s.readLoop(ctx, wc)
 	s.cleanup(workerID)
+}
+
+// readRegistration reads and validates the initial register message from a worker.
+// Returns the envelope and parsed payload, or an error (with the connection
+// already closed/logged on failure).
+func (s *Server) readRegistration(ctx context.Context, conn *websocket.Conn) (Envelope, RegisterPayload, error) {
+	regCtx, regCancel := context.WithTimeout(ctx, registrationTimeout)
+	defer regCancel()
+
+	var env Envelope
+	if err := wsjson.Read(regCtx, conn, &env); err != nil {
+		s.logger.Error("failed to read register message", "error", err)
+		return env, RegisterPayload{}, err
+	}
+
+	if env.Type != TypeRegister {
+		s.logger.Error("expected register message", "got", env.Type)
+		_ = conn.Close(websocket.StatusPolicyViolation, "first message must be register")
+		return env, RegisterPayload{}, fmt.Errorf("expected register, got %s", env.Type)
+	}
+
+	// Parse register payload
+	payloadBytes, err := json.Marshal(env.Payload)
+	if err != nil {
+		s.logger.Error("failed to marshal register payload", "error", err)
+		return env, RegisterPayload{}, err
+	}
+	var reg RegisterPayload
+	if err := json.Unmarshal(payloadBytes, &reg); err != nil {
+		s.logger.Error("failed to parse register payload", "error", err)
+		return env, RegisterPayload{}, err
+	}
+
+	if err := s.validateRegistration(conn, &reg); err != nil {
+		return env, RegisterPayload{}, err
+	}
+
+	return env, reg, nil
+}
+
+// validateRegistration checks the swarm code and field constraints. Closes the
+// connection with a policy violation on failure.
+func (s *Server) validateRegistration(conn *websocket.Conn, reg *RegisterPayload) error {
+	// Constant-time comparison for swarm code
+	if subtle.ConstantTimeCompare([]byte(reg.SwarmCode), []byte(s.swarm.Code())) != 1 {
+		s.logger.Warn("invalid swarm code attempt", "agent", reg.AgentName)
+		_ = conn.Close(websocket.StatusPolicyViolation, "invalid swarm code")
+		return fmt.Errorf("invalid swarm code")
+	}
+
+	if reg.AgentName == "" || len(reg.AgentName) > maxAgentNameLen {
+		_ = conn.Close(websocket.StatusPolicyViolation, "invalid agent name")
+		return fmt.Errorf("invalid agent name")
+	}
+	if len(reg.Description) > maxDescriptionLen {
+		_ = conn.Close(websocket.StatusPolicyViolation, "description too long")
+		return fmt.Errorf("description too long")
+	}
+	if len(reg.Skills) > maxSkills {
+		_ = conn.Close(websocket.StatusPolicyViolation, "too many skills")
+		return fmt.Errorf("too many skills")
+	}
+	for _, skill := range reg.Skills {
+		if skill == "" || len(skill) > maxSkillNameLen {
+			_ = conn.Close(websocket.StatusPolicyViolation, "invalid skill name")
+			return fmt.Errorf("invalid skill name")
+		}
+	}
+	return nil
 }
 
 func (s *Server) readLoop(ctx context.Context, wc *workerConn) {
@@ -357,51 +376,25 @@ func (s *Server) DispatchTask(ctx context.Context, worker hub.Worker, skill, pro
 	s.mu.Lock()
 	wc, ok := s.conns[worker.ID]
 	s.mu.Unlock()
-
 	if !ok {
 		return "", fmt.Errorf("worker %q (%s) is not connected", worker.AgentName, worker.ID)
 	}
 
 	taskID := uuid.New().String()
-	task := &hub.Task{
-		ID:        taskID,
-		Skill:     skill,
-		Prompt:    prompt,
-		WorkerID:  worker.ID,
-		Status:    hub.TaskAssigned,
-		CreatedAt: time.Now(),
-	}
-	s.swarm.AddTask(task)
+	s.swarm.AddTask(&hub.Task{
+		ID: taskID, Skill: skill, Prompt: prompt,
+		WorkerID: worker.ID, Status: hub.TaskAssigned, CreatedAt: time.Now(),
+	})
 
-	// Create result channel and track task against worker
-	ch := make(chan taskResponse, 1)
-	s.mu.Lock()
-	s.pending[taskID] = ch
-	if taskSet, exists := s.tasks[worker.ID]; exists {
-		taskSet[taskID] = struct{}{}
-	}
-	s.mu.Unlock()
-
-	defer func() {
-		s.mu.Lock()
-		delete(s.pending, taskID)
-		if taskSet, exists := s.tasks[worker.ID]; exists {
-			delete(taskSet, taskID)
-		}
-		s.mu.Unlock()
-	}()
+	ch := s.trackTask(taskID, worker.ID)
+	defer s.untrackTask(taskID, worker.ID)
 
 	// Send task request to worker — uses per-connection write mutex
 	err := wc.write(ctx, Envelope{
-		Type:      TypeTaskRequest,
-		ID:        uuid.New().String(),
-		From:      "leader",
-		Timestamp: time.Now(),
+		Type: TypeTaskRequest, ID: uuid.New().String(),
+		From: "leader", Timestamp: time.Now(),
 		Payload: TaskRequestPayload{
-			TaskID:  taskID,
-			Skill:   skill,
-			Prompt:  prompt,
-			Context: taskContext,
+			TaskID: taskID, Skill: skill, Prompt: prompt, Context: taskContext,
 		},
 	})
 	if err != nil {
@@ -409,7 +402,33 @@ func (s *Server) DispatchTask(ctx context.Context, worker hub.Worker, skill, pro
 		return "", fmt.Errorf("sending task to worker: %w", err)
 	}
 
-	// Wait for result
+	return s.awaitTask(ctx, taskID, ch)
+}
+
+// trackTask registers a pending result channel for a dispatched task.
+func (s *Server) trackTask(taskID, workerID string) chan taskResponse {
+	ch := make(chan taskResponse, 1)
+	s.mu.Lock()
+	s.pending[taskID] = ch
+	if taskSet, exists := s.tasks[workerID]; exists {
+		taskSet[taskID] = struct{}{}
+	}
+	s.mu.Unlock()
+	return ch
+}
+
+// untrackTask removes a task from the pending and per-worker tracking maps.
+func (s *Server) untrackTask(taskID, workerID string) {
+	s.mu.Lock()
+	delete(s.pending, taskID)
+	if taskSet, exists := s.tasks[workerID]; exists {
+		delete(taskSet, taskID)
+	}
+	s.mu.Unlock()
+}
+
+// awaitTask blocks until the task completes or the context is cancelled.
+func (s *Server) awaitTask(ctx context.Context, taskID string, ch chan taskResponse) (string, error) {
 	select {
 	case <-ctx.Done():
 		_ = s.swarm.FailTask(taskID, "context cancelled")

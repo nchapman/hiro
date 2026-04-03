@@ -575,18 +575,26 @@ type grepMatch struct {
 	lineText string
 }
 
-func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
+// compileGrepPatterns compiles the search pattern and optional include glob filter.
+func compileGrepPatterns(pattern, include string) (*regexp.Regexp, *regexp.Regexp, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+		return nil, nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
-
 	var includeRe *regexp.Regexp
 	if include != "" {
 		includeRe, err = regexp.Compile(globToRegex(include))
 		if err != nil {
-			return nil, fmt.Errorf("invalid include pattern: %w", err)
+			return nil, nil, fmt.Errorf("invalid include pattern: %w", err)
 		}
+	}
+	return re, includeRe, nil
+}
+
+func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
+	re, includeRe, err := compileGrepPatterns(pattern, include)
+	if err != nil {
+		return nil, err
 	}
 
 	var matches []grepMatch

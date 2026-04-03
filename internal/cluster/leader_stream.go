@@ -166,75 +166,75 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	status := s.checkApproval(nodeID)
 
 	if status != ApprovalGranted {
-		truncID := nodeID
-		if len(truncID) > maxNodeIDDisplayLen {
-			truncID = truncID[:maxNodeIDDisplayLen] + "..."
-		}
+		return s.handleUnapprovedNode(stream, nodeID, nodeName, peerAddr, status)
+	}
 
-		if status == ApprovalRevoked {
-			s.logger.Info("rejected revoked node", "node_id", truncID, "name", nodeName)
-			_ = stream.Send(&pb.LeaderMessage{
-				Msg: &pb.LeaderMessage_Rejected{
-					Rejected: &pb.NodeRejected{
-						NodeId: nodeID,
-						Reason: "approval revoked by leader operator",
-					},
-				},
-			})
-			return nil
-		}
+	// Step 4: Approved — register and proceed.
+	return s.runApprovedNode(stream, nodeID, nodeName, peerAddr, reg)
+}
 
-		// Not approved and not revoked — add to pending list.
-		ok, isNew := s.pending.AddOrUpdate(PendingNode{
-			NodeID: nodeID,
-			Name:   nodeName,
-			Addr:   peerAddr,
-		})
+// handleUnapprovedNode handles a node that is pending or revoked.
+func (s *LeaderStream) handleUnapprovedNode(stream pb.Cluster_NodeStreamServer, nodeID, nodeName, peerAddr string, status ApprovalStatus) error {
+	truncID := nodeID
+	if len(truncID) > maxNodeIDDisplayLen {
+		truncID = truncID[:maxNodeIDDisplayLen] + "..."
+	}
 
-		if !ok {
-			s.logger.Warn("pending registry full, rejecting node", "node_id", truncID)
-			_ = stream.Send(&pb.LeaderMessage{
-				Msg: &pb.LeaderMessage_Rejected{
-					Rejected: &pb.NodeRejected{
-						NodeId: nodeID,
-						Reason: "pending node limit reached; dismiss or approve existing nodes first",
-					},
-				},
-			})
-			return nil
-		}
-
-		if isNew {
-			s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)
-		}
-
+	if status == ApprovalRevoked {
+		s.logger.Info("rejected revoked node", "node_id", truncID, "name", nodeName)
 		_ = stream.Send(&pb.LeaderMessage{
-			Msg: &pb.LeaderMessage_Pending{
-				Pending: &pb.NodePending{
-					NodeId:  nodeID,
-					Message: "awaiting approval from leader operator",
+			Msg: &pb.LeaderMessage_Rejected{
+				Rejected: &pb.NodeRejected{
+					NodeId: nodeID,
+					Reason: "approval revoked by leader operator",
 				},
 			},
 		})
 		return nil
 	}
 
-	// Step 4: Approved — register and proceed.
+	// Not approved and not revoked — add to pending list.
+	ok, isNew := s.pending.AddOrUpdate(PendingNode{
+		NodeID: nodeID,
+		Name:   nodeName,
+		Addr:   peerAddr,
+	})
+
+	if !ok {
+		s.logger.Warn("pending registry full, rejecting node", "node_id", truncID)
+		_ = stream.Send(&pb.LeaderMessage{
+			Msg: &pb.LeaderMessage_Rejected{
+				Rejected: &pb.NodeRejected{
+					NodeId: nodeID,
+					Reason: "pending node limit reached; dismiss or approve existing nodes first",
+				},
+			},
+		})
+		return nil
+	}
+
+	if isNew {
+		s.logger.Info("node pending approval", "node_id", truncID, "name", nodeName, "addr", peerAddr)
+	}
+
+	_ = stream.Send(&pb.LeaderMessage{
+		Msg: &pb.LeaderMessage_Pending{
+			Pending: &pb.NodePending{
+				NodeId:  nodeID,
+				Message: "awaiting approval from leader operator",
+			},
+		},
+	})
+	return nil
+}
+
+// runApprovedNode registers an approved node and enters the message loop.
+func (s *LeaderStream) runApprovedNode(stream pb.Cluster_NodeStreamServer, nodeID, nodeName, peerAddr string, reg *pb.NodeRegister) error {
 	// Remove from pending if it was there (approved while worker was retrying).
 	s.pending.Remove(nodeID)
 
 	// Detect relay vs direct connection by checking if peer IP matches relay.
-	via := "direct"
-	s.mu.Lock()
-	hasRelay := s.relayAddr != ""
-	relayIPs := s.relayIPs
-	s.mu.Unlock()
-	if hasRelay {
-		peerHost, _, _ := net.SplitHostPort(peerAddr)
-		if relayIPs[peerHost] {
-			via = "relay"
-		}
-	}
+	via := s.detectConnectionType(peerAddr)
 
 	if err := s.registry.Register(nodeID, nodeName, int(reg.Capacity), peerAddr, via); err != nil {
 		return fmt.Errorf("registering node: %w", err)
@@ -270,7 +270,7 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	}
 
 	// Enter message loop.
-	err = s.readLoop(conn)
+	err := s.readLoop(conn)
 
 	// Cleanup on disconnect.
 	s.cleanupNode(nodeID)
@@ -280,6 +280,22 @@ func (s *LeaderStream) NodeStream(stream pb.Cluster_NodeStreamServer) error {
 	}
 	s.logger.Info("node disconnected", "node_id", nodeID)
 	return nil
+}
+
+// detectConnectionType returns "relay" or "direct" based on whether the
+// peer address matches the relay server's IPs.
+func (s *LeaderStream) detectConnectionType(peerAddr string) string {
+	s.mu.Lock()
+	hasRelay := s.relayAddr != ""
+	relayIPs := s.relayIPs
+	s.mu.Unlock()
+	if hasRelay {
+		peerHost, _, _ := net.SplitHostPort(peerAddr)
+		if relayIPs[peerHost] {
+			return "relay"
+		}
+	}
+	return "direct"
 }
 
 // readLoop processes incoming messages from a node.
@@ -317,51 +333,47 @@ func (s *LeaderStream) readLoop(conn *nodeConn) error {
 			s.mu.Unlock()
 
 			s.registry.Touch(conn.nodeID)
+			s.dispatchNodeMessage(conn.nodeID, h, r.msg)
+		}
+	}
+}
 
-			switch m := r.msg.Msg.(type) {
-			case *pb.NodeMessage_SpawnResult:
-				if h.OnSpawnResult != nil {
-					h.OnSpawnResult(conn.nodeID, m.SpawnResult)
-				}
-
-			case *pb.NodeMessage_ToolResult:
-				if h.OnToolResult != nil {
-					h.OnToolResult(conn.nodeID, m.ToolResult)
-				}
-
-			case *pb.NodeMessage_Heartbeat:
-				// Touch already called above.
-
-			case *pb.NodeMessage_WorkerExited:
-				if h.OnWorkerExited != nil {
-					h.OnWorkerExited(conn.nodeID, m.WorkerExited)
-				}
-
-			case *pb.NodeMessage_FileUpdate:
-				if h.OnFileUpdate != nil {
-					h.OnFileUpdate(conn.nodeID, m.FileUpdate)
-				}
-
-			case *pb.NodeMessage_JobCompletion:
-				if h.OnJobCompletion != nil {
-					h.OnJobCompletion(conn.nodeID, m.JobCompletion)
-				}
-
-			case *pb.NodeMessage_TerminalCreated:
-				if h.OnTerminalCreated != nil {
-					h.OnTerminalCreated(conn.nodeID, m.TerminalCreated)
-				}
-
-			case *pb.NodeMessage_TerminalOutput:
-				if h.OnTerminalOutput != nil {
-					h.OnTerminalOutput(conn.nodeID, m.TerminalOutput)
-				}
-
-			case *pb.NodeMessage_TerminalExited:
-				if h.OnTerminalExited != nil {
-					h.OnTerminalExited(conn.nodeID, m.TerminalExited)
-				}
-			}
+// dispatchNodeMessage routes a received node message to the appropriate handler.
+func (s *LeaderStream) dispatchNodeMessage(nodeID NodeID, h *NodeHandlers, msg *pb.NodeMessage) {
+	switch m := msg.Msg.(type) {
+	case *pb.NodeMessage_SpawnResult:
+		if h.OnSpawnResult != nil {
+			h.OnSpawnResult(nodeID, m.SpawnResult)
+		}
+	case *pb.NodeMessage_ToolResult:
+		if h.OnToolResult != nil {
+			h.OnToolResult(nodeID, m.ToolResult)
+		}
+	case *pb.NodeMessage_Heartbeat:
+		// Touch already called by readLoop.
+	case *pb.NodeMessage_WorkerExited:
+		if h.OnWorkerExited != nil {
+			h.OnWorkerExited(nodeID, m.WorkerExited)
+		}
+	case *pb.NodeMessage_FileUpdate:
+		if h.OnFileUpdate != nil {
+			h.OnFileUpdate(nodeID, m.FileUpdate)
+		}
+	case *pb.NodeMessage_JobCompletion:
+		if h.OnJobCompletion != nil {
+			h.OnJobCompletion(nodeID, m.JobCompletion)
+		}
+	case *pb.NodeMessage_TerminalCreated:
+		if h.OnTerminalCreated != nil {
+			h.OnTerminalCreated(nodeID, m.TerminalCreated)
+		}
+	case *pb.NodeMessage_TerminalOutput:
+		if h.OnTerminalOutput != nil {
+			h.OnTerminalOutput(nodeID, m.TerminalOutput)
+		}
+	case *pb.NodeMessage_TerminalExited:
+		if h.OnTerminalExited != nil {
+			h.OnTerminalExited(nodeID, m.TerminalExited)
 		}
 	}
 }

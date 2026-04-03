@@ -166,7 +166,7 @@ func TestLogin_RateLimiter(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"password": "wrong"})
 
 	// 5 attempts should succeed (even if password is wrong).
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()

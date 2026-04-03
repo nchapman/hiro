@@ -110,34 +110,10 @@ func (cp *ControlPlane) handleSecrets(verb string, args []string) (string, bool,
 func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, error) {
 	switch verb {
 	case "set":
-		if len(args) < minSubcommandArgs {
-			return "Usage: /tools set <agent> <tool1,tool2,...>", false, nil
-		}
-		agentName := args[0]
-		toolList := parseToolList(args[1:])
-		if len(toolList) == 0 {
-			return "Usage: /tools set <agent> <tool1,tool2,...>", false, nil
-		}
-		if _, err := toolrules.ParseRules(toolList); err != nil {
-			return fmt.Sprintf("Invalid rule: %v", err), false, nil
-		}
-		cp.SetAgentTools(agentName, toolList)
-		return fmt.Sprintf("Allow rules for %q set to: %s\n\nTakes effect on the agent's next turn.", agentName, strings.Join(toolList, ", ")), true, nil
+		return cp.handleToolsSetOrDeny(args, "allow", "Usage: /tools set <agent> <tool1,tool2,...>", cp.SetAgentTools)
 
 	case "deny":
-		if len(args) < minSubcommandArgs {
-			return "Usage: /tools deny <agent> <rule1,rule2,...>", false, nil
-		}
-		agentName := args[0]
-		toolList := parseToolList(args[1:])
-		if len(toolList) == 0 {
-			return "Usage: /tools deny <agent> <rule1,rule2,...>", false, nil
-		}
-		if _, err := toolrules.ParseRules(toolList); err != nil {
-			return fmt.Sprintf("Invalid rule: %v", err), false, nil
-		}
-		cp.SetAgentDisallowedTools(agentName, toolList)
-		return fmt.Sprintf("Deny rules for %q set to: %s\n\nTakes effect on the agent's next turn.", agentName, strings.Join(toolList, ", ")), true, nil
+		return cp.handleToolsSetOrDeny(args, "deny", "Usage: /tools deny <agent> <rule1,rule2,...>", cp.SetAgentDisallowedTools)
 
 	case "rm", "remove", "clear":
 		if len(args) < 1 {
@@ -149,33 +125,7 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 		return fmt.Sprintf("Tool overrides for %q cleared. Agent will use its declared tools.", agentName), true, nil
 
 	case "list", "ls":
-		if len(args) > 0 {
-			return cp.formatToolPolicy(args[0]), false, nil
-		}
-		policies := cp.AllPolicies()
-		if len(policies) == 0 {
-			return "No tool overrides configured. All agents use their declared tools.", false, nil
-		}
-		// Sort agent names for consistent output.
-		names := make([]string, 0, len(policies))
-		for name := range policies {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-
-		var b strings.Builder
-		b.WriteString("Tool overrides:\n")
-		for _, name := range names {
-			p := policies[name]
-			fmt.Fprintf(&b, "  %s:\n", name)
-			if len(p.AllowedTools) > 0 {
-				fmt.Fprintf(&b, "    allow: %s\n", strings.Join(p.AllowedTools, ", "))
-			}
-			if len(p.DisallowedTools) > 0 {
-				fmt.Fprintf(&b, "    deny:  %s\n", strings.Join(p.DisallowedTools, ", "))
-			}
-		}
-		return strings.TrimRight(b.String(), "\n"), false, nil
+		return cp.handleToolsList(args), false, nil
 
 	case "":
 		return "Usage: /tools <set|deny|rm|list>", false, nil
@@ -183,6 +133,56 @@ func (cp *ControlPlane) handleTools(verb string, args []string) (string, bool, e
 	default:
 		return "", false, fmt.Errorf("unknown tools command: %s", verb)
 	}
+}
+
+// handleToolsSetOrDeny validates and applies an allow or deny rule list for an agent.
+func (cp *ControlPlane) handleToolsSetOrDeny(args []string, label, usage string, apply func(string, []string)) (string, bool, error) {
+	if len(args) < minSubcommandArgs {
+		return usage, false, nil
+	}
+	agentName := args[0]
+	toolList := parseToolList(args[1:])
+	if len(toolList) == 0 {
+		return usage, false, nil
+	}
+	if _, err := toolrules.ParseRules(toolList); err != nil {
+		return fmt.Sprintf("Invalid rule: %v", err), false, nil
+	}
+	apply(agentName, toolList)
+	capLabel := strings.ToUpper(label[:1]) + label[1:]
+	return fmt.Sprintf("%s rules for %q set to: %s\n\nTakes effect on the agent's next turn.",
+		capLabel, agentName, strings.Join(toolList, ", ")), true, nil
+}
+
+// handleToolsList formats tool policy overrides for display.
+func (cp *ControlPlane) handleToolsList(args []string) string {
+	if len(args) > 0 {
+		return cp.formatToolPolicy(args[0])
+	}
+	policies := cp.AllPolicies()
+	if len(policies) == 0 {
+		return "No tool overrides configured. All agents use their declared tools."
+	}
+	// Sort agent names for consistent output.
+	names := make([]string, 0, len(policies))
+	for name := range policies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("Tool overrides:\n")
+	for _, name := range names {
+		p := policies[name]
+		fmt.Fprintf(&b, "  %s:\n", name)
+		if len(p.AllowedTools) > 0 {
+			fmt.Fprintf(&b, "    allow: %s\n", strings.Join(p.AllowedTools, ", "))
+		}
+		if len(p.DisallowedTools) > 0 {
+			fmt.Fprintf(&b, "    deny:  %s\n", strings.Join(p.DisallowedTools, ", "))
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // formatToolPolicy returns a human-readable summary of an agent's tool policy.
@@ -279,7 +279,7 @@ func parseToolList(args []string) []string {
 	var result []string
 	depth := 0
 	start := 0
-	for i := 0; i < len(raw); i++ {
+	for i := range len(raw) {
 		switch raw[i] {
 		case '(':
 			depth++

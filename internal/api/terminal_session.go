@@ -278,12 +278,7 @@ func (m *TerminalSessionManager) Create(nodeID string, cols, rows uint16) (*Term
 
 // createLocal spawns a local PTY session. Caller must pass a validated nodeID.
 func (m *TerminalSessionManager) createLocal(nodeID string, cols, rows uint16) (*TerminalSession, error) {
-	if cols == 0 {
-		cols = defaultTermCols
-	}
-	if rows == 0 {
-		rows = defaultTermRows
-	}
+	cols, rows = applyDefaultSize(cols, rows)
 
 	// Check limits before spawning the PTY to avoid wasted process creation.
 	m.mu.Lock()
@@ -293,34 +288,12 @@ func (m *TerminalSessionManager) createLocal(nodeID string, cols, rows uint16) (
 	}
 	m.mu.Unlock()
 
-	shell := "/bin/bash"
-	if _, err := exec.LookPath(shell); err != nil {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.Command(shell)
-	cmd.Dir = m.rootDir
-	cmd.Env = terminalEnvForSession(m.rootDir)
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+	cmd, ptmx, err := m.spawnPTY(cols, rows)
 	if err != nil {
-		return nil, fmt.Errorf("start pty: %w", err)
+		return nil, err
 	}
 
-	now := time.Now()
-	sess := &TerminalSession{
-		ID:        generateSessionID(),
-		NodeID:    nodeID,
-		CreatedAt: now,
-		lastUsed:  now,
-		cmd:       cmd,
-		ptmx:      ptmx,
-		waitDone:  make(chan struct{}),
-		replay:    newReplayBuffer(maxReplayBytes),
-		subs:      make(map[string]chan sessionEvent),
-		cols:      cols,
-		rows:      rows,
-	}
+	sess := newLocalSession(nodeID, cmd, ptmx, cols, rows)
 
 	// Reap the process.
 	go func() {
@@ -348,6 +321,53 @@ func (m *TerminalSessionManager) createLocal(nodeID string, cols, rows uint16) (
 	return sess, nil
 }
 
+// spawnPTY starts a shell process with a PTY of the given size.
+func (m *TerminalSessionManager) spawnPTY(cols, rows uint16) (*exec.Cmd, *os.File, error) {
+	shell := "/bin/bash"
+	if _, err := exec.LookPath(shell); err != nil {
+		shell = "/bin/sh"
+	}
+
+	cmd := exec.Command(shell)
+	cmd.Dir = m.rootDir
+	cmd.Env = terminalEnvForSession(m.rootDir)
+
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+	if err != nil {
+		return nil, nil, fmt.Errorf("start pty: %w", err)
+	}
+	return cmd, ptmx, nil
+}
+
+// newLocalSession creates a TerminalSession for a local PTY.
+func newLocalSession(nodeID string, cmd *exec.Cmd, ptmx *os.File, cols, rows uint16) *TerminalSession {
+	now := time.Now()
+	return &TerminalSession{
+		ID:        generateSessionID(),
+		NodeID:    nodeID,
+		CreatedAt: now,
+		lastUsed:  now,
+		cmd:       cmd,
+		ptmx:      ptmx,
+		waitDone:  make(chan struct{}),
+		replay:    newReplayBuffer(maxReplayBytes),
+		subs:      make(map[string]chan sessionEvent),
+		cols:      cols,
+		rows:      rows,
+	}
+}
+
+// applyDefaultSize returns cols and rows with defaults applied for zero values.
+func applyDefaultSize(cols, rows uint16) (uint16, uint16) {
+	if cols == 0 {
+		cols = defaultTermCols
+	}
+	if rows == 0 {
+		rows = defaultTermRows
+	}
+	return cols, rows
+}
+
 // createRemote creates a terminal session on a remote worker node via gRPC.
 func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) (*TerminalSession, error) {
 	m.mu.Lock()
@@ -364,24 +384,8 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 		return nil, fmt.Errorf("node %q is not available", nodeID)
 	}
 
-	if cols == 0 {
-		cols = defaultTermCols
-	}
-	if rows == 0 {
-		rows = defaultTermRows
-	}
-
-	now := time.Now()
-	sess := &TerminalSession{
-		ID:        generateSessionID(),
-		NodeID:    nodeID,
-		CreatedAt: now,
-		lastUsed:  now,
-		replay:    newReplayBuffer(maxReplayBytes),
-		subs:      make(map[string]chan sessionEvent),
-		cols:      cols,
-		rows:      rows,
-	}
+	cols, rows = applyDefaultSize(cols, rows)
+	sess := newRemoteSession(nodeID, cols, rows)
 
 	// Register a channel to receive the create response.
 	createCh := make(chan string, 1)
@@ -394,13 +398,39 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
 
+	if err := m.sendAndAwaitRemoteCreate(remote, nodeID, sess, cols, rows, createCh); err != nil {
+		return nil, err
+	}
+
+	m.logger.Info("remote terminal session created", "id", sess.ID, "node", nodeID)
+	return sess, nil
+}
+
+// newRemoteSession creates a TerminalSession for a remote node (no local PTY).
+func newRemoteSession(nodeID string, cols, rows uint16) *TerminalSession {
+	now := time.Now()
+	return &TerminalSession{
+		ID:        generateSessionID(),
+		NodeID:    nodeID,
+		CreatedAt: now,
+		lastUsed:  now,
+		replay:    newReplayBuffer(maxReplayBytes),
+		subs:      make(map[string]chan sessionEvent),
+		cols:      cols,
+		rows:      rows,
+	}
+}
+
+// sendAndAwaitRemoteCreate sends the create terminal request and waits for
+// the worker's response. On failure it cleans up the session from the map.
+func (m *TerminalSessionManager) sendAndAwaitRemoteCreate(remote RemoteTerminalSender, nodeID string, sess *TerminalSession, cols, rows uint16, createCh chan string) error {
 	// Send create request to the worker.
 	if err := remote.SendCreateTerminal(nodeID, sess.ID, uint32(cols), uint32(rows)); err != nil {
 		m.mu.Lock()
 		delete(m.createChans, sess.ID)
 		delete(m.sessions, sess.ID)
 		m.mu.Unlock()
-		return nil, fmt.Errorf("send create terminal: %w", err)
+		return fmt.Errorf("send create terminal: %w", err)
 	}
 
 	// Wait for response with timeout.
@@ -410,7 +440,7 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 			m.mu.Lock()
 			delete(m.sessions, sess.ID)
 			m.mu.Unlock()
-			return nil, fmt.Errorf("remote terminal creation failed: %s", errMsg)
+			return fmt.Errorf("remote terminal creation failed: %s", errMsg)
 		}
 	case <-time.After(remoteCreateTimeout):
 		m.mu.Lock()
@@ -419,11 +449,9 @@ func (m *TerminalSessionManager) createRemote(nodeID string, cols, rows uint16) 
 		m.mu.Unlock()
 		// Clean up the orphaned PTY on the worker.
 		_ = remote.SendCloseTerminal(nodeID, sess.ID)
-		return nil, fmt.Errorf("timeout waiting for remote terminal creation")
+		return fmt.Errorf("timeout waiting for remote terminal creation")
 	}
-
-	m.logger.Info("remote terminal session created", "id", sess.ID, "node", nodeID)
-	return sess, nil
+	return nil
 }
 
 // outputPump reads PTY output and writes to the replay buffer and subscribers.

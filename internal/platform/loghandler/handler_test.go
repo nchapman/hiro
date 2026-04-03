@@ -163,7 +163,7 @@ func TestHandler_SubscriberLimit(t *testing.T) {
 	defer h.Close()
 
 	var unsubs []func()
-	for i := 0; i < maxSubscribers; i++ {
+	for i := range maxSubscribers {
 		_, unsub, err := h.Subscribe()
 		if err != nil {
 			t.Fatalf("Subscribe %d: %v", i, err)
@@ -196,7 +196,7 @@ func TestHandler_BatchedWrites(t *testing.T) {
 	logger := slog.New(h)
 
 	// Write enough entries to trigger a batch flush.
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		logger.Info("batch entry")
 	}
 

@@ -98,39 +98,9 @@ func (rc *RelayClient) Run(ctx context.Context, onConnection func(net.Conn)) {
 }
 
 func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(net.Conn)) (wasConnected bool, err error) {
-	conn, err := net.DialTimeout("tcp", rc.relayAddr, relayDialTimeout)
+	conn, err := rc.dialAndRegister()
 	if err != nil {
-		return false, fmt.Errorf("dialing relay: %w", err)
-	}
-	if tc, ok := conn.(*net.TCPConn); ok {
-		_ = tc.SetKeepAlive(true)
-		_ = tc.SetKeepAlivePeriod(relayKeepaliveInterval)
-	}
-
-	// Send leader handshake.
-	if err := rc.sendHandshake(conn, relayRoleLeader); err != nil {
-		_ = conn.Close()
 		return false, err
-	}
-
-	status, err := readRelayStatus(conn)
-	if err != nil {
-		_ = conn.Close()
-		return false, err
-	}
-	if status == relayStatusConflict {
-		_ = conn.Close()
-		// NOTE: Conflict is NOT a permanent error. The most common case is our
-		// previous control connection died but the relay hasn't cleaned it up yet
-		// (relay has a 5-minute read timeout on control connections). The Run()
-		// loop retries with exponential backoff until the stale entry expires.
-		// Do NOT treat this as fatal — it would prevent reconnection after any
-		// transient network issue.
-		return false, fmt.Errorf("relay: leader already registered for this swarm")
-	}
-	if status != relayStatusOK {
-		_ = conn.Close()
-		return false, fmt.Errorf("relay registration failed: status %d", status)
 	}
 
 	rc.mu.Lock()
@@ -150,29 +120,73 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 		_ = conn.Close()
 	}()
 
-	// Keepalive: send bytes every 15s to prevent NAT/proxy idle timeouts.
-	go func() {
-		ticker := time.NewTicker(relayKeepaliveInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(relayWriteDeadline))
-				if _, err := conn.Write([]byte{0x00}); err != nil {
-					rc.logger.Warn("relay keepalive write failed", "error", err)
-					_ = conn.Close() // unblocks the read loop
-					return
-				}
-				_ = conn.SetWriteDeadline(time.Time{})
-			case <-connCtx.Done():
+	go rc.keepaliveLoop(connCtx, conn)
+
+	return true, rc.notificationLoop(connCtx, conn, onConnection)
+}
+
+// dialAndRegister establishes a TCP connection to the relay and completes
+// the leader handshake. Returns the connection on success.
+func (rc *RelayClient) dialAndRegister() (net.Conn, error) {
+	conn, err := net.DialTimeout("tcp", rc.relayAddr, relayDialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("dialing relay: %w", err)
+	}
+	if tc, ok := conn.(*net.TCPConn); ok {
+		_ = tc.SetKeepAlive(true)
+		_ = tc.SetKeepAlivePeriod(relayKeepaliveInterval)
+	}
+
+	if err := rc.sendHandshake(conn, relayRoleLeader); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	status, err := readRelayStatus(conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if status == relayStatusConflict {
+		_ = conn.Close()
+		// NOTE: Conflict is NOT a permanent error. The most common case is our
+		// previous control connection died but the relay hasn't cleaned it up yet
+		// (relay has a 5-minute read timeout on control connections). The Run()
+		// loop retries with exponential backoff until the stale entry expires.
+		return nil, fmt.Errorf("relay: leader already registered for this swarm")
+	}
+	if status != relayStatusOK {
+		_ = conn.Close()
+		return nil, fmt.Errorf("relay registration failed: status %d", status)
+	}
+
+	return conn, nil
+}
+
+// keepaliveLoop sends a byte every interval to prevent NAT/proxy idle timeouts.
+func (rc *RelayClient) keepaliveLoop(ctx context.Context, conn net.Conn) {
+	ticker := time.NewTicker(relayKeepaliveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(relayWriteDeadline))
+			if _, err := conn.Write([]byte{0x00}); err != nil {
+				rc.logger.Warn("relay keepalive write failed", "error", err)
+				_ = conn.Close() // unblocks the read loop
 				return
 			}
+			_ = conn.SetWriteDeadline(time.Time{})
+		case <-ctx.Done():
+			return
 		}
-	}()
+	}
+}
 
-	// Semaphore to cap concurrent incoming connection handlers.
+// notificationLoop reads incoming notifications from the relay control
+// connection and spawns data connections for each incoming worker.
+func (rc *RelayClient) notificationLoop(ctx context.Context, conn net.Conn, onConnection func(net.Conn)) error {
 	sem := make(chan struct{}, maxPendingRelayConns)
-
 	buf := make([]byte, 1)
 	for {
 		// No read deadline — keepalive write failures and context cancel
@@ -182,7 +196,7 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 			rc.mu.Lock()
 			rc.ctrlConn = nil
 			rc.mu.Unlock()
-			return true, fmt.Errorf("control connection read: %w", err)
+			return fmt.Errorf("control connection read: %w", err)
 		}
 
 		if buf[0] == relayNotifyIncoming {
@@ -190,7 +204,7 @@ func (rc *RelayClient) connectAndServe(ctx context.Context, onConnection func(ne
 			case sem <- struct{}{}:
 				go func() {
 					defer func() { <-sem }()
-					rc.handleIncoming(connCtx, onConnection)
+					rc.handleIncoming(ctx, onConnection)
 				}()
 			default:
 				rc.logger.Warn("relay: too many pending connections, dropping notification")

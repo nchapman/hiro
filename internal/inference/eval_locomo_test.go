@@ -316,7 +316,7 @@ func runEval(t *testing.T, lm fantasy.LanguageModel, configFn evalConfigFunc, ma
 			// of an active session). Each round may create new leaf summaries
 			// or condense existing ones into higher-depth nodes.
 			const maxRounds = 5
-			for round := 0; round < maxRounds; round++ {
+			for round := range maxRounds {
 				compactor := NewCompactor(pdb, sessionID, summarizer, cfg, logger)
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				_, err := compactor.CompactIfNeeded(ctx, int64(estimated))

@@ -283,7 +283,7 @@ func TestSearchTextFile_PerFileMatchCap(t *testing.T) {
 	path := filepath.Join(dir, "many.txt")
 
 	var content strings.Builder
-	for i := 0; i < maxMatchesPerFile+20; i++ {
+	for range maxMatchesPerFile + 20 {
 		content.WriteString("findme\n")
 	}
 	os.WriteFile(path, []byte(content.String()), 0o644)

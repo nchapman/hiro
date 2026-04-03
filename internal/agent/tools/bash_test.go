@@ -135,7 +135,7 @@ func TestBash_BackgroundFailingCommand(t *testing.T) {
 
 func TestBackgroundJob_KillAll(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_, err := mgr.Start(t.TempDir(), "sleep 60")
 		if err != nil {
 			t.Fatalf("Start: %v", err)
@@ -157,7 +157,7 @@ func TestBackgroundJob_CappedBuffer(t *testing.T) {
 	for i := range chunk {
 		chunk[i] = 'A'
 	}
-	for i := 0; i < (maxBufferBytes/1024)+100; i++ {
+	for range (maxBufferBytes / 1024) + 100 {
 		cb.Write(chunk)
 	}
 	if len(cb.String()) > maxBufferBytes {

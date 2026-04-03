@@ -30,7 +30,7 @@ func TestCompactIfNeeded_NoCompactionBelowThreshold(t *testing.T) {
 	createTestSession(t, pdb, "s1")
 
 	// Add a few small messages — well below any compaction threshold.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		appendMsg(t, pdb, "s1", "user", "small msg", 100)
 	}
 
@@ -69,7 +69,7 @@ func TestCompactIfNeeded_LeafPassTriggered(t *testing.T) {
 	}
 
 	// Add enough messages outside the fresh tail to trigger leaf pass.
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		appendMsg(t, pdb, "s1", "user", "message for compaction testing", 100)
 	}
 
@@ -131,7 +131,7 @@ func TestCompactIfNeeded_SoftThresholdTriggersFullSweep(t *testing.T) {
 
 	// Add messages — their estimated tokens don't matter for the trigger,
 	// but they need to exist for the leaf pass to have material to compact.
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		appendMsg(t, pdb, "s1", "user", "message for compaction testing", 100)
 	}
 
@@ -190,7 +190,7 @@ func TestCompactIfNeeded_HardThresholdSetsFlag(t *testing.T) {
 	// Add 10 messages: 5 old (compactable) + 5 in fresh tail.
 	// Each message is 2000 estimated tokens. Fresh tail alone = 10K,
 	// which exceeds the hard threshold (8500) even after compacting the old ones.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		appendMsg(t, pdb, "s1", "user", "message for compaction testing", 2000)
 	}
 
@@ -237,7 +237,7 @@ func TestCompactIfNeeded_FallsBackToEstimatesWhenNoAPIData(t *testing.T) {
 	}
 
 	// Add messages with estimated tokens that exceed soft threshold (120K).
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		appendMsg(t, pdb, "s1", "user", "message content", 7000)
 	}
 
@@ -274,7 +274,7 @@ func TestCompactIfNeeded_CondensationFiresAfterLeafPasses(t *testing.T) {
 
 	// Add 30 messages — enough for multiple leaf passes that produce 3+
 	// adjacent summaries, which should trigger condensation.
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		appendMsg(t, pdb, "s1", "user", "message for condensation test", 100)
 	}
 
@@ -321,7 +321,7 @@ func TestPrecedingSummaryContent_FlowsThroughToPrompt(t *testing.T) {
 
 	// Add 10 messages: 8 outside fresh tail, enough for two leaf passes
 	// (4 messages per pass at 100 tokens each, LeafChunkTokens=400).
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		appendMsg(t, pdb, "s1", "user", "message for dedup test", 100)
 	}
 
@@ -540,7 +540,7 @@ func TestCompactionConfigScaling(t *testing.T) {
 
 func TestGenerateSummaryID(t *testing.T) {
 	seen := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		id := generateSummaryID()
 		if !strings.HasPrefix(id, "sum_") {
 			t.Fatalf("id %q missing sum_ prefix", id)

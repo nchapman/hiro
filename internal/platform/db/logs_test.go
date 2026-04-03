@@ -117,7 +117,7 @@ func TestQueryLogs_CursorPagination(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		d.InsertLogs(ctx, []LogEntry{
 			{Level: "INFO", Message: "msg", CreatedAt: now},
 		})

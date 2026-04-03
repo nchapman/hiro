@@ -8,13 +8,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/nchapman/hiro/internal/platform/fsperm"
-
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
+	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/provider"
 	"github.com/nchapman/hiro/internal/watcher"
@@ -166,85 +165,136 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	// Create new session directory.
 	newSessionID := uuid.Must(uuid.NewV7()).String()
 	sessDir := m.instanceSessionDir(instanceID, newSessionID)
-	if err := os.MkdirAll(sessDir, fsperm.DirPrivate); err != nil {
-		return "", fmt.Errorf("creating session dir: %w", err)
-	}
-	for _, sub := range []string{"scratch", "tmp"} {
-		if err := os.MkdirAll(filepath.Join(sessDir, sub), fsperm.DirPrivate); err != nil {
-			return "", fmt.Errorf("creating session %s dir: %w", sub, err)
-		}
+	if err := createSessionDirs(sessDir); err != nil {
+		return "", err
 	}
 
-	// Register new session in DB.
-	if m.pdb != nil {
-		if err := m.pdb.CreateSession(context.Background(), platformdb.Session{
-			ID:         newSessionID,
-			InstanceID: instanceID,
-			AgentName:  inst.agentName,
-			Mode:       string(inst.info.Mode),
-		}); err != nil {
-			return "", fmt.Errorf("creating session in db: %w", err)
-		}
+	if err := m.registerSessionInDB(instanceID, newSessionID, inst.agentName, inst.info.Mode); err != nil {
+		return "", err
 	}
 
-	// Chown session dir using the UID already held for this instance.
-	if inst.uid != 0 {
-		if err := filepath.WalkDir(sessDir, func(path string, _ fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			return os.Chown(path, int(inst.uid), int(inst.gid))
-		}); err != nil {
-			m.logger.Warn("failed to chown session dir", "session", newSessionID, "error", err)
-		}
-	}
+	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", newSessionID)
 
-	// Reload agent config and resolve provider.
-	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.agentName))
-	if err != nil {
-		return "", fmt.Errorf("loading agent %q: %w", inst.agentName, err)
-	}
-
-	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
+	// Reload agent config, resolve tools and provider.
+	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
 	}
 
-	hasSkills := len(cfg.Skills) > 0
-	if !hasSkills {
-		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
-		if _, err := os.Stat(skillsDir); err == nil {
-			hasSkills = true
-		}
+	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups)
+
+	// Shut down old worker concurrently while spawning the new one.
+	shutdownDone := m.shutdownOldWorkerAsync(oldHandle)
+
+	handle, loop, err := m.spawnSessionWorkerAndLoop(m.ctx, inst, sc.agentConfig, spawnCfg, sc.allowedTools, sc.modelSpec, sc.apiKey, sc.baseURL, instanceID, newSessionID, sessDir)
+	if err != nil {
+		return m.failNewSession(shutdownDone, instanceID, newSessionID, sessDir, inst, err)
 	}
+
+	<-shutdownDone
+
+	inst.activeSession = newSessionID
+	inst.worker = handle.Worker
+	inst.handle = handle
+	inst.loop = loop
+
+	go m.watchWorker(instanceID, handle.Done)
+	go m.watchJobCompletions(m.ctx, handle.Worker, inst.notifications)
+
+	m.logger.Info("new session created",
+		"instance", instanceID, "session", newSessionID, "agent", inst.agentName)
+
+	return newSessionID, nil
+}
+
+// registerSessionInDB creates a session record in the platform database.
+func (m *Manager) registerSessionInDB(instanceID, sessionID, agentName string, mode config.AgentMode) error {
+	if m.pdb == nil {
+		return nil
+	}
+	return m.pdb.CreateSession(context.Background(), platformdb.Session{
+		ID:         sessionID,
+		InstanceID: instanceID,
+		AgentName:  agentName,
+		Mode:       string(mode),
+	})
+}
+
+// failNewSession marks an instance as stopped after a failed session spawn.
+// inst.mu must be held by the caller.
+func (m *Manager) failNewSession(shutdownDone <-chan struct{}, instanceID, sessionID, sessDir string, inst *instance, err error) (string, error) {
+	<-shutdownDone
+	inst.info.Status = InstanceStatusStopped
+	m.setInstanceStatus(instanceID, "stopped")
+	os.RemoveAll(sessDir)
+	if m.pdb != nil {
+		_ = m.pdb.DeleteSession(context.Background(), sessionID)
+	}
+	return "", err
+}
+
+// chownDir recursively chowns a directory to the given uid/gid.
+// No-op if uid is 0 (isolation not enabled).
+func chownDir(dir string, uid, gid uint32, logger interface{ Warn(string, ...any) }, label, id string) {
+	if uid == 0 {
+		return
+	}
+	if err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		return os.Chown(path, int(uid), int(gid))
+	}); err != nil {
+		logger.Warn("failed to chown dir", label, id, "error", err)
+	}
+}
+
+// sessionConfig holds the resolved configuration for starting a new session.
+type sessionConfig struct {
+	agentConfig  config.AgentConfig
+	allowedTools map[string]bool
+	modelSpec    models.ModelSpec
+	apiKey       string
+	baseURL      string
+}
+
+// resolveSessionConfig reloads the agent config and resolves tools and provider
+// for a new session. Updates inst.effectiveTools/allowLayers/denyRules in place.
+func (m *Manager) resolveSessionConfig(inst *instance) (sessionConfig, error) {
+	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.agentName))
+	if err != nil {
+		return sessionConfig{}, fmt.Errorf("loading agent %q: %w", inst.agentName, err)
+	}
+
+	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
+	if err != nil {
+		return sessionConfig{}, err
+	}
+
+	hasSkills := m.agentHasSkills(cfg)
 	// Recompute effective tools from current config (agent.md + CP + parent).
 	// This picks up any permission changes since the instance was created.
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, inst.info.ParentID)
 	if err != nil {
-		return "", fmt.Errorf("computing effective tools: %w", err)
+		return sessionConfig{}, fmt.Errorf("computing effective tools: %w", err)
 	}
 	inst.effectiveTools = effectiveTools
 	inst.allowLayers = allowLayers
 	inst.denyRules = denyRules
 	allowedTools := buildAllowedToolsMap(effectiveTools, inst.info.Mode, hasSkills)
 
-	spawnCtx := m.ctx // persistent instances always use manager context
+	return sessionConfig{
+		agentConfig:  cfg,
+		allowedTools: allowedTools,
+		modelSpec:    modelSpec,
+		apiKey:       apiKey,
+		baseURL:      baseURL,
+	}, nil
+}
 
-	spawnCfg := ipc.SpawnConfig{
-		InstanceID:     instanceID,
-		SessionID:      newSessionID,
-		AgentName:      cfg.Name,
-		EffectiveTools: allowedTools,
-		WorkingDir:     m.opts.WorkingDir,
-		SessionDir:     sessDir,
-		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hiro-agent-%s.sock", newSessionID)),
-		UID:            inst.uid,
-		GID:            inst.gid,
-		Groups:         inst.groups,
-	}
-
-	// Shut down old worker concurrently while spawning the new one.
-	// Different socket paths and session dirs, so no resource conflicts.
+// shutdownOldWorkerAsync shuts down the old worker handle in a goroutine.
+// Returns a channel that is closed when shutdown completes.
+func (m *Manager) shutdownOldWorkerAsync(oldHandle *WorkerHandle) <-chan struct{} {
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
@@ -255,91 +305,52 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 			oldHandle.Close()
 		}
 	}()
+	return shutdownDone
+}
 
-	// failStopped marks the instance as stopped on spawn/loop failure.
-	// inst.mu is already held by the caller (NewSession defers it).
-	failStopped := func(err error) (string, error) {
-		<-shutdownDone // wait for old worker cleanup before marking stopped
-		inst.info.Status = InstanceStatusStopped
-		m.setInstanceStatus(instanceID, "stopped")
-		os.RemoveAll(sessDir)
-		if m.pdb != nil {
-			_ = m.pdb.DeleteSession(context.Background(), newSessionID)
-		}
-		return "", err
-	}
-
-	handle, err := m.workerFactory(spawnCtx, spawnCfg)
+// spawnSessionWorkerAndLoop creates a new worker and inference loop for a session.
+// Returns the handle and loop, or an error.
+func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance, cfg config.AgentConfig, spawnCfg ipc.SpawnConfig, allowedTools map[string]bool, modelSpec models.ModelSpec, apiKey, baseURL, instanceID, sessionID, sessDir string) (*WorkerHandle, *inference.Loop, error) {
+	handle, err := m.workerFactory(ctx, spawnCfg)
 	if err != nil {
-		return failStopped(fmt.Errorf("spawning agent %q: %w", cfg.Name, err))
+		return nil, nil, fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
 	}
 	if s, ok := handle.Worker.(ipc.SecretEnvSetter); ok {
 		s.SetSecretEnvFn(m.SecretEnv)
 	}
 
-	// Create new inference loop.
-	var loop *inference.Loop
-	if modelSpec.Provider != "" {
-		lm, err := provider.CreateLanguageModel(spawnCtx, provider.Type(modelSpec.Provider), apiKey, baseURL, modelSpec.Model)
-		if err != nil {
-			handle.Kill()
-			handle.Close()
-			return failStopped(fmt.Errorf("creating language model for %q: %w", cfg.Name, err))
-		}
-
-		loop, err = inference.NewLoop(inference.LoopConfig{
-			InstanceID:     instanceID,
-			SessionID:      newSessionID,
-			AgentConfig:    cfg,
-			Mode:           inst.info.Mode,
-			WorkingDir:     m.opts.WorkingDir,
-			InstanceDir:    m.instanceDir(instanceID),
-			SessionDir:     sessDir,
-			AgentDefDir:    m.agentDefDir(cfg.Name),
-			SharedSkillDir: m.sharedSkillsDir(),
-			LM:             lm,
-			Model:          modelSpec.String(),
-			Provider:       modelSpec.Provider,
-			Executor:       handle.Worker,
-			PDB:            m.pdb,
-			AllowedTools:   allowedTools,
-			AllowLayers:    allowLayers,
-			DenyRules:      denyRules,
-			MaxTurns:       cfg.MaxTurns,
-			HasSkills:      hasSkills,
-			SecretNamesFn:  m.SecretNames,
-			SecretEnvFn:    m.SecretEnv,
-			Notifications:  inst.notifications,
-			Logger:         m.logger.With("instance", instanceID, "session", newSessionID, "agent", cfg.Name),
-			HostManager:    m,
-		})
-		if err != nil {
-			handle.Kill()
-			handle.Close()
-			return failStopped(fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err))
-		}
+	loop, err := m.createInferenceLoop(ctx, inference.LoopConfig{
+		InstanceID:     instanceID,
+		SessionID:      sessionID,
+		AgentConfig:    cfg,
+		Mode:           inst.info.Mode,
+		WorkingDir:     m.opts.WorkingDir,
+		InstanceDir:    m.instanceDir(instanceID),
+		SessionDir:     sessDir,
+		AgentDefDir:    m.agentDefDir(cfg.Name),
+		SharedSkillDir: m.sharedSkillsDir(),
+		Model:          modelSpec.String(),
+		Provider:       modelSpec.Provider,
+		Executor:       handle.Worker,
+		PDB:            m.pdb,
+		AllowedTools:   allowedTools,
+		AllowLayers:    inst.allowLayers,
+		DenyRules:      inst.denyRules,
+		MaxTurns:       cfg.MaxTurns,
+		HasSkills:      len(cfg.Skills) > 0 || m.agentHasSkills(cfg),
+		SecretNamesFn:  m.SecretNames,
+		SecretEnvFn:    m.SecretEnv,
+		Notifications:  inst.notifications,
+		Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
+		HostManager:    m,
+	}, modelSpec, apiKey, baseURL)
+	if err != nil {
+		handle.Kill()
+		handle.Close()
+		return nil, nil, err
 	}
 
-	// Wait for old worker to finish before swapping, so the old watchWorker
-	// goroutine sees nil handle and bails cleanly.
-	<-shutdownDone
-
-	// Swap — inst.loop goes directly from old to new.
-	inst.activeSession = newSessionID
-	inst.worker = handle.Worker
-	inst.handle = handle
-	inst.loop = loop
-
-	go m.watchWorker(instanceID, handle.Done)
-	go m.watchJobCompletions(spawnCtx, handle.Worker, inst.notifications)
-
-	m.logger.Info("new session created",
-		"instance", instanceID,
-		"session", newSessionID,
-		"agent", inst.agentName,
-	)
-
-	return newSessionID, nil
+	return handle, loop, nil
 }
 
 // WatchAgentDefinitions subscribes to agent.md changes via the filesystem
@@ -358,6 +369,16 @@ func (m *Manager) WatchAgentDefinitions(w *watcher.Watcher) {
 	})
 }
 
+// configPushContext holds resolved config for pushing updates to running instances.
+type configPushContext struct {
+	cfg       config.AgentConfig
+	modelSpec models.ModelSpec
+	apiKey    string
+	baseURL   string
+	model     string
+	hasSkills bool
+}
+
 // pushConfigUpdate reloads an agent definition from disk and pushes the
 // resolved config to all running instances of that agent.
 func (m *Manager) pushConfigUpdate(agentName string) {
@@ -374,80 +395,90 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 			"agent", agentName, "error", err)
 		return
 	}
-	model := modelSpec.String()
 
-	hasSkills := len(cfg.Skills) > 0
-	if !hasSkills {
-		skillsDir := filepath.Join(m.agentDefDir(cfg.Name), "skills")
-		if _, err := os.Stat(skillsDir); err == nil {
-			hasSkills = true
-		}
+	pc := configPushContext{
+		cfg:       cfg,
+		modelSpec: modelSpec,
+		apiKey:    apiKey,
+		baseURL:   baseURL,
+		model:     modelSpec.String(),
+		hasSkills: m.agentHasSkills(cfg),
 	}
 
 	type pushTarget struct {
-		id           string
-		parentID     string
-		mode         config.AgentMode
-		currentModel string
+		id       string
+		parentID string
+		mode     config.AgentMode
 	}
 
 	m.mu.RLock()
 	var targets []pushTarget
 	for id, inst := range m.instances {
 		if inst.agentName == agentName && inst.info.Status == InstanceStatusRunning {
-			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode, currentModel: inst.info.Model})
+			targets = append(targets, pushTarget{id: id, parentID: inst.info.ParentID, mode: inst.info.Mode})
 		}
 	}
 	m.mu.RUnlock()
 
 	for _, t := range targets {
-		inst := m.getInstance(t.id)
-		if inst == nil {
-			continue // removed between snapshot and push
-		}
-
-		inst.mu.Lock()
-		if inst.info.Status == InstanceStatusStopped {
-			inst.mu.Unlock()
-			continue
-		}
-
-		if inst.loop != nil {
-			// Recompute effective tools from updated config.
-			effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, t.parentID)
-			if err != nil {
-				m.logger.Warn("failed to recompute tools for config push",
-					"agent", agentName, "instance", t.id, "error", err)
-			} else {
-				allowedTools := buildAllowedToolsMap(effectiveTools, t.mode, hasSkills)
-				inst.effectiveTools = effectiveTools
-				inst.allowLayers = allowLayers
-				inst.denyRules = denyRules
-				inst.loop.UpdateToolRules(allowedTools, allowLayers, denyRules)
-			}
-
-			// Model switch.
-			if model != inst.info.Model {
-				const modelSwitchTimeout = 10 * time.Second
-				pushCtx, pushCancel := context.WithTimeout(context.Background(), modelSwitchTimeout)
-				lm, err := provider.CreateLanguageModel(pushCtx, provider.Type(modelSpec.Provider), apiKey, baseURL, modelSpec.Model)
-				pushCancel()
-				if err != nil {
-					m.logger.Warn("failed to create language model for config push",
-						"agent", agentName, "model", model, "error", err)
-				} else {
-					inst.loop.UpdateModel(lm, model, modelSpec.Provider)
-					inst.info.Model = model
-				}
-			}
-		}
-
-		inst.info.Description = cfg.Description
-		inst.mu.Unlock()
-
-		m.logger.Info("pushed config update to instance",
-			"agent", agentName, "instance", t.id, "model", model)
+		m.pushConfigToInstance(t.id, t.parentID, t.mode, pc)
 	}
+}
+
+// pushConfigToInstance applies a resolved config update to a single running instance.
+func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.AgentMode, pc configPushContext) {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return // removed between snapshot and push
+	}
+
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+
+	if inst.info.Status == InstanceStatusStopped {
+		return
+	}
+
+	if inst.loop != nil {
+		m.pushToolsAndModel(inst, instanceID, parentID, mode, pc)
+	}
+
+	inst.info.Description = pc.cfg.Description
+	m.logger.Info("pushed config update to instance",
+		"agent", pc.cfg.Name, "instance", instanceID, "model", pc.model)
+}
+
+// pushToolsAndModel updates tool rules and model on an instance's inference loop.
+// Caller must hold inst.mu.
+func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string, mode config.AgentMode, pc configPushContext) {
+	// Recompute effective tools from updated config.
+	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(pc.cfg, parentID)
+	if err != nil {
+		m.logger.Warn("failed to recompute tools for config push",
+			"agent", pc.cfg.Name, "instance", instanceID, "error", err)
+	} else {
+		allowedTools := buildAllowedToolsMap(effectiveTools, mode, pc.hasSkills)
+		inst.effectiveTools = effectiveTools
+		inst.allowLayers = allowLayers
+		inst.denyRules = denyRules
+		inst.loop.UpdateToolRules(allowedTools, allowLayers, denyRules)
+	}
+
+	// Model switch.
+	if pc.model == inst.info.Model {
+		return
+	}
+	const modelSwitchTimeout = 10 * time.Second
+	pushCtx, pushCancel := context.WithTimeout(context.Background(), modelSwitchTimeout)
+	lm, lmErr := provider.CreateLanguageModel(pushCtx, provider.Type(pc.modelSpec.Provider), pc.apiKey, pc.baseURL, pc.modelSpec.Model)
+	pushCancel()
+	if lmErr != nil {
+		m.logger.Warn("failed to create language model for config push",
+			"agent", pc.cfg.Name, "model", pc.model, "error", lmErr)
+		return
+	}
+	inst.loop.UpdateModel(lm, pc.model, pc.modelSpec.Provider)
+	inst.info.Model = pc.model
 }
 
 // PushConfigUpdateAll recomputes and pushes config to all running instances.
