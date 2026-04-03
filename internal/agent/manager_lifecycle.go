@@ -56,15 +56,18 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 
 // parentGroupSet returns the set of supplementary GIDs held by the parent instance.
 // Returns nil if there is no parent (root instance — no restriction).
+// Returns an empty non-nil map if the parent exists but has no groups, or if the
+// parent ID is specified but not found (fail-closed: deny all supplementary groups).
 func (m *Manager) parentGroupSet(parentID string) map[uint32]bool {
 	if parentID == "" {
-		return nil
+		return nil // root instance — no restriction
 	}
 	m.mu.RLock()
 	parent, ok := m.instances[parentID]
 	m.mu.RUnlock()
 	if !ok {
-		return nil
+		// Parent specified but not found — deny all supplementary groups.
+		return map[uint32]bool{}
 	}
 	set := make(map[uint32]bool, len(parent.groups))
 	for _, g := range parent.groups {

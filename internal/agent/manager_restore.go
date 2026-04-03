@@ -11,8 +11,8 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 )
 
-// RestoreInstances reads persistent/coordinator instances from the platform
-// database and restarts them. Call once after NewManager.
+// RestoreInstances reads persistent instances from the platform database
+// and restarts them. Call once after NewManager.
 func (m *Manager) RestoreInstances(ctx context.Context) error {
 	if m.pdb == nil {
 		return nil
@@ -50,6 +50,16 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		if dbInst.Status == "stopped" {
 			// Store agent definition defaults; enrichPersonaNames resolves
 			// persona overrides at list time (same as running instances).
+			// Re-derive groups from the agent definition so that
+			// parentGroupSet works correctly for children of this instance.
+			var restoredGroups []uint32
+			if m.uidPool != nil {
+				for _, g := range cfg.Groups {
+					if gid := m.uidPool.GroupGID(g); gid != 0 {
+						restoredGroups = append(restoredGroups, gid)
+					}
+				}
+			}
 			inst := &instance{
 				info: InstanceInfo{
 					ID:          dbInst.ID,
@@ -61,6 +71,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 					Model:       m.resolveModelString(cfg.Model),
 				},
 				agentName: cfg.Name,
+				groups:    restoredGroups,
 			}
 			m.mu.Lock()
 			m.instances[dbInst.ID] = inst
