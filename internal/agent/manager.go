@@ -69,7 +69,7 @@ type instance struct {
 	denyRules      []toolrules.Rule   // merged deny rules from all sources
 	uid            uint32             // isolated UID (0 = no isolation)
 	gid            uint32             // isolated GID
-	groups         []uint32           // supplementary groups (from agent frontmatter, intersected with parent)
+	groups         []uint32           // supplementary groups only (not primary GID); used for inheritance checks
 	nodeID         ipc.NodeID         // which node this instance runs on ("home" for local)
 }
 

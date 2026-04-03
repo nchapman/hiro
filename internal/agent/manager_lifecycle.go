@@ -312,15 +312,14 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 
 	// Acquire a dedicated Unix UID for this instance (if isolation is enabled).
 	var uid, gid uint32
-	var groups []uint32
+	var supplementaryGroups []uint32 // only declared groups, not the primary GID
 	if m.uidPool != nil {
 		var err error
 		uid, gid, err = m.uidPool.Acquire(instanceID)
 		if err != nil {
 			return "", fmt.Errorf("acquiring UID: %w", err)
 		}
-		groups = []uint32{gid}
-		// Add supplementary groups declared in the agent definition,
+		// Resolve supplementary groups from the agent definition,
 		// intersected with the parent's groups (a child cannot escalate
 		// beyond its parent's group membership). Root instances (no parent)
 		// get whatever they declare.
@@ -337,7 +336,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 					"agent", cfg.Name, "group", g)
 				continue
 			}
-			groups = append(groups, groupGID)
+			supplementaryGroups = append(supplementaryGroups, groupGID)
 		}
 		// Transfer ownership of the instance dir (and all contents) to the agent user.
 		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, err error) error {
@@ -372,7 +371,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hiro-agent-%s.sock", sessionID)),
 		UID:            uid,
 		GID:            gid,
-		Groups:         groups,
+		Groups:         append([]uint32{gid}, supplementaryGroups...),
 	}
 
 	// cleanup removes directories and releases UID on failure.
@@ -508,7 +507,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		denyRules:      denyRules,
 		uid:            uid,
 		gid:            gid,
-		groups:         groups,
+		groups:         supplementaryGroups,
 		nodeID:         resolvedNodeID,
 	}
 

@@ -232,6 +232,22 @@ type SkillConfig struct {
 	Metadata      map[string]string // optional: arbitrary key-value pairs (author, version, etc.)
 }
 
+var validGroupName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// validateGroupName checks that a group name looks like a valid Unix group name.
+func validateGroupName(name string) error {
+	if name == "" {
+		return fmt.Errorf("group name is empty")
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("group name %q exceeds 64 character limit", name)
+	}
+	if !validGroupName.MatchString(name) {
+		return fmt.Errorf("group name %q must be lowercase letters, numbers, and hyphens", name)
+	}
+	return nil
+}
+
 var validSkillName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // ValidateSkillName checks that a skill name is kebab-case, max 64 characters.
@@ -270,6 +286,13 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 
 	if agent.Name == "" {
 		return AgentConfig{}, fmt.Errorf("agent config at %s missing required 'name' field", agentPath)
+	}
+
+	// Validate group names (must be valid Unix group name format).
+	for _, g := range agent.Groups {
+		if err := validateGroupName(g); err != nil {
+			return AgentConfig{}, fmt.Errorf("agent %q: %w", agent.Name, err)
+		}
 	}
 
 	// Load skills

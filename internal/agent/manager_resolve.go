@@ -174,7 +174,15 @@ func filterRules(rules []toolrules.Rule, effective map[string]bool) []toolrules.
 }
 
 // buildAllowedToolsMap creates the AllowedTools map for agent.Options,
-// adding mode-appropriate structural tools that bypass filtering.
+// adding mode-appropriate structural tools that bypass allowed_tools filtering.
+//
+// Structural tools (injected unconditionally, cannot be denied via allowed_tools):
+//   - SpawnInstance: all instances
+//   - AddMemory, ForgetMemory, TodoWrite, HistorySearch, HistoryRecall: persistent instances
+//   - Skill: instances with skills available
+//
+// These are fundamental to the agent runtime and cannot be opted out of.
+// Control-plane deny rules can still block them at call time.
 //
 // SECURITY: Management tools (CreatePersistentInstance, ResumeInstance,
 // StopInstance, DeleteInstance, SendMessage, ListInstances, ListNodes)
@@ -186,10 +194,9 @@ func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasS
 		allowed[t] = true
 	}
 
-	// All instances get SpawnInstance.
+	// Structural tools — always injected regardless of allowed_tools.
 	allowed[spawnTool] = true
 
-	// Persistent instances get memory/todos/history tools.
 	if mode.IsPersistent() {
 		for _, t := range persistentTools {
 			allowed[t] = true
