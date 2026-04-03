@@ -65,7 +65,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	// Validate mode
 	switch req.Mode {
-	case "standalone", "leader", "worker":
+	case roleStandalone, roleLeader, roleWorker:
 		// ok
 	case "":
 		http.Error(w, "mode is required", http.StatusBadRequest)
@@ -76,7 +76,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Standalone and leader require a provider; worker does not.
-	if req.Mode != "worker" {
+	if req.Mode != roleWorker {
 		if req.ProviderType == "" || req.APIKey == "" {
 			http.Error(w, "provider_type and api_key are required", http.StatusBadRequest)
 			return
@@ -84,7 +84,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Worker requires either a swarm code or a direct leader address.
-	if req.Mode == "worker" {
+	if req.Mode == roleWorker {
 		if req.WorkerSwarmCode == "" && req.WorkerLeaderAddr == "" {
 			http.Error(w, "worker mode requires worker_swarm_code or worker_leader_addr", http.StatusBadRequest)
 			return
@@ -101,7 +101,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	// Validate provider config before mutating any state, so a bad provider
 	// type doesn't leave the control plane in a half-configured state.
-	if req.Mode != "worker" {
+	if req.Mode != roleWorker {
 		if err := s.cp.SetProvider(req.ProviderType, controlplane.ProviderConfig{
 			APIKey: req.APIKey,
 		}); err != nil {
@@ -137,7 +137,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"ok": true}
 
 	switch req.Mode {
-	case "leader":
+	case roleLeader:
 		swarmCode, err := cluster.GenerateSwarmCode()
 		if err != nil {
 			s.logger.Error("failed to generate swarm code", "error", err)
@@ -148,7 +148,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		s.cp.SetClusterSwarmCode(swarmCode)
 		resp["swarm_code"] = swarmCode
 
-	case "worker":
+	case roleWorker:
 		if req.WorkerSwarmCode != "" {
 			s.cp.SetClusterTrackerURL(defaultTrackerURL)
 			s.cp.SetClusterSwarmCode(req.WorkerSwarmCode)
@@ -169,13 +169,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Start services based on mode (worker restart is deferred until after response).
 	needsRestart := false
 	switch req.Mode {
-	case "standalone":
+	case roleStandalone:
 		if s.startManager != nil {
 			if err := s.startManager(); err != nil {
 				s.logger.Error("failed to start manager after setup", "error", err)
 			}
 		}
-	case "leader":
+	case roleLeader:
 		// Cluster must start before manager so the manager gets the cluster service.
 		if s.startCluster != nil {
 			if err := s.startCluster(); err != nil {
@@ -187,7 +187,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 				s.logger.Error("failed to start manager after setup", "error", err)
 			}
 		}
-	case "worker":
+	case roleWorker:
 		needsRestart = true
 	}
 

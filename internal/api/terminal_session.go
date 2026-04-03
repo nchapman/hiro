@@ -265,11 +265,11 @@ func (m *TerminalSessionManager) HandleTerminalExited(nodeID, sessionID string, 
 // Create spawns a new terminal session (local or remote). Returns the session
 // or an error if the per-node limit is reached.
 func (m *TerminalSessionManager) Create(nodeID string, cols, rows uint16) (*TerminalSession, error) {
-	if nodeID == "" || nodeID == "home" {
-		nodeID = "home"
+	if nodeID == "" || nodeID == nodeIDHome {
+		nodeID = nodeIDHome
 	}
 
-	if nodeID == "home" {
+	if nodeID == nodeIDHome {
 		return m.createLocal(nodeID, cols, rows)
 	}
 

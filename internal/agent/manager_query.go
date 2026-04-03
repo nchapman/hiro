@@ -12,6 +12,13 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 )
 
+// Message role constants.
+const (
+	roleUser      = "user"
+	roleAssistant = "assistant"
+	roleTool      = "tool"
+)
+
 // HistoryMessage is a simplified message for API consumers.
 type HistoryMessage struct {
 	Role      string `json:"role"`
@@ -140,9 +147,9 @@ func (m *Manager) GetHistory(ctx context.Context, instanceID string, limit int) 
 
 	result := make([]HistoryMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "tool" {
+		if msg.Role == roleUser || msg.Role == roleAssistant || msg.Role == roleTool {
 			rawJSON := msg.RawJSON
-			if msg.Role == "assistant" && rawJSON != "" {
+			if msg.Role == roleAssistant && rawJSON != "" {
 				rawJSON = inference.InjectStatusMessages(rawJSON)
 			}
 			result = append(result, HistoryMessage{
@@ -170,9 +177,9 @@ func (m *Manager) GetSessionHistory(ctx context.Context, sessionID string, limit
 
 	result := make([]HistoryMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "tool" {
+		if msg.Role == roleUser || msg.Role == roleAssistant || msg.Role == roleTool {
 			rawJSON := msg.RawJSON
-			if msg.Role == "assistant" && rawJSON != "" {
+			if msg.Role == roleAssistant && rawJSON != "" {
 				rawJSON = inference.InjectStatusMessages(rawJSON)
 			}
 			result = append(result, HistoryMessage{

@@ -25,7 +25,7 @@ func (s *Server) handleGetClusterSettings(w http.ResponseWriter, _ *http.Request
 	}
 
 	switch mode {
-	case "leader":
+	case roleLeader:
 		resp["swarm_code"] = s.cp.ClusterSwarmCode()
 		resp["tracker_url"] = s.cp.ClusterTrackerURL()
 
@@ -72,7 +72,7 @@ func (s *Server) handleGetClusterSettings(w http.ResponseWriter, _ *http.Request
 			resp["nodes"] = nodeList
 		}
 
-	case "worker":
+	case roleWorker:
 		resp["leader_addr"] = s.cp.ClusterLeaderAddr()
 		resp["swarm_code"] = s.cp.ClusterSwarmCode()
 		if s.workerStatus != nil {

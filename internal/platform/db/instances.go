@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// Instance status constants.
+const (
+	statusRunning = "running"
+	statusStopped = "stopped"
+)
+
 // Instance represents a row in the instances table.
 //
 // Storage rule: only non-derivable data is persisted. Derived state
@@ -38,7 +44,7 @@ func (d *DB) CreateInstance(ctx context.Context, inst Instance) error {
 	}
 	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO instances (id, agent_name, mode, parent_id, node_id, status) VALUES (?, ?, ?, ?, ?, ?)`,
-		inst.ID, inst.AgentName, inst.Mode, parentID, nodeID, "running",
+		inst.ID, inst.AgentName, inst.Mode, parentID, nodeID, statusRunning,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -110,7 +116,7 @@ func (d *DB) ListChildInstances(ctx context.Context, parentID string) ([]Instanc
 // stopped_at is set to now.
 func (d *DB) UpdateInstanceStatus(ctx context.Context, id, status string) error {
 	var stoppedAt *string
-	if status == "stopped" {
+	if status == statusStopped {
 		now := time.Now().UTC().Format("2006-01-02 15:04:05")
 		stoppedAt = &now
 	}

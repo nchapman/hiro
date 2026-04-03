@@ -9,6 +9,9 @@ import (
 	"github.com/coder/websocket"
 )
 
+// nodeIDHome is the node ID representing the local machine.
+const nodeIDHome = "home"
+
 // Wire protocol constants for the multiplexed terminal WebSocket.
 const (
 	termMsgOutput  byte = 0x01 // server -> client: PTY output
@@ -66,7 +69,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	// If no sessions exist, auto-create one.
 	sessions := s.termSessions.List()
 	if len(sessions) == 0 {
-		ts.handleCreate(termControlMsg{NodeID: "home", Cols: defaultTermCols, Rows: defaultTermRows})
+		ts.handleCreate(termControlMsg{NodeID: nodeIDHome, Cols: defaultTermCols, Rows: defaultTermRows})
 	}
 
 	// Read loop: client -> server.
@@ -92,10 +95,10 @@ type attachedSub struct {
 
 // resolveNodeName looks up the human-readable name for a node ID.
 func (ts *termSocket) resolveNodeName(nodeID string) string {
-	if nodeID == "home" {
+	if nodeID == nodeIDHome {
 		// Try the registry first for the configured home name.
 		if ts.server.nodeRegistry != nil {
-			if info, ok := ts.server.nodeRegistry.Get("home"); ok && info.Name != "" {
+			if info, ok := ts.server.nodeRegistry.Get(nodeIDHome); ok && info.Name != "" {
 				return info.Name
 			}
 		}
@@ -220,7 +223,7 @@ func (ts *termSocket) readLoop() {
 func (ts *termSocket) handleCreate(ctrl termControlMsg) {
 	nodeID := ctrl.NodeID
 	if nodeID == "" {
-		nodeID = "home"
+		nodeID = nodeIDHome
 	}
 	cols := ctrl.Cols
 	rows := ctrl.Rows

@@ -2,6 +2,13 @@ package api
 
 import "time"
 
+// Cluster role constants.
+const (
+	roleStandalone = "standalone"
+	roleLeader     = "leader"
+	roleWorker     = "worker"
+)
+
 // Shared constants used across multiple files in the api package.
 const (
 	// minPasswordLength is the minimum password length for setup and change-password.

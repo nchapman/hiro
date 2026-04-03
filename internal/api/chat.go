@@ -23,6 +23,12 @@ import (
 // large enough for file attachments.
 const wsReadLimitChat = 10 * 1024 * 1024
 
+// Chat message type constants.
+const (
+	msgTypeConfig  = "config"
+	msgTypeMessage = "message"
+)
+
 // ChatAttachment is a file attached to a chat message, base64-encoded.
 type ChatAttachment struct {
 	Filename  string `json:"filename"`
@@ -214,7 +220,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 // Returns a non-nil error if the connection should be closed.
 func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, instanceID string, msg ChatMessage, onEvent func(ipc.ChatEvent) error, sendDone func() error) error {
 	// Handle config changes (model switch, reasoning toggle).
-	if msg.Type == "config" {
+	if msg.Type == msgTypeConfig {
 		if err := s.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
 			s.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
 			_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
@@ -226,7 +232,7 @@ func (s *Server) handleUserMessage(ctx context.Context, conn *websocket.Conn, in
 		return wsjson.Write(ctx, conn, done)
 	}
 
-	if msg.Type != "message" || (msg.Content == "" && len(msg.Attachments) == 0) {
+	if msg.Type != msgTypeMessage || (msg.Content == "" && len(msg.Attachments) == 0) {
 		return nil
 	}
 
