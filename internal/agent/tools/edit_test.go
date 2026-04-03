@@ -195,6 +195,41 @@ func TestEdit_RelativePath(t *testing.T) {
 	}
 }
 
+func TestEdit_ConfinedRejectsOutside(t *testing.T) {
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+
+	root := t.TempDir()
+	SetAllowedRoots([]string{root})
+
+	tool := NewEditTool(root)
+	content, isErr := runTool(t, tool, `{"file_path": "/etc/evil.txt", "old_string": "x", "new_string": "y"}`)
+	if !isErr {
+		t.Fatal("expected error for path outside allowed roots")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
+func TestEdit_CreateWithParentDirs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deep", "nested", "new.txt")
+
+	tool := NewEditTool(dir)
+	content, isErr := runTool(t, tool, `{"file_path": "`+path+`", "old_string": "", "new_string": "deep content"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("file not found: %v", err)
+	}
+	if string(data) != "deep content" {
+		t.Errorf("got %q, want %q", string(data), "deep content")
+	}
+}
+
 func TestEdit_RelativeCreateFile(t *testing.T) {
 	dir := t.TempDir()
 

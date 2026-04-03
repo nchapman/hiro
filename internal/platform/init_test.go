@@ -115,3 +115,118 @@ func TestInit_Idempotent(t *testing.T) {
 		t.Error("coordinator agent.md content changed after second Init")
 	}
 }
+
+func TestInit_ConfigDirPermissions(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.DiscardHandler)
+
+	if err := Init(dir, logger); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config")
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+
+	// config/ should be restricted to owner only (0700).
+	perm := info.Mode().Perm()
+	if perm != 0o700 {
+		t.Errorf("config dir perms = %04o, want 0700", perm)
+	}
+}
+
+func TestInit_ConfigDirPermsTightened(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.DiscardHandler)
+
+	// Pre-create config/ with overly permissive mode.
+	configPath := filepath.Join(dir, "config")
+	if err := os.MkdirAll(configPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Init(dir, logger); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	perm := info.Mode().Perm()
+	if perm != 0o700 {
+		t.Errorf("config dir perms not tightened: got %04o, want 0700", perm)
+	}
+}
+
+func TestInit_AllRequiredDirs(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.DiscardHandler)
+
+	if err := Init(dir, logger); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	expected := []string{"agents", "config", "db", "instances", "skills", "workspace"}
+	for _, name := range expected {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("directory %s does not exist: %v", name, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("%s is not a directory", name)
+		}
+	}
+}
+
+func TestInit_SeededAgentHasContent(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.DiscardHandler)
+
+	if err := Init(dir, logger); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// Walk the seeded agents directory and verify all .md files are non-empty.
+	agentsDir := filepath.Join(dir, "agents")
+	err := filepath.WalkDir(agentsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if len(data) == 0 {
+			t.Errorf("seeded file is empty: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking agents dir: %v", err)
+	}
+}
+
+func TestLookupGroupGID_NonexistentGroup(t *testing.T) {
+	// lookupGroupGID should return -1 for groups that don't exist.
+	gid := lookupGroupGID("hiro-nonexistent-group-xyz-99999")
+	if gid != -1 {
+		t.Errorf("expected -1 for nonexistent group, got %d", gid)
+	}
+}
+
+func TestSetCoordinatorDir_NegativeGID(t *testing.T) {
+	// setCoordinatorDir should be a no-op when coordGID is negative.
+	dir := t.TempDir()
+	err := setCoordinatorDir(dir, "test", -1)
+	if err != nil {
+		t.Errorf("expected no-op for negative GID, got: %v", err)
+	}
+}

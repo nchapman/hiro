@@ -219,3 +219,66 @@ func TestAtomicWriteFile(t *testing.T) {
 		t.Errorf("temp files not cleaned up: %v", matches)
 	}
 }
+
+func TestAtomicWriteFile_EmptyContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.txt")
+
+	if err := atomicWriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("expected empty file, got %d bytes", len(data))
+	}
+}
+
+func TestAtomicWriteFile_Permissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "perms.txt")
+
+	if err := atomicWriteFile(path, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+	info, _ := os.Stat(path)
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("permissions = %o, want 0o600", perm)
+	}
+}
+
+func TestAtomicWriteFile_NonexistentDir(t *testing.T) {
+	// Writing to a directory that doesn't exist should fail.
+	err := atomicWriteFile("/nonexistent/dir/file.txt", []byte("x"), 0o644)
+	if err == nil {
+		t.Error("expected error for nonexistent directory")
+	}
+}
+
+func TestMkdirFor(t *testing.T) {
+	// Empty or "." dir returns nil.
+	if err := mkdirFor("file.txt"); err != nil {
+		t.Errorf("mkdirFor bare file: %v", err)
+	}
+
+	// Nested dir creation.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a", "b", "c", "file.txt")
+	if err := mkdirFor(path); err != nil {
+		t.Fatalf("mkdirFor nested: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a", "b", "c")); err != nil {
+		t.Errorf("expected directory to exist: %v", err)
+	}
+}
+
+func TestExcludedDirs(t *testing.T) {
+	expected := []string{"node_modules", "vendor", "dist", "__pycache__", ".git"}
+	for _, name := range expected {
+		if !excludedDirs[name] {
+			t.Errorf("expected %q in excludedDirs", name)
+		}
+	}
+}

@@ -105,6 +105,23 @@ func TestWriteFile_RelativePath(t *testing.T) {
 	}
 }
 
+func TestWriteFile_ConfinedRejectsOutside(t *testing.T) {
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+
+	root := t.TempDir()
+	SetAllowedRoots([]string{root})
+
+	tool := NewWriteTool(root)
+	content, isErr := runTool(t, tool, `{"file_path": "/etc/evil.txt", "content": "bad"}`)
+	if !isErr {
+		t.Fatal("expected error for path outside allowed roots")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
 func TestWriteFile_RelativeCreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
 

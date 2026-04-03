@@ -2,10 +2,12 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 )
@@ -165,6 +167,231 @@ func TestBackgroundJob_CappedBuffer(t *testing.T) {
 	}
 	if cb.lost == 0 {
 		t.Error("expected some bytes to be dropped")
+	}
+}
+
+func TestResolveBashTimeout(t *testing.T) {
+	tests := []struct {
+		name      string
+		timeoutMs int
+		want      time.Duration
+	}{
+		{"zero uses auto-background", 0, autoBackgroundAfter},
+		{"negative uses auto-background", -1, autoBackgroundAfter},
+		{"normal value", 5000, 5 * time.Second},
+		{"clamped to max", maxBashTimeout + 100, time.Duration(maxBashTimeout) * time.Millisecond},
+		{"exact max", maxBashTimeout, time.Duration(maxBashTimeout) * time.Millisecond},
+		{"small value", 100, 100 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveBashTimeout(tt.timeoutMs)
+			if got != tt.want {
+				t.Errorf("resolveBashTimeout(%d) = %v, want %v", tt.timeoutMs, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateOutput(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		check func(t *testing.T, result string)
+	}{
+		{
+			name:  "short string unchanged",
+			input: "hello world",
+			check: func(t *testing.T, result string) {
+				if result != "hello world" {
+					t.Errorf("got %q, want %q", result, "hello world")
+				}
+			},
+		},
+		{
+			name:  "empty string",
+			input: "",
+			check: func(t *testing.T, result string) {
+				if result != "" {
+					t.Errorf("got %q, want empty string", result)
+				}
+			},
+		},
+		{
+			name:  "exactly maxOutputLen",
+			input: strings.Repeat("x", maxOutputLen),
+			check: func(t *testing.T, result string) {
+				if len(result) != maxOutputLen {
+					t.Errorf("len = %d, want %d", len(result), maxOutputLen)
+				}
+			},
+		},
+		{
+			name:  "exceeds maxOutputLen",
+			input: strings.Repeat("a\n", maxOutputLen),
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "truncated") {
+					t.Error("expected truncation marker")
+				}
+				// Should have beginning and end
+				if !strings.HasPrefix(result, "a\n") {
+					t.Error("expected output to start with original content")
+				}
+				if !strings.HasSuffix(result, "a\n") {
+					t.Error("expected output to end with original content")
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateOutput(tt.input)
+			tt.check(t, result)
+		})
+	}
+}
+
+func TestFormatBashResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		stdout  string
+		stderr  string
+		execErr error
+		isErr   bool
+		check   func(t *testing.T, content string)
+	}{
+		{
+			name:   "stdout only",
+			stdout: "hello",
+			check: func(t *testing.T, content string) {
+				if content != "hello" {
+					t.Errorf("got %q, want %q", content, "hello")
+				}
+			},
+		},
+		{
+			name:   "stderr only",
+			stderr: "warning",
+			check: func(t *testing.T, content string) {
+				if !strings.Contains(content, "STDERR:") || !strings.Contains(content, "warning") {
+					t.Errorf("expected STDERR with warning, got %q", content)
+				}
+			},
+		},
+		{
+			name:   "stdout and stderr",
+			stdout: "out",
+			stderr: "err",
+			check: func(t *testing.T, content string) {
+				if !strings.Contains(content, "out") || !strings.Contains(content, "STDERR:") {
+					t.Errorf("expected both, got %q", content)
+				}
+			},
+		},
+		{
+			name:  "no output",
+			check: func(t *testing.T, content string) {
+				if !strings.Contains(content, "no output") {
+					t.Errorf("expected '(no output)', got %q", content)
+				}
+			},
+		},
+		{
+			name:    "error with no output",
+			execErr: fmt.Errorf("command failed"),
+			isErr:   true,
+			check: func(t *testing.T, content string) {
+				if !strings.Contains(content, "command failed") {
+					t.Errorf("expected error message, got %q", content)
+				}
+			},
+		},
+		{
+			name:    "error with output",
+			stdout:  "partial output",
+			execErr: fmt.Errorf("command failed"),
+			isErr:   true,
+			check: func(t *testing.T, content string) {
+				if !strings.Contains(content, "partial output") {
+					t.Errorf("expected output in error, got %q", content)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := formatBashResult(tt.stdout, tt.stderr, tt.execErr)
+			if tt.isErr && !resp.IsError {
+				t.Error("expected error response")
+			}
+			if !tt.isErr && resp.IsError {
+				t.Errorf("unexpected error response: %s", resp.Content)
+			}
+			tt.check(t, resp.Content)
+		})
+	}
+}
+
+func TestBash_CustomTimeout(t *testing.T) {
+	// A quick command with a very short timeout should still complete.
+	tool := NewBashTool(t.TempDir(), NewBackgroundJobManager(nil))
+	content, isErr := runTool(t, tool, `{"command": "echo fast", "timeout": 5000}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "fast") {
+		t.Errorf("expected 'fast', got %q", content)
+	}
+}
+
+func TestBash_ContextCancellation(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+	tool := NewBashTool(t.TempDir(), mgr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "test",
+		Name:  "Bash",
+		Input: `{"command": "sleep 60"}`,
+	})
+	if err != nil {
+		t.Fatalf("tool error: %v", err)
+	}
+	if !resp.IsError {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !strings.Contains(resp.Content, "cancelled") {
+		t.Errorf("expected 'cancelled' error, got %q", resp.Content)
+	}
+}
+
+func TestBash_AutoBackground(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+	t.Cleanup(func() { mgr.KillAll() })
+	// Use a very short timeout to trigger auto-backgrounding.
+	tool := NewBashTool(t.TempDir(), mgr)
+	content, isErr := runTool(t, tool, `{"command": "sleep 60", "timeout": 200}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "background") && !strings.Contains(content, "Background") {
+		t.Errorf("expected auto-background message, got %q", content)
+	}
+}
+
+func TestBash_EnvFn(t *testing.T) {
+	mgr := NewBackgroundJobManager(func() []string {
+		return []string{"TEST_SECRET=mysecret"}
+	})
+	tool := NewBashTool(t.TempDir(), mgr)
+	content, isErr := runTool(t, tool, `{"command": "echo $TEST_SECRET"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "mysecret") {
+		t.Errorf("expected secret in output, got %q", content)
 	}
 }
 

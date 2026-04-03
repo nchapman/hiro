@@ -127,6 +127,44 @@ func TestReadFile_RelativePath(t *testing.T) {
 	}
 }
 
+func TestReadFile_OutputTruncation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+
+	// Write a file that will produce output exceeding maxFileReadLen.
+	var content strings.Builder
+	for range 5000 {
+		content.WriteString("this is a long line to fill up the output buffer quickly\n")
+	}
+	os.WriteFile(path, []byte(content.String()), 0o644)
+
+	tool := NewReadTool(dir)
+	result, isErr := runTool(t, tool, `{"file_path": "`+path+`"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", result)
+	}
+	if !strings.Contains(result, "truncated") {
+		t.Error("expected truncation notice for large output")
+	}
+}
+
+func TestReadFile_ConfinedRejectsOutside(t *testing.T) {
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+
+	root := t.TempDir()
+	SetAllowedRoots([]string{root})
+
+	tool := NewReadTool(root)
+	content, isErr := runTool(t, tool, `{"file_path": "/etc/passwd"}`)
+	if !isErr {
+		t.Fatal("expected error for path outside allowed roots")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
 func TestReadFile_RelativeSubdirectory(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub", "dir")

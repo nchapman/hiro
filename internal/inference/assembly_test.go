@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 
@@ -165,5 +167,141 @@ func TestAssemble_SessionIsolation(t *testing.T) {
 	}
 	if len(result.Messages) != 1 {
 		t.Fatalf("expected 1 message from s1, got %d", len(result.Messages))
+	}
+}
+
+func TestResolveItem_MessageWithRawJSON(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+	appendMsg(t, pdb, "s1", "user", "hello", 10)
+
+	items, err := pdb.GetContextItems(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetContextItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	msg, tokens, err := resolveItem(context.Background(), pdb, items[0])
+	if err != nil {
+		t.Fatalf("resolveItem: %v", err)
+	}
+	if tokens != 10 {
+		t.Errorf("expected 10 tokens, got %d", tokens)
+	}
+	if msg.Role != fantasy.MessageRoleUser {
+		t.Errorf("expected user role, got %s", msg.Role)
+	}
+}
+
+func TestResolveItem_MessageWithoutRawJSON(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	// Insert a message without raw_json.
+	if _, err := pdb.AppendMessage(context.Background(), "s1", "user", "plain text", "", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := pdb.GetContextItems(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetContextItems: %v", err)
+	}
+
+	msg, tokens, err := resolveItem(context.Background(), pdb, items[0])
+	if err != nil {
+		t.Fatalf("resolveItem: %v", err)
+	}
+	if tokens != 5 {
+		t.Errorf("expected 5 tokens, got %d", tokens)
+	}
+	if msg.Role != "user" {
+		t.Errorf("expected user role, got %s", msg.Role)
+	}
+	// Should fallback to text content.
+	if len(msg.Content) == 0 {
+		t.Fatal("expected content parts")
+	}
+}
+
+func TestResolveItem_SummaryItem(t *testing.T) {
+	pdb := openTestDB(t)
+	createTestSession(t, pdb, "s1")
+
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Minute)
+
+	if err := pdb.CreateSummary(ctx, platformdb.Summary{
+		ID:           "sum-1",
+		SessionID:    "s1",
+		Kind:         "leaf",
+		Depth:        0,
+		Content:      "Summary of the conversation.",
+		Tokens:       50,
+		EarliestAt:   now.Add(-time.Hour),
+		LatestAt:     now,
+		SourceTokens: 200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replace the message context item with a summary context item.
+	sumID := "sum-1"
+	item := platformdb.ContextItem{
+		SessionID: "s1",
+		Ordinal:   0,
+		ItemType:  "summary",
+		SummaryID: &sumID,
+	}
+
+	msg, tokens, err := resolveItem(ctx, pdb, item)
+	if err != nil {
+		t.Fatalf("resolveItem summary: %v", err)
+	}
+	if tokens != 50 {
+		t.Errorf("expected 50 tokens, got %d", tokens)
+	}
+	if msg.Role != fantasy.MessageRoleUser {
+		t.Errorf("expected user role for summary, got %s", msg.Role)
+	}
+	text := msg.Content[0].(fantasy.TextPart).Text
+	if !strings.Contains(text, "conversation_summary") {
+		t.Error("expected conversation_summary tag in summary message")
+	}
+	if !strings.Contains(text, "Summary of the conversation.") {
+		t.Error("expected summary content in message")
+	}
+}
+
+func TestResolveItem_NilMessageID(t *testing.T) {
+	item := platformdb.ContextItem{
+		ItemType:  "message",
+		MessageID: nil,
+	}
+	_, _, err := resolveItem(context.Background(), nil, item)
+	if err == nil {
+		t.Error("expected error for nil message_id")
+	}
+}
+
+func TestResolveItem_NilSummaryID(t *testing.T) {
+	item := platformdb.ContextItem{
+		ItemType:  "summary",
+		SummaryID: nil,
+	}
+	_, _, err := resolveItem(context.Background(), nil, item)
+	if err == nil {
+		t.Error("expected error for nil summary_id")
+	}
+}
+
+func TestResolveItem_UnknownType(t *testing.T) {
+	item := platformdb.ContextItem{
+		ItemType: "unknown",
+	}
+	_, _, err := resolveItem(context.Background(), nil, item)
+	if err == nil {
+		t.Error("expected error for unknown item type")
 	}
 }

@@ -48,6 +48,33 @@ func TestTaskStop_MissingID(t *testing.T) {
 	}
 }
 
+func TestExitCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"nil error", nil, -1},
+		{"non-exec error", fmt.Errorf("generic"), -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := exitCode(tt.err)
+			if got != tt.want {
+				t.Errorf("exitCode() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+
+	// Test with a real exec.ExitError by running a command that fails.
+	mgr := NewBackgroundJobManager(nil)
+	job, _ := mgr.Start(t.TempDir(), "exit 42")
+	job.Wait(context.Background())
+	if code := exitCode(job.ExitErr()); code != 42 {
+		t.Errorf("exitCode for exit 42 = %d, want 42", code)
+	}
+}
+
 func TestTaskStop_AlreadyCompleted(t *testing.T) {
 	mgr := NewBackgroundJobManager(nil)
 	job, _ := mgr.Start(t.TempDir(), "true")

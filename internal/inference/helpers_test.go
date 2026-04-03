@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -202,4 +203,108 @@ func TestInjectStatusMessages_InvalidJSON(t *testing.T) {
 	if got != raw {
 		t.Error("should return original on invalid JSON")
 	}
+}
+
+func TestInjectStatusMessages_WithToolCall(t *testing.T) {
+	raw := `{"role":"assistant","content":[{"type":"tool-call","data":{"tool_name":"Read","input":"{\"file_path\":\"main.go\"}"}}]}`
+	got := InjectStatusMessages(raw)
+	if got == raw {
+		t.Error("should have modified message with tool call")
+	}
+	if !strings.Contains(got, "Reading main.go") {
+		t.Errorf("expected status message injected, got: %s", got)
+	}
+}
+
+func TestInjectStatusMessages_ToolCallWithoutTemplate(t *testing.T) {
+	raw := `{"role":"assistant","content":[{"type":"tool-call","data":{"tool_name":"UnknownTool","input":"{}"}}]}`
+	got := InjectStatusMessages(raw)
+	if got != raw {
+		t.Error("should not modify when tool has no status template")
+	}
+}
+
+func TestInjectStatusMessages_EmptyToolName(t *testing.T) {
+	raw := `{"role":"assistant","content":[{"type":"tool-call","data":{"tool_name":"","input":"{}"}}]}`
+	got := InjectStatusMessages(raw)
+	if got != raw {
+		t.Error("should not modify when tool name is empty")
+	}
+}
+
+func TestMarshalMessage(t *testing.T) {
+	msg := fantasy.NewUserMessage("hello world")
+	result := marshalMessage(msg)
+	if result == "{}" {
+		t.Error("expected non-empty JSON")
+	}
+	if !strings.Contains(result, "hello world") {
+		t.Errorf("expected message content in JSON, got: %s", result)
+	}
+	if !strings.Contains(result, "user") {
+		t.Errorf("expected role in JSON, got: %s", result)
+	}
+}
+
+func TestExtractText(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  fantasy.Message
+		want string
+	}{
+		{
+			name: "text message",
+			msg:  fantasy.NewUserMessage("hello world"),
+			want: "hello world",
+		},
+		{
+			name: "empty message",
+			msg:  fantasy.Message{Role: "user"},
+			want: "",
+		},
+		{
+			name: "tool call part",
+			msg: fantasy.Message{
+				Role: "assistant",
+				Content: []fantasy.MessagePart{
+					fantasy.ToolCallPart{ToolName: "Read"},
+				},
+			},
+			want: "[tool_call: Read]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractText(tt.msg)
+			if got != tt.want {
+				t.Errorf("extractText() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractToolResultOutput(t *testing.T) {
+	t.Run("nil content", func(t *testing.T) {
+		text, isErr := extractToolResultOutput(nil)
+		if text != "" || isErr {
+			t.Errorf("nil content: got (%q, %v), want (\"\", false)", text, isErr)
+		}
+	})
+
+	t.Run("text content", func(t *testing.T) {
+		content := fantasy.ToolResultOutputContentText{Text: "file contents here"}
+		text, isErr := extractToolResultOutput(content)
+		if text != "file contents here" || isErr {
+			t.Errorf("text content: got (%q, %v)", text, isErr)
+		}
+	})
+
+	t.Run("error content", func(t *testing.T) {
+		content := fantasy.ToolResultOutputContentError{Error: errors.New("not found")}
+		text, isErr := extractToolResultOutput(content)
+		if text != "not found" || !isErr {
+			t.Errorf("error content: got (%q, %v), want (\"not found\", true)", text, isErr)
+		}
+	})
 }

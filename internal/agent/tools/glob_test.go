@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,96 @@ func TestGlobWalk_DirectlyTestedFallback(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected deep.go, got %v", paths)
+	}
+}
+
+func TestSplitOnNull(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		atEOF   bool
+		advance int
+		token   string
+		isNil   bool
+	}{
+		{"empty at EOF", []byte{}, true, 0, "", true},
+		{"empty not EOF", []byte{}, false, 0, "", true},
+		{"single null", []byte{0}, false, 1, "", false},
+		{"token then null", []byte("hello\x00"), false, 6, "hello", false},
+		{"no null not EOF", []byte("hello"), false, 0, "", true},
+		{"no null at EOF", []byte("hello"), true, 5, "hello", false},
+		{"multiple tokens", []byte("a\x00b\x00"), false, 2, "a", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			advance, token, err := splitOnNull(tt.data, tt.atEOF)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if advance != tt.advance {
+				t.Errorf("advance = %d, want %d", advance, tt.advance)
+			}
+			if tt.isNil {
+				if token != nil {
+					t.Errorf("token = %q, want nil", token)
+				}
+			} else {
+				if string(token) != tt.token {
+					t.Errorf("token = %q, want %q", token, tt.token)
+				}
+			}
+		})
+	}
+}
+
+func TestIsHiddenPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		root string
+		want bool
+	}{
+		{"visible file", "/root/file.go", "/root", false},
+		{"hidden file", "/root/.hidden", "/root", true},
+		{"hidden dir", "/root/.git/config", "/root", true},
+		{"nested hidden", "/root/src/.cache/file", "/root", true},
+		{"no hidden", "/root/src/main.go", "/root", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isHiddenPath(tt.path, tt.root)
+			if got != tt.want {
+				t.Errorf("isHiddenPath(%q, %q) = %v, want %v", tt.path, tt.root, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGlob_MaxResults(t *testing.T) {
+	dir := t.TempDir()
+	// Create more files than maxGlobResults.
+	for i := range maxGlobResults + 10 {
+		os.WriteFile(filepath.Join(dir, fmt.Sprintf("file_%03d.txt", i)), []byte("x"), 0o644)
+	}
+
+	tool := NewGlobTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": "*.txt"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "truncated") {
+		t.Errorf("expected truncation notice, got %q", content)
+	}
+	// Count result lines (excluding truncation notice).
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	resultCount := 0
+	for _, l := range lines {
+		if !strings.Contains(l, "truncated") && l != "" {
+			resultCount++
+		}
+	}
+	if resultCount > maxGlobResults {
+		t.Errorf("got %d results, expected at most %d", resultCount, maxGlobResults)
 	}
 }
 

@@ -555,3 +555,50 @@ func TestGenerateSummaryID(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestCompactionConfigForModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{"unknown model uses default window", "unknown-model-xyz"},
+		{"claude model", "claude-3-5-sonnet-20241022"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := CompactionConfigForModel(tt.model)
+			if cfg.ContextWindow <= 0 {
+				t.Error("ContextWindow should be positive")
+			}
+			if cfg.SoftThreshold <= 0 || cfg.SoftThreshold >= 1 {
+				t.Errorf("SoftThreshold should be between 0 and 1, got %f", cfg.SoftThreshold)
+			}
+			if cfg.HardThreshold <= cfg.SoftThreshold {
+				t.Error("HardThreshold should exceed SoftThreshold")
+			}
+			if cfg.TokenBudget <= 0 {
+				t.Error("TokenBudget should be positive")
+			}
+			if cfg.FreshTailCount <= 0 {
+				t.Error("FreshTailCount should be positive")
+			}
+			if cfg.LeafChunkTokens <= 0 {
+				t.Error("LeafChunkTokens should be positive")
+			}
+			if cfg.SoftThresholdTokens() <= 0 {
+				t.Error("SoftThresholdTokens should be positive")
+			}
+			if cfg.HardThresholdTokens() <= cfg.SoftThresholdTokens() {
+				t.Error("HardThresholdTokens should exceed SoftThresholdTokens")
+			}
+		})
+	}
+}
+
+func TestCompactionConfigForWindow_ZeroWindow(t *testing.T) {
+	cfg := compactionConfigForWindow(0)
+	if cfg.ContextWindow <= 0 {
+		t.Error("zero window should fall back to default")
+	}
+}

@@ -192,6 +192,76 @@ func TestNotifyOnComplete_SuppressedByKill(t *testing.T) {
 	}
 }
 
+func TestBackgroundJob_ExitErr(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+
+	// Successful command: ExitErr should be nil.
+	job, err := mgr.Start(t.TempDir(), "true")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	job.Wait(context.Background())
+	if job.ExitErr() != nil {
+		t.Errorf("expected nil ExitErr for successful command, got %v", job.ExitErr())
+	}
+
+	// Failing command: ExitErr should be non-nil.
+	job2, err := mgr.Start(t.TempDir(), "exit 1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	job2.Wait(context.Background())
+	if job2.ExitErr() == nil {
+		t.Error("expected non-nil ExitErr for failing command")
+	}
+}
+
+func TestBackgroundJob_CleanupExpired(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+
+	// Start and complete a job.
+	job, err := mgr.Start(t.TempDir(), "true")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	job.Wait(context.Background())
+
+	// White-box: manipulate completedAt to simulate expiry without waiting.
+	job.completedAt.Store(time.Now().Add(-completedJobRetention - time.Hour).Unix())
+
+	// Start another job to trigger cleanup.
+	job2, err := mgr.Start(t.TempDir(), "true")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer mgr.Remove(job2.ID)
+
+	// The expired job should have been cleaned up.
+	_, ok := mgr.Get(job.ID)
+	if ok {
+		t.Error("expected expired job to be cleaned up")
+	}
+}
+
+func TestNotifyOnComplete_NilCallback(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+	// OnComplete is nil, should not panic.
+	job, err := mgr.Start(t.TempDir(), "echo done")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	mgr.NotifyOnComplete(job.ID)
+	job.Wait(context.Background())
+	// No panic means success.
+}
+
+func TestNotifyOnComplete_NonexistentJob(t *testing.T) {
+	mgr := NewBackgroundJobManager(nil)
+	mgr.OnComplete = func(job *BackgroundJob) {}
+	// Should not panic for nonexistent job.
+	mgr.NotifyOnComplete("NONEXISTENT")
+}
+
 func TestNotifyOnComplete_AtMostOnce(t *testing.T) {
 	var count atomic.Int32
 	mgr := NewBackgroundJobManager(nil)
