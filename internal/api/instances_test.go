@@ -177,7 +177,7 @@ func TestStopInstance_ForbidsRoot(t *testing.T) {
 	srv, mgr, agentName := newInstanceTestServer(t)
 
 	// Create a root instance (no parent).
-	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "coordinator", "", "", "")
+	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "")
 
 	req := httptest.NewRequest("POST", "/api/instances/"+id+"/stop", nil)
 	rec := httptest.NewRecorder()
@@ -191,7 +191,7 @@ func TestStopInstance_ForbidsRoot(t *testing.T) {
 func TestDeleteInstance_ForbidsRoot(t *testing.T) {
 	srv, mgr, agentName := newInstanceTestServer(t)
 
-	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "coordinator", "", "", "")
+	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "")
 
 	req := httptest.NewRequest("DELETE", "/api/instances/"+id, nil)
 	rec := httptest.NewRecorder()

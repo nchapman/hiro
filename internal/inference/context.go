@@ -21,7 +21,7 @@ func callerIDFromContext(ctx context.Context) string {
 }
 
 // ContextWithCallChain returns a context with the given instance added to the call chain.
-// Used to detect re-entrant deadlocks in coordinator tools.
+// Used to detect re-entrant deadlocks in management tools.
 func ContextWithCallChain(ctx context.Context, instanceID string) context.Context {
 	chain := callChainFromContext(ctx)
 	newChain := make(map[string]bool, len(chain)+1)
@@ -39,7 +39,7 @@ func callChainFromContext(ctx context.Context) map[string]bool {
 }
 
 // IsInCallChain returns true if the instance is already in the call chain,
-// indicating a potential deadlock from re-entrant coordinator tool calls.
+// indicating a potential deadlock from re-entrant management tool calls.
 func IsInCallChain(ctx context.Context, instanceID string) bool {
 	chain := callChainFromContext(ctx)
 	return chain[instanceID]

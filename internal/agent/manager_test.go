@@ -143,7 +143,7 @@ func TestManager_CreateSession_MissingConfig(t *testing.T) {
 func TestManager_CreateSession_InvalidMode(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
-	for _, mode := range []string{"", "supercoordinator", "persistant"} {
+	for _, mode := range []string{"", "coordinator", "supercoordinator", "persistant"} {
 		_, err := mgr.CreateInstance(t.Context(), "test-agent", "", mode, "", "", "")
 		if err == nil {
 			t.Errorf("mode %q: expected error, got nil", mode)
@@ -1473,12 +1473,12 @@ func TestBuildAllowedToolsMap_EphemeralMode(t *testing.T) {
 	effective := map[string]bool{"Bash": true, "Read": true}
 	allowed := buildAllowedToolsMap(effective, config.ModeEphemeral, false)
 
-	// Ephemeral agents get SpawnInstance but NOT coordinator or persistent tools.
+	// Ephemeral agents get SpawnInstance but NOT management or persistent tools.
 	if !allowed["SpawnInstance"] {
 		t.Error("ephemeral agents should get SpawnInstance")
 	}
 	if allowed["ResumeInstance"] || allowed["StopInstance"] || allowed["DeleteInstance"] || allowed["SendMessage"] || allowed["ListInstances"] {
-		t.Error("ephemeral agents should not get coordinator tools")
+		t.Error("ephemeral agents should not get management tools")
 	}
 	if allowed["TodoWrite"] {
 		t.Error("ephemeral agents should not get persistent tools")
@@ -1497,23 +1497,23 @@ func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
 		t.Error("persistent agents should get persistent tools")
 	}
 	if allowed["CreatePersistentInstance"] || allowed["ResumeInstance"] || allowed["StopInstance"] || allowed["SendMessage"] || allowed["ListInstances"] {
-		t.Error("persistent agents should not get coordinator tools")
+		t.Error("persistent agents should not get management tools unless declared in allowed_tools")
 	}
 }
 
-func TestBuildAllowedToolsMap_CoordinatorMode(t *testing.T) {
-	effective := map[string]bool{"Bash": true}
-	allowed := buildAllowedToolsMap(effective, config.ModeCoordinator, false)
+func TestBuildAllowedToolsMap_PersistentWithManagementTools(t *testing.T) {
+	// When management tools are declared in allowed_tools, they should flow through.
+	effective := map[string]bool{"Bash": true, "CreatePersistentInstance": true, "SendMessage": true, "ListInstances": true}
+	allowed := buildAllowedToolsMap(effective, config.ModePersistent, false)
 
-	// Coordinator agents get everything: spawn + coordinator + persistent tools.
 	if !allowed["SpawnInstance"] {
-		t.Error("coordinators should get SpawnInstance")
+		t.Error("should get SpawnInstance")
 	}
-	if !allowed["CreatePersistentInstance"] || !allowed["ResumeInstance"] || !allowed["StopInstance"] || !allowed["DeleteInstance"] || !allowed["SendMessage"] || !allowed["ListInstances"] {
-		t.Error("coordinators should get coordinator tools")
+	if !allowed["CreatePersistentInstance"] || !allowed["SendMessage"] || !allowed["ListInstances"] {
+		t.Error("management tools declared in allowed_tools should be in the map")
 	}
 	if !allowed["TodoWrite"] || !allowed["HistorySearch"] || !allowed["HistoryRecall"] {
-		t.Error("coordinators should get persistent tools")
+		t.Error("should get persistent tools")
 	}
 }
 
@@ -1525,7 +1525,7 @@ func TestBuildAllowedToolsMap_WithSkills(t *testing.T) {
 	}
 }
 
-func TestManager_CoordinatorMode_RestoredOnRestart(t *testing.T) {
+func TestManager_PersistentMode_RestoredOnRestart(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentMD(t, dir, "coord", `---
 name: coord
@@ -1536,30 +1536,30 @@ Coordinator.`)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
-	// Start coordinator, shut down
+	// Start persistent instance, shut down
 	pdb := openTestPDB(t, dir)
 	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
-	id, err := mgr1.CreateInstance(ctx, "coord", "", "coordinator", "", "", "")
+	id, err := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	mgr1.Shutdown()
 
-	// Restore — coordinator mode should survive (it's persistent)
+	// Restore — persistent mode should survive
 	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	info, ok := mgr2.GetInstance(id)
 	if !ok {
-		t.Fatal("coordinator should be restored")
+		t.Fatal("persistent instance should be restored")
 	}
-	if info.Mode != config.ModeCoordinator {
-		t.Errorf("restored mode = %q, want coordinator", info.Mode)
+	if info.Mode != config.ModePersistent {
+		t.Errorf("restored mode = %q, want persistent", info.Mode)
 	}
 }
 
-func TestManager_CoordinatorMode_SessionNotCleaned(t *testing.T) {
+func TestManager_PersistentMode_SessionNotCleaned(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
@@ -1567,55 +1567,56 @@ model: fake-model
 ---
 Coordinator.`)
 
-	id, _ := mgr.CreateInstance(t.Context(), "coord", "", "coordinator", "", "", "")
+	id, _ := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "")
 	sessDir := filepath.Join(dir, "instances", id)
 
 	mgr.StopInstance(id)
 
 	if _, err := os.Stat(sessDir); os.IsNotExist(err) {
-		t.Error("coordinator session dir should survive stop (like persistent)")
+		t.Error("persistent session dir should survive stop")
 	}
 }
 
-func TestManager_CoordinatorTools_InSpawnConfig(t *testing.T) {
+func TestManager_ManagementTools_InSpawnConfig(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
-allowed_tools: [Bash]
+allowed_tools: [Bash, DeleteInstance, SendMessage, ListInstances]
 ---
 Coordinator.`)
 
-	_, err := mgr.CreateInstance(t.Context(), "coord", "", "coordinator", "", "", "")
+	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
 	cfg := (*configs)[0]
-	// Coordinator should have coordinator tools in effective tools
+	// Management tools declared in allowed_tools should be in effective tools
 	if !cfg.EffectiveTools["DeleteInstance"] {
-		t.Error("coordinator should have DeleteInstance in effective tools")
+		t.Error("should have DeleteInstance in effective tools")
 	}
 	if !cfg.EffectiveTools["SpawnInstance"] {
-		t.Error("coordinator should have SpawnInstance in effective tools")
+		t.Error("should have SpawnInstance in effective tools")
 	}
 	if !cfg.EffectiveTools["TodoWrite"] {
-		t.Error("coordinator should have TodoWrite in effective tools")
+		t.Error("persistent should have TodoWrite in effective tools")
 	}
 }
 
-func TestManager_CoordinatorGroups_InSpawnConfig(t *testing.T) {
+func TestManager_Groups_InSpawnConfig(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetCoordinatorGID(10001)
+	pool.SetGroupGID("hiro-coordinators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
 allowed_tools: [Bash]
+groups: [hiro-coordinators]
 ---
 Coordinator.`)
 
-	_, err := mgr.CreateInstance(t.Context(), "coord", "", "coordinator", "", "", "")
+	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1630,31 +1631,32 @@ Coordinator.`)
 		t.Error("primary GID 10000 should be in groups")
 	}
 	if !groupSet[10001] {
-		t.Error("coordinator GID 10001 should be in groups")
+		t.Error("hiro-coordinators GID 10001 should be in groups")
 	}
 	if len(cfg.Groups) != 2 {
 		t.Errorf("expected 2 groups, got %v", cfg.Groups)
 	}
 }
 
-func TestManager_CoordinatorMode_NoGroupConfigured(t *testing.T) {
+func TestManager_Groups_UnknownGroupSkipped(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	// CoordinatorGID not set — pool.CoordinatorGID() == 0
+	// "hiro-coordinators" not registered in pool
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
 allowed_tools: [Bash]
+groups: [hiro-coordinators]
 ---
 Coordinator.`)
 
-	_, err := mgr.CreateInstance(t.Context(), "coord", "", "coordinator", "", "", "")
+	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
 	cfg := (*configs)[0]
-	// Only primary group — no coordinator group available
+	// Only primary group — unknown group silently skipped
 	if len(cfg.Groups) != 1 {
 		t.Fatalf("expected 1 group (primary only), got %v", cfg.Groups)
 	}
@@ -1663,9 +1665,9 @@ Coordinator.`)
 	}
 }
 
-func TestManager_NonCoordinator_NoCoordinatorGroup(t *testing.T) {
+func TestManager_NoGroups_NoExtraGIDs(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetCoordinatorGID(10001)
+	pool.SetGroupGID("hiro-coordinators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "worker", `---
 name: worker
@@ -1680,7 +1682,7 @@ Worker.`)
 	}
 
 	cfg := (*configs)[0]
-	// Should only have primary group, no coordinator group
+	// Should only have primary group — no groups declared in frontmatter
 	if len(cfg.Groups) != 1 {
 		t.Fatalf("expected 1 group, got %v", cfg.Groups)
 	}
@@ -1689,7 +1691,7 @@ Worker.`)
 	}
 }
 
-func TestManager_EphemeralAgent_NoCoordinatorTools(t *testing.T) {
+func TestManager_EphemeralAgent_NoManagementTools(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "worker", `---
@@ -1709,6 +1711,12 @@ Worker.`)
 	}
 	if spawnCfg.EffectiveTools["TodoWrite"] {
 		t.Error("ephemeral should NOT have TodoWrite")
+	}
+	// Management tools must never leak to agents that don't declare them.
+	for _, tool := range []string{"CreatePersistentInstance", "ResumeInstance", "StopInstance", "DeleteInstance", "SendMessage", "ListInstances"} {
+		if spawnCfg.EffectiveTools[tool] {
+			t.Errorf("ephemeral should NOT have management tool %s", tool)
+		}
 	}
 }
 

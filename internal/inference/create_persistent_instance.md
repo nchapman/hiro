@@ -1,7 +1,4 @@
-Create a long-lived agent instance with its own memory, todos, and conversation history.
-
-- **Persistent**: has memory and conversation history. Interact with it via SendMessage over multiple exchanges.
-- **Coordinator**: persistent plus management tools and write access to agent definitions.
+Create a long-lived persistent agent instance with its own memory, todos, and conversation history.
 
 The instance is created and returns its ID immediately — it does not run a prompt. Use SendMessage to communicate with it.
 

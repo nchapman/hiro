@@ -97,7 +97,7 @@ func TestE2E_RootProtection(t *testing.T) {
 	var coordInst instanceInfo
 	coordFound := false
 	for _, inst := range listInstances(t) {
-		if inst.Mode == "coordinator" {
+		if inst.ParentID == "" && inst.Mode == "persistent" {
 			coordInst = inst
 			coordFound = true
 			break

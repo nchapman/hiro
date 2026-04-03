@@ -11,12 +11,7 @@ import (
 // spawnTool is injected into all agents.
 var spawnTool = "SpawnInstance"
 
-// coordinatorTools are injected only for coordinator-mode instances.
-var coordinatorTools = []string{
-	"CreatePersistentInstance", "ResumeInstance", "ListInstances", "SendMessage", "StopInstance", "DeleteInstance",
-}
-
-// persistentTools are injected for persistent and coordinator instances.
+// persistentTools are injected for persistent instances.
 var persistentTools = []string{
 	"TodoWrite", "HistorySearch", "HistoryRecall",
 }
@@ -180,23 +175,21 @@ func filterRules(rules []toolrules.Rule, effective map[string]bool) []toolrules.
 
 // buildAllowedToolsMap creates the AllowedTools map for agent.Options,
 // adding mode-appropriate structural tools that bypass filtering.
+//
+// SECURITY: Management tools (CreatePersistentInstance, ResumeInstance,
+// StopInstance, DeleteInstance, SendMessage, ListInstances, ListNodes)
+// must NOT be added here unconditionally. They are only available to
+// agents that explicitly declare them in allowed_tools.
 func buildAllowedToolsMap(effective map[string]bool, mode config.AgentMode, hasSkills bool) map[string]bool {
 	allowed := make(map[string]bool, len(effective)+10)
 	for t := range effective {
 		allowed[t] = true
 	}
 
-	// All instances get SpawnInstance; coordinators can use all modes.
+	// All instances get SpawnInstance.
 	allowed[spawnTool] = true
 
-	// Coordinator instances get full instance management tools.
-	if mode == config.ModeCoordinator {
-		for _, t := range coordinatorTools {
-			allowed[t] = true
-		}
-	}
-
-	// Persistent and coordinator instances get memory/todos/history tools.
+	// Persistent instances get memory/todos/history tools.
 	if mode.IsPersistent() {
 		for _, t := range persistentTools {
 			allowed[t] = true

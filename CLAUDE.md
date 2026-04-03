@@ -84,7 +84,7 @@ Control Plane Process (hiro)
 ├── Inference loops (fantasy agent per instance)
 ├── Unified database (db/hiro.db — instances, sessions, messages, usage)
 ├── System prompt assembly, context management, compaction
-├── Local tools: memory, todos, history, spawn, coordinator, skills
+├── Local tools: memory, todos, history, spawn, management, skills
 ├── Secrets + tool policies (config/config.yaml)
 ├── Process registry + instance lifecycle
 └── Spawns: hiro agent (one worker per instance)
@@ -101,7 +101,7 @@ Agent Worker Process (hiro agent)
 
 **Group-based access control**: Two Unix groups control filesystem access:
 - `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
-- `hiro-coordinators` (GID 10001) — supplementary group for coordinator-mode agents. Grants write access to `agents/` and `skills/` directories (setgid `2775`). Non-coordinator agents get read-only access via "other" bits. Group membership is assigned dynamically at spawn time via `SysProcAttr.Credential.Groups` — no UIDs are statically added to `hiro-coordinators` in `/etc/group`.
+- `hiro-coordinators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-coordinators]`) and assigned dynamically at spawn time via `SysProcAttr.Credential.Groups`.
 
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 
@@ -121,12 +121,11 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
-- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Persistent and coordinator instances survive restarts via `RestoreInstances()`.
+- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Persistent instances survive restarts via `RestoreInstances()`.
 - **Sessions** are task-scoped work within an instance. Session-level state includes `todos.yaml`, `scratch/`, and `tmp/`. A new session is created on `/clear`.
-- **Agent mode** (ephemeral, persistent, coordinator) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
+- **Agent mode** (ephemeral, persistent) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
-- **Persistent instances** get extra tools: `TodoWrite`, `HistorySearch/HistoryRecall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory).
-- **Coordinator instances** are a superset of persistent — they additionally get agent management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) and write access to `agents/` and `skills/` directories via the `hiro-coordinators` Unix group.
+- **Persistent instances** get extra tools: `TodoWrite`, `HistorySearch/HistoryRecall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory). Management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) are available to any persistent agent that declares them in `allowed_tools`.
 
 ### Agent Definition Structure
 
@@ -183,7 +182,7 @@ Skills are re-scanned from disk each turn (like persona and memory), so runtime-
 
 - **`cmd/hiro`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC).
 - **`internal/agent`** — Instance management. `Manager` supervises instance lifecycles, spawns workers via `WorkerFactory`, creates inference loops. `CreateLanguageModel` handles LLM provider setup.
-- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per instance. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, coordinator, skills). `ScopedManager` enforces descendant scoping via instance IDs. Context-based cycle detection prevents re-entrant deadlocks.
+- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per instance. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, management, skills). `ScopedManager` enforces descendant scoping via instance IDs. Context-based cycle detection prevents re-entrant deadlocks.
 - **`internal/platform/db`** — Unified SQLite database (`db/hiro.db`). Stores instances, sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup). Error sentinels include `ErrInstanceNotFound`.
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
@@ -216,26 +215,26 @@ Implementations in `internal/agent/tools/*.go`. These run in worker processes an
 
 ### Spawn Tool (all agents)
 
-All agents get `SpawnInstance`. The `mode` parameter controls behavior — non-coordinator agents are restricted to ephemeral. Defined in `internal/inference/tools_spawn.go`.
+All agents get `SpawnInstance`. Non-persistent agents are restricted to ephemeral mode. Defined in `internal/inference/tools_spawn.go`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
 | `SpawnInstance` | Run an agent to complete a task | `agent` (name), `prompt`, `background` (bool) | Blocks until done, returns result, cleans up. `background: true`: returns immediately, notifies on completion. 32KB max result |
 
-### Coordinator Tools (coordinator mode only)
+### Management Tools
 
-Defined in `internal/inference/tools_spawn.go`. Only injected for coordinator-mode instances. Scoped to descendants via `ScopedManager.checkDescendant()`.
+Defined in `internal/inference/tools_spawn.go`. Available to any agent that declares them in `allowed_tools`. Scoped to descendants via `ScopedManager.checkDescendant()`.
 
 | Tool | Purpose | Key Params | Behavior |
 |------|---------|------------|----------|
-| `CreatePersistentInstance` | Create a long-lived agent instance | `agent` (name), `mode` (persistent/coordinator) | Returns instance ID. Interact via SendMessage. |
+| `CreatePersistentInstance` | Create a long-lived agent instance | `agent` (name) | Returns instance ID. Interact via SendMessage. |
 | `ResumeInstance` | Restart a stopped instance | `instance_id` | Resumes with previous memory, history, todos |
 | `SendMessage` | Send message to child and get response | `instance_id`, `message` | Blocks; scoped to descendants; serialized per-instance (mutex); 32KB max result |
 | `StopInstance` | Stop instance and its subtree | `instance_id` | Stops leaf-first; cleans up ephemeral dirs; persists persistent instances |
 | `DeleteInstance` | Permanently delete instance and subtree | `instance_id` | Removes all data; cannot be undone |
 | `ListInstances` | List direct child instances | *(none)* | Shows name, ID, mode, description for direct children only |
 
-### Persistent Agent Tools (mode: persistent or coordinator)
+### Persistent Agent Tools (mode: persistent)
 
 Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_history.go`. Run in the control plane process (not in workers). Persona is managed via the standard file tools (`persona.md` is seeded at instance creation and included in the system prompt).
 
@@ -256,21 +255,20 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 ### Tool Totals by Agent Type
 
 - **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
-- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills)
-- **Coordinator instances:** 9 built-in + 1 spawn + 7 coordinator + 2 memory + 1 todos + 2 history = 22 tools (+ 1 if skills)
+- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills, + management tools if declared in allowed_tools)
 
 ## Coordinator Agent
 
-The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started in coordinator mode at bootstrap.
+The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started as a persistent instance at bootstrap.
 
 **Bootstrap flow** (`cmd/hiro/main.go`):
 1. Load `config/config.yaml` — if no provider is configured, the server starts in setup mode (dashboard shows onboarding)
 2. Once configured, create `Manager` with provider from config
 3. `RestoreInstances()` — resume any persistent agents from prior runs
 4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
-5. If not running, `CreateInstance(ctx, "coordinator", "", "coordinator")` — no parent, coordinator mode, becomes root
+5. If not running, `CreateInstance(ctx, "coordinator", "", "persistent")` — no parent, persistent mode, becomes root
 
-Coordinator mode gives persistent-agent capabilities (memory, todos, history) plus coordinator-only tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and write access to `agents/` and `skills/` via the `hiro-coordinators` Unix group. All agents get `SpawnInstance` which supports all modes (non-coordinators are restricted to ephemeral).
+The coordinator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) in its `allowed_tools` frontmatter and `groups: [hiro-coordinators]` for write access to `agents/` and `skills/`. All agents get `SpawnInstance`.
 
 ## Control Plane
 
@@ -290,7 +288,7 @@ agents:
 **Key concepts:**
 
 - **Secrets** — Named key-value pairs. Injected as env vars into Bash commands. Agents see names in system prompt but never values.
-- **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`tools: [Bash, Read, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
+- **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`allowed_tools: [Bash, Read, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
 - **Inherited caps** — Child effective tools = intersection of (declared tools ∩ control plane ∩ parent's effective tools).
 - **Bash is binary** — Agent gets Bash or doesn't. No sandboxing pretense.
 
@@ -309,7 +307,7 @@ agents:
 
 Agents can create new agent definitions at runtime using their file tools:
 1. Use `Write` / `Edit` to create `agents/<name>/agent.md` (and optionally `skills/*.md`)
-2. Use `SpawnInstance` with mode `persistent` or `coordinator` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
+2. Use `SpawnInstance` with mode `persistent` to start the new agent — `LoadAgentDir()` is called fresh each time, so it picks up the new definition immediately
 3. No restart or reload mechanism needed
 
 Similarly, skills can be added by writing `.md` files to an agent's `skills/` directory (flat or directory format). Skills are re-scanned from disk each turn, so new skills take effect on the next inference loop turn.
@@ -318,11 +316,11 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 - **Coordinator and persistent agents** use the unified platform database (`db/hiro.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
-- **WebSocket chat** sends messages to the coordinator's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
+- **WebSocket chat** sends messages to the root instance's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
 
 ### Agent Tool Scoping
 
-Coordinator tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`, `DeleteInstance`) and `SpawnInstance` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+Management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`, `DeleteInstance`) and `SpawnInstance` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
 
 ## Testing Notes
 
@@ -333,4 +331,4 @@ Coordinator tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstanc
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Coordinator agents get `hiro-coordinators` as a supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).
+- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Agents with `groups: [hiro-coordinators]` in frontmatter get the supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).

@@ -323,7 +323,7 @@ func run() error {
 				if err != nil {
 					return fmt.Errorf("parsing hiro-coordinators GID %q: %w", coordGrp.Gid, err)
 				}
-				pool.SetCoordinatorGID(uint32(coordGID))
+				pool.SetGroupGID("hiro-coordinators", uint32(coordGID))
 				logger.Info("coordinator group detected", "gid", coordGID)
 			}
 		}

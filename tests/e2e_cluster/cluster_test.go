@@ -584,12 +584,13 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 			continue
 		}
 		var instances []struct {
-			ID   string `json:"id"`
-			Mode string `json:"mode"`
+			ID       string `json:"id"`
+			Mode     string `json:"mode"`
+			ParentID string `json:"parent_id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
 			for _, inst := range instances {
-				if inst.Mode == "coordinator" {
+				if inst.ParentID == "" && inst.Mode == "persistent" {
 					resp.Body.Close()
 					return inst.ID, nil
 				}

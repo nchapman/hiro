@@ -39,7 +39,7 @@ type Session struct {
 	ID         string
 	InstanceID string // parent instance
 	AgentName  string
-	Mode       string // "ephemeral", "persistent", "coordinator"
+	Mode       string // "ephemeral", "persistent"
 	ParentID   string // empty if root
 	Status     string // "running", "stopped"
 	CreatedAt  time.Time

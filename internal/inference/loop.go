@@ -56,10 +56,9 @@ type LoopConfig struct {
 	Notifications *NotificationQueue
 
 	// For building local tools — the Loop needs access to the Manager
-	// for coordinator/spawn tools. This avoids a circular dependency
+	// for spawn/management tools. This avoids a circular dependency
 	// by using the HostManager interface.
 	HostManager ipc.HostManager
-	InstanceMode  config.AgentMode
 }
 
 // Loop runs the fantasy agent loop for a single session.
@@ -163,7 +162,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	redactor := NewRedactor(cfg.SecretEnvFn)
 	agentTools := buildProxyTools(cfg.WorkingDir, cfg.Executor, cfg.AllowedTools, cfg.AllowLayers, cfg.DenyRules, redactor, l.logger)
 
-	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, coordinator tools, Skill.
+	// Local tools: TodoWrite, HistorySearch/Recall, SpawnInstance, management tools, Skill.
 	localTools := l.buildLocalTools(cfg)
 	agentTools = append(agentTools, localTools...)
 
@@ -783,10 +782,8 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 
 	if cfg.HostManager != nil {
 		localTools = append(localTools, buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger))
-		if cfg.InstanceMode == config.ModeCoordinator {
-			localTools = append(localTools, buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
-			localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
-		}
+		localTools = append(localTools, buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
+		localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
 	}
 
 	// Skill tool.
@@ -802,17 +799,14 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []fantasy.AgentTool {
 		localTools = append(localTools, buildSkillTool(&cfg.AgentConfig, allowedDirs, l.expandToolsForSkill, l.logger))
 	}
 
-	// Filter by allowed set.
+	// Filter by allowed set. All tools — both remote (worker-side) and
+	// local (control-plane-side) — are subject to AllowedTools filtering.
 	if cfg.AllowedTools != nil {
 		filtered := make([]fantasy.AgentTool, 0, len(localTools))
 		for _, t := range localTools {
-			name := t.Info().Name
-			// Local tools that aren't in the remote set are structural
-			// (spawn, coordinator, memory, etc.) and bypass tool filtering.
-			if RemoteTools[name] && !cfg.AllowedTools[name] {
-				continue
+			if cfg.AllowedTools[t.Info().Name] {
+				filtered = append(filtered, t)
 			}
-			filtered = append(filtered, t)
 		}
 		localTools = filtered
 	}

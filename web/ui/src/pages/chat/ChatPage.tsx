@@ -92,7 +92,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   }, [session?.id])
 
   const isStopped = session?.status === "stopped"
-  const isRoot = session ? !session.mode || session.mode === "coordinator" : false
+  const isRoot = session ? !session.mode || !session.parent_id : false
   const wsSessionId = isStopped ? null : (session?.id ?? null)
   const { send, connected, setOnMessage } = useWebSocket(wsSessionId)
 

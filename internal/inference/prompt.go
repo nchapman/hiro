@@ -14,7 +14,7 @@ type EnvInfo struct {
 	WorkingDir  string           // platform root (e.g. /hiro)
 	InstanceDir string           // instance state dir (persona.md, memory.md)
 	SessionDir  string           // session state dir (todos.yaml, scratch/, tmp/)
-	Mode        config.AgentMode // ephemeral, persistent, or coordinator
+	Mode        config.AgentMode // ephemeral or persistent
 }
 
 // buildSystemPrompt assembles the system prompt from the agent's config

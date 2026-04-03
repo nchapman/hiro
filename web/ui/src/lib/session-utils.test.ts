@@ -29,7 +29,7 @@ describe("statusDotColor", () => {
     expect(statusDotColor(makeSession({ mode: "persistent", status: "running" }))).toBe("bg-green-500")
   })
 
-  it("returns green for running coordinator sessions", () => {
-    expect(statusDotColor(makeSession({ mode: "coordinator", status: "running" }))).toBe("bg-green-500")
+  it("returns green for running sessions with unknown mode", () => {
+    expect(statusDotColor(makeSession({ mode: "other", status: "running" }))).toBe("bg-green-500")
   })
 })

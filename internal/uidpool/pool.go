@@ -19,12 +19,12 @@ const (
 // It is pure bookkeeping — no OS calls. The actual UID assignment happens
 // via syscall.SysProcAttr.Credential at process spawn time.
 type Pool struct {
-	mu             sync.Mutex
-	baseUID        uint32
-	gid            uint32            // GID of the hiro-agents group
-	coordinatorGID uint32            // GID of hiro-coordinators group; 0 = not available
-	size           int               // number of UIDs in the pool
-	inUse          map[uint32]string // UID -> instance ID
+	mu      sync.Mutex
+	baseUID uint32
+	gid     uint32            // GID of the hiro-agents group
+	groups  map[string]uint32 // named group -> GID (e.g. "hiro-coordinators" -> 10001)
+	size    int               // number of UIDs in the pool
+	inUse   map[uint32]string // UID -> instance ID
 }
 
 // New creates a UID pool starting at baseUID with the given group ID and size.
@@ -32,25 +32,26 @@ func New(baseUID, gid uint32, size int) *Pool {
 	return &Pool{
 		baseUID: baseUID,
 		gid:     gid,
+		groups:  make(map[string]uint32),
 		size:    size,
 		inUse:   make(map[uint32]string),
 	}
 }
 
-// SetCoordinatorGID sets the GID of the hiro-coordinators group.
-// Coordinator-mode agents are given this as a supplementary group
-// for write access to agents/ and skills/ directories.
-func (p *Pool) SetCoordinatorGID(gid uint32) {
+// SetGroupGID registers a named Unix group and its GID. Agents that
+// declare this group in their frontmatter will receive it as a
+// supplementary group at spawn time.
+func (p *Pool) SetGroupGID(name string, gid uint32) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.coordinatorGID = gid
+	p.groups[name] = gid
 }
 
-// CoordinatorGID returns the hiro-coordinators group GID, or 0 if not configured.
-func (p *Pool) CoordinatorGID() uint32 {
+// GroupGID returns the GID for a named group, or 0 if not registered.
+func (p *Pool) GroupGID(name string) uint32 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.coordinatorGID
+	return p.groups[name]
 }
 
 // Acquire assigns the next available UID to the given session.

@@ -222,29 +222,19 @@ func TestCreatePersistentInstance_Default(t *testing.T) {
 	mgr.mu.Unlock()
 }
 
-func TestCreatePersistentInstance_Coordinator(t *testing.T) {
+func TestCreatePersistentInstance_AlwaysPersistent(t *testing.T) {
 	mgr := &fakeHostManager{createResult: "inst-456"}
 	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
 
-	resp := runTool(t, tool, `{"agent":"manager","mode":"coordinator"}`)
+	resp := runTool(t, tool, `{"agent":"manager"}`)
 	if resp.IsError {
 		t.Fatalf("unexpected error: %s", resp.Content)
 	}
 	mgr.mu.Lock()
-	if mgr.lastCreateMode != "coordinator" {
-		t.Errorf("expected mode 'coordinator', got %q", mgr.lastCreateMode)
+	if mgr.lastCreateMode != "persistent" {
+		t.Errorf("expected mode 'persistent', got %q", mgr.lastCreateMode)
 	}
 	mgr.mu.Unlock()
-}
-
-func TestCreatePersistentInstance_RejectsEphemeral(t *testing.T) {
-	mgr := &fakeHostManager{}
-	tool := buildCreatePersistentInstanceTool(mgr, testLogger)
-
-	resp := runTool(t, tool, `{"agent":"test","mode":"ephemeral"}`)
-	if !resp.IsError {
-		t.Error("ephemeral mode should be rejected by CreatePersistentInstance")
-	}
 }
 
 func TestCreatePersistentInstance_EmptyAgent(t *testing.T) {

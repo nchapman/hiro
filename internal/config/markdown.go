@@ -188,21 +188,17 @@ func ParseMarkdownFile(path string) (ParsedMarkdown, error) {
 }
 
 // AgentMode distinguishes persistent from ephemeral agents.
-// Coordinator is a superset of persistent — it adds manager tools
-// and write access to agents/ and skills/ directories.
 type AgentMode string
 
 const (
-	ModePersistent  AgentMode = "persistent"
-	ModeEphemeral   AgentMode = "ephemeral"
-	ModeCoordinator AgentMode = "coordinator"
+	ModePersistent AgentMode = "persistent"
+	ModeEphemeral  AgentMode = "ephemeral"
 )
 
 // IsPersistent reports whether the mode has persistent-agent capabilities
-// (memory, todos, history, session restoration). Both persistent and
-// coordinator modes are persistent.
+// (memory, todos, history, session restoration).
 func (m AgentMode) IsPersistent() bool {
-	return m == ModePersistent || m == ModeCoordinator
+	return m == ModePersistent
 }
 
 // AgentConfig represents an agent's configuration loaded from markdown.
@@ -213,6 +209,7 @@ type AgentConfig struct {
 	DisallowedTools []string // from frontmatter "disallowed_tools"; deny rules checked at call time
 	Model           string   // from frontmatter "model"; per-agent model override
 	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
+	Groups          []string // from frontmatter "groups"; supplementary Unix groups for the worker process
 	Prompt        string   // the markdown body — the agent's operating instructions
 	Skills        []SkillConfig
 }
@@ -267,6 +264,7 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		DisallowedTools: parsed.Frontmatter.StringSlice("disallowed_tools"),
 		Model:           parsed.Frontmatter.String("model"),
 		MaxTurns:         parsed.Frontmatter.Int("max_turns"),
+		Groups:           parsed.Frontmatter.StringSlice("groups"),
 		Prompt:           parsed.Body,
 	}
 

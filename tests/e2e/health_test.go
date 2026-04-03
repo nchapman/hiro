@@ -38,12 +38,12 @@ func TestE2E_ListInstances(t *testing.T) {
 
 	found := false
 	for _, inst := range instances {
-		if inst.Mode == "coordinator" {
+		if inst.ParentID == "" && inst.Mode == "persistent" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("coordinator not found in instance list")
+		t.Error("root persistent instance (coordinator) not found in instance list")
 	}
 }

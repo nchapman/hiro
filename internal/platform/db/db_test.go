@@ -41,7 +41,7 @@ func TestSessions_CRUD(t *testing.T) {
 	err := d.CreateSession(Session{
 		ID:        "sess-1",
 		AgentName: "coordinator",
-		Mode:      "coordinator",
+		Mode:      "persistent",
 	})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -63,7 +63,7 @@ func TestSessions_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if s.AgentName != "coordinator" || s.Mode != "coordinator" || s.Status != "running" {
+	if s.AgentName != "coordinator" || s.Mode != "persistent" || s.Status != "running" {
 		t.Errorf("unexpected session: %+v", s)
 	}
 
@@ -95,7 +95,7 @@ func TestSessions_CRUD(t *testing.T) {
 	}
 
 	// Instance descendant checking.
-	if err := d.CreateInstance(Instance{ID: "inst-1", AgentName: "coordinator", Mode: "coordinator"}); err != nil {
+	if err := d.CreateInstance(Instance{ID: "inst-1", AgentName: "coordinator", Mode: "persistent"}); err != nil {
 		t.Fatalf("CreateInstance parent: %v", err)
 	}
 	if err := d.CreateInstance(Instance{ID: "inst-2", AgentName: "researcher", Mode: "persistent", ParentID: "inst-1"}); err != nil {

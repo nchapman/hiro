@@ -23,7 +23,7 @@ import (
 // spawning — persistent/coordinator instances use the manager's lifetime context.
 // parentInstanceID tracks lineage; pass "" for top-level instances.
 // mode is a string to satisfy the ipc.HostManager interface boundary; it must
-// be one of "persistent", "ephemeral", or "coordinator".
+// be one of "persistent" or "ephemeral".
 // displayName and displayDesc override the agent definition name/description
 // in persona.md frontmatter (pass "" to use defaults).
 func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID ipc.NodeID, displayName, displayDesc string) (string, error) {
@@ -33,10 +33,10 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 
 	agentMode := config.AgentMode(mode)
 	switch agentMode {
-	case config.ModePersistent, config.ModeEphemeral, config.ModeCoordinator:
+	case config.ModePersistent, config.ModeEphemeral:
 		// valid
 	default:
-		return "", fmt.Errorf("invalid mode %q: must be persistent, ephemeral, or coordinator", mode)
+		return "", fmt.Errorf("invalid mode %q: must be persistent or ephemeral", mode)
 	}
 
 	cfg, err := config.LoadAgentDir(m.agentDefDir(name))
@@ -298,10 +298,13 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			return "", fmt.Errorf("acquiring UID: %w", err)
 		}
 		groups = []uint32{gid}
-		// Coordinator instances get write access to agents/ and skills/.
-		if mode == config.ModeCoordinator {
-			if coordGID := m.uidPool.CoordinatorGID(); coordGID != 0 {
-				groups = append(groups, coordGID)
+		// Add supplementary groups declared in the agent definition.
+		for _, g := range cfg.Groups {
+			if groupGID := m.uidPool.GroupGID(g); groupGID != 0 {
+				groups = append(groups, groupGID)
+			} else {
+				m.logger.Warn("agent declared unknown group, ignoring",
+					"agent", cfg.Name, "group", g)
 			}
 		}
 		// Transfer ownership of the instance dir (and all contents) to the agent user.
@@ -428,7 +431,6 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			Notifications:  notifications,
 			Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 			HostManager:    m,
-			InstanceMode:     mode,
 		})
 		if err != nil {
 			handle.Kill()

@@ -26,6 +26,7 @@ export interface SessionInfo {
   id: string
   name: string
   mode: string
+  parent_id?: string
   status: "running" | "stopped"
   description?: string
   model?: string
@@ -273,7 +274,7 @@ export default function App() {
   useEffect(() => {
     if (hasAutoSelected.current || sessions.length === 0) return
     const first = sessions.find(
-      (s) => (s.mode === "persistent" || s.mode === "coordinator") && s.status === "running",
+      (s) => s.mode === "persistent" && s.status === "running",
     )
     if (!first) return
     setSelectedSessionId(first.id)

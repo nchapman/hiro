@@ -76,17 +76,23 @@ func TestDoubleRelease(t *testing.T) {
 	}
 }
 
-func TestCoordinatorGID(t *testing.T) {
+func TestGroupGID(t *testing.T) {
 	p := New(10000, 10000, 2)
 
-	// Default: no coordinator GID.
-	if gid := p.CoordinatorGID(); gid != 0 {
+	// Default: unknown group returns 0.
+	if gid := p.GroupGID("hiro-coordinators"); gid != 0 {
 		t.Fatalf("expected 0, got %d", gid)
 	}
 
 	// Set and retrieve.
-	p.SetCoordinatorGID(10001)
-	if gid := p.CoordinatorGID(); gid != 10001 {
+	p.SetGroupGID("hiro-coordinators", 10001)
+	if gid := p.GroupGID("hiro-coordinators"); gid != 10001 {
 		t.Fatalf("expected 10001, got %d", gid)
+	}
+
+	// Different group.
+	p.SetGroupGID("custom-group", 20000)
+	if gid := p.GroupGID("custom-group"); gid != 20000 {
+		t.Fatalf("expected 20000, got %d", gid)
 	}
 }

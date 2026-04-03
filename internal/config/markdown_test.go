@@ -230,7 +230,6 @@ func TestAgentMode_IsPersistent(t *testing.T) {
 		want bool
 	}{
 		{ModePersistent, true},
-		{ModeCoordinator, true},
 		{ModeEphemeral, false},
 	}
 	for _, tt := range tests {

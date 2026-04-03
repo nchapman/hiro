@@ -9,7 +9,6 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/ipc"
 )
 
@@ -124,7 +123,7 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 	)
 }
 
-// --- CreatePersistentInstance tool (coordinator only) ---
+// --- CreatePersistentInstance tool ---
 
 func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool {
 	return fantasy.NewAgentTool("CreatePersistentInstance",
@@ -133,25 +132,13 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 			Agent       string `json:"agent"       description:"Agent definition name (directory under agents/)."`
 			Name        string `json:"name"        description:"Display name for this instance. Defaults to the agent definition name."`
 			Description string `json:"description" description:"Display description for this instance. Defaults to the agent definition description."`
-			Mode        string `json:"mode"        description:"'persistent' (default) or 'coordinator'." default:"persistent"`
 			Node        string `json:"node"        description:"Target node name. Omit for local."`
 		}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if input.Agent == "" {
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
 
-			mode := input.Mode
-			if mode == "" {
-				mode = "persistent"
-			}
-
-			switch config.AgentMode(mode) {
-			case config.ModePersistent, config.ModeCoordinator:
-				// valid
-			default:
-				return fantasy.NewTextErrorResponse(
-					fmt.Sprintf("invalid mode %q: must be persistent or coordinator", mode)), nil
-			}
+			mode := "persistent"
 
 			callerID := callerIDFromContext(ctx)
 			nodeID := ipc.NodeID(input.Node)
@@ -173,7 +160,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 	)
 }
 
-// --- Coordinator tools ---
+// --- Management tools ---
 
 func buildCoordinatorTools(mgr ipc.HostManager, logger *slog.Logger) []fantasy.AgentTool {
 	return []fantasy.AgentTool{

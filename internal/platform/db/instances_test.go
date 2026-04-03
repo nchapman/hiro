@@ -10,7 +10,7 @@ func TestInstanceCRUD(t *testing.T) {
 
 	// Create a root instance.
 	err := d.CreateInstance(Instance{
-		ID: "inst-1", AgentName: "coordinator", Mode: "coordinator",
+		ID: "inst-1", AgentName: "coordinator", Mode: "persistent",
 	})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
@@ -21,7 +21,7 @@ func TestInstanceCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInstance: %v", err)
 	}
-	if inst.AgentName != "coordinator" || inst.Mode != "coordinator" || inst.Status != "running" {
+	if inst.AgentName != "coordinator" || inst.Mode != "persistent" || inst.Status != "running" {
 		t.Errorf("unexpected instance: %+v", inst)
 	}
 	if inst.StoppedAt != nil {
@@ -56,7 +56,7 @@ func TestInstanceCRUD(t *testing.T) {
 func TestListInstances(t *testing.T) {
 	d := openTestDB(t)
 
-	d.CreateInstance(Instance{ID: "root", AgentName: "coord", Mode: "coordinator"})
+	d.CreateInstance(Instance{ID: "root", AgentName: "coord", Mode: "persistent"})
 	d.CreateInstance(Instance{ID: "child-1", AgentName: "w1", Mode: "ephemeral", ParentID: "root"})
 	d.CreateInstance(Instance{ID: "child-2", AgentName: "w2", Mode: "persistent", ParentID: "root"})
 

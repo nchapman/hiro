@@ -201,7 +201,7 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 		var instances []instanceInfo
 		if err := json.NewDecoder(resp.Body).Decode(&instances); err == nil {
 			for _, inst := range instances {
-				if inst.Mode == "coordinator" {
+				if inst.ParentID == "" && inst.Mode == "persistent" {
 					io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
 					return inst.ID, nil
