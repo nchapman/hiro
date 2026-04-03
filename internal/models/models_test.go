@@ -25,6 +25,41 @@ func TestLookup_UnknownModel(t *testing.T) {
 	}
 }
 
+func TestLookup_SpecFormat(t *testing.T) {
+	// "provider/model" spec strings should resolve by stripping the provider prefix.
+	m, ok := Lookup("anthropic/claude-sonnet-4-20250514")
+	if !ok {
+		t.Fatal("expected spec format 'anthropic/claude-sonnet-4-20250514' to resolve")
+	}
+	if m.ContextWindow <= 0 {
+		t.Error("expected positive context window")
+	}
+
+	// Unknown provider prefix should still work if the model part matches.
+	m2, ok := Lookup("custom-provider/claude-sonnet-4-20250514")
+	if !ok {
+		t.Fatal("expected spec with unknown provider to resolve via model part")
+	}
+	if m2.ID != m.ID {
+		t.Errorf("expected same model, got %q vs %q", m2.ID, m.ID)
+	}
+
+	// Three-component spec (OpenRouter models have slashes in their IDs).
+	// "openrouter/x-ai/grok-3-mini-beta" → strip "openrouter" → "x-ai/grok-3-mini-beta".
+	orModels := ModelsForProvider("openrouter")
+	if len(orModels) > 0 {
+		raw := orModels[0].ID // e.g. "x-ai/grok-3-mini-beta"
+		spec := "openrouter/" + raw
+		m3, ok := Lookup(spec)
+		if !ok {
+			t.Fatalf("expected 3-component spec %q to resolve", spec)
+		}
+		if m3.ID != raw {
+			t.Errorf("expected model ID %q, got %q", raw, m3.ID)
+		}
+	}
+}
+
 func TestContextWindow_KnownModel(t *testing.T) {
 	cw := ContextWindow("claude-sonnet-4-20250514")
 	if cw < 100_000 {

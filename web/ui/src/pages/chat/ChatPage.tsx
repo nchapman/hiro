@@ -32,6 +32,7 @@ import type { ModelInfo, ToolCall, Message, MessageAttachment } from "@/lib/chat
 import type { ChatAttachment } from "@/hooks/use-websocket"
 import { mergeHistoryMessages } from "@/lib/chat-parser"
 import { statusDotColor } from "@/lib/session-utils"
+import { parseModelSpec, formatModelSpec } from "@/pages/settings/DefaultModelCard"
 import ModelSelector from "@/pages/chat/ModelSelector"
 import TokenCounter from "@/pages/chat/TokenCounter"
 import { AssistantMessage, UserMessage } from "@/pages/chat/ChatMessages"
@@ -114,12 +115,19 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   }, [])
 
   const currentModel = usage?.model || session?.model || ""
-  const currentModelInfo = models.find((m) => m.id === currentModel)
+  // currentModel may be a "provider/model" spec — extract the raw model ID
+  // so we can match against ModelInfo.id from the registry.
+  const [, currentModelId] = parseModelSpec(currentModel)
+  const currentModelInfo = models.find((m) => m.id === currentModelId)
 
   const handleModelChange = useCallback(
     (modelId: string) => {
-      send({ type: "config", model: modelId })
-      setUsage((u) => u ? { ...u, model: modelId, context_window: models.find((m) => m.id === modelId)?.context_window ?? u.context_window } : u)
+      const info = models.find((m) => m.id === modelId)
+      // Send as "provider/model" spec so the backend doesn't misparse
+      // model IDs that contain slashes (e.g. OpenRouter's "x-ai/grok-4.1-fast").
+      const spec = info?.provider ? formatModelSpec(info.provider, modelId) : modelId
+      send({ type: "config", model: spec })
+      setUsage((u) => u ? { ...u, model: spec, context_window: info?.context_window ?? u?.context_window } : u)
       setReasoningEffort("")
     },
     [send, models]
@@ -439,7 +447,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           {!isStopped && !streaming && models.length > 0 && currentModel && (
             <ModelSelector
               models={models}
-              currentModel={currentModel}
+              currentModel={currentModelId}
               onSelect={handleModelChange}
             />
           )}

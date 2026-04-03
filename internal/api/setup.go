@@ -178,11 +178,14 @@ func (s *Server) applyProviderConfig(req setupRequest) error {
 		return err
 	}
 	if req.DefaultModel != "" {
-		spec := models.ParseModelSpec(req.DefaultModel)
-		if spec.Provider == "" {
-			spec.Provider = req.ProviderType
-		}
-		s.cp.SetDefaultModelSpec(spec)
+		// The UI sends a raw model ID (e.g. "x-ai/grok-4.1-fast" for
+		// OpenRouter) — not a "provider/model" spec. Construct the spec
+		// directly from the known provider type to avoid misinterpreting
+		// slashes in the model ID as a provider separator.
+		s.cp.SetDefaultModelSpec(models.ModelSpec{
+			Provider: req.ProviderType,
+			Model:    req.DefaultModel,
+		})
 	}
 	// When no model specified, ProviderInfo() resolves the default
 	// provider from the configured providers map.

@@ -4,6 +4,7 @@
 package models
 
 import (
+	"strings"
 	"sync"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -45,10 +46,20 @@ func ensureInit() {
 }
 
 // Lookup finds a model by ID across all embedded providers.
+// Accepts both raw model IDs ("x-ai/grok-4.1-fast") and "provider/model"
+// spec strings ("openrouter/x-ai/grok-4.1-fast"). On a miss, strips the
+// leading segment before the first "/" and retries recursively.
 func Lookup(modelID string) (catwalk.Model, bool) {
 	ensureInit()
-	m, ok := registry[modelID]
-	return m, ok
+	if m, ok := registry[modelID]; ok {
+		return m, true
+	}
+	// Spec format: strip one prefix segment and retry.
+	// Handles "openrouter/x-ai/grok-4.1-fast" → "x-ai/grok-4.1-fast" → found.
+	if _, after, ok := strings.Cut(modelID, "/"); ok {
+		return Lookup(after)
+	}
+	return catwalk.Model{}, false
 }
 
 // ContextWindow returns the context window for a model.
