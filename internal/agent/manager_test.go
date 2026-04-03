@@ -1720,6 +1720,106 @@ Worker.`)
 	}
 }
 
+func TestManager_Groups_InheritedFromParent(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("custom-group", 20000)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+
+	// Parent agent has hiro-coordinators but NOT custom-group.
+	writeAgentMD(t, dir, "parent-agent", `---
+name: parent-agent
+allowed_tools: [Bash, CreatePersistentInstance]
+groups: [hiro-coordinators]
+---
+Parent.`)
+
+	// Child agent declares both groups.
+	writeAgentMD(t, dir, "child-agent", `---
+name: child-agent
+allowed_tools: [Bash]
+groups: [hiro-coordinators, custom-group]
+---
+Child.`)
+
+	parentID, err := mgr.CreateInstance(t.Context(), "parent-agent", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	parentCfg := (*configs)[0]
+
+	// Parent should have hiro-coordinators.
+	parentGroupSet := make(map[uint32]bool)
+	for _, g := range parentCfg.Groups {
+		parentGroupSet[g] = true
+	}
+	if !parentGroupSet[10001] {
+		t.Error("parent should have hiro-coordinators (10001)")
+	}
+
+	// Spawn child with parent.
+	_, err = mgr.CreateInstance(t.Context(), "child-agent", parentID, "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	childCfg := (*configs)[1]
+
+	childGroupSet := make(map[uint32]bool)
+	for _, g := range childCfg.Groups {
+		childGroupSet[g] = true
+	}
+
+	// Child should inherit hiro-coordinators (parent has it).
+	if !childGroupSet[10001] {
+		t.Error("child should have hiro-coordinators (inherited from parent)")
+	}
+
+	// Child should NOT get custom-group (parent doesn't have it).
+	if childGroupSet[20000] {
+		t.Error("child should NOT have custom-group (parent doesn't have it)")
+	}
+}
+
+func TestManager_Groups_UnprivilegedParentCannotEscalate(t *testing.T) {
+	pool := uidpool.New(10000, 10000, 64)
+	pool.SetGroupGID("hiro-coordinators", 10001)
+	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+
+	// Parent has no groups.
+	writeAgentMD(t, dir, "unpriv", `---
+name: unpriv
+allowed_tools: [Bash, CreatePersistentInstance]
+---
+Unprivileged.`)
+
+	// Child declares hiro-coordinators.
+	writeAgentMD(t, dir, "wants-coord", `---
+name: wants-coord
+allowed_tools: [Bash]
+groups: [hiro-coordinators]
+---
+Wants escalation.`)
+
+	parentID, err := mgr.CreateInstance(t.Context(), "unpriv", "", "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	_, err = mgr.CreateInstance(t.Context(), "wants-coord", parentID, "persistent", "", "", "")
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	childCfg := (*configs)[1]
+
+	// Child should only have the primary group — no hiro-coordinators.
+	if len(childCfg.Groups) != 1 {
+		t.Fatalf("expected 1 group (primary only), got %v", childCfg.Groups)
+	}
+	if childCfg.Groups[0] != 10000 {
+		t.Errorf("expected primary GID 10000, got %d", childCfg.Groups[0])
+	}
+}
+
 // --- Config push tests ---
 
 func TestExtractAgentName(t *testing.T) {

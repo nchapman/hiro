@@ -54,6 +54,25 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 	return id, err2
 }
 
+// parentGroupSet returns the set of supplementary GIDs held by the parent instance.
+// Returns nil if there is no parent (root instance — no restriction).
+func (m *Manager) parentGroupSet(parentID string) map[uint32]bool {
+	if parentID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	parent, ok := m.instances[parentID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	set := make(map[uint32]bool, len(parent.groups))
+	for _, g := range parent.groups {
+		set[g] = true
+	}
+	return set
+}
+
 // SpawnEphemeral starts an ephemeral instance that runs the given prompt and returns
 // the result. Blocks until the subagent completes. The instance always runs in
 // ephemeral mode — the caller controls the lifecycle.
@@ -298,14 +317,24 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			return "", fmt.Errorf("acquiring UID: %w", err)
 		}
 		groups = []uint32{gid}
-		// Add supplementary groups declared in the agent definition.
+		// Add supplementary groups declared in the agent definition,
+		// intersected with the parent's groups (a child cannot escalate
+		// beyond its parent's group membership). Root instances (no parent)
+		// get whatever they declare.
+		parentGroups := m.parentGroupSet(parentID)
 		for _, g := range cfg.Groups {
-			if groupGID := m.uidPool.GroupGID(g); groupGID != 0 {
-				groups = append(groups, groupGID)
-			} else {
+			groupGID := m.uidPool.GroupGID(g)
+			if groupGID == 0 {
 				m.logger.Warn("agent declared unknown group, ignoring",
 					"agent", cfg.Name, "group", g)
+				continue
 			}
+			if parentGroups != nil && !parentGroups[groupGID] {
+				m.logger.Warn("agent declared group not held by parent, ignoring",
+					"agent", cfg.Name, "group", g)
+				continue
+			}
+			groups = append(groups, groupGID)
 		}
 		// Transfer ownership of the instance dir (and all contents) to the agent user.
 		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, err error) error {
