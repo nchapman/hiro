@@ -28,7 +28,7 @@ type NodeIdentity struct {
 func LoadOrCreateIdentity(rootDir string) (*NodeIdentity, error) {
 	path := filepath.Join(rootDir, identityFile)
 
-	seed, err := os.ReadFile(path)
+	seed, err := os.ReadFile(path) //nolint:gosec // path is constructed from rootDir
 	if err == nil {
 		if len(seed) != ed25519.SeedSize {
 			return nil, fmt.Errorf("identity.key has wrong size: got %d, want %d", len(seed), ed25519.SeedSize)

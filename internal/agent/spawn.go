@@ -95,7 +95,7 @@ func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*exec.Cmd, *by
 		return nil, nil, nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, self, "agent")
+	cmd := exec.CommandContext(ctx, self, "agent") //nolint:gosec // self is our own binary path from os.Executable
 	if cfg.UID != 0 {
 		configureIsolation(cmd, cfg)
 	}

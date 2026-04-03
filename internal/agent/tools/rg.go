@@ -42,7 +42,7 @@ func rgGlobCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	if globPattern != "" {
 		args = append(args, "--glob", globPattern)
 	}
-	return exec.CommandContext(ctx, name, args...)
+	return exec.CommandContext(ctx, name, args...) //nolint:gosec // name is resolved rg binary
 }
 
 // errRgUnavailable is returned when ripgrep is not installed.

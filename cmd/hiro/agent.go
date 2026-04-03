@@ -89,7 +89,7 @@ func configureAgentSecurity(cfg ipc.SpawnConfig) error {
 	}
 
 	syscall.Umask(umaskCollaborative)
-	if uint32(os.Getuid()) != cfg.UID {
+	if uint32(os.Getuid()) != cfg.UID { //nolint:gosec // UID fits uint32 on all supported platforms
 		return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
 	}
 
@@ -131,7 +131,7 @@ func setupBackgroundJobs(logger *slog.Logger) backgroundJobs {
 			failed = true
 			var e *exec.ExitError
 			if errors.As(job.ExitErr(), &e) {
-				exitCode = int32(e.ExitCode())
+				exitCode = int32(e.ExitCode()) //nolint:gosec // exit codes fit int32
 			}
 		}
 		select {

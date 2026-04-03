@@ -42,7 +42,7 @@ func NewReadTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("file too large (%d bytes, max %d)", fi.Size(), maxFileSize)), nil
 			}
 
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //nolint:gosec // path validated by caller
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %v", err)), nil
 			}

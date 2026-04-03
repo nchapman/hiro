@@ -92,7 +92,7 @@ func (s *FileSyncService) tarEntry(tw *tar.Writer, path string, d fs.DirEntry, w
 	if err := tw.WriteHeader(header); err != nil {
 		return err
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is from WalkDir within the sync root
 	if err != nil {
 		return nil
 	}
@@ -121,7 +121,7 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 			return fmt.Errorf("reading tar: %w", err)
 		}
 
-		target := filepath.Join(s.rootDir, header.Name)
+		target := filepath.Join(s.rootDir, header.Name) //nolint:gosec // G305: path traversal prevented by Rel+".." check below
 
 		// Prevent path traversal.
 		rel, relErr := filepath.Rel(s.rootDir, filepath.Clean(target))
@@ -137,14 +137,14 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil { //nolint:gosec // mode comes from our own tar, bounded by filePermNoExec
 				return fmt.Errorf("creating dir %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), fsperm.DirStandard); err != nil {
 				return err
 			}
-			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&filePermNoExec); err != nil {
+			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&filePermNoExec); err != nil { //nolint:gosec // mode comes from our own tar, masked by filePermNoExec
 				return fmt.Errorf("writing file %s: %w", header.Name, err)
 			}
 		}

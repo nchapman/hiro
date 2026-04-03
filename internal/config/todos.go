@@ -30,7 +30,7 @@ type Todo struct {
 // ReadTodos reads the todo list from the session directory.
 // Returns an empty slice if the file does not exist.
 func ReadTodos(sessionDir string) ([]Todo, error) {
-	data, err := os.ReadFile(filepath.Join(sessionDir, todosFileName))
+	data, err := os.ReadFile(filepath.Join(sessionDir, todosFileName)) //nolint:gosec // internal session file
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

@@ -185,7 +185,7 @@ func ParseMarkdown(r io.Reader) (ParsedMarkdown, error) {
 
 // ParseMarkdownFile parses a markdown file from disk.
 func ParseMarkdownFile(path string) (ParsedMarkdown, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is from internal config loading, not user input
 	if err != nil {
 		return ParsedMarkdown{}, err
 	}
@@ -389,7 +389,7 @@ func MergeSkills(agentSkills, sharedSkills []SkillConfig) []SkillConfig {
 // ReadOptionalFile reads a file and returns its trimmed content.
 // Returns empty string and nil error if the file does not exist.
 func ReadOptionalFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is from internal config loading, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil

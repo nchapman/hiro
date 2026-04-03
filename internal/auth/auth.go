@@ -58,7 +58,7 @@ func (ts *TokenSigner) Create() string {
 
 func (ts *TokenSigner) createWithExpiry(expiry int64) string {
 	eb := make([]byte, expiryFieldLen)
-	binary.BigEndian.PutUint64(eb, uint64(expiry))
+	binary.BigEndian.PutUint64(eb, uint64(expiry)) //nolint:gosec // expiry is a Unix timestamp, always positive
 
 	mac := hmac.New(sha256.New, ts.secret)
 	mac.Write(eb)
@@ -104,7 +104,7 @@ func (ts *TokenSigner) Valid(token string) bool {
 	}
 
 	// Check expiry
-	expiry := int64(binary.BigEndian.Uint64(eb))
+	expiry := int64(binary.BigEndian.Uint64(eb)) //nolint:gosec // stored as uint64 from positive Unix timestamp
 	return time.Now().Unix() <= expiry
 }
 

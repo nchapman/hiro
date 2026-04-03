@@ -243,7 +243,7 @@ func chownDir(dir string, uid, gid uint32, logger interface{ Warn(string, ...any
 		if walkErr != nil {
 			return walkErr
 		}
-		return os.Chown(path, int(uid), int(gid))
+		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled directory, no symlink risk
 	}); err != nil {
 		logger.Warn("failed to chown dir", label, id, "error", err)
 	}

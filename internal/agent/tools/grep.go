@@ -489,7 +489,7 @@ func runRgText(ctx context.Context, pattern, searchPath string, params GrepParam
 
 	args = appendPatternAndPath(args, pattern, searchPath)
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is resolved rg/grep binary
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -514,7 +514,7 @@ func runRgFilesList(ctx context.Context, pattern, searchPath string, params Grep
 	args = append(args, "-l")
 	args = appendPatternAndPath(args, pattern, searchPath)
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is resolved rg/grep binary
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -545,7 +545,7 @@ func runRgCount(ctx context.Context, pattern, searchPath string, params GrepPara
 	args = append(args, "-c")
 	args = appendPatternAndPath(args, pattern, searchPath)
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is resolved rg/grep binary
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -654,7 +654,7 @@ func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]gr
 // searchTextFile checks if a file is text (no null bytes in the first 512 bytes),
 // then searches it for the pattern. Returns all matches up to maxMatchesPerFile.
 func searchTextFile(path string, re *regexp.Regexp, modTime int64) []grepMatch {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path from WalkDir within working directory
 	if err != nil {
 		return nil
 	}

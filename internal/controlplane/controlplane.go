@@ -109,7 +109,7 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 		},
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // config file path from startup
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Info("no config.yaml found, starting with empty control plane", "path", path)

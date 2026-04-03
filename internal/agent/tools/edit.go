@@ -77,7 +77,7 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 	}
 	fileMode := info.Mode()
 
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) //nolint:gosec // filePath validated by resolvePath
 	if err != nil {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("error reading file: %v", err)), nil
@@ -96,7 +96,7 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 			return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
 		}
 
-		if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil {
+		if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil { //nolint:gosec // filePath is validated by resolvePath
 			return fantasy.NewTextErrorResponse(
 				fmt.Sprintf("error writing file: %v", err)), nil
 		}
@@ -119,7 +119,7 @@ func editFile(filePath, oldString, newString string, replaceAll bool) (fantasy.T
 	}
 
 	newContent := content[:index] + newString + content[index+len(oldString):]
-	if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil {
+	if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil { //nolint:gosec // filePath is validated by resolvePath
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("error writing file: %v", err)), nil
 	}

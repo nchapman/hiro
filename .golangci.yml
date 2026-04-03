@@ -34,6 +34,7 @@ linters:
     - dupword
     - nakedret
     - loggercheck
+    - gosec
 
   settings:
     gocritic:
@@ -75,6 +76,9 @@ linters:
       statements: 40
     nestif:
       min-complexity: 5
+    gosec:
+      excludes:
+        - G104  # unhandled errors — already covered by errcheck with proper exclusions
     errcheck:
       check-type-assertions: true
     errorlint:
@@ -108,6 +112,7 @@ linters:
           - gocognit
           - nestif
           - forcetypeassert
+          - gosec
       # Generated protobuf code
       - path: \.pb\.go$
         linters:

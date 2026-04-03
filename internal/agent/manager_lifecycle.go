@@ -325,7 +325,7 @@ func (m *Manager) acquireUIDAndChown(instanceID, instDir string) (uint32, uint32
 		if walkErr != nil {
 			return walkErr
 		}
-		return os.Chown(path, int(uid), int(gid))
+		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
 	}); err != nil {
 		if os.IsPermission(err) {
 			m.logger.Warn("cannot chown instance dir (not root); file isolation degraded",

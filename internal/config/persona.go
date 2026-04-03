@@ -52,7 +52,7 @@ func (pd PersonaData) ForPrompt() string {
 // directory. Returns zero PersonaData and nil error if the file does not exist.
 func ReadPersonaFile(instanceDir string) (PersonaData, error) {
 	path := filepath.Join(instanceDir, personaFileName)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from instance dir, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return PersonaData{}, nil

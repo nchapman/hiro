@@ -249,7 +249,7 @@ func (rc *RelayClient) sendHandshake(conn net.Conn, role byte) error {
 	buf[1] = role
 	copy(buf[2:34], rc.swarmHash[:])
 	copy(buf[34:66], rc.identity.PublicKey)
-	binary.BigEndian.PutUint64(buf[66:74], uint64(time.Now().Unix()))
+	binary.BigEndian.PutUint64(buf[66:74], uint64(time.Now().Unix())) //nolint:gosec // Unix timestamp is always positive
 	sig := ed25519.Sign(rc.identity.PrivateKey, buf[:74])
 	copy(buf[74:138], sig)
 
@@ -276,7 +276,7 @@ func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity
 	buf[1] = relayRoleWorker
 	copy(buf[2:34], hash[:])
 	copy(buf[34:66], identity.PublicKey)
-	binary.BigEndian.PutUint64(buf[66:74], uint64(time.Now().Unix()))
+	binary.BigEndian.PutUint64(buf[66:74], uint64(time.Now().Unix())) //nolint:gosec // Unix timestamp is always positive
 	sig := ed25519.Sign(identity.PrivateKey, buf[:74])
 	copy(buf[74:138], sig)
 
@@ -308,9 +308,9 @@ func SelfTestReachability(addr string, tlsCert tls.Certificate) bool {
 	expectedDER := tlsCert.Certificate[0]
 	tlsCfg := &tls.Config{
 		Certificates:       []tls.Certificate{tlsCert},
-		InsecureSkipVerify: true,
-		NextProtos:         []string{"h2"},
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		InsecureSkipVerify: true,           //nolint:gosec // custom verification via VerifyPeerCertificate below
+		NextProtos:         []string{"h2"}, //
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error { //nolint:gosec // G123: session resumption is not a concern — we verify the cert ourselves
 			if len(rawCerts) == 0 || !bytes.Equal(rawCerts[0], expectedDER) {
 				return fmt.Errorf("responding server is not us")
 			}

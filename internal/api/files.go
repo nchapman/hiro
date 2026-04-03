@@ -228,7 +228,7 @@ func (s *Server) handleFilesFileRead(w http.ResponseWriter, r *http.Request) {
 	// Use ServeContent (not ServeFile) to avoid redirect behavior that
 	// breaks query-parameter-based routing. ServeContent still handles
 	// Content-Type detection, range requests, and caching headers.
-	f, err := os.Open(absPath)
+	f, err := os.Open(absPath) //nolint:gosec // absPath validated by resolveFilesPath
 	if err != nil {
 		s.logger.Error("files file open failed", "path", absPath, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

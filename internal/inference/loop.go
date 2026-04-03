@@ -520,7 +520,7 @@ func (l *Loop) persistTurn(ctx context.Context, prompt string, files []fantasy.F
 
 	// Async compaction — runs in background so the session mutex is released.
 	// Uses the lm/model snapshots from the turn to avoid racing with UpdateModel.
-	go func() {
+	go func() { //nolint:gosec // G118: intentional — compaction must outlive the request context
 		l.compactMu.Lock()
 		defer l.compactMu.Unlock()
 		compactor := NewCompactor(l.pdb, l.sessionID, &lmSummarizer{lm: lm, providerOptions: providerOpts}, CompactionConfigForModel(model), l.logger)

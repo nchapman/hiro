@@ -161,7 +161,7 @@ func (s *Server) handleSharedFileInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := os.Stat(absPath)
+	info, err := os.Stat(absPath) //nolint:gosec // absPath validated by resolveShareToken
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "file no longer exists", http.StatusGone)
@@ -179,7 +179,7 @@ func (s *Server) handleSharedFileInfo(w http.ResponseWriter, r *http.Request) {
 
 	// For non-huge text files, include content inline.
 	if info.Size() <= maxFileReadSize {
-		data, err := os.ReadFile(absPath)
+		data, err := os.ReadFile(absPath) //nolint:gosec // absPath validated by resolveShareToken
 		if err == nil && !isBinaryData(data) {
 			resp["content"] = string(data)
 		}
@@ -196,7 +196,7 @@ func (s *Server) handleSharedFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(absPath)
+	f, err := os.Open(absPath) //nolint:gosec // absPath validated by resolveShareToken
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "file no longer exists", http.StatusGone)

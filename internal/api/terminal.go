@@ -156,7 +156,7 @@ func (ts *termSocket) attachSession(sessionID string) {
 	}
 
 	// Start write pump goroutine for live output.
-	pumpCtx, pumpCancel := context.WithCancel(ts.ctx)
+	pumpCtx, pumpCancel := context.WithCancel(ts.ctx) //nolint:gosec // cancel stored in attachedSub, called on detach
 	ts.attached[sessionID] = attachedSub{subID: subID, cancel: pumpCancel}
 
 	go ts.writePump(pumpCtx, sessionID, ch)

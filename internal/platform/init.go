@@ -162,11 +162,11 @@ func applyCoordinatorOwnership(root string, coordGID int, logger *slog.Logger) e
 		if !d.IsDir() {
 			return nil
 		}
-		if err := os.Chown(path, -1, coordGID); err != nil {
+		if err := os.Chown(path, -1, coordGID); err != nil { //nolint:gosec // G122: platform directory, no symlink risk
 			logger.Warn("cannot chown directory to hiro-coordinators", "path", path, "error", err)
 			return nil // best-effort
 		}
-		if err := os.Chmod(path, fsperm.DirSetgid); err != nil {
+		if err := os.Chmod(path, fsperm.DirSetgid); err != nil { //nolint:gosec // G122: same controlled directory
 			logger.Warn("cannot set setgid on directory", "path", path, "error", err)
 		}
 		return nil

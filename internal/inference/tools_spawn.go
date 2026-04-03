@@ -140,7 +140,8 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 				return fantasy.NewTextErrorResponse("agent name is required"), nil
 			}
 
-			mode := "persistent"
+			const modePersistent = "persistent"
+			mode := modePersistent
 
 			callerID := callerIDFromContext(ctx)
 			nodeID := input.Node

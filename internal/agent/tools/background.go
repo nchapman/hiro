@@ -116,7 +116,7 @@ func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob
 
 	id := fmt.Sprintf("%06X", jobIDCounter.Add(1))
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored in job.cancel and called on Kill
 
 	job := &BackgroundJob{
 		ID:         id,
@@ -132,7 +132,7 @@ func (m *BackgroundJobManager) Start(workingDir, command string) (*BackgroundJob
 
 	go func() {
 		defer close(job.done)
-		cmd := exec.CommandContext(ctx, "bash", "-c", command)
+		cmd := exec.CommandContext(ctx, "bash", "-c", command) //nolint:gosec // agent tool — user-provided command execution is the purpose
 		cmd.Dir = workingDir
 		cmd.Stdout = job.stdout
 		cmd.Stderr = job.stderr

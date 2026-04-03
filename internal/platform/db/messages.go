@@ -152,7 +152,7 @@ func (d *DB) GetMessages(ctx context.Context, ids []int64) ([]Message, error) {
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholders are "?" literals, not user input — values are parameterized via args
 		"SELECT id, session_id, seq, role, content, raw_json, tokens, meta, created_at FROM messages WHERE id IN (%s) ORDER BY seq",
 		strings.Join(placeholders, ","),
 	)

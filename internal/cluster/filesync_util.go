@@ -88,7 +88,7 @@ func (s *FileSyncService) reconcileEntry(path string, d fs.DirEntry, walkErr err
 		}
 	}
 
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // path is from WalkDir within the sync root
 	if err != nil {
 		return nil //nolint:nilerr // skip unreadable files
 	}

@@ -70,10 +70,10 @@ func ServerTLSConfig(cert tls.Certificate) *tls.Config {
 func ClientTLSConfig(clientCert tls.Certificate, expectedPubKey ed25519.PublicKey) *tls.Config {
 	return &tls.Config{
 		Certificates:       []tls.Certificate{clientCert},
-		InsecureSkipVerify: true, // we do our own verification below
-		MinVersion:         tls.VersionTLS13,
-		NextProtos:         []string{"h2"}, // required for gRPC over TLS
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		InsecureSkipVerify: true,             //nolint:gosec // custom identity-based verification via VerifyPeerCertificate below
+		MinVersion:         tls.VersionTLS13, //
+		NextProtos:         []string{"h2"},   // required for gRPC over TLS
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error { //nolint:gosec // G123: session resumption is safe — TLS 1.3 only, identity verified per-connection
 			if len(rawCerts) == 0 {
 				return errors.New("server presented no certificate")
 			}

@@ -40,7 +40,7 @@ type DB struct {
 // Open opens (or creates) the platform database at the given path
 // and runs any pending migrations.
 func Open(path string) (*DB, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, fsperm.FilePrivate)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, fsperm.FilePrivate) //nolint:gosec // database path from startup
 	if err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)
 	}

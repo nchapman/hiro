@@ -141,7 +141,7 @@ func (s *FileSyncService) sendChange(relPath string, deleted bool) error {
 		return nil
 	}
 
-	content, err := os.ReadFile(absPath)
+	content, err := os.ReadFile(absPath) //nolint:gosec // absPath is resolved from WalkDir within the sync root
 	if err != nil {
 		return err
 	}

@@ -62,8 +62,8 @@ func (m *WorkerTerminalManager) handleCreate(_ context.Context, msg *pb.CreateTe
 	cmd.Dir = m.rootDir
 	cmd.Env = workerTerminalEnv()
 
-	cols := uint16(msg.Cols)
-	rows := uint16(msg.Rows)
+	cols := uint16(msg.Cols) //nolint:gosec // terminal dimensions are small values
+	rows := uint16(msg.Rows) //nolint:gosec // terminal dimensions are small values
 	if cols == 0 {
 		cols = 80
 	}
@@ -129,7 +129,7 @@ func (m *WorkerTerminalManager) outputPump(sess *workerTermSession) {
 			m.mu.Unlock()
 
 			if !closed {
-				_ = m.stream.SendTerminalExited(sess.id, int32(sess.exitCode))
+				_ = m.stream.SendTerminalExited(sess.id, int32(sess.exitCode)) //nolint:gosec // exit codes fit int32
 				m.logger.Info("terminal exited", "session_id", sess.id, "code", sess.exitCode)
 			}
 			return
@@ -155,8 +155,8 @@ func (m *WorkerTerminalManager) handleResize(_ context.Context, msg *pb.Terminal
 		return
 	}
 	_ = pty.Setsize(sess.ptmx, &pty.Winsize{
-		Rows: uint16(msg.Rows),
-		Cols: uint16(msg.Cols),
+		Rows: uint16(msg.Rows), //nolint:gosec // terminal dimensions are small values
+		Cols: uint16(msg.Cols), //nolint:gosec // terminal dimensions are small values
 	})
 }
 
