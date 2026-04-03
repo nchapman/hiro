@@ -250,9 +250,11 @@ func (s *Server) handleTaskResult(workerID string, env Envelope) {
 		return
 	}
 
-	// Truncate oversized results before they reach the LLM
+	// Truncate oversized results before they reach the LLM.
+	// Account for the suffix length so the total stays within the cap.
 	if len(result.Result) > maxTaskResultLen {
-		result.Result = result.Result[:maxTaskResultLen] + "\n[truncated]"
+		const truncSuffix = "\n[truncated]"
+		result.Result = result.Result[:maxTaskResultLen-len(truncSuffix)] + truncSuffix
 	}
 
 	// Verify task ownership — only accept results from the assigned worker

@@ -18,20 +18,21 @@ type cappedBuffer struct {
 	lost int64
 }
 
-func (cb *cappedBuffer) Write(p []byte) (n int, err error) {
+func (cb *cappedBuffer) Write(p []byte) (int, error) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
+	n := len(p) // always report full consumption to avoid io.ErrShortWrite
 	avail := maxBufferBytes - len(cb.buf)
 	if avail <= 0 {
-		cb.lost += int64(len(p))
-		return len(p), nil
+		cb.lost += int64(n)
+		return n, nil
 	}
 	if len(p) > avail {
 		cb.lost += int64(len(p) - avail)
 		p = p[:avail]
 	}
 	cb.buf = append(cb.buf, p...)
-	return len(p), nil
+	return n, nil
 }
 
 func (cb *cappedBuffer) String() string {
@@ -57,7 +58,12 @@ type BackgroundJob struct {
 
 // ExitErr returns the exit error from the completed job, or nil if still running or succeeded.
 func (j *BackgroundJob) ExitErr() error {
-	return j.exitErr
+	select {
+	case <-j.done:
+		return j.exitErr
+	default:
+		return nil
+	}
 }
 
 // GetOutput returns the current stdout, stderr, completion status, and exit error.

@@ -28,7 +28,11 @@ type Pool struct {
 }
 
 // New creates a UID pool starting at baseUID with the given group ID and size.
+// Panics if size is zero or negative.
 func New(baseUID, gid uint32, size int) *Pool {
+	if size <= 0 {
+		panic("uidpool: size must be positive")
+	}
 	return &Pool{
 		baseUID: baseUID,
 		gid:     gid,

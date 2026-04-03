@@ -12,7 +12,7 @@ import (
 func newTestLeaderService(t *testing.T) *LeaderService {
 	t.Helper()
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 	return NewLeaderService(ls, registry, slog.Default())
 }

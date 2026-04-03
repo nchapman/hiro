@@ -59,7 +59,7 @@ func (s *WorkerServer) ExecuteTool(ctx context.Context, req *pb.ExecuteToolReque
 
 func (s *WorkerServer) Shutdown(ctx context.Context, req *pb.ShutdownRequest) (*pb.ShutdownResponse, error) {
 	if err := s.worker.Shutdown(ctx); err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "shutting down worker: %v", err)
 	}
 	return &pb.ShutdownResponse{}, nil
 }

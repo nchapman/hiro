@@ -48,6 +48,9 @@ const (
 
 	// logRetention is how long logs are kept before pruning.
 	logRetention = 7 * 24 * time.Hour
+
+	// minRunDuration is the minimum time a run must last to not count as a crash loop.
+	minRunDuration = 30 * time.Second
 )
 
 // errRestartRequested is returned by run() when the setup API requests a
@@ -73,7 +76,7 @@ func main() {
 		start := time.Now()
 		err := run()
 		if errors.Is(err, errRestartRequested) {
-			if time.Since(start) > 30*time.Second {
+			if time.Since(start) > minRunDuration {
 				restarts = 0 // ran long enough — not a crash loop
 			}
 			restarts++
@@ -477,7 +480,9 @@ func (a *app) serve() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
-	_ = httpServer.Shutdown(shutdownCtx)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		a.logger.Warn("HTTP server shutdown error", "error", err)
+	}
 	return runErr
 }
 

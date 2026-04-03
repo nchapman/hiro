@@ -1,6 +1,10 @@
 package controlplane
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // SecretNames returns a sorted list of secret names (never values).
 // Used to populate the agent's system prompt.
@@ -30,11 +34,16 @@ func (cp *ControlPlane) SecretEnv() []string {
 	return env
 }
 
-// SetSecret stores or updates a secret.
-func (cp *ControlPlane) SetSecret(name, value string) {
+// SetSecret stores or updates a secret. Returns an error if the name is empty.
+func (cp *ControlPlane) SetSecret(name, value string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("secret name cannot be empty")
+	}
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.config.Secrets[name] = value
+	return nil
 }
 
 // DeleteSecret removes a secret. No-op if it doesn't exist.

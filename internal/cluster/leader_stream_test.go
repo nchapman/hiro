@@ -12,7 +12,7 @@ func TestLeaderStream_SetRelayAddr(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	// Set relay addr with valid host:port.
@@ -36,7 +36,7 @@ func TestLeaderStream_SetRelayAddr_NoPort(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	// If SplitHostPort fails, it should still store the raw address.
@@ -55,7 +55,7 @@ func TestLeaderStream_ConnectedNodes_Empty(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	nodes := ls.ConnectedNodes()
@@ -68,7 +68,7 @@ func TestLeaderStream_SendToNode_NotConnected(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	err := ls.SendToNode("nonexistent", &pb.LeaderMessage{})
@@ -81,7 +81,7 @@ func TestLeaderStream_DisconnectNode_NotConnected(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	// Should be a no-op, not panic.
@@ -92,7 +92,7 @@ func TestLeaderStream_DetectConnectionType(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	// Without relay configured, everything is direct.
@@ -121,7 +121,7 @@ func TestLeaderStream_DispatchNodeMessage(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	var gotSpawnResult, gotToolResult, gotWorkerExited, gotFileUpdate bool
@@ -181,7 +181,7 @@ func TestLeaderStream_DispatchNodeMessage_NilHandlers(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	// All nil handlers should not panic.
@@ -202,7 +202,7 @@ func TestLeaderStream_SetOnNodeConnected(t *testing.T) {
 	t.Parallel()
 
 	registry := NewNodeRegistry()
-	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := NewLeaderStream(registry, func(string) ApprovalStatus { return ApprovalPending }, pending, slog.Default())
 
 	called := false

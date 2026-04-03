@@ -22,7 +22,9 @@ func (m *Manager) shutdownHandle(h *WorkerHandle) {
 	}
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	_ = h.Worker.Shutdown(shutCtx)
+	if err := h.Worker.Shutdown(shutCtx); err != nil {
+		m.logger.Debug("worker shutdown error", "error", err)
+	}
 
 	select {
 	case <-h.Done:

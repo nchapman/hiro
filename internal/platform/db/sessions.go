@@ -12,7 +12,7 @@ import (
 
 // parseTime parses a SQLite datetime string, logging a warning on failure.
 func parseTime(s string) time.Time {
-	return parseTimeLayout("2006-01-02 15:04:05", s)
+	return parseTimeLayout(sqliteTimeFormat, s)
 }
 
 // parseTimeLayout parses a time string with the given layout, logging a warning on failure.
@@ -178,7 +178,7 @@ func (d *DB) LatestSessionByInstance(ctx context.Context, instanceID string) (Se
 func (d *DB) UpdateSessionStatus(ctx context.Context, id, status string) error {
 	var stoppedAt *string
 	if status == statusStopped {
-		now := time.Now().UTC().Format("2006-01-02 15:04:05")
+		now := time.Now().UTC().Format(sqliteTimeFormat)
 		stoppedAt = &now
 	}
 	result, err := d.db.ExecContext(ctx,

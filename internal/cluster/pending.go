@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"sort"
 	"sync"
@@ -34,13 +35,18 @@ type PendingRegistry struct {
 	mu       sync.RWMutex
 	nodes    map[string]*PendingNode // keyed by NodeID
 	filePath string
+	logger   *slog.Logger
 }
 
 // NewPendingRegistry creates a registry that persists to filePath.
-func NewPendingRegistry(filePath string) *PendingRegistry {
+func NewPendingRegistry(filePath string, logger *slog.Logger) *PendingRegistry {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &PendingRegistry{
 		nodes:    make(map[string]*PendingNode),
 		filePath: filePath,
+		logger:   logger,
 	}
 }
 
@@ -84,7 +90,9 @@ func (r *PendingRegistry) AddOrUpdate(node PendingNode) (ok bool, isNew bool) {
 		existing.LastSeen = now
 		existing.Name = node.Name
 		existing.Addr = node.Addr
-		_ = r.saveLocked()
+		if err := r.saveLocked(); err != nil {
+			r.logger.Warn("failed to persist pending nodes", "error", err)
+		}
 		return true, false
 	}
 
@@ -95,7 +103,9 @@ func (r *PendingRegistry) AddOrUpdate(node PendingNode) (ok bool, isNew bool) {
 	node.FirstSeen = now
 	node.LastSeen = now
 	r.nodes[node.NodeID] = &node
-	_ = r.saveLocked()
+	if err := r.saveLocked(); err != nil {
+		r.logger.Warn("failed to persist pending nodes", "error", err)
+	}
 	return true, true
 }
 
@@ -105,7 +115,9 @@ func (r *PendingRegistry) Remove(nodeID string) {
 	defer r.mu.Unlock()
 	if _, ok := r.nodes[nodeID]; ok {
 		delete(r.nodes, nodeID)
-		_ = r.saveLocked()
+		if err := r.saveLocked(); err != nil {
+			r.logger.Warn("failed to persist pending nodes", "error", err)
+		}
 	}
 }
 

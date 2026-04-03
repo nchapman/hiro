@@ -48,5 +48,9 @@ func atomicWrite(path string, content []byte, mode os.FileMode) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }

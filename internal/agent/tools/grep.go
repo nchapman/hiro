@@ -18,6 +18,34 @@ import (
 	"charm.land/fantasy"
 )
 
+// fileEntry pairs a file path with its modification time for mtime sorting.
+type fileEntry struct {
+	path    string
+	modTime int64
+}
+
+// formatFileEntries sorts entries by mtime (newest first), relativizes paths,
+// paginates the result, and returns the formatted response.
+func formatFileEntries(entries []fileEntry, workingDir string, params GrepParams) fantasy.ToolResponse {
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].modTime > entries[j].modTime
+	})
+
+	filePaths := make([]string, len(entries))
+	for i, e := range entries {
+		filePaths[i] = relativizePath(e.path, workingDir)
+	}
+
+	limit := effectiveHeadLimit(params)
+	sliced, truncated := applyPagination(filePaths, params.Offset, limit)
+
+	result := strings.Join(sliced, "\n")
+	if truncated {
+		result += fmt.Sprintf("\n\n(Results truncated at %d entries. Use head_limit and offset for pagination.)", limit)
+	}
+	return fantasy.NewTextResponse(result)
+}
+
 //go:embed grep.md
 var grepDescription string
 
@@ -258,10 +286,6 @@ func grepFilesWithMatches(ctx context.Context, pattern, searchPath, workingDir s
 	}
 
 	// Stat and sort by mtime
-	type fileEntry struct {
-		path    string
-		modTime int64
-	}
 	var entries []fileEntry
 	for _, f := range lines {
 		absPath := f
@@ -274,24 +298,7 @@ func grepFilesWithMatches(ctx context.Context, pattern, searchPath, workingDir s
 		}
 		entries = append(entries, fileEntry{path: absPath, modTime: info.ModTime().UnixNano()})
 	}
-
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].modTime > entries[j].modTime
-	})
-
-	filePaths := make([]string, len(entries))
-	for i, e := range entries {
-		filePaths[i] = relativizePath(e.path, workingDir)
-	}
-
-	limit := effectiveHeadLimit(params)
-	sliced, truncated := applyPagination(filePaths, params.Offset, limit)
-
-	result := strings.Join(sliced, "\n")
-	if truncated {
-		result += fmt.Sprintf("\n\n(Results truncated at %d entries. Use head_limit and offset for pagination.)", limit)
-	}
-	return fantasy.NewTextResponse(result), nil
+	return formatFileEntries(entries, workingDir, params), nil
 }
 
 func grepFilesWithMatchesFallback(ctx context.Context, pattern, searchPath, workingDir string, params GrepParams) (fantasy.ToolResponse, error) {
@@ -304,10 +311,6 @@ func grepFilesWithMatchesFallback(ctx context.Context, pattern, searchPath, work
 	}
 
 	// Deduplicate files, sort by mtime
-	type fileEntry struct {
-		path    string
-		modTime int64
-	}
 	seen := make(map[string]bool)
 	var entries []fileEntry
 	for _, m := range matches {
@@ -317,23 +320,7 @@ func grepFilesWithMatchesFallback(ctx context.Context, pattern, searchPath, work
 		seen[m.path] = true
 		entries = append(entries, fileEntry{path: m.path, modTime: m.modTime})
 	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].modTime > entries[j].modTime
-	})
-
-	filePaths := make([]string, len(entries))
-	for i, e := range entries {
-		filePaths[i] = relativizePath(e.path, workingDir)
-	}
-
-	limit := effectiveHeadLimit(params)
-	sliced, truncated := applyPagination(filePaths, params.Offset, limit)
-
-	result := strings.Join(sliced, "\n")
-	if truncated {
-		result += fmt.Sprintf("\n\n(Results truncated at %d entries. Use head_limit and offset for pagination.)", limit)
-	}
-	return fantasy.NewTextResponse(result), nil
+	return formatFileEntries(entries, workingDir, params), nil
 }
 
 // --- Count mode ---

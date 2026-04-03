@@ -135,7 +135,7 @@ func assembleMessages(kept, freshTail []resolvedItem) AssembleResult {
 // resolveItem converts a context item to a fantasy.Message.
 func resolveItem(ctx context.Context, pdb *platformdb.DB, item platformdb.ContextItem) (fantasy.Message, int, error) {
 	switch item.ItemType {
-	case "message":
+	case platformdb.ItemTypeMessage:
 		if item.MessageID == nil {
 			return fantasy.Message{}, 0, fmt.Errorf("message item has nil message_id")
 		}
@@ -155,7 +155,7 @@ func resolveItem(ctx context.Context, pdb *platformdb.DB, item platformdb.Contex
 			Content: []fantasy.MessagePart{fantasy.TextPart{Text: msg.Content}},
 		}, msg.Tokens, nil
 
-	case "summary":
+	case platformdb.ItemTypeSummary:
 		if item.SummaryID == nil {
 			return fantasy.Message{}, 0, fmt.Errorf("summary item has nil summary_id")
 		}

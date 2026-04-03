@@ -13,8 +13,15 @@ import (
 const (
 	maxSearchQueryLen = 512 // max byte length for FTS search queries
 
+	// ItemTypeMessage is the context item type for conversation messages.
+	ItemTypeMessage = "message"
 	// ItemTypeSummary is the context item type for compacted summaries.
 	ItemTypeSummary = "summary"
+
+	// SummaryKindLeaf is a summary that directly replaces source messages.
+	SummaryKindLeaf = "leaf"
+	// SummaryKindCondensed is a summary that replaces other summaries.
+	SummaryKindCondensed = "condensed"
 )
 
 // Message represents a stored conversation message.
@@ -125,7 +132,7 @@ func (d *DB) AppendMessage(ctx context.Context, sessionID, role, content, rawJSO
 // Used by tests that ingest historical data with known timestamps.
 func (d *DB) UpdateMessageTimestamp(ctx context.Context, id int64, t time.Time) error {
 	_, err := d.db.ExecContext(ctx, "UPDATE messages SET created_at = ? WHERE id = ?",
-		t.Format("2006-01-02 15:04:05"), id)
+		t.Format(sqliteTimeFormat), id)
 	return err
 }
 

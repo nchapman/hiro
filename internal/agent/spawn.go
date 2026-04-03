@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -27,7 +28,7 @@ func prepareSocketDir(cfg ipc.SpawnConfig) (socketPath string, socketDir string,
 	if len(sessPrefix) > ipc.MaxSessionPrefix {
 		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
 	}
-	socketDir = fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
+	socketDir = filepath.Join(os.TempDir(), fmt.Sprintf("hiro-%s", sessPrefix))
 	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
 		return "", "", fmt.Errorf("creating socket dir: %w", err)
 	}

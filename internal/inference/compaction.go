@@ -357,7 +357,7 @@ func (c *Compactor) leafPass(ctx context.Context) error {
 	sum := platformdb.Summary{
 		ID:           summaryID,
 		SessionID:    c.sessionID,
-		Kind:         "leaf",
+		Kind:         platformdb.SummaryKindLeaf,
 		Depth:        0,
 		Content:      summary,
 		Tokens:       summaryTokens,
@@ -450,7 +450,7 @@ func (c *Compactor) condenseAtDepth(ctx context.Context, depth int, allContextIt
 	sum := platformdb.Summary{
 		ID:           summaryID,
 		SessionID:    c.sessionID,
-		Kind:         "condensed",
+		Kind:         platformdb.SummaryKindCondensed,
 		Depth:        depth + 1,
 		Content:      summary,
 		Tokens:       summaryTokens,

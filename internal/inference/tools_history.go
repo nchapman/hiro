@@ -89,7 +89,7 @@ func handleHistoryRecall(ctx context.Context, pdb *platformdb.DB, summaryID stri
 	fmt.Fprintf(&sb, "Compression: %d tokens → %d tokens\n\n", sum.SourceTokens, sum.Tokens)
 	sb.WriteString(sum.Content)
 
-	if sum.Kind == "leaf" {
+	if sum.Kind == platformdb.SummaryKindLeaf {
 		if err := appendSourceMessages(ctx, pdb, sum.ID, &sb); err != nil {
 			return fantasy.NewTextErrorResponse(err.Error()), nil
 		}
@@ -135,6 +135,7 @@ func appendChildSummaries(ctx context.Context, pdb *platformdb.DB, summaryID str
 	for _, cid := range childIDs {
 		child, err := pdb.GetSummary(ctx, cid)
 		if err != nil {
+			fmt.Fprintf(sb, "*(failed to load summary %s)*\n\n", cid)
 			continue
 		}
 		fmt.Fprintf(sb, "**%s** (depth %d, %s to %s):\n%s\n\n",

@@ -130,7 +130,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	}
 
 	// Clear the stopped flag so the instance starts on next server restart.
-	m.setInstanceStatus(instanceID, "running")
+	m.setInstanceStatus(instanceID, string(InstanceStatusRunning))
 	return nil
 }
 
@@ -159,7 +159,9 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	// Mark the old session as stopped in DB.
 	if m.pdb != nil && oldSession != "" {
-		_ = m.pdb.UpdateSessionStatus(context.Background(), oldSession, "stopped")
+		if err := m.pdb.UpdateSessionStatus(context.Background(), oldSession, "stopped"); err != nil {
+			m.logger.Warn("failed to mark old session as stopped", "session", oldSession, "error", err)
+		}
 	}
 
 	// Create new session directory.
@@ -225,10 +227,12 @@ func (m *Manager) registerSessionInDB(instanceID, sessionID, agentName string, m
 func (m *Manager) failNewSession(shutdownDone <-chan struct{}, instanceID, sessionID, sessDir string, inst *instance, err error) (string, error) {
 	<-shutdownDone
 	inst.info.Status = InstanceStatusStopped
-	m.setInstanceStatus(instanceID, "stopped")
+	m.setInstanceStatus(instanceID, string(InstanceStatusStopped))
 	os.RemoveAll(sessDir)
 	if m.pdb != nil {
-		_ = m.pdb.DeleteSession(context.Background(), sessionID)
+		if err := m.pdb.DeleteSession(context.Background(), sessionID); err != nil {
+			m.logger.Warn("failed to delete session from DB", "session", sessionID, "error", err)
+		}
 	}
 	return "", err
 }

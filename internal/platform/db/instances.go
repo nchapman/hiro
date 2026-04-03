@@ -117,7 +117,7 @@ func (d *DB) ListChildInstances(ctx context.Context, parentID string) ([]Instanc
 func (d *DB) UpdateInstanceStatus(ctx context.Context, id, status string) error {
 	var stoppedAt *string
 	if status == statusStopped {
-		now := time.Now().UTC().Format("2006-01-02 15:04:05")
+		now := time.Now().UTC().Format(sqliteTimeFormat)
 		stoppedAt = &now
 	}
 	result, err := d.db.ExecContext(ctx,

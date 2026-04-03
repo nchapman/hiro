@@ -6,8 +6,10 @@ package loghandler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -229,8 +231,10 @@ func (h *Handler) writeLoop() {
 		if len(batch) == 0 {
 			return
 		}
-		// Best-effort insert — don't let DB errors stop the writer.
-		_ = h.db.InsertLogs(context.Background(), batch)
+		if err := h.db.InsertLogs(context.Background(), batch); err != nil {
+			// Can't use slog here (would recurse). Write to stderr as last resort.
+			fmt.Fprintf(os.Stderr, "loghandler: failed to insert %d log entries: %v\n", len(batch), err)
+		}
 		batch = batch[:0]
 	}
 
@@ -327,10 +331,14 @@ func (r *subscriberRegistry) subscribe() (<-chan platformdb.LogEntry, func(), er
 	s := &subscriber{ch: make(chan platformdb.LogEntry, subscriberBufSize)}
 	r.subs[s] = struct{}{}
 
+	var once sync.Once
 	unsub := func() {
-		r.mu.Lock()
-		delete(r.subs, s)
-		r.mu.Unlock()
+		once.Do(func() {
+			r.mu.Lock()
+			delete(r.subs, s)
+			close(s.ch)
+			r.mu.Unlock()
+		})
 	}
 	return s.ch, unsub, nil
 }

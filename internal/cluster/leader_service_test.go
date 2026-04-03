@@ -24,7 +24,7 @@ func setupLeaderService(t *testing.T) (*cluster.LeaderService, cluster.NodeID, p
 	logger := slog.Default()
 	clientID := testIdentityFromSeed(10)
 
-	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 	ls := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
 		if nodeID == nodeIDFromIdentity(clientID) {
 			return cluster.ApprovalGranted

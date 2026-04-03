@@ -40,7 +40,7 @@ func setupApprovalTest(t *testing.T, registry *cluster.NodeRegistry, approvedIDs
 	t.Helper()
 	logger := slog.Default()
 
-	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"), nil)
 
 	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
 		if approvedIDs[nodeID] {
@@ -190,7 +190,7 @@ func TestStream_RejectedRevoked(t *testing.T) {
 
 	// Mark the node as revoked (not approved, but explicitly revoked).
 	revokedIDs := map[string]bool{nodeIDFromIdentity(clientID): true}
-	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"))
+	pending := cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.json"), nil)
 
 	leader := cluster.NewLeaderStream(registry, func(nodeID string) cluster.ApprovalStatus {
 		if revokedIDs[nodeID] {

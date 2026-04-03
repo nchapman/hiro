@@ -39,7 +39,9 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	for _, dbInst := range instances {
 		mode := config.AgentMode(dbInst.Mode)
 		if !mode.IsPersistent() {
-			_ = m.pdb.DeleteInstance(ctx, dbInst.ID)
+			if err := m.pdb.DeleteInstance(ctx, dbInst.ID); err != nil {
+				m.logger.Warn("failed to delete ephemeral instance from DB", "id", dbInst.ID, "error", err)
+			}
 			os.RemoveAll(m.instanceDir(dbInst.ID))
 			cleaned++
 			continue
@@ -59,7 +61,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 
 		entry := restoreEntry{dbInst, cfg, mode}
-		if dbInst.Status == "stopped" {
+		if dbInst.Status == string(InstanceStatusStopped) {
 			stopped = append(stopped, entry)
 		} else {
 			toStart = append(toStart, entry)
@@ -133,7 +135,9 @@ func (m *Manager) restoreRunningInstance(ctx context.Context, e restoreEntry) bo
 	if _, err := os.Stat(m.instanceDir(e.dbInst.ID)); os.IsNotExist(err) {
 		m.logger.Warn("instance dir missing, removing orphaned DB record",
 			"id", e.dbInst.ID, "agent", e.dbInst.AgentName)
-		_ = m.pdb.DeleteInstance(ctx, e.dbInst.ID)
+		if err := m.pdb.DeleteInstance(ctx, e.dbInst.ID); err != nil {
+			m.logger.Warn("failed to delete orphaned instance from DB", "id", e.dbInst.ID, "error", err)
+		}
 		return false
 	}
 

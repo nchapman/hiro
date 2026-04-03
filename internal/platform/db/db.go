@@ -30,6 +30,9 @@ var migrationsFS embed.FS
 
 const (
 	sqlitePoolSize = 4 // concurrent readers in WAL mode
+
+	// sqliteTimeFormat is the timestamp layout used for SQLite datetime columns.
+	sqliteTimeFormat = "2006-01-02 15:04:05"
 )
 
 // DB wraps a SQLite database connection for the platform.

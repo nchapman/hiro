@@ -27,7 +27,7 @@ func newClusterTestServer(t *testing.T) (srv *Server, cp *controlplane.ControlPl
 	nr = cluster.NewNodeRegistry()
 	nr.RegisterHome("test-leader")
 
-	pr = cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	pr = cluster.NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	s.SetNodeRegistry(nr)
 	s.SetPendingRegistry(pr)

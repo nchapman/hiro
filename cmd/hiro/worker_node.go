@@ -165,7 +165,10 @@ func (wn *workerNode) init() error {
 func (wn *workerNode) startHTTPServer() {
 	listenAddr := envOr("HIRO_ADDR", ":8080")
 
-	webFS, _ := web.DistFS()
+	webFS, err := web.DistFS()
+	if err != nil {
+		wn.logger.Warn("failed to load web UI assets", "error", err)
+	}
 	httpSrv := api.NewServer(wn.logger, webFS, wn.cp, nil, wn.rootDir)
 	httpSrv.SetWorkerStatus(func() string {
 		s, _ := wn.connStatus.Load().(string)

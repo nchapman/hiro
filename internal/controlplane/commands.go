@@ -76,7 +76,9 @@ func (cp *ControlPlane) handleSecrets(verb string, args []string) (string, bool,
 		if !ok {
 			return "Usage: /secrets set NAME=VALUE", false, nil
 		}
-		cp.SetSecret(name, value)
+		if err := cp.SetSecret(name, value); err != nil {
+			return err.Error(), false, nil
+		}
 		return fmt.Sprintf("Secret %q set.", name), true, nil
 
 	case "rm", "remove", "delete":

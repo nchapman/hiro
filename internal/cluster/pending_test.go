@@ -8,7 +8,7 @@ import (
 
 func TestPendingRegistry_AddOrUpdate_New(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	ok, isNew := r.AddOrUpdate(PendingNode{NodeID: "node-1", Name: "Node 1", Addr: "1.2.3.4:8080"})
 	if !ok {
@@ -24,7 +24,7 @@ func TestPendingRegistry_AddOrUpdate_New(t *testing.T) {
 
 func TestPendingRegistry_AddOrUpdate_Existing(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	r.AddOrUpdate(PendingNode{NodeID: "node-1", Name: "Node 1", Addr: "1.2.3.4:8080"})
 	ok, isNew := r.AddOrUpdate(PendingNode{NodeID: "node-1", Name: "Node 1 Updated", Addr: "5.6.7.8:8080"})
@@ -52,7 +52,7 @@ func TestPendingRegistry_AddOrUpdate_Existing(t *testing.T) {
 
 func TestPendingRegistry_Get(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	_, found := r.Get("nonexistent")
 	if found {
@@ -74,7 +74,7 @@ func TestPendingRegistry_Get(t *testing.T) {
 
 func TestPendingRegistry_Remove(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	r.AddOrUpdate(PendingNode{NodeID: "node-1", Name: "Node 1"})
 	r.AddOrUpdate(PendingNode{NodeID: "node-2", Name: "Node 2"})
@@ -97,7 +97,7 @@ func TestPendingRegistry_Remove(t *testing.T) {
 
 func TestPendingRegistry_List_SortedByFirstSeen(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	// Add nodes in reverse order; List should return oldest first.
 	r.AddOrUpdate(PendingNode{NodeID: "node-c", Name: "C"})
@@ -125,7 +125,7 @@ func TestPendingRegistry_Clear(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pending.yaml")
-	r := NewPendingRegistry(path)
+	r := NewPendingRegistry(path, nil)
 
 	r.AddOrUpdate(PendingNode{NodeID: "node-1", Name: "Node 1"})
 	r.AddOrUpdate(PendingNode{NodeID: "node-2", Name: "Node 2"})
@@ -144,7 +144,7 @@ func TestPendingRegistry_Clear(t *testing.T) {
 func TestPendingRegistry_FilePath(t *testing.T) {
 	t.Parallel()
 	path := "/tmp/test-pending.yaml"
-	r := NewPendingRegistry(path)
+	r := NewPendingRegistry(path, nil)
 	if r.FilePath() != path {
 		t.Fatalf("got %q, want %q", r.FilePath(), path)
 	}
@@ -156,12 +156,12 @@ func TestPendingRegistry_LoadPersistence(t *testing.T) {
 	path := filepath.Join(dir, "pending.yaml")
 
 	// Create and populate a registry.
-	r1 := NewPendingRegistry(path)
+	r1 := NewPendingRegistry(path, nil)
 	r1.AddOrUpdate(PendingNode{NodeID: "node-1", Name: "Node 1", Addr: "1.2.3.4:8080"})
 	r1.AddOrUpdate(PendingNode{NodeID: "node-2", Name: "Node 2", Addr: "5.6.7.8:9090"})
 
 	// Load into a fresh registry.
-	r2 := NewPendingRegistry(path)
+	r2 := NewPendingRegistry(path, nil)
 	if err := r2.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestPendingRegistry_LoadPersistence(t *testing.T) {
 
 func TestPendingRegistry_Load_NoFile(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "nonexistent.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "nonexistent.yaml"), nil)
 	if err := r.Load(); err != nil {
 		t.Fatalf("Load should return nil for nonexistent file, got %v", err)
 	}
@@ -194,7 +194,7 @@ func TestPendingRegistry_Load_CorruptFile(t *testing.T) {
 	path := filepath.Join(dir, "pending.yaml")
 	os.WriteFile(path, []byte("not valid yaml: [[["), 0o644)
 
-	r := NewPendingRegistry(path)
+	r := NewPendingRegistry(path, nil)
 	if err := r.Load(); err == nil {
 		t.Fatal("expected error for corrupt file")
 	}
@@ -202,7 +202,7 @@ func TestPendingRegistry_Load_CorruptFile(t *testing.T) {
 
 func TestPendingRegistry_MaxNodes(t *testing.T) {
 	t.Parallel()
-	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"))
+	r := NewPendingRegistry(filepath.Join(t.TempDir(), "pending.yaml"), nil)
 
 	// Fill to capacity.
 	for i := range maxPendingNodes {

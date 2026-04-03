@@ -208,7 +208,9 @@ func (m *Manager) DeleteInstance(instanceID string) error {
 		// Always delete instance dir and DB record regardless of mode.
 		os.RemoveAll(m.instanceDir(id))
 		if m.pdb != nil {
-			_ = m.pdb.DeleteInstance(context.Background(), id)
+			if err := m.pdb.DeleteInstance(context.Background(), id); err != nil {
+				m.logger.Warn("failed to delete instance from DB", "id", id, "error", err)
+			}
 		}
 		m.logger.Info("instance deleted", "id", id)
 	}
