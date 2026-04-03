@@ -9,11 +9,17 @@ import (
 )
 
 // Instance represents a row in the instances table.
+//
+// Storage rule: only non-derivable data is persisted. Derived state
+// (effective tools, supplementary groups, resolved model/provider)
+// is recomputed from agent definitions at startup. If it can be
+// reconstructed from config files, it does not belong in this table.
 type Instance struct {
 	ID        string
 	AgentName string
 	Mode      string // "ephemeral", "persistent"
 	ParentID  string // empty if root
+	NodeID    string // cluster node ("home" for local)
 	Status    string // "running", "stopped"
 	CreatedAt time.Time
 	StoppedAt *time.Time
@@ -25,9 +31,13 @@ func (d *DB) CreateInstance(inst Instance) error {
 	if inst.ParentID != "" {
 		parentID = &inst.ParentID
 	}
+	nodeID := inst.NodeID
+	if nodeID == "" {
+		nodeID = "home"
+	}
 	_, err := d.db.Exec(
-		`INSERT INTO instances (id, agent_name, mode, parent_id, status) VALUES (?, ?, ?, ?, ?)`,
-		inst.ID, inst.AgentName, inst.Mode, parentID, "running",
+		`INSERT INTO instances (id, agent_name, mode, parent_id, node_id, status) VALUES (?, ?, ?, ?, ?, ?)`,
+		inst.ID, inst.AgentName, inst.Mode, parentID, nodeID, "running",
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -45,9 +55,9 @@ func (d *DB) GetInstance(id string) (Instance, error) {
 	var createdAt string
 	var stoppedAt sql.NullString
 	err := d.db.QueryRow(
-		`SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, agent_name, mode, parent_id, node_id, status, created_at, stopped_at
 		 FROM instances WHERE id = ?`, id,
-	).Scan(&inst.ID, &inst.AgentName, &inst.Mode, &parentID, &inst.Status, &createdAt, &stoppedAt)
+	).Scan(&inst.ID, &inst.AgentName, &inst.Mode, &parentID, &inst.NodeID, &inst.Status, &createdAt, &stoppedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Instance{}, fmt.Errorf("instance %s: %w", id, ErrNotFound)
 	}
@@ -68,7 +78,7 @@ func (d *DB) GetInstance(id string) (Instance, error) {
 // ListInstances returns all instances matching the given filters.
 // Pass empty strings to skip a filter.
 func (d *DB) ListInstances(parentID, status string) ([]Instance, error) {
-	query := "SELECT id, agent_name, mode, parent_id, status, created_at, stopped_at FROM instances WHERE 1=1"
+	query := "SELECT id, agent_name, mode, parent_id, node_id, status, created_at, stopped_at FROM instances WHERE 1=1"
 	var args []any
 
 	if parentID != "" {
@@ -218,7 +228,7 @@ func scanInstances(rows *sql.Rows) ([]Instance, error) {
 		var parentID sql.NullString
 		var createdAt string
 		var stoppedAt sql.NullString
-		if err := rows.Scan(&inst.ID, &inst.AgentName, &inst.Mode, &parentID, &inst.Status, &createdAt, &stoppedAt); err != nil {
+		if err := rows.Scan(&inst.ID, &inst.AgentName, &inst.Mode, &parentID, &inst.NodeID, &inst.Status, &createdAt, &stoppedAt); err != nil {
 			return nil, err
 		}
 		if parentID.Valid {

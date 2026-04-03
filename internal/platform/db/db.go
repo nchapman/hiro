@@ -3,6 +3,11 @@
 // All session, message, history, usage, and request log data is stored in a
 // single SQLite database. The control plane is the sole writer; agent workers
 // never touch this database.
+//
+// Storage rule: only persist non-derivable data. Derived state (effective
+// tools, supplementary groups, resolved model/provider) is recomputed from
+// agent definitions and control plane config at startup. If it can be
+// reconstructed from config files on disk, it does not belong here.
 package db
 
 import (

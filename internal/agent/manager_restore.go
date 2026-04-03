@@ -77,8 +77,10 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 				ParentID:    e.dbInst.ParentID,
 				Status:      InstanceStatusStopped,
 				Model:       m.resolveModelString(e.cfg.Model),
+				NodeID:      ipc.NodeID(e.dbInst.NodeID),
 			},
 			agentName: e.cfg.Name,
+			nodeID:    ipc.NodeID(e.dbInst.NodeID),
 		}
 		m.mu.Lock()
 		m.instances[e.dbInst.ID] = inst
@@ -130,7 +132,8 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 				"instance", e.dbInst.ID, "session", sessionID, "agent", e.dbInst.AgentName)
 		}
 		// Pass empty display name/desc — startInstance reads persona.md for existing instances.
-		_, err = m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, ipc.HomeNodeID, "", "")
+		// Use the persisted node_id so instances restart on their original node.
+		_, err = m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, ipc.NodeID(e.dbInst.NodeID), "", "")
 		if err != nil {
 			m.logger.Warn("failed to restore instance",
 				"id", e.dbInst.ID, "agent", e.dbInst.AgentName, "error", err)

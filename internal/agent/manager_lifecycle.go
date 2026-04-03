@@ -292,6 +292,12 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		}
 	}
 
+	// Resolve node ID early so it's available for DB registration.
+	resolvedNodeID := nodeID
+	if resolvedNodeID == "" {
+		resolvedNodeID = ipc.HomeNodeID
+	}
+
 	// Register instance in the platform database.
 	if m.pdb != nil {
 		if err := m.pdb.CreateInstance(platformdb.Instance{
@@ -299,6 +305,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			AgentName: cfg.Name,
 			Mode:      string(mode),
 			ParentID:  parentID,
+			NodeID:    string(resolvedNodeID),
 		}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
 			return "", fmt.Errorf("creating instance in db: %w", err)
 		}
@@ -476,11 +483,6 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 			cleanup()
 			return "", fmt.Errorf("creating inference loop for %q: %w", cfg.Name, err)
 		}
-	}
-
-	resolvedNodeID := nodeID
-	if resolvedNodeID == "" {
-		resolvedNodeID = ipc.HomeNodeID
 	}
 
 	// Resolve display name/description: persona frontmatter overrides agent definition.
