@@ -46,7 +46,6 @@ type LoopConfig struct {
 	DenyRules      []toolrules.Rule   // merged deny rules from all sources
 	MaxTurns       int                // max agentic turns; 0 = unlimited
 	HasSkills      bool
-	SecretNamesFn  func() []string
 	SecretEnvFn    func() []string
 	Logger         *slog.Logger
 
@@ -84,7 +83,6 @@ type Loop struct {
 	maxTurns       int // max agentic turns; 0 = unlimited
 	lm             fantasy.LanguageModel
 	pdb            *platformdb.DB
-	secretNamesFn  func() []string
 	logger         *slog.Logger
 
 	// Tools are stored for agent recreation on model switch.
@@ -162,7 +160,6 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		maxTurns:       cfg.MaxTurns,
 		lm:             cfg.LM,
 		pdb:            cfg.PDB,
-		secretNamesFn:  cfg.SecretNamesFn,
 		notifications:  cfg.Notifications,
 		logger:         cfg.Logger.With("component", "inference", "instance_id", cfg.InstanceID),
 	}
@@ -777,17 +774,12 @@ func (l *Loop) currentSystemPrompt() string {
 
 // currentSystemPromptWithConfig rebuilds the system prompt using the provided
 // config snapshot. Does not acquire updateMu — safe to call from UpdateModel
-// which already holds the lock.
+// which already holds the lock. Dynamic state (memories, todos, secrets, skills)
+// is injected via context providers, not the system prompt.
 func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
-	persona, memory := l.readInstanceState()
-	todos := l.readSessionTodos()
+	persona := l.readPersona()
 
 	l.reloadAgentDefinition(&cfg)
-
-	var secretNames []string
-	if l.secretNamesFn != nil {
-		secretNames = l.secretNamesFn()
-	}
 
 	env := EnvInfo{
 		WorkingDir:  l.workingDir,
@@ -795,38 +787,20 @@ func (l *Loop) currentSystemPromptWithConfig(cfg config.AgentConfig) string {
 		SessionDir:  l.sessionDir,
 		Mode:        l.mode,
 	}
-	return buildSystemPrompt(cfg, env, persona, memory, todos, secretNames)
+	return buildSystemPrompt(cfg, env, persona)
 }
 
-// readInstanceState reads persona and memory from the instance directory.
-func (l *Loop) readInstanceState() (persona, memory string) {
+// readPersona reads the persona from the instance directory.
+func (l *Loop) readPersona() string {
 	if l.instanceDir == "" {
-		return "", ""
-	}
-	if pd, err := config.ReadPersonaFile(l.instanceDir); err != nil {
-		l.logger.Warn("could not read persona.md", "error", err)
-	} else {
-		persona = pd.ForPrompt()
-	}
-	if mem, err := config.ReadMemoryFile(l.instanceDir); err != nil {
-		l.logger.Warn("could not read memory.md", "error", err)
-	} else {
-		memory = mem
-	}
-	return persona, memory
-}
-
-// readSessionTodos reads the todo list from the session directory.
-func (l *Loop) readSessionTodos() string {
-	if l.sessionDir == "" {
 		return ""
 	}
-	t, err := config.ReadTodos(l.sessionDir)
+	pd, err := config.ReadPersonaFile(l.instanceDir)
 	if err != nil {
-		l.logger.Warn("could not read todos.yaml", "error", err)
+		l.logger.Warn("could not read persona.md", "error", err)
 		return ""
 	}
-	return config.FormatTodos(t)
+	return pd.ForPrompt()
 }
 
 // reloadAgentDefinition reloads agent prompt text and skills from disk.

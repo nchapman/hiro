@@ -345,13 +345,16 @@ func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance,
 		DenyRules:      inst.denyRules,
 		MaxTurns:       cfg.MaxTurns,
 		HasSkills:      len(cfg.Skills) > 0 || m.agentHasSkills(cfg),
-		SecretNamesFn:  m.SecretNames,
 		SecretEnvFn:    m.SecretEnv,
 		Notifications:  inst.notifications,
 		Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 		HostManager:    m,
 		ContextProviders: []inference.ContextProvider{
+			inference.MemoryProvider(m.instanceDir(instanceID)),
+			inference.TodoProvider(sessDir),
+			inference.SecretProvider(m.SecretNames),
 			inference.AgentListingProvider(m),
+			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
 		},
 	}, modelSpec, apiKey, baseURL)
 	if err != nil {

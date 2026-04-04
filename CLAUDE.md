@@ -170,20 +170,18 @@ Full instructions (read on demand by the agent).
 
 Validation: name must match `^[a-z0-9]+(-[a-z0-9]+)*$`. For directory skills, name must match directory name (case-insensitive).
 
-### System Prompt Assembly Order
+### System Prompt and Context Messages
 
-Each turn, `currentSystemPrompt()` rebuilds the full prompt from disk:
+The system prompt contains only **static identity** — content that rarely changes:
 
-1. `## Environment` + directory tree with instance/session paths (always present)
-2. `## Memories` + `memory.md` from instance dir (persistent agents only)
-3. `## Current Tasks` + formatted todos (persistent agents only)
-4. `## Secrets` + secret names (if any)
-5. `agent.md` body (main instructions)
-6. `## Persona` + `persona.md` from instance dir (refines instructions above)
-7. `## Skills` + skill name/description listing (if present)
-8. `## Security` + tool result trust warning (always present)
+1. `## Environment` + directory tree with instance/session paths
+2. `agent.md` body (main instructions, reloaded from disk each turn)
+3. `## Persona` + `persona.md` from instance dir
+4. `## Security` + tool result trust warning
 
-Skills are re-scanned from disk each turn (like persona and memory), so runtime-created skills take effect immediately. The full skill body is NOT in the prompt — agents read it on demand via `Skill`.
+**Dynamic state** (memories, todos, secrets, skills, agent listings) is injected as `<system-reminder>` user messages via the **context provider system**. These messages are persisted in conversation history with delta tracking metadata — if nothing changed since the last turn, no new message is emitted and the prompt cache is preserved. Multiple providers that emit in the same turn are merged into a single message.
+
+See `docs/system-reminders.md` for the full design, change detection strategies, and how to add new providers.
 
 ### Key Packages
 
@@ -328,6 +326,18 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 ### Agent Tool Scoping
 
 Management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`, `DeleteInstance`) and `SpawnInstance` are scoped to the calling agent's descendants via `IsDescendant()`. An agent cannot manage siblings or ancestors.
+
+## Design Docs
+
+The `docs/` directory contains design documents for key subsystems. **Keep these in sync when modifying the systems they describe.**
+
+| Document | Covers |
+|----------|--------|
+| `docs/agent-model.md` | Three-tier model (definition → instance → session), lifecycle, state organization |
+| `docs/system-reminders.md` | Context provider system: delta tracking, change detection, adding new providers |
+| `docs/security.md` | Process isolation, UID pool, filesystem permissions |
+| `docs/tool-permissions.md` | Tool allowlists, deny rules, inherited capabilities |
+| `docs/map.md` | Codebase map and package overview |
 
 ## Testing Notes
 

@@ -567,13 +567,16 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 		DenyRules:      denyRules,
 		MaxTurns:       cfg.MaxTurns,
 		HasSkills:      hasSkills,
-		SecretNamesFn:  m.SecretNames,
 		SecretEnvFn:    m.SecretEnv,
 		Notifications:  notifications,
 		Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
 		HostManager:    m,
 		ContextProviders: []inference.ContextProvider{
+			inference.MemoryProvider(instDir),
+			inference.TodoProvider(sessDir),
+			inference.SecretProvider(m.SecretNames),
 			inference.AgentListingProvider(m),
+			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
 		},
 	}
 }
