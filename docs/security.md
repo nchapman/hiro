@@ -64,7 +64,7 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 - Operator-mode agents receive `hiro-operators` as a supplementary group via `Credential.Groups`, granting write access to `agents/` and `skills/`.
 - When an agent stops, its UID is released back to the pool.
 
-**Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={instance-dir}`, `LANG`, `LC_ALL`, `HIRO_API_KEY`, `MISE_DATA_DIR`) rather than inheriting the control plane's full environment. Setting `HOME` to the instance directory gives each agent an isolated home for dotfiles, caches, and temp data.
+**Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={instance-dir}`, `LANG`, `LC_ALL`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_GLOBAL_CONFIG_FILE`) rather than inheriting the control plane's full environment. Workers explicitly do not receive `HIRO_API_KEY` — inference runs in the control plane, not in workers. Setting `HOME` to the instance directory gives each agent an isolated home for dotfiles, caches, and temp data.
 
 ### 4. File System Permissions
 
@@ -78,7 +78,7 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 | `instances/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, sessions with todos, scratch, tmp). Only the owning agent can access. |
 | `db/hiro.db` | default | root | Unified platform database (instances, sessions, messages, usage). Accessed only by the control plane process. |
 | `/opt/mise/` | `2775` (setgid) | root:hiro-agents | Shared tool installations (mise, node, python, etc.). All agents can read, write, and install new tools. |
-| Agent socket | default | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hiro-agent-{instance-id}.sock`. |
+| Agent socket | default | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hiro-agent-{session-id}.sock`. |
 
 ### 5. Tool Capability System
 
@@ -96,8 +96,10 @@ Effective tools = declared tools ∩ control plane policy ∩ parent's effective
 
 **Structural tools** bypass this system — they are intrinsic to the agent's mode:
 - `SpawnInstance` is available to all agents.
-- Operator tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) are only available to operator-mode agents.
-- Persistent tools (`TodoWrite`, `AddMemory`, `ForgetMemory`, `HistorySearch`, `HistoryRecall`) are available to persistent and operator agents.
+- Management tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) are available to any agent that declares them in `allowed_tools`, scoped to descendants.
+- Persistent tools (`TodoWrite`, `AddMemory`, `ForgetMemory`, `HistorySearch`, `HistoryRecall`) are available to persistent agents.
+
+**Parameterized rules:** The `toolrules` package provides fine-grained call-time enforcement beyond tool names. Rules like `Bash(curl *)` restrict which commands an agent can run. Rules are parsed from `allowed_tools` and `disallowed_tools` in agent definitions and operator config. See `docs/tool-permissions.md` for details.
 
 ### 6. Secrets Management
 
@@ -118,7 +120,7 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 **How it works:**
 
 1. Each instance's inference loop receives its instance ID as a `callerID` via context propagation.
-2. Operator tools (`SendMessage`, `StopInstance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
+2. Management tools (`SendMessage`, `StopInstance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
 3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the platform DB. If the target is not a descendant of the caller, the request is rejected.
 
 **Scoping rules:**
@@ -126,11 +128,11 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 | Operation | Authorization |
 |---|---|
 | `SpawnInstance` | No check needed — caller becomes the parent. |
-| `ResumeInstance` | Target must be a descendant of caller. Operator mode only. |
-| `SendMessage` | Target must be a descendant of caller. Operator mode only. |
-| `StopInstance` | Target must be a descendant of caller. Operator mode only. |
-| `DeleteInstance` | Target must be a descendant of caller. Operator mode only. |
-| `ListInstances` | Returns only direct children of caller. Operator mode only. |
+| `ResumeInstance` | Target must be a descendant of caller. Requires declaration in `allowed_tools`. |
+| `SendMessage` | Target must be a descendant of caller. Requires declaration in `allowed_tools`. |
+| `StopInstance` | Target must be a descendant of caller. Requires declaration in `allowed_tools`. |
+| `DeleteInstance` | Target must be a descendant of caller. Requires declaration in `allowed_tools`. |
+| `ListInstances` | Returns only direct children of caller. Requires declaration in `allowed_tools`. |
 
 An agent cannot send messages to, stop, or inspect siblings, ancestors, or unrelated agents.
 
@@ -140,7 +142,7 @@ All inter-process communication uses gRPC over Unix domain sockets. No TCP ports
 
 **Single socket direction:**
 
-- **Agent sockets** (`/tmp/hiro-agent-{instance-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
+- **Agent sockets** (`/tmp/hiro-agent-{session-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
 
 There is no worker→control plane socket. All inference, instance management, and operator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
 
@@ -174,7 +176,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### Limitations
 
-- **No network isolation between agents.** Agents share the container's network namespace. An agent with `Bash` could connect to another agent's gRPC socket by enumerating `/tmp/hiro-agent-*.sock` — the path format is known but the UUID suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations.
+- **No network isolation between agents.** Agents share the container's network namespace. An agent with `Bash` could connect to another agent's gRPC socket by enumerating `/tmp/hiro-agent-*.sock` — the path format is known but the UUID (session ID) suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations.
 - **Shared workspace is collaborative.** Any agent can read or modify files in `/hiro/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
 - **No syscall filtering.** Agents are not confined by seccomp, AppArmor, or similar mechanisms beyond what Docker applies by default.

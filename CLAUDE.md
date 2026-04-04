@@ -89,12 +89,12 @@ Hiro uses **process isolation**: the control plane owns all inference (LLM calls
 Control Plane Process (hiro)
 ├── HTTP/WS API (web UI, REST, chat)
 ├── Inference loops (fantasy agent per instance)
-├── Unified database (db/hiro.db — instances, sessions, messages, usage)
-├── System prompt assembly, context management, compaction
+├── Unified database (db/hiro.db — instances, sessions, messages, usage, logs)
+├── System prompt assembly, context providers, compaction
 ├── Local tools: memory, todos, history, spawn, management, skills
-├── Secrets + tool policies (config/config.yaml)
+├── Secrets + tool policies + tool rules (config/config.yaml)
 ├── Process registry + instance lifecycle
-└── Spawns: hiro agent (one worker per instance)
+└── Spawns: hiro agent (one worker per session)
 
 Agent Worker Process (hiro agent)
 ├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
@@ -102,7 +102,7 @@ Agent Worker Process (hiro agent)
 └── Runs under isolated UID for security
 ```
 
-**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
+**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-agent-{session-id}.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
 
 **Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. The `config/` directory is `0700` root-owned, unreadable by agents.
 
@@ -129,10 +129,10 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
 - **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Persistent instances survive restarts via `RestoreInstances()`.
-- **Sessions** are task-scoped work within an instance. Session-level state includes `todos.yaml`, `scratch/`, and `tmp/`. A new session is created on `/clear`.
+- **Sessions** are task-scoped work within an instance. An instance has a single active session at a time. Session-level state includes `todos.yaml` (created on first TodoWrite call), `scratch/`, and `tmp/`. A new session is created on `/clear`, replacing the previous one.
 - **Agent mode** (ephemeral, persistent) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
-- **Persistent instances** get extra tools: `TodoWrite`, `HistorySearch/HistoryRecall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory). Management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) are available to any persistent agent that declares them in `allowed_tools`.
+- **Persistent instances** get extra tools: `AddMemory`/`ForgetMemory`, `TodoWrite`, `HistorySearch`/`HistoryRecall`. Persona and memory are managed via the standard file tools (`persona.md` and `memory.md` in the instance directory). Management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) are available to any agent that declares them in `allowed_tools`, scoped to descendants.
 
 ### Agent Definition Structure
 
@@ -181,24 +181,28 @@ The system prompt contains only **static identity** — content that rarely chan
 
 **Dynamic state** (memories, todos, secrets, skills, agent listings) is injected as `<system-reminder>` user messages via the **context provider system**. These messages are persisted in conversation history with delta tracking metadata — if nothing changed since the last turn, no new message is emitted and the prompt cache is preserved. Multiple providers that emit in the same turn are merged into a single message.
 
-See `docs/system-reminders.md` for the full design, change detection strategies, and how to add new providers.
+See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, change detection strategies, and how to add new providers.
 
 ### Key Packages
 
-- **`cmd/hiro`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC).
-- **`internal/agent`** — Instance management. `Manager` supervises instance lifecycles, spawns workers via `WorkerFactory`, creates inference loops. `CreateLanguageModel` handles LLM provider setup.
-- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per instance. Includes system prompt assembly, context assembly from the platform DB, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, management, skills). `ScopedManager` enforces descendant scoping via instance IDs. Context-based cycle detection prevents re-entrant deadlocks.
-- **`internal/platform/db`** — Unified SQLite database (`db/hiro.db`). Stores instances, sessions, messages, summaries, context items, usage events, and request logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
-- **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup). Error sentinels include `ErrInstanceNotFound`.
+- **`cmd/hiro`** — Entry point. `run()` starts the control plane (HTTP server, manager, database). `runAgent()` is the worker entry point (reads SpawnConfig from stdin, registers tools, serves ExecuteTool gRPC). `bootstrap.go` extracts cluster setup helpers.
+- **`internal/agent`** — Instance management. `Manager` supervises instance lifecycles, spawns workers via `WorkerFactory`, creates inference loops. Split into focused files: lifecycle, session, query, worker, resolve, restore, helpers.
+- **`internal/inference`** — Inference orchestration (runs in the control plane). `Loop` drives `fantasy.Agent.Stream()` per instance. Includes system prompt assembly, context providers with delta tracking, LLM-driven compaction, tool proxy (dispatches remote tools to workers via gRPC), and all local tools (memory, todos, history search, spawn, management, skills). `ScopedManager` enforces descendant scoping via instance IDs.
+- **`internal/platform/db`** — Unified SQLite database (`db/hiro.db`). Stores instances, sessions, messages, summaries, context items, usage events, request logs, and structured logs. Single writer (control plane), WAL mode, FTS5 for full-text search.
+- **`internal/toolrules`** — Tool permission rules engine. Parses parameterized rules like `Bash(curl *)`, uses a real shell parser (`mvdan.cc/sh/v3`) for Bash command analysis, and enforces layered allow/deny at call time. See [`docs/tool-permissions.md`](docs/tool-permissions.md).
+- **`internal/cluster`** — Leader/worker clustering over gRPC with mTLS. Includes file sync, relay for NAT traversal, tracker-based discovery, node approval, and remote terminal sessions.
+- **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
-- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes.
-- **`internal/controlplane`** — Operator-level config (secrets, tool policies). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/tools` commands.
-- **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, memory/todos persistence.
-- **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
+- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes. Resource limits centralized in `limits.go`.
+- **`internal/controlplane`** — Operator-level config (secrets, tool policies, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets`, `/tools`, and `/cluster` commands.
+- **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, persona/memory/todos persistence.
+- **`internal/api`** — HTTP server with REST endpoints, WebSocket chat (`/ws/chat`), WebSocket terminal (`/ws/terminal`), file browser, sharing, usage tracking, log querying/streaming, and cluster node management.
 - **`internal/transport`** — Wire protocol (WebSocket JSON envelopes) for leader↔worker communication.
-- **`internal/api`** — HTTP server with REST endpoints (`/api/health`, `/api/agents`, `/api/instances`, `/api/instances/{id}/messages`) and WebSocket chat (`/ws/chat`).
-- **`web/`** — Embedded React UI (Vite + TypeScript + React 19). Built assets in `web/ui/dist/` are embedded via `//go:embed`. Strict TypeScript (`noUnusedLocals`, `noUnusedParameters`).
+- **`internal/hub`** — Swarm management: tracks connected workers and dispatches tasks by skill.
+- **`internal/platform/loghandler`** — Structured slog handler for platform-wide log capture and querying.
+- **`internal/provider`** — LLM provider construction (`CreateLanguageModel`, `TestConnection`, `AvailableProviders`). Isolates SDK imports.
+- **`web/`** — Embedded React UI (Vite + TypeScript + React 19). Built assets in `web/ui/dist/` are embedded via `//go:embed`. Strict TypeScript (`noUnusedLocals`, `noUnusedParameters`). Pages organized by feature: chat, files, settings, terminal, logs, shared.
 
 ## Agent Tools
 
@@ -248,7 +252,7 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 | `AddMemory` | Append a memory entry | `content` (single line) | Appends to `memory.md` with date stamp; evicts oldest when over 100 entries |
 | `ForgetMemory` | Remove memory entries | `match` (substring) | Case-insensitive match against content (not date stamps); removes all matches |
 | `TodoWrite` | Manage task list | `todos` (array of `{content, status, active_form}`) | Full replacement; statuses: pending, in_progress, completed |
-| `HistorySearch` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; only if history engine initialized |
+| `HistorySearch` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; searches current session only |
 | `HistoryRecall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
 
 ### Skill Tool (agents with skills)
@@ -266,7 +270,7 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 
 The operator (`agents/operator/agent.md`) is the top-level agent, started as a persistent instance at bootstrap.
 
-**Bootstrap flow** (`cmd/hiro/main.go`):
+**Bootstrap flow** (`cmd/hiro/main.go` + `bootstrap.go`):
 1. Load `config/config.yaml` — if no provider is configured, the server starts in setup mode (dashboard shows onboarding)
 2. Once configured, create `Manager` with provider from config
 3. `RestoreInstances()` — resume any persistent agents from prior runs
@@ -287,15 +291,16 @@ secrets:
 
 agents:
   researcher:
-    tools: [Read, Glob, Grep]  # restrict below declared tools
+    allowed_tools: [Read, Glob, Grep]
+    disallowed_tools: [Bash(rm *)]
 ```
 
 **Key concepts:**
 
 - **Secrets** — Named key-value pairs. Injected as env vars into Bash commands. Agents see names in system prompt but never values.
 - **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`allowed_tools: [Bash, Read, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
+- **Tool rules** — Parameterized rules like `Bash(curl *)` or `Read(/src/*)` provide fine-grained call-time enforcement. Deny rules like `Bash(rm *)` block specific patterns. See [`docs/tool-permissions.md`](docs/tool-permissions.md).
 - **Inherited caps** — Child effective tools = intersection of (declared tools ∩ control plane ∩ parent's effective tools).
-- **Bash is binary** — Agent gets Bash or doesn't. No sandboxing pretense.
 
 **Slash commands** (intercepted in WebSocket handler, never reach agent):
 
@@ -305,6 +310,7 @@ agents:
 | `/secrets rm NAME` | Remove a secret |
 | `/secrets list` | List secret names (not values) |
 | `/tools set <agent> <tools>` | Set tool override |
+| `/tools deny <agent> <tools>` | Set deny rules |
 | `/tools rm <agent>` | Clear override |
 | `/tools list [agent]` | Show overrides |
 
@@ -319,7 +325,7 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 ## Conversation Modes
 
-- **Operator and persistent agents** use the unified platform database (`db/hiro.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
+- **Persistent agents** use the unified platform database (`db/hiro.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
 - **WebSocket chat** sends messages to the root instance's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
 
@@ -331,13 +337,25 @@ Management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstance
 
 The `docs/` directory contains design documents for key subsystems. **Keep these in sync when modifying the systems they describe.**
 
-| Document | Covers |
-|----------|--------|
-| `docs/agent-model.md` | Three-tier model (definition → instance → session), lifecycle, state organization |
-| `docs/system-reminders.md` | Context provider system: delta tracking, change detection, adding new providers |
-| `docs/security.md` | Process isolation, UID pool, filesystem permissions |
-| `docs/tool-permissions.md` | Tool allowlists, deny rules, inherited capabilities |
-| `docs/map.md` | Codebase map and package overview |
+### [`docs/agent-model.md`](docs/agent-model.md) — Agent Model
+
+The conceptual model for how agents work. Describes the three-tier hierarchy (Definition → Instance → Session), what state lives where (filesystem vs database), instance modes (ephemeral and persistent), session lifecycle, and parent-child relationships. Read this first to understand Hiro's core abstractions.
+
+### [`docs/security.md`](docs/security.md) — Security Model
+
+Defense-in-depth security architecture. Covers Docker containment, process isolation via separate worker processes, Unix user isolation (UID pool with 64 pre-created users), filesystem permissions (who can read/write what), the tool capability system, secrets management (names in prompts, values only in env vars), agent authorization scoping (descendants only), and IPC security (Unix sockets, no TCP). Includes a threat model of what agents can and cannot do.
+
+### [`docs/tool-permissions.md`](docs/tool-permissions.md) — Tool Permissions
+
+The layered tool permission system. Covers the rule format (`Tool(pattern)` with wildcards), how permissions combine across four sources (agent definition, operator config, parent agent, skill activation), call-time enforcement with the `toolrules` package, Bash command analysis using a real shell parser (catches `$(rm -rf /)` inside subshells), path normalization for file tools, and the complete frontmatter reference for agent and skill YAML fields.
+
+### [`docs/system-reminders.md`](docs/system-reminders.md) — Context Provider System
+
+How dynamic context (memories, todos, secrets, skills, agent listings) is injected into conversations without busting the prompt cache. Describes the two change detection strategies (named-set delta for sets of items, content hash for text blobs), the `DeltaReplay` metadata format, self-healing after compaction, and how to add new providers. All 5 providers are documented with their gates and data sources.
+
+### [`docs/map.md`](docs/map.md) — Codebase Map
+
+Comprehensive map of every package, file, and capability with LOC counts. Includes the capability review checklist (44 reviewable units), hotspot analysis (files over 500 LOC), and a full quality findings log (structural fixes, correctness fixes, security fixes, concurrency fixes, testing gaps — most resolved). Use this for planning work and understanding where things live.
 
 ## Testing Notes
 
@@ -347,5 +365,5 @@ The `docs/` directory contains design documents for key subsystems. **Keep these
 - gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing of `ExecuteTool` and `Shutdown` RPCs.
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
-- `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
+- `make test` runs tests in Docker. `make test-local` runs locally with mock workers.
 - In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Agents with `groups: [hiro-operators]` in frontmatter get the supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).

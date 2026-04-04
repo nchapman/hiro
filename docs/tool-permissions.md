@@ -57,9 +57,9 @@ Each tool's rules match against a specific parameter from the tool call:
 
 ### Which Tools Can Be Controlled?
 
-Rules apply to the 9 **remote tools** that execute in worker processes: Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop.
+Rules apply to the 10 tools registered in the rule checker: Bash, Read, Write, Edit, Glob, Grep, WebFetch, SpawnInstance, TaskOutput, TaskStop.
 
-**Structural tools** (SpawnInstance, operator tools, memory tools, TodoWrite, Skill, etc.) bypass call-time rule enforcement. They are always available based on the agent's mode. You cannot restrict SpawnInstance or operator tools via `disallowed_tools`.
+**Structural tools** (management tools, memory tools, TodoWrite, Skill, etc.) bypass call-time rule enforcement. They are always available based on the agent's mode and `allowed_tools` declaration.
 
 ## Permission Sources
 
@@ -252,6 +252,7 @@ max_turns: 50
 | `disallowed_tools` | string[] | `nil` | Tools to deny; checked at call time |
 | `model` | string | CP default | Model override (e.g., `sonnet`, `opus`, full model ID) |
 | `max_turns` | int | 0 (unlimited) | Max agentic turns before forcing final response |
+| `groups` | string[] | `nil` | Supplementary Unix groups for the worker process (e.g., `[hiro-operators]`) |
 
 ### Skill (`skills/*.md`)
 
@@ -262,10 +263,14 @@ description: What and when
 allowed_tools: [Bash(kubectl *)]
 user_invocable: true
 model: haiku
+license: MIT
+compatibility: Requires kubectl
 version: "1.0"
 when_to_use: Detailed usage scenarios
 argument_hint: "[namespace]"
 arguments: [namespace, resource]
+metadata:
+  author: name
 ---
 ```
 
@@ -276,10 +281,13 @@ arguments: [namespace, resource]
 | `allowed_tools` | string[] | `nil` | Tools granted when skill is activated (session-scoped, additive) |
 | `user_invocable` | bool | unset | Whether users can invoke via `/skill-name` |
 | `model` | string | inherit | Model override when skill runs as sub-agent |
+| `license` | string | optional | License identifier (e.g., MIT, Apache-2.0) |
+| `compatibility` | string | optional | System/dependency requirements (max 500 chars) |
 | `version` | string | optional | Skill version identifier |
 | `when_to_use` | string | optional | Detailed usage scenarios |
 | `argument_hint` | string | optional | Hint text for command arguments |
 | `arguments` | string[] | optional | Named parameters for argument substitution |
+| `metadata` | map | optional | Arbitrary key-value pairs (author, version, etc.) |
 
 ### Operator Config (`config.yaml`)
 

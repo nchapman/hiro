@@ -42,7 +42,7 @@ instances/<instance-id>/
   memory.md                     # What the agent has learned over time
   sessions/
     <session-id>/
-      todos.yaml                # Task list for this session
+      todos.yaml                # Task list for this session (created on first TodoWrite call)
       scratch/                  # Working files for this session
       tmp/                      # Ephemeral files
 ```
@@ -53,13 +53,14 @@ Session directories are kept on disk as long as the session exists in the databa
 
 ### Instance Modes
 
-An instance runs in one of three modes, specified at creation time:
+An instance runs in one of two modes, specified at creation time:
 
 | Mode | Behavior |
 |------|----------|
 | **Ephemeral** | Single task, then auto-deleted. Instance and session collapse into one thing. No durable state. |
 | **Persistent** | Long-lived. Survives restarts. Has memory, identity, and session history. |
-| **Operator** | Superset of persistent. Can spawn and manage child instances. Has write access to agent definitions and skills. |
+
+Any agent can spawn and manage child instances — management tools (`SendMessage`, `StopInstance`, etc.) are available to agents that declare them in `allowed_tools` and are scoped to descendants via `ScopedManager.checkDescendant()`. Write access to `agents/` and `skills/` is controlled by the `hiro-operators` Unix group, declared in agent frontmatter (`groups: [hiro-operators]`).
 
 ### Instance Lifecycle
 
@@ -78,11 +79,10 @@ A session is a **task-scoped** stretch of work within an instance. It groups mes
 
 A new session is created when:
 - An instance starts for the first time
-- A client connects to an instance (web UI, Telegram, API)
 - A user explicitly clears the current session ("/clear")
 - A parent agent spawns a task via `SendMessage`
 
-An instance can have **multiple concurrent sessions**. Each client connection gets its own session. This prevents cross-channel interference — clearing a web session does not affect a Telegram session on the same instance.
+An instance has a single active session at a time. Creating a new session (e.g., via `/clear`) terminates the previous session's worker process and replaces it.
 
 ### Session State
 
@@ -128,12 +128,13 @@ The agent always knows who it is (persona) and what it's currently working on (s
 
 ## History Search
 
-Agents can search their conversation history with a scope parameter:
+Agents can search their conversation history within the current session. The `scope` parameter controls what is searched:
 
-- **Session scope** — search only the current session's messages and summaries.
-- **Instance scope** — search across all sessions for this instance.
+- **messages** — search only raw messages.
+- **summaries** — search only compaction summaries.
+- **all** — search both messages and summaries.
 
-This lets an agent answer "what were we just talking about?" (session) and "what did we discuss last time?" (instance).
+Search is scoped to the active session. Cross-session history is not searchable.
 
 ## Ephemeral Agents
 
@@ -141,14 +142,13 @@ For ephemeral agents, the instance and session are the same thing. There is no d
 
 ## Parent-Child Relationships
 
-Instances form a tree. The operator is the root. When a operator spawns a child, the parent-child relationship is tracked at the **instance level**. Operator tools (SendMessage, StopInstance, etc.) are scoped to descendants — an instance cannot manage siblings or ancestors.
+Instances form a tree. The operator is the root. When an agent spawns a child, the parent-child relationship is tracked at the **instance level**. Management tools (SendMessage, StopInstance, etc.) are scoped to descendants via `ScopedManager.checkDescendant()` — an instance cannot manage siblings or ancestors.
 
 ```
-operator (operator mode)
+operator (persistent, root)
 ├── researcher-1 (persistent)
 │   ├── session: "analyze dataset"       (ended)
-│   ├── session: "follow-up questions"   (active, web)
-│   └── session: "quick check"           (active, telegram)
+│   └── session: "follow-up questions"   (active)
 ├── researcher-2 (persistent)
 │   └── session: "literature review"     (active)
 └── quick-task (ephemeral)
