@@ -2,7 +2,7 @@ Replace your task list. Send the complete list each time — omitted items are r
 
 - Statuses: `pending`, `in_progress`, `completed`
 - Use `active_form` for a present-continuous label shown while in progress (e.g., "Running tests")
-- Exactly one task should be `in_progress` at a time
+- Prefer one task `in_progress` at a time for clarity
 
 Best practices:
 - Use for multi-step tasks (3+ steps) to track progress and show the user what you're doing

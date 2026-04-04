@@ -2,7 +2,7 @@ Run an agent to complete a task. The agent executes the prompt, returns the resu
 
 - Blocks until the agent finishes, unless `background` is set
 - Set `background: true` to return immediately — you'll be notified when the agent completes with its result
-- Results are capped at 32KB and not shown to the user — relay what matters
+- Results are capped at 32KB — summarize what matters for the user
 
 When to use background:
 - You have independent work to do while the agent runs
