@@ -274,6 +274,18 @@ describe("mergeHistoryMessages", () => {
     expect(mergeHistoryMessages([])).toEqual([])
   })
 
+  it("filters out meta messages (system reminders)", () => {
+    const history: HistoryMessage[] = [
+      { role: "user", content: "<system-reminder>secrets list</system-reminder>", is_meta: true },
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+    ]
+    const messages = mergeHistoryMessages(history)
+    expect(messages).toHaveLength(2)
+    expect(messages[0].content).toBe("Hello")
+    expect(messages[1].content).toBe("Hi there")
+  })
+
   it("ignores orphaned tool-result with no preceding assistant message", () => {
     const toolRaw = JSON.stringify({
       role: "tool",

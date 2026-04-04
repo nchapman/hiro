@@ -44,6 +44,7 @@ export interface HistoryMessage {
   role: "user" | "assistant" | "tool"
   content: string
   raw_json?: string
+  is_meta?: boolean
   timestamp?: string
 }
 

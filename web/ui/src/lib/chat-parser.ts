@@ -90,6 +90,8 @@ export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
   }
 
   for (const m of history) {
+    if (m.is_meta) continue
+
     if (m.role === "tool" && m.raw_json) {
       if (current) {
         const results = parseToolResults(m.raw_json)
