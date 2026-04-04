@@ -78,22 +78,22 @@ func TestE2E_InstanceDelete(t *testing.T) {
 	}
 }
 
-// TestE2E_RootProtection verifies that the coordinator (root instance) cannot
+// TestE2E_RootProtection verifies that the operator (root instance) cannot
 // be stopped or deleted via REST.
 func TestE2E_RootProtection(t *testing.T) {
-	// Cannot stop coordinator.
-	code, _ := postInstance(t, coordinatorID, "stop")
+	// Cannot stop operator.
+	code, _ := postInstance(t, operatorID, "stop")
 	if code != http.StatusForbidden {
-		t.Errorf("stop coordinator: expected 403, got %d", code)
+		t.Errorf("stop operator: expected 403, got %d", code)
 	}
 
-	// Cannot delete coordinator.
-	code, _ = deleteInstance(t, coordinatorID)
+	// Cannot delete operator.
+	code, _ = deleteInstance(t, operatorID)
 	if code != http.StatusForbidden {
-		t.Errorf("delete coordinator: expected 403, got %d", code)
+		t.Errorf("delete operator: expected 403, got %d", code)
 	}
 
-	// Coordinator should still be running.
+	// Operator should still be running.
 	var coordInst instanceInfo
 	coordFound := false
 	for _, inst := range listInstances(t) {
@@ -104,10 +104,10 @@ func TestE2E_RootProtection(t *testing.T) {
 		}
 	}
 	if !coordFound {
-		t.Fatal("coordinator disappeared")
+		t.Fatal("operator disappeared")
 	}
 	if coordInst.Status != "running" {
-		t.Errorf("coordinator status: expected running, got %q", coordInst.Status)
+		t.Errorf("operator status: expected running, got %q", coordInst.Status)
 	}
 }
 

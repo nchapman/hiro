@@ -288,7 +288,7 @@ func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	// Protect root instance (coordinator).
+	// Protect root instance (operator).
 	info, ok := s.manager.GetInstance(id)
 	if !ok {
 		http.Error(w, "instance not found", http.StatusNotFound)
@@ -366,7 +366,7 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	// Protect root instance (coordinator).
+	// Protect root instance (operator).
 	info, ok := s.manager.GetInstance(id)
 	if !ok {
 		http.Error(w, "instance not found", http.StatusNotFound)

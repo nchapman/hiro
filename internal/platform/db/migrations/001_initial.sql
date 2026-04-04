@@ -2,7 +2,7 @@
 CREATE TABLE sessions (
     id         TEXT PRIMARY KEY,
     agent_name TEXT    NOT NULL,
-    mode       TEXT    NOT NULL CHECK (mode IN ('ephemeral', 'persistent', 'coordinator')),
+    mode       TEXT    NOT NULL CHECK (mode IN ('ephemeral', 'persistent', 'operator')),
     parent_id  TEXT    REFERENCES sessions(id) ON DELETE CASCADE,
     status     TEXT    NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'stopped')),
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),

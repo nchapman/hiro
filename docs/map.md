@@ -20,11 +20,11 @@
 | File | LOC | Role |
 |------|-----|------|
 | `main.go` | ~340 | CLI parsing, `run()` starts control plane (HTTP, manager, DB) |
-| `bootstrap.go` | ~130 | Cluster setup helpers: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator` |
+| `bootstrap.go` | ~130 | Cluster setup helpers: `setupNodeIdentity`, `setupClusterServer`, `bootstrapOperator` |
 | `agent.go` | ~150 | Agent worker subprocess — reads SpawnConfig from stdin, serves gRPC |
 | `worker_node.go` | 329 | Worker node for cluster mode — connects to leader, bridges remote tool calls |
 
-**Bootstrap flow**: parse flags → load `.env` → open DB → `setupNodeIdentity` → `setupClusterServer` → create Manager → `bootstrapCoordinator` → start HTTP server.
+**Bootstrap flow**: parse flags → load `.env` → open DB → `setupNodeIdentity` → `setupClusterServer` → create Manager → `bootstrapOperator` → start HTTP server.
 
 ---
 
@@ -77,7 +77,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 | File | LOC | Role |
 |------|-----|------|
 | `loop.go` | 564 | Main inference loop — calls `fantasy.Agent.Stream()`, handles tool dispatch |
-| `tools_spawn.go` | 251 | Spawn tool + coordinator tools (ScopedManager, ListNodes, SendMessage, etc.) |
+| `tools_spawn.go` | 251 | Spawn tool + operator tools (ScopedManager, ListNodes, SendMessage, etc.) |
 | `tools_history.go` | 111 | HistorySearch, HistoryRecall |
 | `tools_skills.go` | 125 | Skill + path validation |
 | `tools_todos.go` | 76 | TodoWrite tool |
@@ -94,15 +94,15 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 
 | Tool | Scope | Purpose |
 |------|-------|---------|
-| `SpawnInstance` | All agents | Spawn child instance (ephemeral/persistent/coordinator) |
+| `SpawnInstance` | All agents | Spawn child instance (ephemeral/persistent/operator) |
 
 | `TodoWrite` | Persistent+ | Manage task list (YAML) |
 | `HistorySearch` / `HistoryRecall` | Persistent+ | FTS search conversation history |
-| `ResumeInstance` | Coordinator | Restart stopped child |
-| `SendMessage` | Coordinator | Message child, get response |
-| `StopInstance` | Coordinator | Stop child + subtree |
-| `DeleteInstance` | Coordinator | Permanently remove child + subtree |
-| `ListInstances` | Coordinator | List direct children |
+| `ResumeInstance` | Operator | Restart stopped child |
+| `SendMessage` | Operator | Message child, get response |
+| `StopInstance` | Operator | Stop child + subtree |
+| `DeleteInstance` | Operator | Permanently remove child + subtree |
+| `ListInstances` | Operator | List direct children |
 | `Skill` | Agents with skills | Load skill instructions on demand |
 
 **Tests**: `assembly_test.go`, `compaction_test.go`, `context_test.go`, `prompt_test.go`, `tools_test.go`, `helpers_test.go`, `redact_test.go`, plus two online eval tests.
@@ -209,7 +209,7 @@ Wire protocol for leader ↔ worker WebSocket communication.
 | File | LOC | Role |
 |------|-----|------|
 | `server.go` | ~365 | Router setup, middleware, static file serving; `NewServer(logger, webFS, cp, pdb, rootDir)` |
-| `chat.go` | ~290 | WebSocket chat handler — message relay to/from coordinator; `SetManager`, `SetStartManager`, `SetWatcher` |
+| `chat.go` | ~290 | WebSocket chat handler — message relay to/from operator; `SetManager`, `SetStartManager`, `SetWatcher` |
 | `files.go` | 490 | File browser API (list, read, write, rename, delete) |
 | `share.go` | 236 | Conversation sharing (export/import) |
 | `settings.go` | ~120 | Settings API (theme, model preferences) |
@@ -238,7 +238,7 @@ Wire protocol for leader ↔ worker WebSocket communication.
 | `GET/PUT/DELETE /api/files/*` | Yes | File browser CRUD |
 | `POST /api/files/share` | Yes | Create share token |
 | `GET /api/shared/{token}[/raw]` | No | View shared file (token auth) |
-| `WS /ws/chat` | Cond. | WebSocket chat to coordinator |
+| `WS /ws/chat` | Cond. | WebSocket chat to operator |
 | `WS /ws/terminal` | Yes | WebSocket PTY terminal |
 
 **Tests**: `server_test.go` (health, 404), `auth_test.go` (12 tests: login, logout, rate limiter, bearer token, password change, middleware), `files_test.go` (~40 subtests: tree, read, write, mkdir, delete, rename, path traversal), `instances_test.go` (8 tests: list, filter, root protection, messages), `settings_test.go` (5 tests: CRUD, singleton prevention), `usage_test.go` (5 tests: total, model, daily, no-DB, auth).
@@ -470,7 +470,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**Type assertions on concrete worker types**~~ | `agent/manager_lifecycle.go` | **DONE** — `SecretEnvSetter` interface added to `ipc`. Single interface check replaces assertions on `*grpcipc.WorkerClient` and `*cluster.RemoteWorker`. |
 | ~~**NodeID/HomeNodeID duplicated**~~ | `ipc`, `cluster` | **DONE** — Canonical definitions in `ipc/host_manager.go`. Cluster re-exports from ipc. |
 | ~~**API Server setter injection**~~ | `api/server.go` | **DONE** — `NewServer` takes required deps (`cp`, `pdb`, `rootDir`) in constructor. Only truly late-bound setters remain (`SetManager`, `SetStartManager`, `SetWatcher`). `hasManager()` helper. |
-| ~~**main.go cluster setup inline**~~ | `cmd/hiro/main.go` | **DONE** — Extracted to `bootstrap.go`: `setupNodeIdentity`, `setupClusterServer`, `bootstrapCoordinator`. main.go reduced from 406 to ~340 LOC. |
+| ~~**main.go cluster setup inline**~~ | `cmd/hiro/main.go` | **DONE** — Extracted to `bootstrap.go`: `setupNodeIdentity`, `setupClusterServer`, `bootstrapOperator`. main.go reduced from 406 to ~340 LOC. |
 | ~~**filesync.go does too much**~~ (723 LOC) | `cluster/filesync*.go` | **DONE** — Split into 5 files: core (82), filter (71), initial sync (148), incremental (261), util (207). |
 | ~~**Cleanup logic duplicated**~~ | `agent/manager_worker.go` | **DONE** — 4 paths consolidated into `detachWorker` (atomic field nil + status under `inst.mu`) + `teardownInstance` (parameterized post-detach I/O). |
 | ~~**Resource limits scattered**~~ | `agent/tools/limits.go` | **DONE** — 18 constants from 7 files centralized into `limits.go`, organized by category (timeouts, output sizes, result limits). |

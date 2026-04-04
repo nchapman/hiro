@@ -143,7 +143,7 @@ func TestManager_CreateSession_MissingConfig(t *testing.T) {
 func TestManager_CreateSession_InvalidMode(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
-	for _, mode := range []string{"", "coordinator", "supercoordinator", "invalid-mode"} {
+	for _, mode := range []string{"", "operator", "superoperator", "invalid-mode"} {
 		_, err := mgr.CreateInstance(t.Context(), "test-agent", "", mode, "", "", "", "")
 		if err == nil {
 			t.Errorf("mode %q: expected error, got nil", mode)
@@ -542,8 +542,8 @@ Child.`)
 
 func TestManager_AgentDefDir(t *testing.T) {
 	mgr, dir := setupTestManager(t)
-	got := mgr.agentDefDir("coordinator")
-	want := filepath.Join(dir, "agents", "coordinator", "")
+	got := mgr.agentDefDir("operator")
+	want := filepath.Join(dir, "agents", "operator", "")
 	if got != want {
 		t.Errorf("agentDefDir = %q, want %q", got, want)
 	}
@@ -563,7 +563,7 @@ func TestValidateAgentName(t *testing.T) {
 		name    string
 		wantErr bool
 	}{
-		{"coordinator", false},
+		{"operator", false},
 		{"my-agent", false},
 		{"agent_v2", false},
 		{"Agent123", false},
@@ -870,21 +870,21 @@ func TestManager_Restore_StoppedGroupInheritance(t *testing.T) {
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
-Coordinator.`)
+Operator.`)
 	writeAgentMD(t, dir, "worker", `---
 name: worker
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
-Worker that also wants hiro-coordinators.`)
+Worker that also wants hiro-operators.`)
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
 	pool1 := uidpool.New(10000, 10000, 64)
-	pool1.SetGroupGID("hiro-coordinators", 10001)
+	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
 
@@ -896,14 +896,14 @@ Worker that also wants hiro-coordinators.`)
 
 	// Restore with fresh pool — both stopped, child should inherit parent's groups.
 	pool2 := uidpool.New(10000, 10000, 64)
-	pool2.SetGroupGID("hiro-coordinators", 10001)
+	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
-	// Now start the child — it should get hiro-coordinators (parent has it).
+	// Now start the child — it should get hiro-operators (parent has it).
 	if err := mgr2.StartInstance(ctx, childID); err != nil {
 		t.Fatalf("start child: %v", err)
 	}
@@ -917,7 +917,7 @@ Worker that also wants hiro-coordinators.`)
 		groupSet[g] = true
 	}
 	if !groupSet[10001] {
-		t.Error("restored child should have hiro-coordinators (parent has it)")
+		t.Error("restored child should have hiro-operators (parent has it)")
 	}
 }
 
@@ -932,7 +932,7 @@ No groups.`)
 	writeAgentMD(t, dir, "wants-groups", `---
 name: wants-groups
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
 Wants escalation.`)
 	pdb := openTestPDB(t, dir)
@@ -940,7 +940,7 @@ Wants escalation.`)
 	ctx := t.Context()
 
 	pool1 := uidpool.New(10000, 10000, 64)
-	pool1.SetGroupGID("hiro-coordinators", 10001)
+	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
 
@@ -952,14 +952,14 @@ Wants escalation.`)
 
 	// Restore with fresh pool.
 	pool2 := uidpool.New(10000, 10000, 64)
-	pool2.SetGroupGID("hiro-coordinators", 10001)
+	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
-	// Start the child — should NOT get hiro-coordinators (parent doesn't have it).
+	// Start the child — should NOT get hiro-operators (parent doesn't have it).
 	if err := mgr2.StartInstance(ctx, childID); err != nil {
 		t.Fatalf("start child: %v", err)
 	}
@@ -970,7 +970,7 @@ Wants escalation.`)
 	childCfg := (*configs2)[0]
 	for _, g := range childCfg.Groups {
 		if g == 10001 {
-			t.Error("restored child should NOT have hiro-coordinators (parent doesn't have it)")
+			t.Error("restored child should NOT have hiro-operators (parent doesn't have it)")
 		}
 	}
 }
@@ -981,15 +981,15 @@ func TestManager_Restore_RunningInstanceGroups(t *testing.T) {
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
-Coordinator.`)
+Operator.`)
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
 	pool1 := uidpool.New(10000, 10000, 64)
-	pool1.SetGroupGID("hiro-coordinators", 10001)
+	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
 	mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
@@ -997,7 +997,7 @@ Coordinator.`)
 
 	// Restore — running instances go through startInstance.
 	pool2 := uidpool.New(10000, 10000, 64)
-	pool2.SetGroupGID("hiro-coordinators", 10001)
+	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
@@ -1013,7 +1013,7 @@ Coordinator.`)
 		groupSet[g] = true
 	}
 	if !groupSet[10001] {
-		t.Error("restored running instance should have hiro-coordinators")
+		t.Error("restored running instance should have hiro-operators")
 	}
 }
 
@@ -1768,7 +1768,7 @@ func TestBuildAllowedToolsMap_PersistentMode(t *testing.T) {
 	effective := map[string]bool{"Bash": true}
 	allowed := buildAllowedToolsMap(effective, config.ModePersistent, false)
 
-	// Persistent agents get SpawnInstance + persistent tools, but NOT coordinator tools.
+	// Persistent agents get SpawnInstance + persistent tools, but NOT operator tools.
 	if !allowed["SpawnInstance"] {
 		t.Error("persistent agents should get SpawnInstance")
 	}
@@ -1810,7 +1810,7 @@ func TestManager_PersistentMode_RestoredOnRestart(t *testing.T) {
 name: coord
 model: fake-model
 ---
-Coordinator.`)
+Operator.`)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
@@ -1844,7 +1844,7 @@ func TestManager_PersistentMode_SessionNotCleaned(t *testing.T) {
 name: coord
 model: fake-model
 ---
-Coordinator.`)
+Operator.`)
 
 	id, _ := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
 	sessDir := filepath.Join(dir, "instances", id)
@@ -1863,7 +1863,7 @@ func TestManager_ManagementTools_InSpawnConfig(t *testing.T) {
 name: coord
 allowed_tools: [Bash, DeleteInstance, SendMessage, ListInstances]
 ---
-Coordinator.`)
+Operator.`)
 
 	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1885,15 +1885,15 @@ Coordinator.`)
 
 func TestManager_Groups_InSpawnConfig(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
-Coordinator.`)
+Operator.`)
 
 	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1901,7 +1901,7 @@ Coordinator.`)
 	}
 
 	cfg := (*configs)[0]
-	// Should have both primary group and coordinator group (order-independent).
+	// Should have both primary group and operator group (order-independent).
 	groupSet := make(map[uint32]bool)
 	for _, g := range cfg.Groups {
 		groupSet[g] = true
@@ -1910,7 +1910,7 @@ Coordinator.`)
 		t.Error("primary GID 10000 should be in groups")
 	}
 	if !groupSet[10001] {
-		t.Error("hiro-coordinators GID 10001 should be in groups")
+		t.Error("hiro-operators GID 10001 should be in groups")
 	}
 	if len(cfg.Groups) != 2 {
 		t.Errorf("expected 2 groups, got %v", cfg.Groups)
@@ -1919,15 +1919,15 @@ Coordinator.`)
 
 func TestManager_Groups_UnknownGroupSkipped(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	// "hiro-coordinators" not registered in pool
+	// "hiro-operators" not registered in pool
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 model: fake-model
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
-Coordinator.`)
+Operator.`)
 
 	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1946,7 +1946,7 @@ Coordinator.`)
 
 func TestManager_NoGroups_NoExtraGIDs(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 	writeAgentMD(t, dir, "worker", `---
 name: worker
@@ -2001,15 +2001,15 @@ Worker.`)
 
 func TestManager_Groups_InheritedFromParent(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	pool.SetGroupGID("custom-group", 20000)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 
-	// Parent agent has hiro-coordinators but NOT custom-group.
+	// Parent agent has hiro-operators but NOT custom-group.
 	writeAgentMD(t, dir, "parent-agent", `---
 name: parent-agent
 allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
 Parent.`)
 
@@ -2017,7 +2017,7 @@ Parent.`)
 	writeAgentMD(t, dir, "child-agent", `---
 name: child-agent
 allowed_tools: [Bash]
-groups: [hiro-coordinators, custom-group]
+groups: [hiro-operators, custom-group]
 ---
 Child.`)
 
@@ -2027,13 +2027,13 @@ Child.`)
 	}
 	parentCfg := (*configs)[0]
 
-	// Parent should have hiro-coordinators.
+	// Parent should have hiro-operators.
 	parentGroupSet := make(map[uint32]bool)
 	for _, g := range parentCfg.Groups {
 		parentGroupSet[g] = true
 	}
 	if !parentGroupSet[10001] {
-		t.Error("parent should have hiro-coordinators (10001)")
+		t.Error("parent should have hiro-operators (10001)")
 	}
 
 	// Spawn child with parent.
@@ -2048,9 +2048,9 @@ Child.`)
 		childGroupSet[g] = true
 	}
 
-	// Child should inherit hiro-coordinators (parent has it).
+	// Child should inherit hiro-operators (parent has it).
 	if !childGroupSet[10001] {
-		t.Error("child should have hiro-coordinators (inherited from parent)")
+		t.Error("child should have hiro-operators (inherited from parent)")
 	}
 
 	// Child should NOT get custom-group (parent doesn't have it).
@@ -2061,7 +2061,7 @@ Child.`)
 
 func TestManager_Groups_UnprivilegedParentCannotEscalate(t *testing.T) {
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 
 	// Parent has no groups.
@@ -2071,11 +2071,11 @@ allowed_tools: [Bash, CreatePersistentInstance]
 ---
 Unprivileged.`)
 
-	// Child declares hiro-coordinators.
+	// Child declares hiro-operators.
 	writeAgentMD(t, dir, "wants-coord", `---
 name: wants-coord
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
 Wants escalation.`)
 
@@ -2090,7 +2090,7 @@ Wants escalation.`)
 	}
 	childCfg := (*configs)[1]
 
-	// Child should only have the primary group — no hiro-coordinators.
+	// Child should only have the primary group — no hiro-operators.
 	if len(childCfg.Groups) != 1 {
 		t.Fatalf("expected 1 group (primary only), got %v", childCfg.Groups)
 	}
@@ -2103,15 +2103,15 @@ func TestManager_Groups_ChildDoesNotAutoInheritParentGroups(t *testing.T) {
 	// A privileged parent spawning a child that declares NO groups
 	// should NOT pass its groups to the child. Groups are opt-in.
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
-Coordinator.`)
+Operator.`)
 
 	writeAgentMD(t, dir, "plain-worker", `---
 name: plain-worker
@@ -2130,7 +2130,7 @@ Worker with no group declarations.`)
 	}
 	childCfg := (*configs)[1]
 
-	// Child should only have primary group — parent's hiro-coordinators NOT inherited.
+	// Child should only have primary group — parent's hiro-operators NOT inherited.
 	if len(childCfg.Groups) != 1 {
 		t.Fatalf("expected 1 group (primary only), got %v", childCfg.Groups)
 	}
@@ -2142,14 +2142,14 @@ Worker with no group declarations.`)
 func TestManager_Groups_RootInstanceGetsAllDeclaredGroups(t *testing.T) {
 	// Root instances (no parent) get whatever they declare — no intersection.
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	pool.SetGroupGID("custom-group", 20000)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 
 	writeAgentMD(t, dir, "root-agent", `---
 name: root-agent
 allowed_tools: [Bash]
-groups: [hiro-coordinators, custom-group]
+groups: [hiro-operators, custom-group]
 ---
 Root agent with multiple groups.`)
 
@@ -2167,7 +2167,7 @@ Root agent with multiple groups.`)
 		t.Error("root should have primary GID 10000")
 	}
 	if !groupSet[10001] {
-		t.Error("root should have hiro-coordinators (10001)")
+		t.Error("root should have hiro-operators (10001)")
 	}
 	if !groupSet[20000] {
 		t.Error("root should have custom-group (20000)")
@@ -2180,7 +2180,7 @@ Root agent with multiple groups.`)
 func TestManager_Groups_ThreeLevelInheritance(t *testing.T) {
 	// Grandchild can only get groups that flow through the entire chain.
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	pool.SetGroupGID("extra-group", 20000)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 
@@ -2188,15 +2188,15 @@ func TestManager_Groups_ThreeLevelInheritance(t *testing.T) {
 	writeAgentMD(t, dir, "root", `---
 name: root
 allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-coordinators, extra-group]
+groups: [hiro-operators, extra-group]
 ---
 Root.`)
 
-	// Middle agent only has hiro-coordinators (not extra-group).
+	// Middle agent only has hiro-operators (not extra-group).
 	writeAgentMD(t, dir, "middle", `---
 name: middle
 allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
 Middle.`)
 
@@ -2204,7 +2204,7 @@ Middle.`)
 	writeAgentMD(t, dir, "leaf", `---
 name: leaf
 allowed_tools: [Bash]
-groups: [hiro-coordinators, extra-group]
+groups: [hiro-operators, extra-group]
 ---
 Leaf.`)
 
@@ -2229,9 +2229,9 @@ Leaf.`)
 		leafGroups[g] = true
 	}
 
-	// Leaf should get hiro-coordinators (root has it, middle has it, leaf declares it).
+	// Leaf should get hiro-operators (root has it, middle has it, leaf declares it).
 	if !leafGroups[10001] {
-		t.Error("leaf should have hiro-coordinators")
+		t.Error("leaf should have hiro-operators")
 	}
 
 	// Leaf should NOT get extra-group — middle doesn't have it, breaking the chain.
@@ -2243,7 +2243,7 @@ Leaf.`)
 func TestManager_Groups_EphemeralChildSameRules(t *testing.T) {
 	// Ephemeral children follow the same group inheritance rules.
 	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-coordinators", 10001)
+	pool.SetGroupGID("hiro-operators", 10001)
 	mgr, dir, configs := setupTestManagerWithPool(t, pool)
 
 	writeAgentMD(t, dir, "no-groups-parent", `---
@@ -2255,7 +2255,7 @@ Parent without groups.`)
 	writeAgentMD(t, dir, "eph-child", `---
 name: eph-child
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
 Ephemeral child wanting groups.`)
 
@@ -2281,7 +2281,7 @@ func TestManager_Groups_NoPoolNoGroups(t *testing.T) {
 	writeAgentMD(t, dir, "agent-with-groups", `---
 name: agent-with-groups
 allowed_tools: [Bash]
-groups: [hiro-coordinators]
+groups: [hiro-operators]
 ---
 Agent.`)
 

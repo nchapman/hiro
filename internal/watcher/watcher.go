@@ -46,7 +46,7 @@ func (o Op) String() string {
 
 // Event represents a debounced filesystem change.
 type Event struct {
-	// Path is relative to the watcher root (e.g. "agents/coordinator/agent.md").
+	// Path is relative to the watcher root (e.g. "agents/operator/agent.md").
 	Path string
 	Op   Op
 }

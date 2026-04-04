@@ -249,7 +249,7 @@ func (a *app) initServer() error {
 	a.srv.SetWatcher(a.fsWatcher)
 	a.srv.SetLogHandler(a.lh)
 
-	// Reload config.yaml when it changes on disk (external edits, coordinator writes).
+	// Reload config.yaml when it changes on disk (external edits, operator writes).
 	a.fsWatcher.Subscribe("config/config.yaml", func(events []watcher.Event) {
 		if err := a.cp.Reload(); err != nil {
 			a.logger.Warn("failed to reload config.yaml", "error", err)
@@ -403,7 +403,7 @@ func (a *app) connectRelay(dc *cluster.DiscoveryClient, grpcPort int, swarmCode 
 	})
 }
 
-// startManager boots the agent manager and coordinator. Idempotent.
+// startManager boots the agent manager and operator. Idempotent.
 func (a *app) startManager() error {
 	if a.mgr != nil {
 		return nil
@@ -430,7 +430,7 @@ func (a *app) startManager() error {
 		a.logger.Warn("failed to restore some agent instances", "error", err)
 	}
 
-	leaderID, err := bootstrapCoordinator(a.ctx, a.mgr, a.logger)
+	leaderID, err := bootstrapOperator(a.ctx, a.mgr, a.logger)
 	if err != nil {
 		return err
 	}
@@ -564,13 +564,13 @@ func detectUIDPool(logger *slog.Logger) (*uidpool.Pool, error) {
 	pool := uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
 	logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
 
-	if coordGrp, err := user.LookupGroup("hiro-coordinators"); err == nil {
+	if coordGrp, err := user.LookupGroup("hiro-operators"); err == nil {
 		coordGID, err := strconv.ParseUint(coordGrp.Gid, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("parsing hiro-coordinators GID %q: %w", coordGrp.Gid, err)
+			return nil, fmt.Errorf("parsing hiro-operators GID %q: %w", coordGrp.Gid, err)
 		}
-		pool.SetGroupGID("hiro-coordinators", uint32(coordGID))
-		logger.Info("coordinator group detected", "gid", coordGID)
+		pool.SetGroupGID("hiro-operators", uint32(coordGID))
+		logger.Info("operator group detected", "gid", coordGID)
 	}
 
 	return pool, nil

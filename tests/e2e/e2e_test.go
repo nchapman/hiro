@@ -33,7 +33,7 @@ import (
 var (
 	baseURL       string
 	containerName string
-	coordinatorID string
+	operatorID string
 	httpClient    *http.Client // shared client with cookie jar for auth
 )
 
@@ -69,16 +69,16 @@ func TestMain(m *testing.M) {
 	}
 	fmt.Println("setup complete")
 
-	// Wait for the coordinator agent to be ready (requires LLM call to spawn).
+	// Wait for the operator agent to be ready (requires LLM call to spawn).
 	coordCtx, coordCancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer coordCancel()
-	id, err := waitForCoordinator(coordCtx)
+	id, err := waitForOperator(coordCtx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "coordinator never appeared: %v\n", err)
+		fmt.Fprintf(os.Stderr, "operator never appeared: %v\n", err)
 		os.Exit(1)
 	}
-	coordinatorID = id
-	fmt.Printf("coordinator ready: %s\n", coordinatorID)
+	operatorID = id
+	fmt.Printf("operator ready: %s\n", operatorID)
 
 	os.Exit(m.Run())
 }
@@ -176,11 +176,11 @@ func listInstances(t *testing.T) []instanceInfo {
 	return instances
 }
 
-func waitForCoordinator(ctx context.Context) (string, error) {
-	fmt.Printf("waiting for coordinator at %s\n", baseURL)
+func waitForOperator(ctx context.Context) (string, error) {
+	fmt.Printf("waiting for operator at %s\n", baseURL)
 	for {
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("timed out waiting for coordinator: %w", ctx.Err())
+			return "", fmt.Errorf("timed out waiting for operator: %w", ctx.Err())
 		}
 		reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
 		req, _ := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/api/instances", nil)
@@ -229,7 +229,7 @@ type chatSession struct {
 }
 
 // openChat opens a WebSocket chat session to the given agent.
-// If agentID is empty, it connects to the default (coordinator).
+// If agentID is empty, it connects to the default (operator).
 func openChat(t *testing.T, ctx context.Context, agentID string) *chatSession {
 	t.Helper()
 
@@ -394,7 +394,7 @@ func findInstance(t *testing.T, id string) (instanceInfo, bool) {
 	return instanceInfo{}, false
 }
 
-// spawnPersistentAgent writes an agent definition and asks the coordinator to
+// spawnPersistentAgent writes an agent definition and asks the operator to
 // spawn it as a persistent instance. Returns the instance ID.
 func spawnPersistentAgent(t *testing.T, ctx context.Context, name string) string {
 	t.Helper()
@@ -417,9 +417,9 @@ You are a test agent. Be concise.`, name))
 
 	cs.chat(ctx, fmt.Sprintf(`Use CreatePersistentInstance with agent "%s". Then use SendMessage to send it "Acknowledge you are ready." Do not use any other tools.`, name))
 
-	// Find the new instance (not in the snapshot, child of coordinator).
+	// Find the new instance (not in the snapshot, child of operator).
 	for _, inst := range listInstances(t) {
-		if !before[inst.ID] && inst.Mode == "persistent" && inst.ParentID == coordinatorID {
+		if !before[inst.ID] && inst.Mode == "persistent" && inst.ParentID == operatorID {
 			return inst.ID
 		}
 	}

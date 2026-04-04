@@ -25,7 +25,7 @@ import (
 
 // CreateInstance loads an agent definition by name and starts an instance in the
 // given mode. The ctx parameter is used only for config loading and worker
-// spawning — persistent/coordinator instances use the manager's lifetime context.
+// spawning — persistent/operator instances use the manager's lifetime context.
 // parentInstanceID tracks lineage; pass "" for top-level instances.
 // mode is a string to satisfy the ipc.HostManager interface boundary; it must
 // be one of "persistent" or "ephemeral".

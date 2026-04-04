@@ -33,7 +33,7 @@ func TestE2E_Health(t *testing.T) {
 func TestE2E_ListInstances(t *testing.T) {
 	instances := listInstances(t)
 	if len(instances) == 0 {
-		t.Fatal("expected at least one instance (coordinator)")
+		t.Fatal("expected at least one instance (operator)")
 	}
 
 	found := false
@@ -44,6 +44,6 @@ func TestE2E_ListInstances(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("root persistent instance (coordinator) not found in instance list")
+		t.Error("root persistent instance (operator) not found in instance list")
 	}
 }

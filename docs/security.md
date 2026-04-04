@@ -20,7 +20,7 @@ Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The secur
 │  └──────────────┘  └──────────────┘                 │
 │                                                     │
 │  /hiro (2775, setgid hiro-agents)                   │
-│  ├── agents/, skills/ (hiro-coordinators)           │
+│  ├── agents/, skills/ (hiro-operators)           │
 │  └── workspace/ (shared collaborative space)        │
 └─────────────────────────────────────────────────────┘
 ```
@@ -53,7 +53,7 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 **Setup:**
 
 - A `hiro-agents` group (GID 10000) and 64 users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000–10063) are created in the Dockerfile.
-- A `hiro-coordinators` group (GID 10001) is created for coordinator-mode agents.
+- A `hiro-operators` group (GID 10001) is created for operator-mode agents.
 - At startup, the control plane checks for the `hiro-agents` group. If present, UID isolation is enabled; if absent (e.g., local development), it is silently disabled.
 
 **Per-agent isolation:**
@@ -61,7 +61,7 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 - When an agent starts, the control plane acquires a UID from the pool and sets `SysProcAttr.Credential` on the child process so it runs as that user.
 - The agent's instance directory is `chown`ed to its UID:GID before the process starts.
 - Instance directories use `0700` permissions — only the owning agent can read or write its own memory, history, and todos.
-- Coordinator-mode agents receive `hiro-coordinators` as a supplementary group via `Credential.Groups`, granting write access to `agents/` and `skills/`.
+- Operator-mode agents receive `hiro-operators` as a supplementary group via `Credential.Groups`, granting write access to `agents/` and `skills/`.
 - When an agent stops, its UID is released back to the pool.
 
 **Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={instance-dir}`, `LANG`, `LC_ALL`, `HIRO_API_KEY`, `MISE_DATA_DIR`) rather than inheriting the control plane's full environment. Setting `HOME` to the instance directory gives each agent an isolated home for dotfiles, caches, and temp data.
@@ -72,8 +72,8 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 |---|---|---|---|
 | `config.yaml` | `0600` | root | Control plane only. Contains secrets and tool policies. Unreadable by agent users. |
 | `/hiro` | `2775` (setgid) | root:hiro-agents | Platform root. All agents can read and write. New files inherit the `hiro-agents` group. |
-| `agents/` | `2775` (setgid) | root:hiro-coordinators | Agent definitions. Readable by all (via "other" bits), writable by coordinator agents only. |
-| `skills/` | `2775` (setgid) | root:hiro-coordinators | Shared skills. Same access as `agents/`. |
+| `agents/` | `2775` (setgid) | root:hiro-operators | Agent definitions. Readable by all (via "other" bits), writable by operator agents only. |
+| `skills/` | `2775` (setgid) | root:hiro-operators | Shared skills. Same access as `agents/`. |
 | `workspace/` | `0775` | root:hiro-agents | Shared collaborative space. All agents can read and write. |
 | `instances/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, sessions with todos, scratch, tmp). Only the owning agent can access. |
 | `db/hiro.db` | default | root | Unified platform database (instances, sessions, messages, usage). Accessed only by the control plane process. |
@@ -96,8 +96,8 @@ Effective tools = declared tools ∩ control plane policy ∩ parent's effective
 
 **Structural tools** bypass this system — they are intrinsic to the agent's mode:
 - `SpawnInstance` is available to all agents.
-- Coordinator tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) are only available to coordinator-mode agents.
-- Persistent tools (`TodoWrite`, `AddMemory`, `ForgetMemory`, `HistorySearch`, `HistoryRecall`) are available to persistent and coordinator agents.
+- Operator tools (`ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) are only available to operator-mode agents.
+- Persistent tools (`TodoWrite`, `AddMemory`, `ForgetMemory`, `HistorySearch`, `HistoryRecall`) are available to persistent and operator agents.
 
 ### 6. Secrets Management
 
@@ -118,7 +118,7 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 **How it works:**
 
 1. Each instance's inference loop receives its instance ID as a `callerID` via context propagation.
-2. Coordinator tools (`SendMessage`, `StopInstance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
+2. Operator tools (`SendMessage`, `StopInstance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
 3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the platform DB. If the target is not a descendant of the caller, the request is rejected.
 
 **Scoping rules:**
@@ -126,11 +126,11 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 | Operation | Authorization |
 |---|---|
 | `SpawnInstance` | No check needed — caller becomes the parent. |
-| `ResumeInstance` | Target must be a descendant of caller. Coordinator mode only. |
-| `SendMessage` | Target must be a descendant of caller. Coordinator mode only. |
-| `StopInstance` | Target must be a descendant of caller. Coordinator mode only. |
-| `DeleteInstance` | Target must be a descendant of caller. Coordinator mode only. |
-| `ListInstances` | Returns only direct children of caller. Coordinator mode only. |
+| `ResumeInstance` | Target must be a descendant of caller. Operator mode only. |
+| `SendMessage` | Target must be a descendant of caller. Operator mode only. |
+| `StopInstance` | Target must be a descendant of caller. Operator mode only. |
+| `DeleteInstance` | Target must be a descendant of caller. Operator mode only. |
+| `ListInstances` | Returns only direct children of caller. Operator mode only. |
 
 An agent cannot send messages to, stop, or inspect siblings, ancestors, or unrelated agents.
 
@@ -142,7 +142,7 @@ All inter-process communication uses gRPC over Unix domain sockets. No TCP ports
 
 - **Agent sockets** (`/tmp/hiro-agent-{instance-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
 
-There is no worker→control plane socket. All inference, instance management, and coordinator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
+There is no worker→control plane socket. All inference, instance management, and operator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
 
 gRPC uses `insecure.NewCredentials()` for transport — this is safe because Unix sockets are local-only.
 
@@ -162,7 +162,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 - Read `config.yaml` or secret values directly — blocked by `0600` root ownership.
 - Manage agents outside their descendant tree — blocked by ScopedManager descendant checks.
 - Use tools they weren't granted — blocked by the three-layer capability intersection.
-- Write to `agents/` or `skills/` (unless coordinator mode) — blocked by `hiro-coordinators` group ownership.
+- Write to `agents/` or `skills/` (unless operator mode) — blocked by `hiro-operators` group ownership.
 - Rewrite seeded agent definitions — blocked by `0644` root ownership on seeded files.
 - Escape the Docker container — standard container isolation applies.
 

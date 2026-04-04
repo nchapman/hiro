@@ -225,7 +225,7 @@ Mode field should be ignored.`
 }
 
 func TestValidateGroupName(t *testing.T) {
-	valid := []string{"hiro-coordinators", "custom-group", "a", "group1"}
+	valid := []string{"hiro-operators", "custom-group", "a", "group1"}
 	for _, name := range valid {
 		if err := validateGroupName(name); err != nil {
 			t.Errorf("expected %q to be valid, got: %v", name, err)

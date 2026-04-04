@@ -59,7 +59,7 @@ Each tool's rules match against a specific parameter from the tool call:
 
 Rules apply to the 9 **remote tools** that execute in worker processes: Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop.
 
-**Structural tools** (SpawnInstance, coordinator tools, memory tools, TodoWrite, Skill, etc.) bypass call-time rule enforcement. They are always available based on the agent's mode. You cannot restrict SpawnInstance or coordinator tools via `disallowed_tools`.
+**Structural tools** (SpawnInstance, operator tools, memory tools, TodoWrite, Skill, etc.) bypass call-time rule enforcement. They are always available based on the agent's mode. You cannot restrict SpawnInstance or operator tools via `disallowed_tools`.
 
 ## Permission Sources
 

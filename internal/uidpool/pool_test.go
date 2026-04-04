@@ -80,13 +80,13 @@ func TestGroupGID(t *testing.T) {
 	p := New(10000, 10000, 2)
 
 	// Default: unknown group returns 0.
-	if gid := p.GroupGID("hiro-coordinators"); gid != 0 {
+	if gid := p.GroupGID("hiro-operators"); gid != 0 {
 		t.Fatalf("expected 0, got %d", gid)
 	}
 
 	// Set and retrieve.
-	p.SetGroupGID("hiro-coordinators", 10001)
-	if gid := p.GroupGID("hiro-coordinators"); gid != 10001 {
+	p.SetGroupGID("hiro-operators", 10001)
+	if gid := p.GroupGID("hiro-operators"); gid != 10001 {
 		t.Fatalf("expected 10001, got %d", gid)
 	}
 

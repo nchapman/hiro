@@ -26,7 +26,7 @@ RUN mkdir -p web/ui/dist && echo '<!doctype html>' > web/ui/dist/index.html
 
 # Create agent user pool and groups for isolation tests.
 RUN groupadd -g 10000 hiro-agents \
-    && groupadd -g 10001 hiro-coordinators \
+    && groupadd -g 10001 hiro-operators \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
         useradd -r -u $uid -g hiro-agents -M -d /nonexistent -s /bin/bash "hiro-agent-$i"; \
@@ -79,9 +79,9 @@ ENV LC_ALL=en_US.UTF-8
 
 # Create agent user pool for per-agent Unix user isolation.
 # Each agent process runs as a dedicated user from this pool.
-# hiro-coordinators grants write access to agents/ and skills/ directories.
+# hiro-operators grants write access to agents/ and skills/ directories.
 RUN groupadd -g 10000 hiro-agents \
-    && groupadd -g 10001 hiro-coordinators \
+    && groupadd -g 10001 hiro-operators \
     && for i in $(seq 0 63); do \
         uid=$((10000 + i)); \
         useradd -r -u $uid -g hiro-agents -M -d /nonexistent -s /bin/bash "hiro-agent-$i"; \
@@ -90,7 +90,7 @@ RUN groupadd -g 10000 hiro-agents \
 # Platform root uses setgid (2775) so files created by any agent inherit the
 # hiro-agents group and are group-writable for collaborative access.
 # Subdirectory ownership (agents/, skills/, workspace/) is set by platform.Init()
-# at runtime — hiro-coordinators for agents/ and skills/, hiro-agents for workspace/.
+# at runtime — hiro-operators for agents/ and skills/, hiro-agents for workspace/.
 RUN mkdir -p /hiro && chown root:hiro-agents /hiro && chmod 2775 /hiro
 
 # Install mise (tool version manager). All mise state lives under /opt/mise —

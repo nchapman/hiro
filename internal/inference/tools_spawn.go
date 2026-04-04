@@ -261,7 +261,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 
 // --- Management tools ---
 
-func buildCoordinatorTools(mgr ipc.HostManager, logger *slog.Logger) []Tool {
+func buildOperatorTools(mgr ipc.HostManager, logger *slog.Logger) []Tool {
 	return wrapAll([]fantasy.AgentTool{
 		buildResumeInstance(mgr, logger),
 		buildListInstances(mgr, logger),

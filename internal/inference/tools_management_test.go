@@ -416,15 +416,15 @@ func TestDeleteInstance_Error(t *testing.T) {
 	}
 }
 
-// --- buildCoordinatorTools test ---
+// --- buildOperatorTools test ---
 
-func TestBuildCoordinatorTools_Count(t *testing.T) {
+func TestBuildOperatorTools_Count(t *testing.T) {
 	mgr := &controllableFakeManager{}
-	tools := buildCoordinatorTools(mgr, testLogger)
+	tools := buildOperatorTools(mgr, testLogger)
 
 	// Should return 6 tools: ResumeInstance, ListInstances, ListNodes, SendMessage, StopInstance, DeleteInstance
 	if len(tools) != 6 {
-		t.Errorf("expected 6 coordinator tools, got %d", len(tools))
+		t.Errorf("expected 6 operator tools, got %d", len(tools))
 	}
 
 	names := make(map[string]bool)
@@ -435,7 +435,7 @@ func TestBuildCoordinatorTools_Count(t *testing.T) {
 	expected := []string{"ResumeInstance", "ListInstances", "ListNodes", "SendMessage", "StopInstance", "DeleteInstance"}
 	for _, name := range expected {
 		if !names[name] {
-			t.Errorf("missing coordinator tool: %s", name)
+			t.Errorf("missing operator tool: %s", name)
 		}
 	}
 }

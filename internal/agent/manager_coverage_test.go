@@ -245,7 +245,7 @@ func TestExtractAgentName_Coverage(t *testing.T) {
 		path string
 		want string
 	}{
-		{"agents/coordinator/agent.md", "coordinator"},
+		{"agents/operator/agent.md", "operator"},
 		{"agents/my-agent/agent.md", "my-agent"},
 		{"agents/foo/skills/bar.md", "foo"},
 		{"other/path", ""},

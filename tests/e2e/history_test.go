@@ -36,9 +36,9 @@ func TestE2E_ConversationHistory(t *testing.T) {
 }
 
 func TestE2E_MessagesAPI(t *testing.T) {
-	// The coordinator should have messages from other tests (or at minimum
+	// The operator should have messages from other tests (or at minimum
 	// from startup). Verify the REST endpoint returns them.
-	url := fmt.Sprintf("%s/api/instances/%s/messages", baseURL, coordinatorID)
+	url := fmt.Sprintf("%s/api/instances/%s/messages", baseURL, operatorID)
 	resp, err := httpClient.Get(url)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
@@ -55,7 +55,7 @@ func TestE2E_MessagesAPI(t *testing.T) {
 		t.Fatalf("decoding messages: %v", err)
 	}
 	if len(messages) == 0 {
-		t.Error("expected at least one message from coordinator history")
+		t.Error("expected at least one message from operator history")
 	}
 	t.Logf("Messages API returned %d messages", len(messages))
 }

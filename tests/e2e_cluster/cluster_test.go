@@ -2,7 +2,7 @@
 
 // Package e2e_cluster contains end-to-end tests for Hiro's leader-worker
 // clustering. Tests verify the full flow: worker connects to leader,
-// files sync bidirectionally, coordinator spawns agents on the worker
+// files sync bidirectionally, operator spawns agents on the worker
 // node, and those agents execute tools remotely with results flowing
 // back through the leader.
 //
@@ -39,7 +39,7 @@ var (
 	leaderContainer string
 	workerContainer string
 	httpClient      *http.Client
-	coordinatorID   string
+	operatorID   string
 )
 
 func TestMain(m *testing.M) {
@@ -83,16 +83,16 @@ func TestMain(m *testing.M) {
 	}
 	fmt.Println("worker node approved")
 
-	// Wait for coordinator.
+	// Wait for operator.
 	coordCtx, coordCancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer coordCancel()
-	id, err := waitForCoordinator(coordCtx)
+	id, err := waitForOperator(coordCtx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "coordinator never appeared: %v\n", err)
+		fmt.Fprintf(os.Stderr, "operator never appeared: %v\n", err)
 		os.Exit(1)
 	}
-	coordinatorID = id
-	fmt.Printf("coordinator ready: %s\n", coordinatorID)
+	operatorID = id
+	fmt.Printf("operator ready: %s\n", operatorID)
 
 	os.Exit(m.Run())
 }
@@ -112,9 +112,9 @@ func TestCluster_WorkerNodeRegistered(t *testing.T) {
 	}
 }
 
-// TestCluster_CoordinatorSeesWorkerNode asks the coordinator to list nodes
+// TestCluster_OperatorSeesWorkerNode asks the operator to list nodes
 // and verifies the worker appears.
-func TestCluster_CoordinatorSeesWorkerNode(t *testing.T) {
+func TestCluster_OperatorSeesWorkerNode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -122,11 +122,11 @@ func TestCluster_CoordinatorSeesWorkerNode(t *testing.T) {
 	defer cs.close()
 
 	resp := cs.chat(ctx, `Use the ListNodes tool and tell me what nodes are available. Just list them.`)
-	t.Logf("coordinator response: %s", resp)
+	t.Logf("operator response: %s", resp)
 
 	// The response should mention at least the home node and the worker.
 	if !strings.Contains(strings.ToLower(resp), "home") {
-		t.Error("expected coordinator to mention 'home' node")
+		t.Error("expected operator to mention 'home' node")
 	}
 }
 
@@ -186,7 +186,7 @@ You are a test agent. Write files as instructed. Be concise.`
 Set the node parameter to the worker node's ID. Tell me the result.`, marker)
 
 	resp := cs.chat(ctx, prompt)
-	t.Logf("coordinator response: %s", resp)
+	t.Logf("operator response: %s", resp)
 
 	// Verify the file synced back to the leader (via the API).
 	var leaderContent string
@@ -225,7 +225,7 @@ You are a test agent. When asked, run the command given and report the output. B
 }
 
 // TestCluster_SpawnAgentOnWorkerNode is the core clustering test.
-// It asks the coordinator to spawn an agent on the worker node, has
+// It asks the operator to spawn an agent on the worker node, has
 // that agent execute a bash command (which runs on the worker), and
 // verifies the result comes back through the leader.
 func TestCluster_SpawnAgentOnWorkerNode(t *testing.T) {
@@ -248,7 +248,7 @@ You are a test agent running on a remote node. Execute commands as asked. Be con
 	cs := openChat(t, ctx)
 	defer cs.close()
 
-	// Ask the coordinator to spawn an ephemeral agent on the worker node.
+	// Ask the operator to spawn an ephemeral agent on the worker node.
 	prompt := `I need you to do something on a remote worker node.
 
 1. First use ListNodes to see what's available.
@@ -260,10 +260,10 @@ You are a test agent running on a remote node. Execute commands as asked. Be con
 Important: when calling SpawnInstance, set the "node" parameter to the worker node's ID.`
 
 	resp := cs.chat(ctx, prompt)
-	t.Logf("coordinator response: %s", resp)
+	t.Logf("operator response: %s", resp)
 
 	if resp == "" {
-		t.Fatal("empty response from coordinator")
+		t.Fatal("empty response from operator")
 	}
 	if len(resp) < 5 {
 		t.Errorf("response too short, expected hostname output: %q", resp)
@@ -303,7 +303,7 @@ You are a test agent. Write files as instructed. Use relative paths from your wo
 Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 
 	resp := cs.chat(ctx, prompt)
-	t.Logf("coordinator response: %s", resp)
+	t.Logf("operator response: %s", resp)
 
 	// Verify the file exists on the worker.
 	var workerContent string
@@ -375,7 +375,7 @@ The prompt should be exactly: "Run this bash command and report ONLY the output:
 Reply with ONLY the hash output, nothing else.`, marker)
 
 	resp := cs.chat(ctx, prompt)
-	t.Logf("coordinator response: %s", resp)
+	t.Logf("operator response: %s", resp)
 
 	if !strings.Contains(resp, expectedHash) {
 		t.Errorf("expected response to contain hash %s, got: %s", expectedHash, resp)
@@ -564,7 +564,7 @@ func approveFirstPendingNode(ctx context.Context) error {
 	}
 }
 
-func waitForCoordinator(ctx context.Context) (string, error) {
+func waitForOperator(ctx context.Context) (string, error) {
 	for {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -574,7 +574,7 @@ func waitForCoordinator(ctx context.Context) (string, error) {
 		resp, err := httpClient.Do(req)
 		reqCancel()
 		if err != nil {
-			fmt.Printf("  coordinator poll error: %v\n", err)
+			fmt.Printf("  operator poll error: %v\n", err)
 			time.Sleep(time.Second)
 			continue
 		}

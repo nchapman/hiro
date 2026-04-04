@@ -855,7 +855,7 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []Tool {
 		localTools = append(localTools,
 			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger),
 			buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
-		localTools = append(localTools, buildCoordinatorTools(cfg.HostManager, l.logger)...)
+		localTools = append(localTools, buildOperatorTools(cfg.HostManager, l.logger)...)
 	}
 
 	// Skill tool.

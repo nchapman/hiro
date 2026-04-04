@@ -30,7 +30,7 @@ System prompt — direct instructions to the agent about what it is and how it s
 | `name` | yes | Kebab-case. Must match the directory name. |
 | `description` | yes | Shown in agent listings. Tells the parent agent when to use this agent and what context to provide. |
 | `allowed_tools` | no | Built-in and management tools. No declaration = no tools. Management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) go here too. |
-| `groups` | no | Unix groups for filesystem access. `[hiro-coordinators]` grants write to `agents/` and `skills/`. |
+| `groups` | no | Unix groups for filesystem access. `[hiro-operators]` grants write to `agents/` and `skills/`. |
 
 ### Writing good descriptions
 

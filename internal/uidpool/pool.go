@@ -22,7 +22,7 @@ type Pool struct {
 	mu      sync.Mutex
 	baseUID uint32
 	gid     uint32            // GID of the hiro-agents group
-	groups  map[string]uint32 // named group -> GID (e.g. "hiro-coordinators" -> 10001)
+	groups  map[string]uint32 // named group -> GID (e.g. "hiro-operators" -> 10001)
 	size    int               // number of UIDs in the pool
 	inUse   map[uint32]string // UID -> instance ID
 }

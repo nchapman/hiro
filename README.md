@@ -48,7 +48,7 @@ Agents are defined as markdown files in the `agents/` directory:
 
 ```
 agents/
-  coordinator/
+  operator/
     agent.md          # Required: YAML frontmatter + system prompt
     skills/
       delegate.md     # Skills available to this agent
@@ -58,7 +58,7 @@ The `agent.md` frontmatter configures the agent:
 
 ```yaml
 ---
-name: coordinator
+name: operator
 model: claude-sonnet-4-20250514
 mode: persistent
 description: Manages conversations and coordinates work.
@@ -90,12 +90,12 @@ Agents can create new agent and skill definitions at runtime using their file to
 
 ### Platform Root
 
-On first boot, Hiro initializes the platform root with a default coordinator agent. The coordinator manages conversations, spawns subagents, and can delegate tasks to remote swarm workers. The directory structure:
+On first boot, Hiro initializes the platform root with a default operator agent. The operator manages conversations, spawns subagents, and can delegate tasks to remote swarm workers. The directory structure:
 
 ```
 /hiro/
-  agents/       # Agent definitions (coordinator-writable)
-  skills/       # Shared skills (coordinator-writable)
+  agents/       # Agent definitions (operator-writable)
+  skills/       # Shared skills (operator-writable)
   sessions/     # Per-agent runtime state (history, memory, todos)
   workspace/    # Shared collaborative space for agent work
 ```
@@ -133,7 +133,7 @@ The container is the primary security boundary. Inside it, each agent runs as a 
 
 - **Session isolation**: Each agent's session directory (`sessions/<uuid>/`) is owned by its Unix user with `0700` permissions — agents cannot read each other's memory, history, or todos.
 - **Secrets protection**: `config.yaml` is owned by root with `0600` permissions — agents cannot read operator secrets.
-- **Collaborative workspace**: The shared `workspace/` directory uses setgid (`2775`) so all agents can read and write collaborative files via group membership. Agent definitions (`agents/`, `skills/`) are writable only by coordinator-mode agents.
+- **Collaborative workspace**: The shared `workspace/` directory uses setgid (`2775`) so all agents can read and write collaborative files via group membership. Agent definitions (`agents/`, `skills/`) are writable only by operator-mode agents.
 - **Control plane as root**: The control plane runs as root for UID switching; agents run as unprivileged users.
 
 Isolation is auto-detected at startup (enabled when the `hiro-agents` group exists). Outside Docker, all processes run as the same user.

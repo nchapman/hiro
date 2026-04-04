@@ -12,7 +12,7 @@ func TestInstanceCRUD(t *testing.T) {
 
 	// Create a root instance.
 	err := d.CreateInstance(ctx, Instance{
-		ID: "inst-1", AgentName: "coordinator", Mode: "persistent",
+		ID: "inst-1", AgentName: "operator", Mode: "persistent",
 	})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
@@ -23,7 +23,7 @@ func TestInstanceCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInstance: %v", err)
 	}
-	if inst.AgentName != "coordinator" || inst.Mode != "persistent" || inst.Status != "running" {
+	if inst.AgentName != "operator" || inst.Mode != "persistent" || inst.Status != "running" {
 		t.Errorf("unexpected instance: %+v", inst)
 	}
 	if inst.StoppedAt != nil {

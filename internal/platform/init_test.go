@@ -28,27 +28,27 @@ func TestInit_EmptyPlatform(t *testing.T) {
 		}
 	}
 
-	// Verify coordinator was seeded with non-empty content
-	coordAgent := filepath.Join(dir, "agents", "coordinator", "agent.md")
+	// Verify operator was seeded with non-empty content
+	coordAgent := filepath.Join(dir, "agents", "operator", "agent.md")
 	data, err := os.ReadFile(coordAgent)
 	if err != nil {
-		t.Fatalf("expected coordinator agent.md to be seeded: %v", err)
+		t.Fatalf("expected operator agent.md to be seeded: %v", err)
 	}
 	if len(data) == 0 {
-		t.Error("coordinator agent.md is empty")
+		t.Error("operator agent.md is empty")
 	}
 
-	// Verify coordinator skills were seeded
+	// Verify operator skills were seeded
 	skillFiles := []string{"create-agent.md", "create-skill.md", "delegate.md"}
 	for _, f := range skillFiles {
-		path := filepath.Join(dir, "agents", "coordinator", "skills", f)
+		path := filepath.Join(dir, "agents", "operator", "skills", f)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			t.Errorf("expected coordinator skill %s to be seeded: %v", f, err)
+			t.Errorf("expected operator skill %s to be seeded: %v", f, err)
 			continue
 		}
 		if len(data) == 0 {
-			t.Errorf("coordinator skill %s is empty", f)
+			t.Errorf("operator skill %s is empty", f)
 		}
 	}
 }
@@ -71,10 +71,10 @@ func TestInit_ExistingAgents(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	// Verify coordinator was NOT seeded (agents dir was non-empty)
-	coordAgent := filepath.Join(dir, "agents", "coordinator", "agent.md")
+	// Verify operator was NOT seeded (agents dir was non-empty)
+	coordAgent := filepath.Join(dir, "agents", "operator", "agent.md")
 	if _, err := os.Stat(coordAgent); !os.IsNotExist(err) {
-		t.Errorf("expected coordinator to not be seeded when agents dir is non-empty")
+		t.Errorf("expected operator to not be seeded when agents dir is non-empty")
 	}
 
 	// Verify custom agent was preserved
@@ -96,10 +96,10 @@ func TestInit_Idempotent(t *testing.T) {
 	}
 
 	// Read seeded content before second Init
-	coordAgent := filepath.Join(dir, "agents", "coordinator", "agent.md")
+	coordAgent := filepath.Join(dir, "agents", "operator", "agent.md")
 	before, err := os.ReadFile(coordAgent)
 	if err != nil {
-		t.Fatalf("coordinator agent.md missing after first Init: %v", err)
+		t.Fatalf("operator agent.md missing after first Init: %v", err)
 	}
 
 	if err := Init(dir, logger); err != nil {
@@ -109,10 +109,10 @@ func TestInit_Idempotent(t *testing.T) {
 	// Verify seeded files survived unchanged
 	after, err := os.ReadFile(coordAgent)
 	if err != nil {
-		t.Fatalf("coordinator agent.md missing after second Init: %v", err)
+		t.Fatalf("operator agent.md missing after second Init: %v", err)
 	}
 	if string(before) != string(after) {
-		t.Error("coordinator agent.md content changed after second Init")
+		t.Error("operator agent.md content changed after second Init")
 	}
 }
 
@@ -222,10 +222,10 @@ func TestLookupGroupGID_NonexistentGroup(t *testing.T) {
 	}
 }
 
-func TestSetCoordinatorDir_NegativeGID(t *testing.T) {
-	// setCoordinatorDir should be a no-op when coordGID is negative.
+func TestSetOperatorDir_NegativeGID(t *testing.T) {
+	// setOperatorDir should be a no-op when coordGID is negative.
 	dir := t.TempDir()
-	err := setCoordinatorDir(dir, "test", -1)
+	err := setOperatorDir(dir, "test", -1)
 	if err != nil {
 		t.Errorf("expected no-op for negative GID, got: %v", err)
 	}

@@ -59,9 +59,9 @@ agents:
 		t.Errorf("unexpected tools: %v", tools)
 	}
 
-	_, ok = cp.AgentTools("coordinator")
+	_, ok = cp.AgentTools("operator")
 	if ok {
-		t.Error("expected no policy for coordinator")
+		t.Error("expected no policy for operator")
 	}
 }
 

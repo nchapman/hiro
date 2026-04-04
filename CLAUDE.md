@@ -50,8 +50,8 @@ set -a; . .env; set +a; make test-cluster
 ```
 
 Key details:
-- Tests talk to the coordinator via WebSocket, instructing it to use specific tools by name
-- If you rename or split tools, update the prompts in `tests/e2e/e2e_test.go` (e.g. `spawnPersistentAgent` tells the coordinator which tool to call)
+- Tests talk to the operator via WebSocket, instructing it to use specific tools by name
+- If you rename or split tools, update the prompts in `tests/e2e/e2e_test.go` (e.g. `spawnPersistentAgent` tells the operator which tool to call)
 - The `SessionClear` test is known to be flaky due to OpenRouter connection timeouts
 - Tests take ~2-6 minutes depending on LLM latency
 
@@ -108,7 +108,7 @@ Agent Worker Process (hiro agent)
 
 **Group-based access control**: Two Unix groups control filesystem access:
 - `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
-- `hiro-coordinators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-coordinators]`) and assigned dynamically at spawn time via `SysProcAttr.Credential.Groups`.
+- `hiro-operators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-operators]`) and assigned dynamically at spawn time via `SysProcAttr.Credential.Groups`.
 
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 
@@ -262,18 +262,18 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 - **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
 - **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills, + management tools if declared in allowed_tools)
 
-## Coordinator Agent
+## Operator Agent
 
-The coordinator (`agents/coordinator/agent.md`) is the top-level agent, started as a persistent instance at bootstrap.
+The operator (`agents/operator/agent.md`) is the top-level agent, started as a persistent instance at bootstrap.
 
 **Bootstrap flow** (`cmd/hiro/main.go`):
 1. Load `config/config.yaml` — if no provider is configured, the server starts in setup mode (dashboard shows onboarding)
 2. Once configured, create `Manager` with provider from config
 3. `RestoreInstances()` — resume any persistent agents from prior runs
-4. `InstanceByAgentName("coordinator")` — check if already running (from restore)
-5. If not running, `CreateInstance(ctx, "coordinator", "", "persistent")` — no parent, persistent mode, becomes root
+4. `InstanceByAgentName("operator")` — check if already running (from restore)
+5. If not running, `CreateInstance(ctx, "operator", "", "persistent")` — no parent, persistent mode, becomes root
 
-The coordinator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) in its `allowed_tools` frontmatter and `groups: [hiro-coordinators]` for write access to `agents/` and `skills/`. All agents get `SpawnInstance`.
+The operator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) in its `allowed_tools` frontmatter and `groups: [hiro-operators]` for write access to `agents/` and `skills/`. All agents get `SpawnInstance`.
 
 ## Control Plane
 
@@ -319,7 +319,7 @@ Similarly, skills can be added by writing `.md` files to an agent's `skills/` di
 
 ## Conversation Modes
 
-- **Coordinator and persistent agents** use the unified platform database (`db/hiro.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
+- **Operator and persistent agents** use the unified platform database (`db/hiro.db`) — messages are stored in SQLite, automatically compacted via LLM summarization (async, per-instance locking), and assembled within a token budget. The `internal/inference` package handles assembly and compaction.
 - **Ephemeral agents** keep messages in-memory only (discarded on stop).
 - **WebSocket chat** sends messages to the root instance's inference loop. Streaming events flow directly from the control plane to the WebSocket (no gRPC relay).
 
@@ -348,4 +348,4 @@ The `docs/` directory contains design documents for key subsystems. **Keep these
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker (`Dockerfile.testing`). `make test-local` runs locally with mock workers.
-- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Agents with `groups: [hiro-coordinators]` in frontmatter get the supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).
+- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Agents with `groups: [hiro-operators]` in frontmatter get the supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).

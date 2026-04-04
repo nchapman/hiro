@@ -59,7 +59,7 @@ An instance runs in one of three modes, specified at creation time:
 |------|----------|
 | **Ephemeral** | Single task, then auto-deleted. Instance and session collapse into one thing. No durable state. |
 | **Persistent** | Long-lived. Survives restarts. Has memory, identity, and session history. |
-| **Coordinator** | Superset of persistent. Can spawn and manage child instances. Has write access to agent definitions and skills. |
+| **Operator** | Superset of persistent. Can spawn and manage child instances. Has write access to agent definitions and skills. |
 
 ### Instance Lifecycle
 
@@ -68,7 +68,7 @@ An instance runs in one of three modes, specified at creation time:
 3. **Stopped** — worker killed, state preserved on disk and in DB. Can be resumed.
 4. **Deleted** — all state removed (instance directory + all DB records). Cannot be undone.
 
-Persistent and coordinator instances survive server restarts. On boot, they are restored from the database and their workers are respawned.
+Persistent and operator instances survive server restarts. On boot, they are restored from the database and their workers are respawned.
 
 ## Sessions
 
@@ -141,10 +141,10 @@ For ephemeral agents, the instance and session are the same thing. There is no d
 
 ## Parent-Child Relationships
 
-Instances form a tree. The coordinator is the root. When a coordinator spawns a child, the parent-child relationship is tracked at the **instance level**. Coordinator tools (SendMessage, StopInstance, etc.) are scoped to descendants — an instance cannot manage siblings or ancestors.
+Instances form a tree. The operator is the root. When a operator spawns a child, the parent-child relationship is tracked at the **instance level**. Operator tools (SendMessage, StopInstance, etc.) are scoped to descendants — an instance cannot manage siblings or ancestors.
 
 ```
-coordinator (coordinator mode)
+operator (operator mode)
 ├── researcher-1 (persistent)
 │   ├── session: "analyze dataset"       (ended)
 │   ├── session: "follow-up questions"   (active, web)

@@ -161,32 +161,32 @@ func newClusterGRPCServer(tlsCert tls.Certificate) *grpc.Server {
 	)
 }
 
-// bootstrapCoordinator ensures the coordinator agent is running. It handles
+// bootstrapOperator ensures the operator agent is running. It handles
 // three cases: already running (no-op), stopped (restart), or missing (create).
-// Returns the leader instance ID (empty if no coordinator is defined).
-func bootstrapCoordinator(ctx context.Context, mgr *agent.Manager, logger *slog.Logger) (string, error) {
-	leaderID, alreadyRunning := mgr.InstanceByAgentName("coordinator")
+// Returns the leader instance ID (empty if no operator is defined).
+func bootstrapOperator(ctx context.Context, mgr *agent.Manager, logger *slog.Logger) (string, error) {
+	leaderID, alreadyRunning := mgr.InstanceByAgentName("operator")
 	if alreadyRunning {
 		return leaderID, nil
 	}
 
 	if leaderID != "" {
-		// Stopped coordinator found — restart it.
+		// Stopped operator found — restart it.
 		if err := mgr.StartInstance(ctx, leaderID); err != nil {
 			if os.IsNotExist(err) {
-				logger.Warn("coordinator agent definition missing, skipping restart")
+				logger.Warn("operator agent definition missing, skipping restart")
 				return "", nil
 			}
-			return "", fmt.Errorf("restarting coordinator: %w", err)
+			return "", fmt.Errorf("restarting operator: %w", err)
 		}
 		return leaderID, nil
 	}
 
-	// No coordinator at all — create one.
-	leaderID, err := mgr.CreateInstance(ctx, "coordinator", "", "persistent", "", "Hiro", "", "")
+	// No operator at all — create one.
+	leaderID, err := mgr.CreateInstance(ctx, "operator", "", "persistent", "", "Hiro", "", "")
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Info("no coordinator agent defined, skipping")
+			logger.Info("no operator agent defined, skipping")
 			return "", nil
 		}
 		return "", fmt.Errorf("starting leader agent: %w", err)

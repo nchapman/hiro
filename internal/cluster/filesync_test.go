@@ -20,7 +20,7 @@ func TestShouldIgnore(t *testing.T) {
 		ignore bool
 	}{
 		{"workspace/project/main.go", false},
-		{"agents/coordinator/agent.md", false},
+		{"agents/operator/agent.md", false},
 		{".git/objects/abc123", true},
 		{"workspace/project/.git/HEAD", true},
 		{"workspace/project/node_modules/pkg/index.js", true},

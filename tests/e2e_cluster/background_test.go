@@ -13,7 +13,7 @@ import (
 // TestCluster_RemoteBackgroundTaskNotification verifies that background
 // task completion notifications flow from a remote worker node back
 // through the cluster stream to the control plane, triggering a
-// meta inference turn on the coordinator.
+// meta inference turn on the operator.
 func TestCluster_RemoteBackgroundTaskNotification(t *testing.T) {
 	// Write agent definition with bash + task tools.
 	agentMD := `---
@@ -35,7 +35,7 @@ When you receive a task-notification about a completed background task, report t
 
 	marker := fmt.Sprintf("cluster-bg-%d", time.Now().UnixNano())
 
-	// Ask coordinator to spawn a persistent agent on the worker node,
+	// Ask operator to spawn a persistent agent on the worker node,
 	// run a background command, and report back.
 	prompt := fmt.Sprintf(`Do these steps:
 1. Use ListNodes to find a non-home worker node
@@ -45,10 +45,10 @@ When you receive a task-notification about a completed background task, report t
 3. Tell me the result.`, marker)
 
 	resp := cs.chat(ctx, prompt)
-	t.Logf("coordinator response: %s", resp)
+	t.Logf("operator response: %s", resp)
 
 	if resp == "" {
-		t.Fatal("empty response from coordinator")
+		t.Fatal("empty response from operator")
 	}
 
 	// The response should mention the background task was started.
