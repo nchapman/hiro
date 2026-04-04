@@ -595,7 +595,7 @@ func (m *Manager) registerAndStartInstance(ctx context.Context, inst *instance) 
 	m.mu.Unlock()
 
 	// Start death-watcher goroutine for unexpected process exits.
-	go m.watchWorker(instanceID, inst.handle.Done)
+	go m.watchWorker(instanceID, inst.handle)
 
 	// Start background job completion watcher to push notifications
 	// when background bash tasks finish on this worker.

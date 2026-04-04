@@ -124,8 +124,11 @@ func (m *Manager) reregisterStopped(id string, inst *instance) {
 }
 
 // watchWorker monitors a worker's Done channel and handles unexpected exits.
-func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
-	<-done
+// The handle parameter identifies which worker generation this goroutine is
+// watching — if NewSession has replaced it by the time we acquire the lock,
+// this exit is stale and should be ignored.
+func (m *Manager) watchWorker(instanceID string, handle *WorkerHandle) {
+	<-handle.Done
 
 	m.mu.RLock()
 	inst, ok := m.instances[instanceID]
@@ -139,10 +142,11 @@ func (m *Manager) watchWorker(instanceID string, done <-chan struct{}) {
 	}
 
 	// Check under inst.mu (which guards handle and status) whether this
-	// exit was intentional. NewSession nils the handle before killing the
-	// old worker; softStop sets status to stopped.
+	// exit was intentional. NewSession replaces the handle before killing the
+	// old worker; softStop sets status to stopped. Comparing handles detects
+	// the case where NewSession completes before this goroutine acquires the lock.
 	inst.mu.Lock()
-	stale := inst.info.Status == InstanceStatusStopped || inst.handle == nil
+	stale := inst.info.Status == InstanceStatusStopped || inst.handle != handle
 	inst.mu.Unlock()
 	if stale {
 		return

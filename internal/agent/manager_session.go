@@ -194,7 +194,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	inst.handle = handle
 	inst.loop = loop
 
-	go m.watchWorker(instanceID, handle.Done)
+	go m.watchWorker(instanceID, handle)
 	go m.watchJobCompletions(m.ctx, handle.Worker, inst.notifications)
 
 	m.logger.Info("new session created",
