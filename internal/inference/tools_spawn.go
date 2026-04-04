@@ -253,7 +253,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 					displayLabel = input.Agent
 				}
 				return fantasy.NewTextResponse(
-					fmt.Sprintf("Instance %q created from %q with ID: %s (mode: %s). Use SendMessage to communicate with it.", displayLabel, input.Agent, id, mode)), nil
+					fmt.Sprintf("Instance %q created from %q with ID: %s (mode: %s).", displayLabel, input.Agent, id, mode)), nil
 			},
 		),
 	}
