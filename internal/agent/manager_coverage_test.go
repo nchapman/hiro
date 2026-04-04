@@ -171,7 +171,7 @@ func TestInstanceNotifications_Found(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestActiveSessionID(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestInstanceBySession(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestGetHistory_Ephemeral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load agent dir: %v", err)
 	}
-	id, _ := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "")
+	id, _ := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "", "")
 
 	msgs, err := mgr.GetHistory(t.Context(), id, 10)
 	if err != nil {
@@ -295,7 +295,7 @@ func TestGetHistory_NoPDB(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestGetHistory_WithPDB(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestGetHistory_WithMessages(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestGetSessionHistory(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -411,11 +411,11 @@ func TestInstanceByAgentName_PrefersRunning(t *testing.T) {
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	// Create two instances with the same agent name.
-	id1, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id1, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create instance 1: %v", err)
 	}
-	id2, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id2, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create instance 2: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestInstanceByAgentName_ReturnsStopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestUpdateInstanceConfig_Stopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestUpdateInstanceConfig_NoLoop(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestUpdateInstanceConfig_NoLoopWithEffort(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestStartInstance_NotStopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestSendMetaMessage_Stopped(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -570,7 +570,7 @@ func TestSendMetaMessage_NoLoop(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestSeedInstanceFiles_PersistentWithDisplayNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "My Agent", "A helpful agent"); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "My Agent", "A helpful agent", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -612,6 +612,29 @@ func TestSeedInstanceFiles_PersistentWithDisplayNames(t *testing.T) {
 	}
 }
 
+func TestSeedInstanceFiles_PersistentWithPersonaBody(t *testing.T) {
+	dir := t.TempDir()
+	instDir := filepath.Join(dir, "inst")
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "Backend Lead", "Owns API rewrite", "You focus on Go and PostgreSQL."); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pd, err := config.ReadPersonaFile(instDir)
+	if err != nil {
+		t.Fatalf("reading persona: %v", err)
+	}
+	if pd.Name != "Backend Lead" {
+		t.Errorf("persona name = %q, want %q", pd.Name, "Backend Lead")
+	}
+	if pd.Body != "You focus on Go and PostgreSQL." {
+		t.Errorf("persona body = %q, want %q", pd.Body, "You focus on Go and PostgreSQL.")
+	}
+}
+
 func TestSeedInstanceFiles_EphemeralEmptyPersona(t *testing.T) {
 	dir := t.TempDir()
 	instDir := filepath.Join(dir, "inst")
@@ -619,7 +642,7 @@ func TestSeedInstanceFiles_EphemeralEmptyPersona(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModeEphemeral, "", ""); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModeEphemeral, "", "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -641,7 +664,7 @@ func TestSeedInstanceFiles_PersistentNoDisplayName(t *testing.T) {
 	}
 
 	// Persistent but no display name/desc — should create empty persona.md.
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "", ""); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "", "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -766,7 +789,7 @@ func TestEnrichPersonaNames(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "Custom Name", "Custom Desc")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "Custom Name", "Custom Desc", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1116,7 +1139,7 @@ func TestSetInstanceStatus_WithPDB(t *testing.T) {
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1137,7 +1160,7 @@ func TestSetInstanceStatus_WithPDB(t *testing.T) {
 
 func TestPrepareInstanceDirs_NewInstance(t *testing.T) {
 	mgr, dir := setupTestManager(t)
-	instDir, sessDir, dirIsNew, err := mgr.prepareInstanceDirs("new-inst-id", "new-sess-id", config.ModePersistent, "", "")
+	instDir, sessDir, dirIsNew, err := mgr.prepareInstanceDirs("new-inst-id", "new-sess-id", config.ModePersistent, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1169,7 +1192,7 @@ func TestPrepareInstanceDirs_ExistingInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, dirIsNew, err := mgr.prepareInstanceDirs("existing-inst", "new-sess", config.ModePersistent, "", "")
+	_, _, dirIsNew, err := mgr.prepareInstanceDirs("existing-inst", "new-sess", config.ModePersistent, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1263,7 +1286,7 @@ func TestCreateInstance_InvalidName(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 	tests := []string{"", "../escape", "has space", "special!"}
 	for _, name := range tests {
-		_, err := mgr.CreateInstance(t.Context(), name, "", "persistent", "", "", "")
+		_, err := mgr.CreateInstance(t.Context(), name, "", "persistent", "", "", "", "")
 		if err == nil {
 			t.Errorf("expected error for name %q", name)
 		}
@@ -1298,7 +1321,7 @@ func TestPushConfigUpdateAll_WithInstances(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1343,7 +1366,7 @@ func TestNewSession_StoppedInstance(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1369,11 +1392,11 @@ func TestShutdown_MixedStoppedAndRunning(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id1, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id1, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create instance 1: %v", err)
 	}
-	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create instance 2: %v", err)
 	}
@@ -1401,8 +1424,8 @@ model: fake-model
 ---
 Child.`)
 
-	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent", "", "", "")
-	childID, _ := mgr.CreateInstance(t.Context(), "child", parentID, "persistent", "", "", "")
+	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent", "", "", "", "")
+	childID, _ := mgr.CreateInstance(t.Context(), "child", parentID, "persistent", "", "", "", "")
 
 	// Stop the child first, then delete parent.
 	mgr.StopInstance(childID)
@@ -1547,7 +1570,7 @@ func TestStopInstance_DoubleStopReturnsInfo(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1581,7 +1604,7 @@ func TestUnregisterLocked_NoParent(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1646,9 +1669,9 @@ model: fake-model
 Agent.`)
 
 	// Create a chain: root -> child -> grandchild
-	rootID, _ := mgr.CreateInstance(t.Context(), "agent", "", "persistent", "", "", "")
-	childID, _ := mgr.CreateInstance(t.Context(), "agent", rootID, "persistent", "", "", "")
-	grandchildID, _ := mgr.CreateInstance(t.Context(), "agent", childID, "persistent", "", "", "")
+	rootID, _ := mgr.CreateInstance(t.Context(), "agent", "", "persistent", "", "", "", "")
+	childID, _ := mgr.CreateInstance(t.Context(), "agent", rootID, "persistent", "", "", "", "")
+	grandchildID, _ := mgr.CreateInstance(t.Context(), "agent", childID, "persistent", "", "", "", "")
 
 	descendants := mgr.collectDescendants(rootID)
 	if len(descendants) != 3 {
@@ -1680,7 +1703,7 @@ func TestStartInstance_ResumesLatestSession(t *testing.T) {
 	ctx := t.Context()
 	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1715,7 +1738,7 @@ func TestRestore_ResumesExistingSession(t *testing.T) {
 	ctx := t.Context()
 
 	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
-	id, _ := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "")
+	id, _ := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	sessID := mgr1.ActiveSessionID(id)
 	mgr1.Shutdown()
 
@@ -1740,7 +1763,7 @@ func TestGetHistory_FiltersByRole(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1782,7 +1805,7 @@ func TestGetHistory_MetaMessages(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1812,7 +1835,7 @@ func TestDeleteInstance_WithPDB(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "")
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

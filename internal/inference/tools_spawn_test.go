@@ -41,7 +41,7 @@ func (f *fakeHostManager) SpawnEphemeral(_ context.Context, agentName, prompt, _
 	return f.spawnResult, f.spawnErr
 }
 
-func (f *fakeHostManager) CreateInstance(_ context.Context, name, _, mode string, _ ipc.NodeID, _, _ string) (string, error) {
+func (f *fakeHostManager) CreateInstance(_ context.Context, name, _, mode string, _ ipc.NodeID, _, _, _ string) (string, error) {
 	f.mu.Lock()
 	f.lastCreateAgent = name
 	f.lastCreateMode = mode

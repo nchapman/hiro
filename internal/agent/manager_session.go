@@ -123,7 +123,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	if sessionID == "" {
 		sessionID = uuid.Must(uuid.NewV7()).String()
 	}
-	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID, "", ""); err != nil {
+	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID, "", "", ""); err != nil {
 		// Re-register as stopped so the instance remains visible.
 		m.reregisterStopped(instanceID, inst)
 		return err

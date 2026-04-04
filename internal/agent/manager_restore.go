@@ -146,7 +146,7 @@ func (m *Manager) restoreRunningInstance(ctx context.Context, e restoreEntry) bo
 
 	// Pass empty display name/desc — startInstance reads persona.md for existing instances.
 	// Use the persisted node_id so instances restart on their original node.
-	_, err := m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "")
+	_, err := m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "", "")
 	if err != nil {
 		m.logger.Warn("failed to restore instance",
 			"id", e.dbInst.ID, "agent", e.dbInst.AgentName, "error", err)

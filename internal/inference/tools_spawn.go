@@ -228,6 +228,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 				Agent       string `json:"agent"       description:"Agent definition name (directory under agents/)."`
 				Name        string `json:"name"        description:"Display name for this instance. Defaults to the agent definition name."`
 				Description string `json:"description" description:"Display description for this instance. Defaults to the agent definition description."`
+				Persona     string `json:"persona"     description:"Initial persona instructions for this instance. Specializes the agent for a specific role, project, or personality. Injected into the system prompt under ## Persona."`
 				Node        string `json:"node"        description:"Target node name. Omit for local."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				if input.Agent == "" {
@@ -242,7 +243,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 
 				logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode, "name", input.Name)
 
-				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID, input.Name, input.Description)
+				id, err := mgr.CreateInstance(ctx, input.Agent, callerID, mode, nodeID, input.Name, input.Description, input.Persona)
 				if err != nil {
 					logger.Warn("CreatePersistentInstance failed", "agent", input.Agent, "mode", mode, "error", err)
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create instance: %v", err)), nil

@@ -31,7 +31,7 @@ import (
 // be one of "persistent" or "ephemeral".
 // displayName and displayDesc override the agent definition name/description
 // in persona.md frontmatter (pass "" to use defaults).
-func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID ipc.NodeID, displayName, displayDesc string) (string, error) {
+func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mode string, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) {
 	if err := validateAgentName(name); err != nil {
 		return "", err
 	}
@@ -52,7 +52,7 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("creating instance", "instance_id", instanceID, "agent", name, "mode", mode)
-	id, err2 := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID, displayName, displayDesc)
+	id, err2 := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID, displayName, displayDesc, personaBody)
 	if err2 != nil {
 		m.logger.Error("instance creation failed", "instance_id", instanceID, "agent", name, "error", err2)
 	}
@@ -126,7 +126,7 @@ func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentI
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("spawning ephemeral", "instance_id", instanceID, "agent", agentName)
-	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID, "", "")
+	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID, "", "", "")
 	if err != nil {
 		return "", err
 	}
@@ -257,9 +257,9 @@ func (m *Manager) Shutdown() {
 }
 
 // seedInstanceFiles creates persona.md and memory.md in a new instance directory.
-func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displayDesc string) error {
-	if mode.IsPersistent() && (displayName != "" || displayDesc != "") {
-		if err := config.WritePersonaFile(instDir, displayName, displayDesc, ""); err != nil {
+func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displayDesc, personaBody string) error {
+	if mode.IsPersistent() && (displayName != "" || displayDesc != "" || personaBody != "") {
+		if err := config.WritePersonaFile(instDir, displayName, displayDesc, personaBody); err != nil {
 			return fmt.Errorf("creating persona.md: %w", err)
 		}
 	} else {
@@ -403,7 +403,7 @@ func (m *Manager) spawnWorker(ctx context.Context, cfg config.AgentConfig, nodeI
 // prepareInstanceDirs creates instance and session directories, seeding state files
 // for new instances. Returns the instance dir, session dir, and whether the instance
 // dir was newly created.
-func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.AgentMode, displayName, displayDesc string) (instDir, sessDir string, dirIsNew bool, err error) {
+func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.AgentMode, displayName, displayDesc, personaBody string) (instDir, sessDir string, dirIsNew bool, err error) {
 	instDir = m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
 	dirIsNew = os.IsNotExist(statErr)
@@ -411,7 +411,7 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 		return "", "", false, fmt.Errorf("creating instance dir: %w", err)
 	}
 	if dirIsNew {
-		if err := seedInstanceFiles(instDir, mode, displayName, displayDesc); err != nil {
+		if err := seedInstanceFiles(instDir, mode, displayName, displayDesc, personaBody); err != nil {
 			return "", "", false, err
 		}
 	}
@@ -422,8 +422,8 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 	return instDir, sessDir, dirIsNew, nil
 }
 
-func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc string) (string, error) {
-	instDir, sessDir, dirIsNew, err := m.prepareInstanceDirs(instanceID, sessionID, mode, displayName, displayDesc)
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) {
+	instDir, sessDir, dirIsNew, err := m.prepareInstanceDirs(instanceID, sessionID, mode, displayName, displayDesc, personaBody)
 	if err != nil {
 		return "", err
 	}
