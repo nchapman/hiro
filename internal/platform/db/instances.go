@@ -34,6 +34,8 @@ type Instance struct {
 
 // CreateInstance inserts a new instance.
 func (d *DB) CreateInstance(ctx context.Context, inst Instance) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	var parentID *string
 	if inst.ParentID != "" {
 		parentID = &inst.ParentID
@@ -115,6 +117,8 @@ func (d *DB) ListChildInstances(ctx context.Context, parentID string) ([]Instanc
 // UpdateInstanceStatus sets the instance status. If status is "stopped",
 // stopped_at is set to now.
 func (d *DB) UpdateInstanceStatus(ctx context.Context, id, status string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	var stoppedAt *string
 	if status == statusStopped {
 		now := time.Now().UTC().Format(sqliteTimeFormat)
@@ -139,6 +143,8 @@ func (d *DB) UpdateInstanceStatus(ctx context.Context, id, status string) error 
 
 // DeleteInstance removes an instance and all its data (cascades to sessions).
 func (d *DB) DeleteInstance(ctx context.Context, id string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	result, err := d.db.ExecContext(ctx, "DELETE FROM instances WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("deleting instance: %w", err)
@@ -184,6 +190,8 @@ func (d *DB) UpdateInstanceConfig(ctx context.Context, instanceID string, cfg In
 	if err != nil {
 		return fmt.Errorf("marshaling instance config: %w", err)
 	}
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	result, err := d.db.ExecContext(ctx, "UPDATE instances SET config = ? WHERE id = ?", string(raw), instanceID)
 	if err != nil {
 		return fmt.Errorf("updating instance config: %w", err)

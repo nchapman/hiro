@@ -49,6 +49,8 @@ type Session struct {
 
 // CreateSession inserts a new session.
 func (d *DB) CreateSession(ctx context.Context, s Session) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	var parentID *string
 	if s.ParentID != "" {
 		parentID = &s.ParentID
@@ -176,6 +178,8 @@ func (d *DB) LatestSessionByInstance(ctx context.Context, instanceID string) (Se
 // UpdateSessionStatus sets the session status. If status is "stopped",
 // stopped_at is set to now.
 func (d *DB) UpdateSessionStatus(ctx context.Context, id, status string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	var stoppedAt *string
 	if status == statusStopped {
 		now := time.Now().UTC().Format(sqliteTimeFormat)
@@ -200,6 +204,8 @@ func (d *DB) UpdateSessionStatus(ctx context.Context, id, status string) error {
 
 // DeleteSession removes a session and all its data (cascades).
 func (d *DB) DeleteSession(ctx context.Context, id string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	result, err := d.db.ExecContext(ctx, "DELETE FROM sessions WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("deleting session: %w", err)

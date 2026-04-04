@@ -57,6 +57,8 @@ func (d *DB) RecordTurnUsage(ctx context.Context, events []UsageEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning turn usage tx: %w", err)

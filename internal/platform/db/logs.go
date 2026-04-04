@@ -34,6 +34,8 @@ func (d *DB) InsertLogs(ctx context.Context, entries []LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning log insert tx: %w", err)
@@ -165,6 +167,8 @@ func scanLogRows(rows *sql.Rows) ([]LogEntry, error) {
 
 // PruneLogs deletes log entries older than maxAge and returns the count deleted.
 func (d *DB) PruneLogs(ctx context.Context, maxAge time.Duration) (int64, error) {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	cutoff := time.Now().UTC().Add(-maxAge).Format("2006-01-02T15:04:05.000Z")
 	result, err := d.db.ExecContext(ctx, "DELETE FROM logs WHERE created_at < ?", cutoff)
 	if err != nil {

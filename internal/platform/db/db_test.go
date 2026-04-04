@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -588,5 +590,111 @@ func TestDeleteSession_Cascades(t *testing.T) {
 	d.db.QueryRow(`SELECT COUNT(*) FROM request_log WHERE session_id = ?`, "s1").Scan(&logCount)
 	if logCount != 0 {
 		t.Errorf("expected 0 log entries after delete, got %d", logCount)
+	}
+}
+
+// TestConcurrentWrites hammers multiple write methods from parallel goroutines
+// to verify no SQLITE_BUSY errors occur. This reproduces the production scenario
+// where multiple agent instances persist messages, record usage, and insert logs
+// concurrently against the same database.
+func TestConcurrentWrites(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	const (
+		numSessions     = 4  // simulate 4 concurrent agent instances
+		msgsPerSession  = 20 // messages per session (user + assistant pairs)
+		usagePerSession = 10
+		logBatches      = 10
+	)
+
+	// Set up instances and sessions.
+	for i := range numSessions {
+		instID := fmt.Sprintf("inst-%d", i)
+		sessID := fmt.Sprintf("sess-%d", i)
+		if err := d.CreateInstance(ctx, Instance{ID: instID, AgentName: "test", Mode: "persistent"}); err != nil {
+			t.Fatalf("CreateInstance %s: %v", instID, err)
+		}
+		if err := d.CreateSession(ctx, Session{ID: sessID, InstanceID: instID, AgentName: "test", Mode: "persistent"}); err != nil {
+			t.Fatalf("CreateSession %s: %v", sessID, err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, numSessions*3+logBatches)
+
+	// Goroutine per session: append messages (simulates persistTurn).
+	for i := range numSessions {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sessID := fmt.Sprintf("sess-%d", i)
+			for j := range msgsPerSession {
+				role := "user"
+				if j%2 == 1 {
+					role = "assistant"
+				}
+				content := fmt.Sprintf("message %d from session %d", j, i)
+				if _, err := d.AppendMessage(ctx, sessID, role, content, "{}", 10); err != nil {
+					errs <- fmt.Errorf("AppendMessage sess=%s msg=%d: %w", sessID, j, err)
+					return
+				}
+			}
+		}()
+	}
+
+	// Goroutine per session: record usage (simulates recordUsage).
+	for i := range numSessions {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sessID := fmt.Sprintf("sess-%d", i)
+			for j := range usagePerSession {
+				events := []UsageEvent{{
+					SessionID:   sessID,
+					Model:       "test-model",
+					Provider:    "test-provider",
+					InputTokens: int64(100 * (j + 1)),
+				}}
+				if err := d.RecordTurnUsage(ctx, events); err != nil {
+					errs <- fmt.Errorf("RecordTurnUsage sess=%s turn=%d: %w", sessID, j, err)
+					return
+				}
+			}
+		}()
+	}
+
+	// Goroutine: insert log batches (simulates loghandler flushing).
+	for i := range logBatches {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			entries := []LogEntry{{
+				Level:   "info",
+				Message: fmt.Sprintf("test log batch %d", i),
+			}}
+			if err := d.InsertLogs(ctx, entries); err != nil {
+				errs <- fmt.Errorf("InsertLogs batch=%d: %w", i, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
+
+	// Verify all messages were persisted — none dropped.
+	for i := range numSessions {
+		sessID := fmt.Sprintf("sess-%d", i)
+		msgs, err := d.RecentMessages(ctx, sessID, msgsPerSession+1)
+		if err != nil {
+			t.Fatalf("RecentMessages %s: %v", sessID, err)
+		}
+		if len(msgs) != msgsPerSession {
+			t.Errorf("session %s: got %d messages, want %d", sessID, len(msgs), msgsPerSession)
+		}
 	}
 }

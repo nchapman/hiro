@@ -39,7 +39,7 @@ func TestInit_EmptyPlatform(t *testing.T) {
 	}
 
 	// Verify operator skills were seeded
-	skillFiles := []string{"create-agent.md", "create-skill.md", "delegate.md"}
+	skillFiles := []string{"create-agent.md", "create-skill.md"}
 	for _, f := range skillFiles {
 		path := filepath.Join(dir, "agents", "operator", "skills", f)
 		data, err := os.ReadFile(path)

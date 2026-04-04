@@ -20,6 +20,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/nchapman/hiro/internal/platform/fsperm"
 	_ "modernc.org/sqlite" // SQLite driver
@@ -37,7 +38,8 @@ const (
 
 // DB wraps a SQLite database connection for the platform.
 type DB struct {
-	db *sql.DB
+	db      *sql.DB
+	writeMu sync.Mutex // serializes all write operations (transactions and single statements) to prevent SQLITE_BUSY deadlocks
 }
 
 // Open opens (or creates) the platform database at the given path
@@ -51,14 +53,18 @@ func Open(path string) (*DB, error) {
 
 	// Use _pragma DSN parameters so every pooled connection gets the same
 	// pragmas automatically. This allows multiple concurrent readers in WAL
-	// mode while a single writer holds busy_timeout for lock contention.
+	// mode while writes are serialized via writeMu.
 	dsn := (&url.URL{
 		Path: path,
 		RawQuery: url.Values{
 			"_pragma": {
-				"journal_mode(WAL)",   // persists in DB header; idempotent per connection
-				"foreign_keys(1)",     // connection-scoped; must be set per connection
-				"busy_timeout(10000)", // connection-scoped; must be set per connection
+				"journal_mode(WAL)",    // persists in DB header; idempotent per connection
+				"synchronous(NORMAL)",  // safe in WAL mode; avoids fsync per commit (2-5x faster writes)
+				"foreign_keys(1)",      // connection-scoped; must be set per connection
+				"busy_timeout(5000)",   // safety net for read-vs-checkpoint contention; writes serialized by writeMu
+				"cache_size(-16000)",   // 16MB page cache (default 2MB); improves FTS and JOIN-heavy reads
+				"mmap_size(268435456)", // 256MB memory-mapped I/O for faster reads via OS page cache
+				"temp_store(MEMORY)",   // keep temp tables and sort spills in memory
 			},
 		}.Encode(),
 	}).String()

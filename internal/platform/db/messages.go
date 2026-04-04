@@ -75,6 +75,8 @@ type SearchResult struct {
 // AppendMessage stores a new message and adds it to the context items.
 // If meta is true, the message is visible to the model but hidden from the user's transcript.
 func (d *DB) AppendMessage(ctx context.Context, sessionID, role, content, rawJSON string, tokens int, meta ...bool) (int64, error) {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	isMeta := len(meta) > 0 && meta[0]
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -131,6 +133,8 @@ func (d *DB) AppendMessage(ctx context.Context, sessionID, role, content, rawJSO
 // UpdateMessageTimestamp sets the created_at timestamp for a message.
 // Used by tests that ingest historical data with known timestamps.
 func (d *DB) UpdateMessageTimestamp(ctx context.Context, id int64, t time.Time) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	_, err := d.db.ExecContext(ctx, "UPDATE messages SET created_at = ? WHERE id = ?",
 		t.Format(sqliteTimeFormat), id)
 	return err
@@ -203,6 +207,8 @@ func (d *DB) RecentMessages(ctx context.Context, sessionID string, limit int) ([
 
 // CreateSummary inserts a new summary record.
 func (d *DB) CreateSummary(ctx context.Context, sum Summary) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO summaries (id, session_id, kind, depth, content, tokens, earliest_at, latest_at, source_tokens, model)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -215,6 +221,8 @@ func (d *DB) CreateSummary(ctx context.Context, sum Summary) error {
 
 // LinkSummaryMessages links a leaf summary to its source messages.
 func (d *DB) LinkSummaryMessages(ctx context.Context, summaryID string, messageIDs []int64) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -233,6 +241,8 @@ func (d *DB) LinkSummaryMessages(ctx context.Context, summaryID string, messageI
 
 // LinkSummaryParents links a condensed summary to its child summaries.
 func (d *DB) LinkSummaryParents(ctx context.Context, parentID string, childIDs []string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -343,6 +353,8 @@ func (d *DB) GetContextItems(ctx context.Context, sessionID string) ([]ContextIt
 // ReplaceContextItems replaces a range of context items (inclusive) with a
 // single summary item. Used after compaction.
 func (d *DB) ReplaceContextItems(ctx context.Context, sessionID string, startOrd, endOrd int, summaryID string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
