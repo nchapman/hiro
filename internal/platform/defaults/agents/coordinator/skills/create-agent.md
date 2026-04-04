@@ -7,56 +7,61 @@ You can create new agents at runtime. An agent is a directory under `agents/` wi
 
 ## Steps
 
-1. Choose a short, descriptive kebab-case name for the agent (e.g. `code-reviewer`, `data-fetcher`).
-2. Create the agent definition directory and required file:
-   - `agents/<name>/agent.md` — **required**. Contains YAML frontmatter and a markdown body.
-3. Optionally create skills:
-   - `agents/<name>/skills/<skill-name>.md` — flat skill file (requires frontmatter with `name` and `description`)
-   - `agents/<name>/skills/<skill-name>/SKILL.md` — directory skill with optional `scripts/`, `references/`, `assets/` subdirs
+1. Choose a short, descriptive kebab-case name (e.g. `code-reviewer`, `data-analyst`).
+2. Create `agents/<name>/agent.md` with frontmatter and a markdown body.
+3. Optionally create skills in `agents/<name>/skills/` (use the `create-skill` skill for format details).
 
 ## agent.md format
 
 ```markdown
 ---
 name: <agent-name>
-description: One-line description of what this agent does.
+description: <what this agent does and when to use it>
 allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop]
 ---
 
-The markdown body is the agent's system prompt — its core operating instructions.
-Write this as direct instructions to the agent about what it is and how it should behave.
+System prompt — direct instructions to the agent about what it is and how it should behave.
 ```
 
 ### Frontmatter fields
 
-| Field | Required | Default | Values |
-|-------|----------|---------|--------|
-| `name` | yes | — | Must match the directory name |
-| `description` | no | — | Short description shown in `ListInstances` |
-| `tools` | no | *(none)* | List of built-in tools the agent can use |
+| Field | Required | Notes |
+|-------|----------|-------|
+| `name` | yes | Kebab-case. Must match the directory name. |
+| `description` | yes | Shown in agent listings. Tells the parent agent when to use this agent and what context to provide. |
+| `allowed_tools` | no | Built-in and management tools. No declaration = no tools. Management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`) go here too. |
+| `groups` | no | Unix groups for filesystem access. `[hiro-coordinators]` grants write to `agents/` and `skills/`. |
 
-### Mode guidance
+### Writing good descriptions
 
-- **persistent**: The agent keeps persona, memory, todos, and conversation history across interactions. Use for agents that build up context over time or need to be long-running.
-- **coordinator**: A superset of persistent — also gets agent management tools (`ResumeInstance`, `StopInstance`, `SendMessage`, `ListInstances`) and write access to `agents/` and `skills/` directories. Use for agents that need to manage other agents.
-- **ephemeral**: The agent runs a single task and is cleaned up. Use for stateless, one-shot tasks. `SpawnInstance` always forces ephemeral mode regardless of the config.
+The description is the most important field — it's what parent agents read to decide when to spawn this agent and how to prompt it. A good description:
 
-## Instance-level files
+- States the agent's role clearly (what it does)
+- Tells the caller when to use it vs other agents
+- Says what context to provide in the prompt
 
-These files live in the instance directory, not the agent definition. The agent manages them at runtime:
+Examples:
+- `Default all-around agent with full file and shell access. Use for one-off tasks (ephemeral) or as a long-running collaborator (persistent). When in doubt, use this agent.`
+- `Read-only reviewer for evaluating completed work. Cannot modify files. Provide the content to review and the goal or intent behind it.`
+- `Subject matter expert for problems requiring domain-specific expertise in any field. Specify the domain, provide the context, and describe what you need (planning, review, or implementation).`
 
-- **`persona.md`** — who this instance is. Identity, tone, behavioral traits. Read and update using `Read` and `Edit`. Appears in the system prompt under `## Persona`.
-- **`memory.md`** — what this instance knows. Facts, context, decisions. Read and update using `Read` and `Edit`. Appears in the system prompt under `## Memories`.
+### Writing good system prompts
+
+- Keep it short. The parent agent's prompt shapes the agent's behavior for each task — the system prompt just sets the baseline.
+- Be direct. Write instructions, not descriptions. "You review completed work" not "This agent is designed to review completed work."
+- Don't over-specify. A few high-value behavioral guidelines beat a wall of rules.
+- Don't repeat what the description says. The description is for the caller; the system prompt is for the agent.
+
+## Agent modes
+
+Mode is a **runtime property** set by the caller, not the agent definition. The same agent can run in different modes:
+
+- **ephemeral**: Runs a single task and is cleaned up. Default for `SpawnInstance`.
+- **persistent**: Keeps persona, memory, todos, and conversation history across interactions. Created via `CreatePersistentInstance`.
 
 ## After creating an agent
 
-- Use `SpawnInstance` with `mode: "persistent"` to launch it as a persistent instance, or with the default ephemeral mode to run it with a one-shot prompt.
-- The agent definition is loaded fresh from disk each time, so edits to the markdown files take effect on the next start/spawn.
-- You can verify the files look correct with `Read` before starting the agent.
-
-## Guidelines
-
-- Write clear, focused system prompts. An agent should have a well-defined purpose.
-- Keep agent prompts concise — avoid walls of text. Trust the agent to be capable.
-- If an agent needs to create or manage its own sub-agents, it will automatically get manager tools.
-- Don't duplicate capabilities that already exist — check `agents/` first.
+- Use `SpawnInstance` to run it as a one-off, or `CreatePersistentInstance` to create a long-lived instance. Use the `persona` parameter to specialize the instance at creation time.
+- The agent definition is loaded fresh from disk each time — edits take effect on the next start.
+- Verify the files look correct with `Read` before starting.
+- Don't duplicate agents that already exist — check `agents/` first.
