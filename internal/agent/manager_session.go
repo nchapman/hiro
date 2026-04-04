@@ -151,8 +151,8 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	}
 
 	// Capture old handle so we can shut it down after the new spawn.
-	// Nil it out so the old watchWorker goroutine sees handle == nil and
-	// bails instead of tearing down the instance.
+	// Nil it out before spawning the new worker — watchWorker uses
+	// pointer identity (inst.handle != handle) to detect stale exits.
 	oldHandle := inst.handle
 	inst.handle = nil
 	oldSession := inst.activeSession
