@@ -60,7 +60,7 @@ export default function TerminalTabBar({
   const hasMultipleNodes = nodes.length > 1
 
   return (
-    <div className="flex h-9 min-h-9 items-center bg-[#21252b] border-b border-[#181a1f] px-1 gap-0.5 select-none">
+    <div className="flex h-9 min-h-9 items-center bg-sidebar border-b border-border px-1 gap-0.5 select-none">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -68,8 +68,8 @@ export default function TerminalTabBar({
           className={cn(
             "group flex items-center gap-1.5 px-3 h-7 rounded text-xs font-medium transition-colors max-w-48 min-w-0",
             tab.id === activeTabId
-              ? "bg-[#282c34] text-[#abb2bf]"
-              : "text-[#5c6370] hover:text-[#abb2bf] hover:bg-[#282c34]/50",
+              ? "bg-background text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent",
           )}
         >
           <HugeiconsIcon icon={ComputerIcon} className="h-3 w-3 shrink-0 opacity-60" />
@@ -83,7 +83,7 @@ export default function TerminalTabBar({
             }}
             className={cn(
               "ml-auto shrink-0 rounded p-0.5 transition-colors",
-              "opacity-0 group-hover:opacity-100 hover:bg-[#3e4451]",
+              "opacity-0 group-hover:opacity-100 hover:bg-accent",
             )}
           >
             <HugeiconsIcon icon={Cancel01Icon} className="h-2.5 w-2.5" />
@@ -95,7 +95,7 @@ export default function TerminalTabBar({
       {hasMultipleNodes ? (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-7 w-7 items-center justify-center rounded text-[#5c6370] hover:text-[#abb2bf] hover:bg-[#282c34]/50 transition-colors cursor-pointer"
+            className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
             <HugeiconsIcon icon={Add01Icon} className="h-3.5 w-3.5" />
           </DropdownMenuTrigger>
@@ -111,7 +111,7 @@ export default function TerminalTabBar({
       ) : (
         <button
           onClick={() => onCreate("home")}
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-[#5c6370] hover:text-[#abb2bf] hover:bg-[#282c34]/50 transition-colors"
+          className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
           <HugeiconsIcon icon={Add01Icon} className="h-3.5 w-3.5" />
         </button>

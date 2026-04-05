@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils"
 import React, { useEffect, useState } from "react"
 import { codeToHtml } from "shiki"
+import { useTheme } from "@/hooks/use-theme"
 
 export type CodeBlockProps = {
   children?: React.ReactNode
@@ -32,10 +33,12 @@ export type CodeBlockCodeProps = {
 function CodeBlockCode({
   code,
   language = "tsx",
-  theme = "github-dark-default",
+  theme: themeProp,
   className,
   ...props
 }: CodeBlockCodeProps) {
+  const { resolved } = useTheme()
+  const theme = themeProp || resolved?.shikiThemeName || "one-dark-pro"
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
 
   useEffect(() => {

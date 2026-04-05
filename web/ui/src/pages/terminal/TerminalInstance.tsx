@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef } from "react"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebLinksAddon } from "@xterm/addon-web-links"
+import type { ITheme } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 
 export interface TerminalInstanceHandle {
@@ -16,37 +17,15 @@ export interface TerminalInstanceHandle {
 interface TerminalInstanceProps {
   sessionId: string
   visible: boolean
+  xtermTheme?: ITheme
   /** Called when the user types — parent sends this over the WebSocket. */
   onData: (sessionId: string, data: Uint8Array) => void
   /** Called when the terminal resizes — parent sends resize control. */
   onResize: (sessionId: string, cols: number, rows: number) => void
 }
 
-const theme = {
-  background: "#282c34",
-  foreground: "#abb2bf",
-  cursor: "#528bff",
-  selectionBackground: "#3e4451",
-  black: "#282c34",
-  red: "#e06c75",
-  green: "#98c379",
-  yellow: "#e5c07b",
-  blue: "#61afef",
-  magenta: "#c678dd",
-  cyan: "#56b6c2",
-  white: "#abb2bf",
-  brightBlack: "#5c6370",
-  brightRed: "#e06c75",
-  brightGreen: "#98c379",
-  brightYellow: "#e5c07b",
-  brightBlue: "#61afef",
-  brightMagenta: "#c678dd",
-  brightCyan: "#56b6c2",
-  brightWhite: "#ffffff",
-}
-
 const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProps>(
-  function TerminalInstance({ sessionId, visible, onData, onResize }, ref) {
+  function TerminalInstance({ sessionId, visible, xtermTheme, onData, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
     const termRef = useRef<Terminal | null>(null)
     const fitRef = useRef<FitAddon | null>(null)
@@ -82,7 +61,7 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
         cursorBlink: true,
         fontFamily: "'Geist Mono Variable', 'Geist Mono', Menlo, monospace",
         fontSize: 14,
-        theme,
+        theme: xtermTheme,
       })
 
       const fitAddon = new FitAddon()
@@ -124,6 +103,13 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
       // sessionId is stable for the lifetime of this component.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sessionId])
+
+    // Update theme at runtime when it changes.
+    useEffect(() => {
+      if (termRef.current && xtermTheme) {
+        termRef.current.options.theme = xtermTheme
+      }
+    }, [xtermTheme])
 
     // Re-fit and focus when visibility changes.
     useEffect(() => {

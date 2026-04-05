@@ -23,7 +23,7 @@ import SecurityCard from "@/pages/settings/SecurityCard"
 import ClusterCard from "@/pages/settings/ClusterCard"
 
 export default function SettingsPage() {
-  const { theme, setTheme } = useTheme()
+  const { themeId, setThemeId, availableThemes } = useTheme()
   const [providerTypes, setProviderTypes] = useState<ProviderTypeInfo[]>([])
   const [providers, setProviders] = useState<Record<string, ProviderInfo>>({})
   const [settings, setSettings] = useState<Settings>({
@@ -114,18 +114,25 @@ export default function SettingsPage() {
               <div className="flex flex-col gap-2">
                 <Label>Theme</Label>
                 <Select
-                  value={theme}
+                  value={themeId}
                   onValueChange={(v) => {
-                    if (v) setTheme(v as "light" | "dark" | "system")
+                    if (v) setThemeId(v)
                   }}
                 >
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className="w-56">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="system">System</SelectItem>
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="dark">Dark</SelectItem>
+                    {availableThemes
+                      .filter((t) => t.type === "dark")
+                      .map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
+                    {availableThemes
+                      .filter((t) => t.type === "light")
+                      .map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

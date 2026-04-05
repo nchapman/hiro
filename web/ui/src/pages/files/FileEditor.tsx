@@ -106,7 +106,7 @@ export default function FileEditor({
   onReloadRequested,
   onDismissChange,
 }: FileEditorProps) {
-  const { resolved: theme } = useTheme()
+  const { resolved: themeResolved } = useTheme()
   const [content, setContent] = useState<string>("")
   const [savedContent, setSavedContent] = useState<string>("")
   const [loading, setLoading] = useState(true)
@@ -397,7 +397,7 @@ export default function FileEditor({
           value={content}
           onChange={setContent}
           extensions={extensions}
-          theme={theme === "dark" ? "dark" : "light"}
+          theme={themeResolved?.codemirrorExtension ?? "dark"}
           height="100%"
           className="h-full"
           basicSetup={{

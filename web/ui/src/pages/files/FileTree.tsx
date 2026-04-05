@@ -538,7 +538,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
             depth={depth}
             icon={
               isDir ? (
-                <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
+                <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : (
                 <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
               )
@@ -586,9 +586,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
                   <HugeiconsIcon icon={ArrowRight01Icon} className="h-3.5 w-3.5 shrink-0" />
                 )}
                 {isExpanded ? (
-                  <HugeiconsIcon icon={FolderOpenIcon} className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={FolderOpenIcon} className="h-4 w-4 shrink-0 text-muted-foreground" />
                 ) : (
-                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
               </>
             ) : (
@@ -616,7 +616,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
                     depth={depth + 1}
                     icon={
                       inlineAction.type === "new-folder" ? (
-                        <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
+                        <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-muted-foreground" />
                       ) : (
                         <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
                       )
@@ -715,7 +715,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(
               depth={0}
               icon={
                 inlineAction.type === "new-folder" ? (
-                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-amber-500" />
+                  <HugeiconsIcon icon={Folder01Icon} className="h-4 w-4 shrink-0 text-muted-foreground" />
                 ) : (
                   <HugeiconsIcon icon={File01Icon} className="h-4 w-4 shrink-0" />
                 )

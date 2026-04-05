@@ -3,6 +3,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { HugeiconsIcon } from "@hugeicons/react"
 import type { IconSvgElement } from "@hugeicons/react"
 import {
@@ -10,14 +15,13 @@ import {
   FolderOpenIcon,
   NoteIcon,
   Settings01Icon,
-  Sun01Icon,
-  Moon01Icon,
-  ComputerIcon,
   Logout01Icon,
   TerminalIcon,
+  PaintBrush01Icon,
 } from "@hugeicons/core-free-icons"
 import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
+import { useState } from "react"
 
 export type Activity = "chat" | "files" | "logs" | "settings"
 
@@ -27,14 +31,6 @@ interface ActivityBarProps {
   onLogout: () => void
   pendingNodeCount?: number
 }
-
-const themeIcons = {
-  light: Sun01Icon,
-  dark: Moon01Icon,
-  system: ComputerIcon,
-} as const
-
-const themeOrder = ["system", "light", "dark"] as const
 
 const activities: { id: Activity; icon: IconSvgElement; label: string }[] = [
   { id: "chat", icon: Message01Icon, label: "Chat" },
@@ -49,13 +45,11 @@ export default function ActivityBar({
   onLogout,
   pendingNodeCount = 0,
 }: ActivityBarProps) {
-  const { theme, setTheme } = useTheme()
-  const themeIcon = themeIcons[theme]
+  const { themeId, setThemeId, availableThemes } = useTheme()
+  const [themeOpen, setThemeOpen] = useState(false)
 
-  const cycleTheme = () => {
-    const idx = themeOrder.indexOf(theme)
-    setTheme(themeOrder[(idx + 1) % themeOrder.length])
-  }
+  const darkThemes = availableThemes.filter((t) => t.type === "dark")
+  const lightThemes = availableThemes.filter((t) => t.type === "light")
 
   return (
     <aside className="flex h-full w-12 min-w-12 flex-col items-center border-r bg-card py-2">
@@ -107,15 +101,45 @@ export default function ActivityBar({
           </TooltipTrigger>
           <TooltipContent side="right">Terminal</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            onClick={cycleTheme}
+        <Popover open={themeOpen} onOpenChange={setThemeOpen}>
+          <PopoverTrigger
             className="inline-flex h-10 w-10 items-center justify-center rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
           >
-            <HugeiconsIcon icon={themeIcon} className="h-5 w-5" />
-          </TooltipTrigger>
-          <TooltipContent side="right">Theme: {theme}</TooltipContent>
-        </Tooltip>
+            <HugeiconsIcon icon={PaintBrush01Icon} className="h-5 w-5" />
+          </PopoverTrigger>
+          <PopoverContent side="right" align="end" className="w-48 p-1">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-2 py-1">Dark</div>
+            {darkThemes.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { setThemeId(t.id); setThemeOpen(false) }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm transition-colors",
+                  t.id === themeId
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent/50"
+                )}
+              >
+                {t.name}
+              </button>
+            ))}
+            <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-2 py-1 mt-1">Light</div>
+            {lightThemes.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { setThemeId(t.id); setThemeOpen(false) }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm transition-colors",
+                  t.id === themeId
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent/50"
+                )}
+              >
+                {t.name}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
         <Tooltip>
           <TooltipTrigger
             onClick={onLogout}

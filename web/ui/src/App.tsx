@@ -480,7 +480,7 @@ export default function App() {
           </div>
         )}
       </TooltipProvider>
-      <Toaster position="top-right" richColors closeButton theme={themeCtx.resolved} />
+      <Toaster position="top-right" richColors closeButton theme={themeCtx.resolved?.isDark ? "dark" : "light"} />
     </ThemeCtx.Provider>
   )
 }

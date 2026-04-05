@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import TerminalTabBar, { type TerminalTab } from "./TerminalTabBar"
 import TerminalInstance, { type TerminalInstanceHandle } from "./TerminalInstance"
+import { useTheme } from "@/hooks/use-theme"
 import "@xterm/xterm/css/xterm.css"
 
 // Wire protocol constants — must match server.
@@ -43,6 +44,7 @@ interface ControlMessage {
 }
 
 export default function TerminalPage() {
+  const { resolved } = useTheme()
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
@@ -192,7 +194,7 @@ export default function TerminalPage() {
   }, [])
 
   return (
-    <div className="h-screen w-screen bg-[#282c34] flex flex-col">
+    <div className="h-screen w-screen bg-background flex flex-col">
       <TerminalTabBar
         tabs={tabs}
         activeTabId={activeTabId}
@@ -208,13 +210,13 @@ export default function TerminalPage() {
       )}
 
       {status === "connecting" && tabs.length === 0 && (
-        <div className="flex-1 flex items-center justify-center text-[#abb2bf]/50 text-sm">
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
           Connecting...
         </div>
       )}
 
       {status === "disconnected" && (
-        <div className="flex-1 flex items-center justify-center text-[#abb2bf]/50 text-sm">
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
           Connection lost. Close and reopen to reconnect.
         </div>
       )}
@@ -225,6 +227,7 @@ export default function TerminalPage() {
           ref={(handle) => setInstanceRef(tab.id, handle)}
           sessionId={tab.id}
           visible={tab.id === activeTabId && status === "connected"}
+          xtermTheme={resolved?.xtermTheme}
           onData={sendInput}
           onResize={handleResize}
         />
