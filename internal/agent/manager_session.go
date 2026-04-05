@@ -131,6 +131,11 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 
 	// Clear the stopped flag so the instance starts on next server restart.
 	m.setInstanceStatus(instanceID, string(InstanceStatusRunning))
+
+	// Resume cron subscriptions for this instance.
+	if m.scheduler != nil {
+		m.scheduler.ResumeInstance(ctx, instanceID)
+	}
 	return nil
 }
 
@@ -326,38 +331,12 @@ func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance,
 		s.SetSecretEnvFn(m.SecretEnv)
 	}
 
-	loop, err := m.createInferenceLoop(ctx, inference.LoopConfig{
-		InstanceID:     instanceID,
-		SessionID:      sessionID,
-		AgentConfig:    cfg,
-		Mode:           inst.info.Mode,
-		WorkingDir:     m.opts.WorkingDir,
-		InstanceDir:    m.instanceDir(instanceID),
-		SessionDir:     sessDir,
-		AgentDefDir:    m.agentDefDir(cfg.Name),
-		SharedSkillDir: m.sharedSkillsDir(),
-		Model:          modelSpec.String(),
-		Provider:       modelSpec.Provider,
-		Executor:       handle.Worker,
-		PDB:            m.pdb,
-		AllowedTools:   allowedTools,
-		AllowLayers:    inst.allowLayers,
-		DenyRules:      inst.denyRules,
-		MaxTurns:       cfg.MaxTurns,
-		HasSkills:      len(cfg.Skills) > 0 || m.agentHasSkills(cfg),
-		SecretEnvFn:    m.SecretEnv,
-		Notifications:  inst.notifications,
-		Logger:         m.logger.With("instance", instanceID, "session", sessionID, "agent", cfg.Name),
-		HostManager:    m,
-		ContextProviders: []inference.ContextProvider{
-			inference.MemoryProvider(m.instanceDir(instanceID)),
-			inference.TodoProvider(sessDir),
-			inference.SecretProvider(m.SecretNames),
-			inference.AgentListingProvider(m),
-			inference.NodeListingProvider(m),
-			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
-		},
-	}, modelSpec, apiKey, baseURL)
+	hasSkills := len(cfg.Skills) > 0 || m.agentHasSkills(cfg)
+	loopCfg := m.buildLoopConfig(instanceID, sessionID, cfg, inst.info.Mode,
+		m.instanceDir(instanceID), sessDir, handle.Worker, allowedTools,
+		inst.allowLayers, inst.denyRules, hasSkills, modelSpec, inst.notifications)
+
+	loop, err := m.createInferenceLoop(ctx, loopCfg, modelSpec, apiKey, baseURL)
 	if err != nil {
 		handle.Kill()
 		handle.Close()

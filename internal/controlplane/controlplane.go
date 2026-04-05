@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/nchapman/hiro/internal/auth"
 	"github.com/nchapman/hiro/internal/platform/fsperm"
@@ -63,6 +64,7 @@ type Config struct {
 	Auth         AuthConfig                `yaml:"auth,omitempty"`
 	Providers    map[string]ProviderConfig `yaml:"providers,omitempty"`     // keyed by provider type
 	DefaultModel string                    `yaml:"default_model,omitempty"` // "provider/model" format
+	Timezone     string                    `yaml:"timezone,omitempty"`      // IANA timezone (e.g. "America/New_York"), defaults to UTC
 	Secrets      map[string]string         `yaml:"secrets,omitempty"`
 	Agents       map[string]AgentPolicy    `yaml:"agents,omitempty"`
 	Cluster      ClusterConfig             `yaml:"cluster,omitempty"`
@@ -255,4 +257,22 @@ func (cp *ControlPlane) Reload() error {
 // Path returns the absolute path to the config file.
 func (cp *ControlPlane) Path() string {
 	return cp.path
+}
+
+// Timezone returns the configured timezone as a *time.Location.
+// Returns UTC if not configured or if the timezone string is invalid.
+func (cp *ControlPlane) Timezone() *time.Location {
+	cp.mu.RLock()
+	tz := cp.config.Timezone
+	cp.mu.RUnlock()
+
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		cp.logger.Warn("invalid timezone in config, using UTC", "timezone", tz, "error", err)
+		return time.UTC
+	}
+	return loc
 }

@@ -106,6 +106,11 @@ func (m *Manager) softStop(id string) {
 
 	// Shutdown the captured handle outside the lock (blocks on I/O).
 	m.teardownInstance(id, h, teardownOpts{graceful: true, status: InstanceStatusStopped})
+
+	// Pause cron subscriptions for this instance.
+	if m.scheduler != nil {
+		m.scheduler.PauseInstance(context.Background(), id)
+	}
 }
 
 // reregisterStopped puts an instance back into the registry as stopped.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -66,6 +67,17 @@ type LoopConfig struct {
 	// ContextProviders produce dynamic per-turn context injected as
 	// <system-reminder> messages via PrepareStep.
 	ContextProviders []ContextProvider
+
+	// IsTriggeredSession indicates this loop runs in a triggered session
+	// (cron, webhook, etc.). Enables the Notify tool.
+	IsTriggeredSession bool
+
+	// ScheduleCallback is called when subscriptions are created or removed.
+	// Nil in tests or when the scheduler is not configured.
+	ScheduleCallback ScheduleCallback
+
+	// Timezone for schedule display and computation. Nil defaults to UTC.
+	Timezone *time.Location
 }
 
 // Loop runs the fantasy agent loop for a single session.
@@ -856,6 +868,16 @@ func (l *Loop) buildLocalTools(cfg LoopConfig) []Tool {
 			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger),
 			buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
 		localTools = append(localTools, buildOperatorTools(cfg.HostManager, l.logger)...)
+	}
+
+	// Schedule tools (persistent only).
+	if cfg.Mode.IsPersistent() && cfg.PDB != nil {
+		localTools = append(localTools, buildScheduleTools(cfg.PDB, cfg.ScheduleCallback, cfg.Timezone)...)
+	}
+
+	// Notify tool (triggered sessions only).
+	if cfg.IsTriggeredSession {
+		localTools = append(localTools, buildNotifyTool(l.notifications))
 	}
 
 	// Skill tool.

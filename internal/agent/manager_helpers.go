@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 
@@ -104,6 +105,16 @@ func (m *Manager) SecretEnv() []string {
 		return nil
 	}
 	return m.cp.SecretEnv()
+}
+
+// SetScheduler sets the cron scheduler for subscription management.
+func (m *Manager) SetScheduler(s *Scheduler) {
+	m.scheduler = s
+}
+
+// SetTimezone sets the server timezone for cron evaluation.
+func (m *Manager) SetTimezone(tz *time.Location) {
+	m.timezone = tz
 }
 
 // SetClusterService sets the cluster leader service for remote node management.

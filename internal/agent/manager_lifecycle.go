@@ -205,6 +205,11 @@ func (m *Manager) DeleteInstance(instanceID string) error {
 			m.removeInstance(id)
 		}
 
+		// Remove any scheduler entries for this instance.
+		if m.scheduler != nil {
+			m.scheduler.PauseInstance(context.Background(), id)
+		}
+
 		// Always delete instance dir and DB record regardless of mode.
 		os.RemoveAll(m.instanceDir(id))
 		if m.pdb != nil {
@@ -578,7 +583,10 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 			inference.AgentListingProvider(m),
 			inference.NodeListingProvider(m),
 			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
+			inference.SubscriptionProvider(m.pdb, instanceID),
 		},
+		ScheduleCallback: m.scheduler,
+		Timezone:         m.timezone,
 	}
 }
 

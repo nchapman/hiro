@@ -108,6 +108,7 @@ type app struct {
 	fsWatcher *watcher.Watcher
 	srv       *api.Server
 	mgr       *agent.Manager
+	scheduler *agent.Scheduler
 
 	// Cluster state — only populated for leader mode.
 	cs             clusterState
@@ -430,6 +431,13 @@ func (a *app) startManager() error {
 		a.logger.Warn("failed to restore some agent instances", "error", err)
 	}
 
+	// Start the cron scheduler after restoring instances.
+	tz := a.cp.Timezone()
+	a.mgr.SetTimezone(tz)
+	a.scheduler = agent.NewScheduler(a.pdb, a.mgr, tz, a.logger)
+	a.mgr.SetScheduler(a.scheduler)
+	a.scheduler.Start(a.ctx)
+
 	leaderID, err := bootstrapOperator(a.ctx, a.mgr, a.logger)
 	if err != nil {
 		return err
@@ -503,6 +511,9 @@ func (a *app) shutdown() {
 	}
 	if a.srv != nil {
 		a.srv.ShutdownTerminalSessions()
+	}
+	if a.scheduler != nil {
+		a.scheduler.Stop()
 	}
 	if a.mgr != nil {
 		a.mgr.Shutdown()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/config"
@@ -89,6 +90,8 @@ type Manager struct {
 	uidPool        *uidpool.Pool          // per-agent Unix user isolation; nil = disabled
 	pdb            *platformdb.DB         // unified platform database
 	clusterService *cluster.LeaderService // cluster orchestration; nil = standalone
+	scheduler      *Scheduler             // cron scheduler; nil until SetScheduler called
+	timezone       *time.Location         // server timezone for cron evaluation
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.

@@ -37,14 +37,15 @@ func isUniqueViolation(err error) bool {
 
 // Session represents a row in the sessions table.
 type Session struct {
-	ID         string
-	InstanceID string // parent instance
-	AgentName  string
-	Mode       string // "ephemeral", "persistent"
-	ParentID   string // empty if root
-	Status     string // "running", "stopped"
-	CreatedAt  time.Time
-	StoppedAt  *time.Time
+	ID             string
+	InstanceID     string // parent instance
+	AgentName      string
+	Mode           string // "ephemeral", "persistent"
+	ParentID       string // empty if root
+	SubscriptionID string // non-empty for triggered sessions
+	Status         string // "running", "stopped"
+	CreatedAt      time.Time
+	StoppedAt      *time.Time
 }
 
 // CreateSession inserts a new session.
@@ -59,9 +60,13 @@ func (d *DB) CreateSession(ctx context.Context, s Session) error {
 	if s.InstanceID != "" {
 		instanceID = &s.InstanceID
 	}
+	var subscriptionID *string
+	if s.SubscriptionID != "" {
+		subscriptionID = &s.SubscriptionID
+	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, agent_name, mode, parent_id, status, instance_id) VALUES (?, ?, ?, ?, ?, ?)`,
-		s.ID, s.AgentName, s.Mode, parentID, "running", instanceID,
+		`INSERT INTO sessions (id, agent_name, mode, parent_id, status, instance_id, subscription_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.AgentName, s.Mode, parentID, "running", instanceID, subscriptionID,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -79,10 +84,11 @@ func (d *DB) GetSession(ctx context.Context, id string) (Session, error) {
 	var createdAt string
 	var stoppedAt sql.NullString
 	var instanceID sql.NullString
+	var subscriptionID sql.NullString
 	err := d.db.QueryRowContext(ctx,
-		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, instance_id, agent_name, mode, parent_id, subscription_id, status, created_at, stopped_at
 		 FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
+	).Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &subscriptionID, &s.Status, &createdAt, &stoppedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, fmt.Errorf("session %s: %w", id, ErrNotFound)
 	}
@@ -95,6 +101,9 @@ func (d *DB) GetSession(ctx context.Context, id string) (Session, error) {
 	if parentID.Valid {
 		s.ParentID = parentID.String
 	}
+	if subscriptionID.Valid {
+		s.SubscriptionID = subscriptionID.String
+	}
 	s.CreatedAt = parseTime(createdAt)
 	if stoppedAt.Valid {
 		t := parseTime(stoppedAt.String)
@@ -106,7 +115,7 @@ func (d *DB) GetSession(ctx context.Context, id string) (Session, error) {
 // ListSessions returns all sessions matching the given filters.
 // Pass empty strings to skip a filter.
 func (d *DB) ListSessions(ctx context.Context, parentID, status string) ([]Session, error) {
-	query := "SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at FROM sessions WHERE 1=1"
+	query := "SELECT id, instance_id, agent_name, mode, parent_id, subscription_id, status, created_at, stopped_at FROM sessions WHERE 1=1"
 	var args []any
 
 	if parentID != "" {
@@ -136,7 +145,7 @@ func (d *DB) ListChildSessions(ctx context.Context, parentID string) ([]Session,
 // ListSessionsByInstance returns all sessions belonging to an instance.
 func (d *DB) ListSessionsByInstance(ctx context.Context, instanceID string) ([]Session, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, instance_id, agent_name, mode, parent_id, subscription_id, status, created_at, stopped_at
 		 FROM sessions WHERE instance_id = ? ORDER BY created_at`, instanceID,
 	)
 	if err != nil {
@@ -152,12 +161,13 @@ func (d *DB) ListSessionsByInstance(ctx context.Context, instanceID string) ([]S
 func (d *DB) LatestSessionByInstance(ctx context.Context, instanceID string) (Session, bool, error) {
 	var s Session
 	var parentID sql.NullString
+	var subscriptionID sql.NullString
 	var createdAt string
 	var stoppedAt sql.NullString
 	err := d.db.QueryRowContext(ctx,
-		`SELECT id, instance_id, agent_name, mode, parent_id, status, created_at, stopped_at
+		`SELECT id, instance_id, agent_name, mode, parent_id, subscription_id, status, created_at, stopped_at
 		 FROM sessions WHERE instance_id = ? ORDER BY created_at DESC LIMIT 1`, instanceID,
-	).Scan(&s.ID, &s.InstanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt)
+	).Scan(&s.ID, &s.InstanceID, &s.AgentName, &s.Mode, &parentID, &subscriptionID, &s.Status, &createdAt, &stoppedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, false, nil
 	}
@@ -166,6 +176,9 @@ func (d *DB) LatestSessionByInstance(ctx context.Context, instanceID string) (Se
 	}
 	if parentID.Valid {
 		s.ParentID = parentID.String
+	}
+	if subscriptionID.Valid {
+		s.SubscriptionID = subscriptionID.String
 	}
 	s.CreatedAt = parseTime(createdAt)
 	if stoppedAt.Valid {
@@ -224,10 +237,10 @@ func scanSessions(rows *sql.Rows) ([]Session, error) {
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		var instanceID, parentID sql.NullString
+		var instanceID, parentID, subscriptionID sql.NullString
 		var createdAt string
 		var stoppedAt sql.NullString
-		if err := rows.Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &s.Status, &createdAt, &stoppedAt); err != nil {
+		if err := rows.Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &subscriptionID, &s.Status, &createdAt, &stoppedAt); err != nil {
 			return nil, err
 		}
 		if instanceID.Valid {
@@ -235,6 +248,9 @@ func scanSessions(rows *sql.Rows) ([]Session, error) {
 		}
 		if parentID.Valid {
 			s.ParentID = parentID.String
+		}
+		if subscriptionID.Valid {
+			s.SubscriptionID = subscriptionID.String
 		}
 		s.CreatedAt = parseTime(createdAt)
 		if stoppedAt.Valid {
@@ -244,4 +260,38 @@ func scanSessions(rows *sql.Rows) ([]Session, error) {
 		sessions = append(sessions, s)
 	}
 	return sessions, rows.Err()
+}
+
+// SessionBySubscription returns the session associated with a subscription,
+// if one exists. Returns the session and true if found.
+func (d *DB) SessionBySubscription(ctx context.Context, subscriptionID string) (Session, bool, error) {
+	var s Session
+	var instanceID, parentID, subID sql.NullString
+	var createdAt string
+	var stoppedAt sql.NullString
+	err := d.db.QueryRowContext(ctx,
+		`SELECT id, instance_id, agent_name, mode, parent_id, subscription_id, status, created_at, stopped_at
+		 FROM sessions WHERE subscription_id = ? LIMIT 1`, subscriptionID,
+	).Scan(&s.ID, &instanceID, &s.AgentName, &s.Mode, &parentID, &subID, &s.Status, &createdAt, &stoppedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, false, nil
+	}
+	if err != nil {
+		return Session{}, false, fmt.Errorf("querying session for subscription %s: %w", subscriptionID, err)
+	}
+	if instanceID.Valid {
+		s.InstanceID = instanceID.String
+	}
+	if parentID.Valid {
+		s.ParentID = parentID.String
+	}
+	if subID.Valid {
+		s.SubscriptionID = subID.String
+	}
+	s.CreatedAt = parseTime(createdAt)
+	if stoppedAt.Valid {
+		t := parseTime(stoppedAt.String)
+		s.StoppedAt = &t
+	}
+	return s, true, nil
 }

@@ -255,6 +255,18 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 | `HistorySearch` | Full-text search conversation history | `query`, `scope` (messages\|summaries\|all) | Max 20 results via SQLite FTS; searches current session only |
 | `HistoryRecall` | Expand a summary's details | `summary_id` | Shows full text + children; depth, compression ratio, time range |
 
+### Schedule Tools (mode: persistent)
+
+Defined in `internal/inference/tools_schedule.go`, `tools_notify.go`. Run in the control plane. Agents must declare these in `allowed_tools`. See [`docs/scheduling.md`](docs/scheduling.md).
+
+| Tool | Purpose | Key Params | Notes |
+|------|---------|------------|-------|
+| `ScheduleRecurring` | Create a cron-based recurring schedule | `name`, `schedule` (cron expr), `message` | Fires in isolated triggered session; server timezone |
+| `ScheduleOnce` | Create a one-time schedule | `name`, `at` (duration or datetime), `message` | Auto-deleted after successful fire |
+| `CancelSchedule` | Remove a schedule by name | `name` | Removes from DB and scheduler heap |
+| `ListSchedules` | List all schedules for this instance | *(none)* | Shows name, type, schedule, status, next fire, fire/error counts |
+| `Notify` | Push message to user's primary session | `message` | Only available in triggered sessions; instance-scoped delivery |
+
 ### Skill Tool (agents with skills)
 
 | Tool | Purpose | Key Params | Notes |
@@ -264,7 +276,7 @@ Defined in `internal/inference/tools_todos.go`, `tools_memory.go`, `tools_histor
 ### Tool Totals by Agent Type
 
 - **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
-- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history = 15 tools (+ 1 if skills, + management tools if declared in allowed_tools)
+- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history + 4 schedule = 19 tools (+ 1 if skills, + management tools if declared in allowed_tools)
 
 ## Operator Agent
 
@@ -277,7 +289,7 @@ The operator (`agents/operator/agent.md`) is the top-level agent, started as a p
 4. `InstanceByAgentName("operator")` — check if already running (from restore)
 5. If not running, `CreateInstance(ctx, "operator", "", "persistent")` — no parent, persistent mode, becomes root
 
-The operator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) in its `allowed_tools` frontmatter and `groups: [hiro-operators]` for write access to `agents/` and `skills/`. All agents get `SpawnInstance`.
+The operator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and schedule tools (`ScheduleRecurring`, `ScheduleOnce`, `CancelSchedule`, `ListSchedules`) in its `allowed_tools` frontmatter and `groups: [hiro-operators]` for write access to `agents/` and `skills/`. All agents get `SpawnInstance`.
 
 ## Control Plane
 
@@ -352,6 +364,10 @@ The layered tool permission system. Covers the rule format (`Tool(pattern)` with
 ### [`docs/system-reminders.md`](docs/system-reminders.md) — Context Provider System
 
 How dynamic context (memories, todos, secrets, skills, agent listings) is injected into conversations without busting the prompt cache. Describes the two change detection strategies (named-set delta for sets of items, content hash for text blobs), the `DeltaReplay` metadata format, self-healing after compaction, and how to add new providers. All 5 providers are documented with their gates and data sources.
+
+### [`docs/scheduling.md`](docs/scheduling.md) — Scheduling
+
+How agents schedule recurring and one-time tasks. Covers the subscription data model (SQLite with JSON trigger column), the min-heap priority queue scheduler, triggered sessions (isolated inference turns with Notify for surfacing results), cron and one-shot trigger types, lifecycle integration (pause on stop, resume on start), concurrency model (lock ordering, overlap guards, WaitGroup), and the server timezone setting. Also describes the future trigger type extensibility (webhooks, file watches).
 
 ### [`docs/map.md`](docs/map.md) — Codebase Map
 
