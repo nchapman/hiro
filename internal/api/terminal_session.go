@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -169,6 +170,12 @@ const sessionIDRandomBytes = 16
 // NewTerminalSessionManager creates a new session manager and starts the
 // idle cleanup goroutine.
 func NewTerminalSessionManager(rootDir string, logger *slog.Logger) *TerminalSessionManager {
+	// Ensure the workspace directory exists so terminals can start there.
+	workspaceDir := filepath.Join(rootDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		logger.Warn("failed to create workspace directory for terminal sessions", "path", workspaceDir, "error", err)
+	}
+
 	m := &TerminalSessionManager{
 		sessions:    make(map[string]*TerminalSession),
 		createChans: make(map[string]chan string),
@@ -329,7 +336,7 @@ func (m *TerminalSessionManager) spawnPTY(cols, rows uint16) (*exec.Cmd, *os.Fil
 	}
 
 	cmd := exec.Command(shell) //nolint:noctx // terminal sessions manage their own lifecycle via SIGHUP/Kill
-	cmd.Dir = m.rootDir
+	cmd.Dir = filepath.Join(m.rootDir, "workspace")
 	cmd.Env = terminalEnvForSession(m.rootDir)
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
