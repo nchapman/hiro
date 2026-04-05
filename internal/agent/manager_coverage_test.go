@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 
@@ -1383,6 +1384,50 @@ func TestNewSession_NotFound(t *testing.T) {
 	_, err := mgr.NewSession("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent instance")
+	}
+}
+
+// TestNewSession_OldWatchWorkerDoesNotTearDown verifies that the old
+// watchWorker goroutine (monitoring the pre-clear worker) does not
+// mistakenly tear down the instance after NewSession replaces the handle.
+// This was a real bug: the old watchWorker woke up after NewSession released
+// inst.mu, saw inst.handle was non-nil (the NEW handle), and treated the
+// old worker's exit as an unexpected crash.
+func TestNewSession_OldWatchWorkerDoesNotTearDown(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	info, ok := mgr.GetInstance(id)
+	if !ok || info.Status != InstanceStatusRunning {
+		t.Fatalf("expected running, got %v", info.Status)
+	}
+
+	// NewSession shuts down the old worker (closing its Done channel) and
+	// spawns a new one. The old watchWorker goroutine will wake up and
+	// must detect the handle was replaced, not tear down the instance.
+	newSess, err := mgr.NewSession(id)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if newSess == "" {
+		t.Fatal("expected non-empty session ID")
+	}
+
+	// Give the old watchWorker goroutine time to run and (incorrectly) tear down.
+	// The bug manifested immediately after inst.mu was released.
+	time.Sleep(50 * time.Millisecond)
+
+	info, ok = mgr.GetInstance(id)
+	if !ok {
+		t.Fatal("instance was removed — old watchWorker incorrectly tore it down")
+	}
+	if info.Status != InstanceStatusRunning {
+		t.Fatalf("instance status is %q — old watchWorker incorrectly stopped it", info.Status)
 	}
 }
 
