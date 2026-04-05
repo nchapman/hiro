@@ -576,6 +576,7 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 			inference.TodoProvider(sessDir),
 			inference.SecretProvider(m.SecretNames),
 			inference.AgentListingProvider(m),
+			inference.NodeListingProvider(m),
 			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
 		},
 	}

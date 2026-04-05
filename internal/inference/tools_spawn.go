@@ -148,6 +148,51 @@ func renderAgentListing(defs []ipc.AgentDef, added, removed []string, isInitial 
 	return b.String()
 }
 
+// NodeListingProvider returns a ContextProvider that announces cluster nodes.
+// Uses content-hash delta tracking because node attributes (status, active
+// count) change even when the set of nodes does not.
+func NodeListingProvider(mgr ipc.HostManager) ContextProvider {
+	return func(activeTools map[string]bool, history []fantasy.Message) *DeltaResult {
+		if !activeTools["ListNodes"] {
+			return nil
+		}
+
+		nodes := mgr.ListNodes()
+		if len(nodes) == 0 {
+			return nil
+		}
+
+		text := renderNodeListing(nodes)
+		hash := contentHash(text)
+		if replayLatestHash("nodes", history) == hash {
+			return nil
+		}
+
+		return &DeltaResult{
+			Message: buildContentMessage(text, "nodes", hash),
+		}
+	}
+}
+
+// renderNodeListing produces the node listing text for the system reminder.
+// Format matches buildListNodes tool output for consistency.
+func renderNodeListing(nodes []ipc.NodeInfo) string {
+	var b strings.Builder
+	b.WriteString("## Cluster Nodes\n\n")
+	for _, n := range nodes {
+		label := n.Name
+		if n.IsHome {
+			label += " (home)"
+		}
+		fmt.Fprintf(&b, "- **%s** (id: %s, status: %s", label, n.ID, n.Status)
+		if n.Capacity > 0 {
+			fmt.Fprintf(&b, ", capacity: %d", n.Capacity)
+		}
+		fmt.Fprintf(&b, ", active: %d)\n", n.ActiveCount)
+	}
+	return b.String()
+}
+
 func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessionID string, logger *slog.Logger) Tool {
 	return Tool{
 		AgentTool: fantasy.NewAgentTool(SpawnToolName,

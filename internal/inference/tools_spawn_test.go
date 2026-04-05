@@ -502,3 +502,105 @@ func TestRenderAgentListing_DeltaShowsOnlyChanges(t *testing.T) {
 		t.Error("expected critic in removed list")
 	}
 }
+
+// --- NodeListingProvider tests ---
+
+func TestNodeListingProvider_GatedOnListNodes(t *testing.T) {
+	mgr := &controllableFakeManager{
+		nodes: []ipc.NodeInfo{{ID: "n1", Name: "worker-1", Status: "online"}},
+	}
+	provider := NodeListingProvider(mgr)
+
+	// Without ListNodes in active tools, should return nil.
+	result := provider(map[string]bool{"Bash": true}, nil)
+	if result != nil {
+		t.Error("expected nil when ListNodes not active")
+	}
+
+	// With ListNodes, should emit.
+	result = provider(map[string]bool{"ListNodes": true}, nil)
+	if result == nil {
+		t.Fatal("expected non-nil result when ListNodes is active")
+	}
+}
+
+func TestNodeListingProvider_NilWhenNoNodes(t *testing.T) {
+	mgr := &controllableFakeManager{nodes: nil}
+	provider := NodeListingProvider(mgr)
+
+	result := provider(map[string]bool{"ListNodes": true}, nil)
+	if result != nil {
+		t.Error("expected nil when no nodes")
+	}
+}
+
+func TestNodeListingProvider_SuppressesDuplicate(t *testing.T) {
+	mgr := &controllableFakeManager{
+		nodes: []ipc.NodeInfo{{ID: "n1", Name: "worker-1", Status: "online"}},
+	}
+	provider := NodeListingProvider(mgr)
+	active := map[string]bool{"ListNodes": true}
+
+	// First call emits.
+	first := provider(active, nil)
+	if first == nil {
+		t.Fatal("expected first call to emit")
+	}
+
+	// Second call with same history should suppress.
+	history := []fantasy.Message{first.Message}
+	second := provider(active, history)
+	if second != nil {
+		t.Error("expected nil on unchanged nodes")
+	}
+}
+
+func TestNodeListingProvider_EmitsOnChange(t *testing.T) {
+	mgr := &controllableFakeManager{
+		nodes: []ipc.NodeInfo{{ID: "n1", Name: "worker-1", Status: "online", ActiveCount: 0}},
+	}
+	provider := NodeListingProvider(mgr)
+	active := map[string]bool{"ListNodes": true}
+
+	first := provider(active, nil)
+	if first == nil {
+		t.Fatal("expected first call to emit")
+	}
+
+	// Change node state.
+	mgr.nodes[0].ActiveCount = 3
+	history := []fantasy.Message{first.Message}
+	second := provider(active, history)
+	if second == nil {
+		t.Error("expected re-emission after node state change")
+	}
+}
+
+func TestRenderNodeListing_IncludesIDAndStatus(t *testing.T) {
+	nodes := []ipc.NodeInfo{
+		{ID: "abc123", Name: "leader", Status: "online", IsHome: true, Capacity: 4, ActiveCount: 2},
+		{ID: "def456", Name: "worker-1", Status: "online", ActiveCount: 1},
+	}
+	text := renderNodeListing(nodes)
+	if !strings.Contains(text, "leader (home)") {
+		t.Error("expected home label")
+	}
+	if !strings.Contains(text, "id: abc123") {
+		t.Error("expected node ID")
+	}
+	if !strings.Contains(text, "capacity: 4") {
+		t.Error("expected capacity for node with capacity > 0")
+	}
+	// worker-1 has zero capacity — check that its line doesn't include "capacity"
+	if idx := strings.Index(text, "def456"); idx >= 0 {
+		// Extract the line containing def456.
+		end := strings.Index(text[idx:], "\n")
+		if end < 0 {
+			end = len(text) - idx
+		}
+		line := text[idx : idx+end]
+		if strings.Contains(line, "capacity") {
+			t.Error("should not show capacity for zero-capacity node")
+		}
+	}
+}

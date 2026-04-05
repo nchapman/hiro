@@ -354,6 +354,7 @@ func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance,
 			inference.TodoProvider(sessDir),
 			inference.SecretProvider(m.SecretNames),
 			inference.AgentListingProvider(m),
+			inference.NodeListingProvider(m),
 			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
 		},
 	}, modelSpec, apiKey, baseURL)
