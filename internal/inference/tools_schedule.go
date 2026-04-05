@@ -36,6 +36,11 @@ type ScheduleCallback interface {
 
 const triggerTypeOnce = "once"
 
+// immediateFireDelay is a small buffer added to "now" and zero/negative
+// durations so the scheduler doesn't treat the fire time as already-past
+// by the time the subscription is persisted and added to the heap.
+const immediateFireDelay = time.Second
+
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 func buildScheduleTools(pdb *platformdb.DB, schedulerCb ScheduleCallback, tz *time.Location) []Tool {
@@ -59,7 +64,7 @@ func buildScheduleTools(pdb *platformdb.DB, schedulerCb ScheduleCallback, tz *ti
 			scheduleOnceDescription,
 			func(ctx context.Context, input struct {
 				Name    string `json:"name" description:"Unique name for this schedule (e.g. 'end-of-day-summary')."`
-				At      string `json:"at" description:"When to fire: relative duration ('20m', '2h') or absolute time ('2026-04-05T17:00:00')."`
+				At      string `json:"at" description:"When to fire: 'now' for immediate, relative duration ('20m', '2h'), or absolute time ('2026-04-05T17:00:00')."`
 				Message string `json:"message" description:"The prompt you will receive when this fires."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				return handleScheduleOnce(ctx, pdb, schedulerCb, tz, input.Name, input.At, input.Message)
@@ -189,11 +194,20 @@ func handleScheduleOnce(ctx context.Context, pdb *platformdb.DB, schedulerCb Sch
 	return fantasy.NewTextResponse(fmt.Sprintf("One-time schedule %q created. Fires at: %s", name, fireAt.Format("2006-01-02 15:04 MST"))), nil
 }
 
-// parseScheduleTime parses a time string as either a relative duration ("20m", "2h")
-// or an absolute time ("2006-01-02T15:04:05") in the server timezone.
+// parseScheduleTime parses a time string as either a relative duration ("20m", "2h"),
+// the keyword "now" (fire immediately), or an absolute time ("2006-01-02T15:04:05")
+// in the server timezone.
 func parseScheduleTime(s string, tz *time.Location) (time.Time, error) {
+	// "now" or "0s" — fire immediately.
+	if strings.EqualFold(s, "now") {
+		return time.Now().Add(immediateFireDelay), nil
+	}
+
 	// Try Go duration first (e.g. "20m", "2h", "1h30m").
 	if d, err := time.ParseDuration(s); err == nil {
+		if d <= 0 {
+			return time.Now().Add(immediateFireDelay), nil
+		}
 		return time.Now().Add(d), nil
 	}
 

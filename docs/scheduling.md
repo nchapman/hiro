@@ -49,13 +49,14 @@ Standard 5-field cron (minute, hour, day-of-month, month, day-of-week). All time
 ```
 ScheduleOnce(name, at, message)
   name:    "reminder"
-  at:      "30m"                               — relative duration
+  at:      "now"                                — fire immediately
+        or "30m"                               — relative duration
         or "2026-04-05T17:00:00"               — absolute (server tz)
         or "2026-04-05T17:00:00Z"              — absolute (UTC)
   message: "Check on the deployment"
 ```
 
-Relative durations (Go `time.Duration` format: `20m`, `2h`, `1h30m`) are resolved to an absolute time at creation. The subscription is automatically deleted after a successful fire.
+`"now"` and `"0s"` fire immediately (within ~1 second). Relative durations (Go `time.Duration` format: `20m`, `2h`, `1h30m`) are resolved to an absolute time at creation. The subscription is automatically deleted after a successful fire.
 
 ### Notify
 

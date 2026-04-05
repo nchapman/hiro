@@ -1,6 +1,6 @@
 ---
 name: operator
-allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop, CreatePersistentInstance, ResumeInstance, StopInstance, DeleteInstance, SendMessage, ListInstances, ListNodes]
+allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop, CreatePersistentInstance, ResumeInstance, StopInstance, DeleteInstance, SendMessage, ListInstances, ListNodes, ScheduleRecurring, ScheduleOnce, CancelSchedule, ListSchedules]
 groups: [hiro-operators]
 description: Leader agent — manages conversations and coordinates work.
 ---

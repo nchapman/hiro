@@ -90,6 +90,54 @@ func TestParseScheduleTime_LocalTime(t *testing.T) {
 	}
 }
 
+func TestParseScheduleTime_Now(t *testing.T) {
+	before := time.Now()
+	got, err := parseScheduleTime("now", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should be ~1 second from now (not in the past).
+	if !got.After(before) {
+		t.Error("expected future time for 'now'")
+	}
+	if got.After(time.Now().Add(5 * time.Second)) {
+		t.Error("expected near-future time for 'now'")
+	}
+}
+
+func TestParseScheduleTime_NowCaseInsensitive(t *testing.T) {
+	got, err := parseScheduleTime("NOW", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.After(time.Now()) {
+		t.Error("expected future time for 'NOW'")
+	}
+}
+
+func TestParseScheduleTime_ZeroDuration(t *testing.T) {
+	before := time.Now()
+	got, err := parseScheduleTime("0s", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.After(before) {
+		t.Error("expected future time for '0s'")
+	}
+}
+
+func TestParseScheduleTime_NegativeDuration(t *testing.T) {
+	before := time.Now()
+	got, err := parseScheduleTime("-5m", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Negative durations are treated as immediate (same as "now").
+	if !got.After(before) {
+		t.Error("expected future time for negative duration")
+	}
+}
+
 func TestParseScheduleTime_Invalid(t *testing.T) {
 	_, err := parseScheduleTime("not-a-time", time.UTC)
 	if err == nil {
@@ -184,6 +232,23 @@ func TestScheduleOnce_RelativeDuration(t *testing.T) {
 		t.Fatalf("unexpected error: %s", content)
 	}
 	if !strings.Contains(content, "reminder") {
+		t.Errorf("expected name in response, got %q", content)
+	}
+	if len(cb.added) != 1 || cb.added[0].Trigger.Type != "once" {
+		t.Fatalf("expected once trigger, got %+v", cb.added)
+	}
+}
+
+func TestScheduleOnce_Now(t *testing.T) {
+	pdb := openTestPDB(t)
+	cb := &fakeScheduleCallback{}
+	tools := buildScheduleTools(pdb, cb, time.UTC)
+
+	content, isErr := runScheduleTool(t, tools[1], `{"name":"immediate","at":"now","message":"do it now"}`)
+	if isErr {
+		t.Fatalf("unexpected error: %s", content)
+	}
+	if !strings.Contains(content, "immediate") {
 		t.Errorf("expected name in response, got %q", content)
 	}
 	if len(cb.added) != 1 || cb.added[0].Trigger.Type != "once" {

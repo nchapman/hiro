@@ -97,6 +97,48 @@ func TestE2E_ScheduleRecurring_DuplicateName(t *testing.T) {
 	cs.chat(ctx, `Use the CancelSchedule tool with name "e2e-dup". Do not use any other tools.`)
 }
 
+func TestE2E_ScheduleOnce_FiresImmediately(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cs := openChat(t, ctx, "")
+	defer cs.close()
+
+	// Schedule a one-time task with at="now" — should fire immediately
+	// and deliver a notification via the triggered session.
+	resp := cs.chat(ctx, `Use the ScheduleOnce tool with name "e2e-fire-now", at "now", and message "Say exactly: FIRE_CONFIRMED". Do not use any other tools.`)
+	t.Logf("ScheduleOnce now response: %s", resp)
+
+	// The LLM should confirm the schedule was created. It may mention the
+	// name, say "schedule", or echo the fire time — any acknowledgement is fine.
+	t.Logf("ScheduleOnce confirmed: %s", resp)
+
+	// Wait for the notification to arrive. The triggered session runs the
+	// prompt and calls Notify, which delivers to the primary session.
+	// Poll with chat messages since notifications arrive as meta messages.
+	var found bool
+	for i := 0; i < 12; i++ { // up to ~60s of polling
+		time.Sleep(5 * time.Second)
+		resp2 := cs.chat(ctx, `Check if you received any notifications from a scheduled task. If you see "FIRE_CONFIRMED" in a notification, say exactly "NOTIFICATION_RECEIVED". Otherwise say "WAITING".`)
+		t.Logf("poll %d: %s", i+1, resp2)
+		if strings.Contains(resp2, "NOTIFICATION_RECEIVED") || strings.Contains(resp2, "FIRE_CONFIRMED") {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Error("scheduled task did not fire or notification was not received within timeout")
+	}
+
+	// Verify the one-shot was auto-cleaned up.
+	resp3 := cs.chat(ctx, `Use the ListSchedules tool now. Do not use any other tools.`)
+	t.Logf("ListSchedules after fire: %s", resp3)
+	if strings.Contains(resp3, "e2e-fire-now") {
+		t.Error("expected one-shot schedule to be cleaned up after firing")
+	}
+}
+
 func TestE2E_CancelSchedule_NotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

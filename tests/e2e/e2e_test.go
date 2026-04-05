@@ -97,6 +97,12 @@ func runSetup() error {
 	}
 	model := os.Getenv("HIRO_MODEL")
 
+	// HIRO_MODEL may use "provider/model" format (e.g. "openrouter/x-ai/grok-4.1-fast").
+	// The setup API expects provider and model separately, so strip the provider prefix.
+	if prefix := provider + "/"; strings.HasPrefix(model, prefix) {
+		model = strings.TrimPrefix(model, prefix)
+	}
+
 	body, _ := json.Marshal(map[string]string{
 		"password":      "e2e-test-password-12345",
 		"mode":          "standalone",

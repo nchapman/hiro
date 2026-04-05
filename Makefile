@@ -1,5 +1,9 @@
 .PHONY: build test test-local test-isolation test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
 
+# Auto-load .env variables. Command-line overrides (make VAR=x) take precedence.
+# Variables are NOT exported globally — only test targets pass what they need.
+-include .env
+
 BINARY := hiro
 PKG := github.com/nchapman/hiro
 
@@ -18,7 +22,7 @@ test-isolation:
 	docker run --rm --init hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
 
 test-online:
-	@if [ -z "$$HIRO_API_KEY" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
+	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
 	@# Build production image and start hiro server
 	docker compose -f docker-compose.yml -f docker-compose.e2e.yml build hiro-e2e
 	docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d hiro-e2e
@@ -26,16 +30,17 @@ test-online:
 	@PORT=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml port hiro-e2e 8080 | cut -d: -f2); \
 	HIRO_E2E_URL=http://localhost:$$PORT \
 	HIRO_E2E_CONTAINER=$$(docker compose -f docker-compose.yml -f docker-compose.e2e.yml ps -q hiro-e2e) \
+	HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL) \
 	go test ./tests/e2e/... -tags=e2e -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	docker compose -f docker-compose.yml -f docker-compose.e2e.yml down -v; \
 	exit $$EXIT
 
 test-cluster:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	if [ -z "$$HIRO_API_KEY" ]; then echo "HIRO_API_KEY must be set (via env or .env)"; exit 1; fi; \
+	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
 	mkdir -p tests/e2e_cluster/leader-config; \
 	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
+	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
 	docker compose -f docker-compose.cluster.yml build; \
 	docker compose -f docker-compose.cluster.yml up -d; \
 	sleep 3; \
@@ -56,11 +61,11 @@ test-cluster:
 	exit $$EXIT
 
 test-cluster-relay:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	if [ -z "$$HIRO_API_KEY" ]; then echo "HIRO_API_KEY must be set (via env or .env)"; exit 1; fi; \
+	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
 	SWARM=$$(openssl rand -hex 16); \
 	mkdir -p tests/e2e_cluster/leader-config; \
 	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
+	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
 	docker compose -f docker-compose.cluster-relay.yml build; \
 	export HIRO_SWARM_CODE=$$SWARM; \
 	docker compose -f docker-compose.cluster-relay.yml up -d; \
