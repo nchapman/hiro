@@ -48,24 +48,19 @@ type Router struct {
 }
 
 // NewRouter creates a Router wired to the given Manager and command handler.
-// The ctx controls the lifetime of all notification pumps.
-func NewRouter(mgr ManagerInterface, cmdHandler CommandHandler, usage *UsageQuerier, logger *slog.Logger) *Router {
+// The ctx controls the lifetime of all notification pumps started via
+// EnsureNotificationPump.
+func NewRouter(ctx context.Context, mgr ManagerInterface, cmdHandler CommandHandler, usage *UsageQuerier, logger *slog.Logger) *Router {
 	return &Router{
 		manager:    mgr,
 		cmdHandler: cmdHandler,
 		usage:      usage,
-		ctx:        context.Background(),
+		ctx:        ctx,
 		channels:   make(map[string]Channel),
 		bindings:   make(map[string]*Binding),
 		pumps:      make(map[string]context.CancelFunc),
 		logger:     logger.With("component", "router"),
 	}
-}
-
-// SetContext sets the parent context for notification pumps. Should be called
-// before any pumps are started, typically with the application lifecycle context.
-func (r *Router) SetContext(ctx context.Context) {
-	r.ctx = ctx
 }
 
 // Register adds a channel to the router.
@@ -290,13 +285,10 @@ func (r *Router) StopNotificationPump(instanceID string) {
 
 // runNotificationPump is the per-instance goroutine that watches the
 // notification queue and delivers meta-turn results to bound channels.
+// Cleanup of the pumps map entry is handled by StopNotificationPump or
+// Router.Stop — not by this goroutine — to avoid a race where a
+// successor pump's cancel func is deleted by a predecessor's defer.
 func (r *Router) runNotificationPump(ctx context.Context, instanceID string) {
-	defer func() {
-		r.pumpMu.Lock()
-		delete(r.pumps, instanceID)
-		r.pumpMu.Unlock()
-	}()
-
 	q := r.manager.InstanceNotifications(instanceID)
 	if q == nil {
 		return

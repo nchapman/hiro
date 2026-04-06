@@ -113,8 +113,7 @@ type app struct {
 	srv        *api.Server
 	mgr        *agent.Manager
 	scheduler  *agent.Scheduler
-	telegramCh *telegramchannel.Channel
-	slackCh    *slackchannel.Channel
+	chanRouter *channel.Router
 
 	// Cluster state — only populated for leader mode.
 	cs             clusterState
@@ -463,8 +462,8 @@ func (a *app) initChannels(leaderID string) {
 	a.srv.SetManager(a.mgr, leaderID)
 
 	usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
-	router := channel.NewRouter(a.mgr, a.cp, usage, a.logger)
-	router.SetContext(a.ctx)
+	router := channel.NewRouter(a.ctx, a.mgr, a.cp, usage, a.logger)
+	a.chanRouter = router
 
 	wc := webchannel.New(router, a.mgr, a.logger)
 	router.Register(wc)
@@ -505,7 +504,6 @@ func (a *app) startTelegramChannel(router *channel.Router) {
 		a.logger.Warn("failed to start telegram channel", "error", err)
 		return
 	}
-	a.telegramCh = tg
 	a.logger.Info("telegram channel started", "instance", tgCfg.Instance)
 }
 
@@ -536,7 +534,6 @@ func (a *app) startSlackChannel(router *channel.Router) {
 		a.logger.Warn("failed to start slack channel", "error", err)
 		return
 	}
-	a.slackCh = sc
 	a.logger.Info("slack channel started", "instance", slackCfg.Instance)
 }
 
@@ -595,11 +592,10 @@ func (a *app) shutdown() {
 	if a.cs.fileSync != nil {
 		a.cs.fileSync.Stop()
 	}
-	if a.telegramCh != nil {
-		_ = a.telegramCh.Stop()
-	}
-	if a.slackCh != nil {
-		_ = a.slackCh.Stop()
+	// Stop all channels and notification pumps via the router.
+	// This also calls Stop on each registered channel (telegram, slack, etc).
+	if a.chanRouter != nil {
+		a.chanRouter.Stop()
 	}
 	if a.srv != nil {
 		a.srv.ShutdownTerminalSessions()

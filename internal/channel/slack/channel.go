@@ -112,7 +112,7 @@ func (c *Channel) Deliver(ctx context.Context, conversationKey string, events []
 		return fmt.Errorf("invalid slack conversation key: %q", conversationKey)
 	}
 
-	text := formatEvents(events)
+	text := channel.FormatEvents(events)
 	if text == "" {
 		return nil
 	}
@@ -227,20 +227,12 @@ func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) {
 		return
 	}
 
+	// Ensure notifications for this instance are pumped to all channels.
+	c.router.EnsureNotificationPump(instanceID)
+
 	// Build buffering callbacks.
 	var buf strings.Builder
-	onEvent := func(e ipc.ChatEvent) error {
-		switch e.Type {
-		case "delta":
-			buf.WriteString(e.Content)
-		case "error":
-			if buf.Len() > 0 {
-				buf.WriteString("\n\n")
-			}
-			buf.WriteString("Error: " + e.Content)
-		}
-		return nil
-	}
+	onEvent := channel.MakeBufferingOnEvent(&buf)
 
 	onDone := func(_ channel.TurnResult) error {
 		resp := buf.String()
@@ -383,21 +375,4 @@ func parseConversationKey(key string) (channelID, threadTS string) {
 		threadTS = parts[1]
 	}
 	return channelID, threadTS
-}
-
-// formatEvents extracts text content from inference events for Slack delivery.
-func formatEvents(events []ipc.ChatEvent) string {
-	var buf strings.Builder
-	for _, evt := range events {
-		switch evt.Type {
-		case "delta":
-			buf.WriteString(evt.Content)
-		case "error":
-			if buf.Len() > 0 {
-				buf.WriteString("\n\n")
-			}
-			buf.WriteString("Error: " + evt.Content)
-		}
-	}
-	return buf.String()
 }

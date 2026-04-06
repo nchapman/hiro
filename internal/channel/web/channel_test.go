@@ -89,7 +89,7 @@ func (h *mockCmdHandler) HandleCommand(input string) (string, error) {
 func setupWebChannel(t *testing.T, mgr *mockManager) (*httptest.Server, *Channel) {
 	t.Helper()
 
-	router := channel.NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	router := channel.NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
 	wc := New(router, mgr, slog.Default())
 	router.Register(wc)
 
@@ -260,7 +260,7 @@ func TestDeliver_NoConnection_ReturnsChannelClosed(t *testing.T) {
 	t.Parallel()
 
 	mgr := newMockManager()
-	router := channel.NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	router := channel.NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
 	wc := New(router, mgr, slog.Default())
 
 	err := wc.Deliver(t.Context(), "web:nonexistent", nil, channel.TurnResult{})

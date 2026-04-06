@@ -123,7 +123,7 @@ func (c *Channel) Deliver(ctx context.Context, conversationKey string, events []
 		return err
 	}
 
-	text := formatEvents(events)
+	text := channel.FormatEvents(events)
 	if text == "" {
 		return nil
 	}
@@ -210,9 +210,12 @@ func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversatio
 		return
 	}
 
+	// Ensure notifications for this instance are pumped to all channels.
+	c.router.EnsureNotificationPump(instanceID)
+
 	// Build buffering callbacks.
 	var buf strings.Builder
-	onEvent := makeBufferingOnEvent(&buf)
+	onEvent := channel.MakeBufferingOnEvent(&buf)
 	onDone := func(_ channel.TurnResult) error {
 		resp := buf.String()
 		if resp == "" {
@@ -231,22 +234,6 @@ func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversatio
 	})
 	if err != nil {
 		c.logger.Warn("dispatch failed", "chat_id", chatID, "error", err)
-	}
-}
-
-// makeBufferingOnEvent creates an OnEvent callback that buffers text deltas.
-func makeBufferingOnEvent(buf *strings.Builder) func(ipc.ChatEvent) error {
-	return func(evt ipc.ChatEvent) error {
-		switch evt.Type {
-		case "delta":
-			buf.WriteString(evt.Content)
-		case "error":
-			if buf.Len() > 0 {
-				buf.WriteString("\n\n")
-			}
-			buf.WriteString("Error: " + evt.Content)
-		}
-		return nil
 	}
 }
 
@@ -340,13 +327,19 @@ func (c *Channel) apiCall(ctx context.Context, method string, params any, result
 	url := fmt.Sprintf("%s/bot%s/%s", c.baseURL, c.token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: failed to build request", method)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s: %w", method, err)
+		// Don't wrap the raw error — it may contain the full URL which
+		// includes the bot token. Report the context error if available
+		// (timeout, cancellation), otherwise a generic message.
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: %w", method, ctx.Err())
+		}
+		return fmt.Errorf("%s: request failed", method)
 	}
 	defer resp.Body.Close()
 
@@ -427,21 +420,4 @@ func splitMessage(text string, maxLen int) []string {
 		text = text[cut:]
 	}
 	return chunks
-}
-
-// formatEvents extracts text content from inference events for Telegram delivery.
-func formatEvents(events []ipc.ChatEvent) string {
-	var buf strings.Builder
-	for _, evt := range events {
-		switch evt.Type {
-		case "delta":
-			buf.WriteString(evt.Content)
-		case "error":
-			if buf.Len() > 0 {
-				buf.WriteString("\n\n")
-			}
-			buf.WriteString("Error: " + evt.Content)
-		}
-	}
-	return buf.String()
 }

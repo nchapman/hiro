@@ -114,7 +114,7 @@ func mockSlackAPI(t *testing.T, postMessageFn func(channelID, text, threadTS str
 
 func testRouter(t *testing.T, mgr *mockManager) *channel.Router {
 	t.Helper()
-	return channel.NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	return channel.NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
 }
 
 // waitFor polls until condition returns true or the timeout expires.
@@ -664,7 +664,7 @@ func TestFormatEvents(t *testing.T) {
 		{Type: "tool_call", ToolName: "Bash"},
 		{Type: "delta", Content: "world"},
 	}
-	text := formatEvents(events)
+	text := channel.FormatEvents(events)
 	if text != "hello world" {
 		t.Errorf("text = %q", text)
 	}
@@ -677,7 +677,7 @@ func TestFormatEvents_WithError(t *testing.T) {
 		{Type: "delta", Content: "partial"},
 		{Type: "error", Content: "failed"},
 	}
-	text := formatEvents(events)
+	text := channel.FormatEvents(events)
 	if !strings.Contains(text, "partial") || !strings.Contains(text, "Error: failed") {
 		t.Errorf("text = %q", text)
 	}

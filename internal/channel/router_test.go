@@ -133,8 +133,9 @@ func (c *mockChannel) Deliver(ctx context.Context, key string, events []ipc.Chat
 	return nil
 }
 
-func testRouter(mgr *mockManager) *Router {
-	return NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+func testRouter(t *testing.T, mgr *mockManager) *Router {
+	t.Helper()
+	return NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
 }
 
 // --- Tests ---
@@ -150,7 +151,7 @@ func TestDispatch_SendMessage(t *testing.T) {
 		return "hello", nil
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	var gotEvents []ipc.ChatEvent
 	var gotResult TurnResult
@@ -194,7 +195,7 @@ func TestDispatch_SendMessageWithFiles(t *testing.T) {
 		return "got files", nil
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	msg := InboundMessage{
 		ConversationKey: "test:1",
@@ -223,7 +224,7 @@ func TestDispatch_ErrorReportedToChannel(t *testing.T) {
 		return "", errors.New("inference failed")
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	var gotError bool
 	msg := InboundMessage{
@@ -256,7 +257,7 @@ func TestSlashCommand_Clear(t *testing.T) {
 		return "new-session", nil
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	var gotClear, gotDone bool
 	msg := InboundMessage{
@@ -305,7 +306,7 @@ func TestSlashCommand_Help(t *testing.T) {
 		return "", errors.New("unknown")
 	}}
 
-	r := NewRouter(mgr, handler, nil, slog.Default())
+	r := NewRouter(t.Context(), mgr, handler, nil, slog.Default())
 
 	var gotSystem string
 	msg := InboundMessage{
@@ -337,7 +338,7 @@ func TestSlashCommand_TrustGating(t *testing.T) {
 	mgr := newMockManager()
 	handler := &mockCmdHandler{}
 
-	r := NewRouter(mgr, handler, nil, slog.Default())
+	r := NewRouter(t.Context(), mgr, handler, nil, slog.Default())
 
 	// Register an untrusted channel.
 	untrusted := &mockChannel{name: "telegram", trusted: false}
@@ -398,7 +399,7 @@ func TestSlashCommand_TrustGating(t *testing.T) {
 func TestSlashCommand_EmptySlash(t *testing.T) {
 	t.Parallel()
 
-	r := testRouter(newMockManager())
+	r := testRouter(t, newMockManager())
 
 	var gotSystem string
 	msg := InboundMessage{
@@ -424,7 +425,7 @@ func TestSlashCommand_EmptySlash(t *testing.T) {
 func TestSlashCommand_UnknownCommand(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter(newMockManager(), nil, nil, slog.Default())
+	r := NewRouter(t.Context(), newMockManager(), nil, nil, slog.Default())
 
 	var gotSystem string
 	msg := InboundMessage{
@@ -453,7 +454,7 @@ func TestSlashCommand_HandlerError(t *testing.T) {
 	handler := &mockCmdHandler{fn: func(string) (string, error) {
 		return "", errors.New("bad command")
 	}}
-	r := NewRouter(newMockManager(), handler, nil, slog.Default())
+	r := NewRouter(t.Context(), newMockManager(), handler, nil, slog.Default())
 
 	var gotSystem string
 	msg := InboundMessage{
@@ -482,7 +483,7 @@ func TestBindUnbind(t *testing.T) {
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 	ch := &mockChannel{name: "test"}
 	r.Register(ch)
 
@@ -551,7 +552,7 @@ func TestNotificationPump_DeliverToBindings(t *testing.T) {
 		return "meta-response", nil
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	var deliveredEvents []ipc.ChatEvent
 	var deliveredMu sync.Mutex
@@ -612,7 +613,7 @@ func TestNotificationPump_StaleSessionDiscarded(t *testing.T) {
 		return "", nil
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 	ch := &mockChannel{name: "test"}
 	r.Register(ch)
 	r.Bind("key-1", "test", "inst-1")
@@ -642,7 +643,7 @@ func TestNotificationPump_NoBindingsSkipsDelivery(t *testing.T) {
 		return "", nil
 	}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 	// No bindings registered.
 
 	r.StartNotificationPump(t.Context(), "inst-1")
@@ -662,7 +663,7 @@ func TestNotificationPump_Idempotent(t *testing.T) {
 	q := inference.NewNotificationQueue(slog.Default())
 	mgr.notifications["inst-1"] = q
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	// Starting the pump twice should not panic or create duplicate goroutines.
 	r.StartNotificationPump(t.Context(), "inst-1")
@@ -677,7 +678,7 @@ func TestFanOut_ChannelClosedUnbinds(t *testing.T) {
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	ch := &mockChannel{
 		name: "test",
@@ -704,7 +705,7 @@ func TestFanOut_ConcurrentDelivery(t *testing.T) {
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
 
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	var deliveryCount atomic.Int32
 	for i := range 3 {
@@ -751,7 +752,7 @@ func TestRouterStop(t *testing.T) {
 	// Override Stop to track it.
 	stoppableCh := &stoppableChannel{mockChannel: ch, onStop: func() { stopped.Store(true) }}
 
-	r := NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	r := NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
 	r.Register(stoppableCh)
 
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:testingcontext // cancel is used explicitly before Stop
@@ -848,7 +849,7 @@ func TestUsageQuerier_NoManager(t *testing.T) {
 func TestRouter_ChannelAccessor(t *testing.T) {
 	t.Parallel()
 
-	r := testRouter(newMockManager())
+	r := testRouter(t, newMockManager())
 
 	// No channel registered.
 	if ch := r.Channel("web"); ch != nil {
@@ -870,7 +871,7 @@ func TestRouter_GetBinding(t *testing.T) {
 
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 
 	ch := &mockChannel{name: "test"}
 	r.Register(ch)
@@ -895,7 +896,7 @@ func TestRouter_Manager(t *testing.T) {
 	t.Parallel()
 
 	mgr := newMockManager()
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 	if r.Manager() == nil {
 		t.Error("expected non-nil manager")
 	}
@@ -905,7 +906,7 @@ func TestBind_ReturnsBinding(t *testing.T) {
 	t.Parallel()
 
 	mgr := newMockManager()
-	r := testRouter(mgr)
+	r := testRouter(t, mgr)
 	ch := &mockChannel{name: "test"}
 	r.Register(ch)
 

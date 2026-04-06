@@ -77,7 +77,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 // testRouter creates a minimal Router with a mock manager for testing.
 func testRouter(t *testing.T, mgr *mockManager) *channel.Router {
 	t.Helper()
-	return channel.NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	return channel.NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
 }
 
 type mockManager struct {
@@ -243,7 +243,7 @@ func TestFormatEvents(t *testing.T) {
 		{Type: "reasoning_delta", Content: "thinking"}, // ignored
 	}
 
-	text := formatEvents(events)
+	text := channel.FormatEvents(events)
 	if text != "hello world" {
 		t.Errorf("text = %q, want %q", text, "hello world")
 	}
@@ -257,7 +257,7 @@ func TestFormatEvents_WithError(t *testing.T) {
 		{Type: "error", Content: "something failed"},
 	}
 
-	text := formatEvents(events)
+	text := channel.FormatEvents(events)
 	if !strings.Contains(text, "partial") || !strings.Contains(text, "something failed") {
 		t.Errorf("text = %q", text)
 	}
@@ -581,7 +581,7 @@ func TestMakeBufferingOnEvent(t *testing.T) {
 	t.Parallel()
 
 	var buf strings.Builder
-	onEvent := makeBufferingOnEvent(&buf)
+	onEvent := channel.MakeBufferingOnEvent(&buf)
 
 	// Delta events.
 	_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "hello "})
@@ -598,7 +598,7 @@ func TestMakeBufferingOnEvent(t *testing.T) {
 
 	// Error on empty buffer — no separator.
 	var buf2 strings.Builder
-	onEvent2 := makeBufferingOnEvent(&buf2)
+	onEvent2 := channel.MakeBufferingOnEvent(&buf2)
 	_ = onEvent2(ipc.ChatEvent{Type: "error", Content: "fail"})
 	if buf2.String() != "Error: fail" {
 		t.Errorf("buf = %q, want no separator", buf2.String())
@@ -606,7 +606,7 @@ func TestMakeBufferingOnEvent(t *testing.T) {
 
 	// Ignored event types.
 	var buf3 strings.Builder
-	onEvent3 := makeBufferingOnEvent(&buf3)
+	onEvent3 := channel.MakeBufferingOnEvent(&buf3)
 	_ = onEvent3(ipc.ChatEvent{Type: "tool_call", ToolName: "Bash"})
 	_ = onEvent3(ipc.ChatEvent{Type: "reasoning_delta", Content: "thinking"})
 	if buf3.String() != "" {
