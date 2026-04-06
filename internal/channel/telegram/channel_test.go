@@ -482,3 +482,137 @@ func TestSendLong_SplitsMessages(t *testing.T) {
 		t.Errorf("total length = %d, want %d", totalLen, maxMessageLen+100)
 	}
 }
+
+func TestStop(t *testing.T) {
+	t.Parallel()
+
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, nil)
+	defer srv.Close()
+
+	ch := New(Config{
+		Token:       "test-token",
+		BaseURL:     srv.URL,
+		PollTimeout: 1,
+	}, nil, slog.Default())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	_ = ch.Start(ctx)
+
+	// Stop should be idempotent.
+	if err := ch.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ch.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+}
+
+func TestRetrySendPlain_ParseError(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, func(chatID int64, text string) error {
+		callCount++
+		return nil
+	})
+	defer srv.Close()
+
+	ch := New(Config{Token: "test-token", BaseURL: srv.URL}, nil, slog.Default())
+
+	// Simulate a parse error — should retry without Markdown.
+	params := map[string]any{
+		"chat_id":    float64(42),
+		"text":       "hello *world",
+		"parse_mode": "Markdown",
+	}
+	err := ch.retrySendPlain(t.Context(), params, "Bad Request: can't parse entities in message text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify parse_mode was cleared.
+	if params["parse_mode"] != "" {
+		t.Errorf("parse_mode should be cleared, got %q", params["parse_mode"])
+	}
+}
+
+func TestRetrySendPlain_NonParseError(t *testing.T) {
+	t.Parallel()
+
+	ch := New(Config{Token: "test-token"}, nil, slog.Default())
+
+	// Non-parse error — should return the error without retrying.
+	err := ch.retrySendPlain(t.Context(), nil, "Too Many Requests: retry after 30")
+	if err == nil {
+		t.Fatal("expected error for non-parse failure")
+	}
+	if !strings.Contains(err.Error(), "Too Many Requests") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestHandleUpdate_EmptyText(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	router := testRouter(t, mgr)
+
+	var sendCalled atomic.Bool
+	mgr.sendMessageFn = func(context.Context, string, string, func(ipc.ChatEvent) error) (string, error) {
+		sendCalled.Store(true)
+		return "", nil
+	}
+
+	ch := New(Config{Token: "test-token", Instance: "operator"}, router, slog.Default())
+	router.Register(ch)
+
+	// Message with empty text should be ignored.
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, Text: ""},
+	})
+
+	if sendCalled.Load() {
+		t.Error("should not dispatch empty text message")
+	}
+}
+
+func TestHandleUpdate_NilMessage(t *testing.T) {
+	t.Parallel()
+
+	ch := New(Config{Token: "test-token"}, nil, slog.Default())
+
+	// Nil message should not panic.
+	ch.handleUpdate(t.Context(), update{UpdateID: 1, Message: nil})
+}
+
+func TestHandleUpdate_UnresolvableInstance(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	// No instances registered — resolution will fail.
+	router := testRouter(t, mgr)
+
+	var sentText string
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, func(chatID int64, text string) error {
+		sentText = text
+		return nil
+	})
+	defer srv.Close()
+
+	ch := New(Config{
+		Token:    "test-token",
+		Instance: "nonexistent",
+		BaseURL:  srv.URL,
+	}, router, slog.Default())
+	router.Register(ch)
+
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "hello"},
+	})
+
+	if sentText != "Agent is not available." {
+		t.Errorf("expected unavailable message, got %q", sentText)
+	}
+}

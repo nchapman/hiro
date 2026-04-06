@@ -1,10 +1,327 @@
 package web
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"charm.land/fantasy"
+	ws "github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+
+	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/channel"
+	"github.com/nchapman/hiro/internal/inference"
+	"github.com/nchapman/hiro/internal/ipc"
 )
+
+// --- Mock Manager for web channel tests ---
+
+type mockManager struct {
+	sendMessageFn  func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	updateConfigFn func(ctx context.Context, instanceID, model string, re *string) error
+	instances      map[string]agent.InstanceInfo
+	agentInstances map[string]string
+}
+
+func newMockManager() *mockManager {
+	return &mockManager{
+		instances:      make(map[string]agent.InstanceInfo),
+		agentInstances: make(map[string]string),
+	}
+}
+
+func (m *mockManager) SendMessage(ctx context.Context, instanceID, msg string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if m.sendMessageFn != nil {
+		return m.sendMessageFn(ctx, instanceID, msg, onEvent)
+	}
+	if onEvent != nil {
+		_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "reply"})
+	}
+	return "reply", nil
+}
+
+func (m *mockManager) SendMessageWithFiles(ctx context.Context, instanceID, msg string, _ []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessage(ctx, instanceID, msg, onEvent)
+}
+
+func (m *mockManager) SendMetaMessage(context.Context, string, string, func(ipc.ChatEvent) error) (string, error) {
+	return "", nil
+}
+
+func (m *mockManager) NewSession(string) (string, error) { return "new", nil }
+
+func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, re *string) error {
+	if m.updateConfigFn != nil {
+		return m.updateConfigFn(ctx, instanceID, model, re)
+	}
+	return nil
+}
+
+func (m *mockManager) InstanceNotifications(string) *inference.NotificationQueue { return nil }
+func (m *mockManager) ActiveSessionID(string) string                             { return "" }
+
+func (m *mockManager) GetInstance(id string) (agent.InstanceInfo, bool) {
+	info, ok := m.instances[id]
+	return info, ok
+}
+
+func (m *mockManager) InstanceByAgentName(name string) (string, bool) {
+	id, ok := m.agentInstances[name]
+	return id, ok
+}
+
+type mockCmdHandler struct{}
+
+func (h *mockCmdHandler) HandleCommand(input string) (string, error) {
+	return "ok: " + input, nil
+}
+
+// setupWebChannel creates a test HTTP server with the web channel wired up.
+// Returns the server, the channel, and a cleanup function.
+func setupWebChannel(t *testing.T, mgr *mockManager) (*httptest.Server, *Channel) {
+	t.Helper()
+
+	router := channel.NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	wc := New(router, mgr, slog.Default())
+	router.Register(wc)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := ws.Accept(w, r, nil)
+		if err != nil {
+			t.Logf("ws accept error: %v", err)
+			return
+		}
+		defer conn.Close(ws.StatusNormalClosure, "")
+
+		wc.HandleConn(r.Context(), conn, "inst-1", "web:test-conn")
+	}))
+
+	t.Cleanup(srv.Close)
+	return srv, wc
+}
+
+func dialWS(t *testing.T, srv *httptest.Server) *ws.Conn {
+	t.Helper()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, resp, err := ws.Dial(t.Context(), url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	return conn
+}
+
+func readMessage(t *testing.T, conn *ws.Conn) ChatMessage {
+	t.Helper()
+	var msg ChatMessage
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
+		t.Fatalf("read message: %v", err)
+	}
+	return msg
+}
+
+// --- WebSocket Integration Tests ---
+
+func TestHandleConn_MessageAndResponse(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	mgr.sendMessageFn = func(_ context.Context, _ string, msg string, onEvent func(ipc.ChatEvent) error) (string, error) {
+		_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "hello back"})
+		return "hello back", nil
+	}
+
+	srv, _ := setupWebChannel(t, mgr)
+	conn := dialWS(t, srv)
+	defer conn.Close(ws.StatusNormalClosure, "")
+
+	// Send a message.
+	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "message", Content: "hello"})
+
+	// Read the delta event.
+	msg := readMessage(t, conn)
+	if msg.Type != "delta" || msg.Content != "hello back" {
+		t.Errorf("got %+v, want delta 'hello back'", msg)
+	}
+
+	// Read the done event.
+	msg = readMessage(t, conn)
+	if msg.Type != "done" {
+		t.Errorf("got type %q, want 'done'", msg.Type)
+	}
+}
+
+func TestHandleConn_SlashClear(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+
+	srv, _ := setupWebChannel(t, mgr)
+	conn := dialWS(t, srv)
+	defer conn.Close(ws.StatusNormalClosure, "")
+
+	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "message", Content: "/clear"})
+
+	// Should get clear + done.
+	msg := readMessage(t, conn)
+	if msg.Type != "clear" {
+		t.Errorf("got type %q, want 'clear'", msg.Type)
+	}
+	msg = readMessage(t, conn)
+	if msg.Type != "done" {
+		t.Errorf("got type %q, want 'done'", msg.Type)
+	}
+}
+
+func TestHandleConn_ConfigMessage(t *testing.T) {
+	t.Parallel()
+
+	var configuredModel string
+	var configMu sync.Mutex
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	mgr.updateConfigFn = func(_ context.Context, _ string, model string, _ *string) error {
+		configMu.Lock()
+		configuredModel = model
+		configMu.Unlock()
+		return nil
+	}
+
+	srv, _ := setupWebChannel(t, mgr)
+	conn := dialWS(t, srv)
+	defer conn.Close(ws.StatusNormalClosure, "")
+
+	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "config", Model: "claude-4"})
+
+	// Should get system + done.
+	msg := readMessage(t, conn)
+	if msg.Type != "system" || !strings.Contains(msg.Content, "Configuration updated") {
+		t.Errorf("got %+v, want system config confirmation", msg)
+	}
+	msg = readMessage(t, conn)
+	if msg.Type != "done" {
+		t.Errorf("got type %q, want 'done'", msg.Type)
+	}
+
+	configMu.Lock()
+	defer configMu.Unlock()
+	if configuredModel != "claude-4" {
+		t.Errorf("model = %q, want %q", configuredModel, "claude-4")
+	}
+}
+
+func TestDeliver_StreamsEventsToWebSocket(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+
+	srv, wc := setupWebChannel(t, mgr)
+	conn := dialWS(t, srv)
+	defer conn.Close(ws.StatusNormalClosure, "")
+
+	// Wait for HandleConn to register the connection.
+	time.Sleep(50 * time.Millisecond)
+
+	events := []ipc.ChatEvent{
+		{Type: "delta", Content: "notification text"},
+	}
+	err := wc.Deliver(t.Context(), "web:test-conn", events, channel.TurnResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := readMessage(t, conn)
+	if msg.Type != "delta" || msg.Content != "notification text" {
+		t.Errorf("got %+v, want delta notification", msg)
+	}
+
+	msg = readMessage(t, conn)
+	if msg.Type != "done" {
+		t.Errorf("got type %q, want 'done'", msg.Type)
+	}
+}
+
+func TestDeliver_NoConnection_ReturnsChannelClosed(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	router := channel.NewRouter(mgr, &mockCmdHandler{}, nil, slog.Default())
+	wc := New(router, mgr, slog.Default())
+
+	err := wc.Deliver(t.Context(), "web:nonexistent", nil, channel.TurnResult{})
+	if !errors.Is(err, channel.ErrChannelClosed) {
+		t.Errorf("err = %v, want ErrChannelClosed", err)
+	}
+}
+
+func TestNameAndTrusted(t *testing.T) {
+	t.Parallel()
+
+	wc := New(nil, nil, slog.Default())
+	if wc.Name() != "web" {
+		t.Errorf("Name() = %q", wc.Name())
+	}
+	if !wc.Trusted() {
+		t.Error("web should be trusted")
+	}
+}
+
+func TestStartStop(t *testing.T) {
+	t.Parallel()
+
+	wc := New(nil, nil, slog.Default())
+	if err := wc.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChatEventToMessage(t *testing.T) {
+	t.Parallel()
+
+	evt := ipc.ChatEvent{
+		Type:       "tool_call",
+		ToolCallID: "tc-1",
+		ToolName:   "Bash",
+		Input:      `{"command":"ls"}`,
+		Status:     "running",
+		IsMeta:     true,
+	}
+
+	msg := chatEventToMessage(evt)
+	if msg.Type != "tool_call" {
+		t.Errorf("type = %q", msg.Type)
+	}
+	if msg.Role != "assistant" {
+		t.Errorf("role = %q", msg.Role)
+	}
+	if msg.ToolCallID != "tc-1" {
+		t.Errorf("tool_call_id = %q", msg.ToolCallID)
+	}
+	if msg.ToolName != "Bash" {
+		t.Errorf("tool_name = %q", msg.ToolName)
+	}
+	if !msg.IsMeta {
+		t.Error("expected IsMeta = true")
+	}
+}
 
 func TestSupportedMIME(t *testing.T) {
 	t.Parallel()

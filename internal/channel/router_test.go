@@ -792,3 +792,79 @@ func TestUsageQuerier_Nil(t *testing.T) {
 		t.Errorf("expected nil for nil querier, got %+v", result)
 	}
 }
+
+func TestRouter_ChannelAccessor(t *testing.T) {
+	t.Parallel()
+
+	r := testRouter(newMockManager())
+
+	// No channel registered.
+	if ch := r.Channel("web"); ch != nil {
+		t.Error("expected nil for unregistered channel")
+	}
+
+	// Register and retrieve.
+	ch := &mockChannel{name: "web"}
+	r.Register(ch)
+	if got := r.Channel("web"); got == nil {
+		t.Error("expected non-nil")
+	} else if got.Name() != "web" {
+		t.Errorf("name = %q, want %q", got.Name(), "web")
+	}
+}
+
+func TestRouter_GetBinding(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	r := testRouter(mgr)
+
+	ch := &mockChannel{name: "test"}
+	r.Register(ch)
+
+	// No binding.
+	if b := r.GetBinding("key-1"); b != nil {
+		t.Error("expected nil for nonexistent binding")
+	}
+
+	// Create binding and retrieve.
+	r.Bind("key-1", "test", "inst-1")
+	b := r.GetBinding("key-1")
+	if b == nil {
+		t.Fatal("expected non-nil binding")
+	}
+	if b.Target != "inst-1" {
+		t.Errorf("target = %q, want %q", b.Target, "inst-1")
+	}
+}
+
+func TestRouter_Manager(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	r := testRouter(mgr)
+	if r.Manager() == nil {
+		t.Error("expected non-nil manager")
+	}
+}
+
+func TestBind_ReturnsBinding(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	r := testRouter(mgr)
+	ch := &mockChannel{name: "test"}
+	r.Register(ch)
+
+	b := r.Bind("key-1", "test", "inst-1")
+	if b == nil {
+		t.Fatal("Bind should return the binding")
+	}
+	if b.ConversationKey != "key-1" {
+		t.Errorf("key = %q", b.ConversationKey)
+	}
+	if b.Target != "inst-1" {
+		t.Errorf("target = %q", b.Target)
+	}
+}
