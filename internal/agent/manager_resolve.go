@@ -72,11 +72,7 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 		allowLayers = append(allowLayers, agentAllow)
 	}
 
-	// Intersect with control plane and parent rules.
-	allowLayers, denyRules, err = m.intersectControlPlaneRules(cfg.Name, effective, allowLayers, denyRules)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	// Intersect with parent rules (child can't have more tools than parent).
 	allowLayers, denyRules = m.intersectParentRules(parentID, effective, allowLayers, denyRules)
 
 	// Filter all allow layers to only include rules for effective tools,
@@ -97,43 +93,6 @@ func (m *Manager) computeEffectiveTools(cfg config.AgentConfig, parentID string)
 	denyRules = filterRules(denyRules, effective)
 
 	return effective, allowLayers, denyRules, nil
-}
-
-// intersectControlPlaneRules intersects the effective tool set with control plane
-// overrides and collects CP deny rules. Modifies effective in place.
-func (m *Manager) intersectControlPlaneRules(agentName string, effective map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) ([][]toolrules.Rule, []toolrules.Rule, error) {
-	if m.cp == nil {
-		return allowLayers, denyRules, nil
-	}
-
-	if cpToolStrs, ok := m.cp.AgentTools(agentName); ok {
-		cpAllow, parseErr := toolrules.ParseRules(cpToolStrs)
-		if parseErr != nil {
-			return nil, nil, fmt.Errorf("parsing control plane tool rules: %w", parseErr)
-		}
-		cpNames := make(map[string]bool, len(cpAllow))
-		for _, r := range cpAllow {
-			cpNames[r.Tool] = true
-		}
-		for t := range effective {
-			if !cpNames[t] {
-				delete(effective, t)
-			}
-		}
-		if hasParameterized(cpAllow) {
-			allowLayers = append(allowLayers, filterRules(cpAllow, effective))
-		}
-	}
-
-	if cpDenyStrs := m.cp.AgentDisallowedTools(agentName); len(cpDenyStrs) > 0 {
-		cpDeny, parseErr := toolrules.ParseRules(cpDenyStrs)
-		if parseErr != nil {
-			return nil, nil, fmt.Errorf("parsing control plane deny rules: %w", parseErr)
-		}
-		denyRules = append(denyRules, cpDeny...)
-	}
-
-	return allowLayers, denyRules, nil
 }
 
 // intersectParentRules intersects the effective tool set with the parent instance's

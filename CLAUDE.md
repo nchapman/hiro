@@ -206,7 +206,7 @@ See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, 
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
 - **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes. Resource limits centralized in `limits.go`.
-- **`internal/controlplane`** — Operator-level config (secrets, tool policies, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets`, `/tools`, and `/cluster` commands.
+- **`internal/controlplane`** — Operator-level config (secrets, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/cluster` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, persona/memory/todos persistence.
 - **`internal/api`** — HTTP server with REST endpoints, WebSocket chat (`/ws/chat`), WebSocket terminal (`/ws/terminal`), file browser, sharing, usage tracking, log querying/streaming, and cluster node management.
 - **`internal/transport`** — Wire protocol (WebSocket JSON envelopes) for leader↔worker communication.
@@ -311,19 +311,14 @@ The control plane (`internal/controlplane`) manages operator-level configuration
 ```yaml
 secrets:
   GITHUB_TOKEN: ghp_xxxxxxxxxxxx
-
-agents:
-  researcher:
-    allowed_tools: [Read, Glob, Grep]
-    disallowed_tools: [Bash(rm *)]
 ```
 
 **Key concepts:**
 
 - **Secrets** — Named key-value pairs. Injected as env vars into Bash commands. Agents see names in system prompt but never values.
-- **Tool allowlists** — Agents declare tools in `agent.md` frontmatter (`allowed_tools: [Bash, Read, ...]`). Closed by default: no declaration = no built-in tools. Control plane can further restrict.
-- **Tool rules** — Parameterized rules like `Bash(curl *)` or `Read(/src/*)` provide fine-grained call-time enforcement. Deny rules like `Bash(rm *)` block specific patterns. See [`docs/tool-permissions.md`](docs/tool-permissions.md).
-- **Inherited caps** — Child effective tools = intersection of (declared tools ∩ control plane ∩ parent's effective tools).
+- **Tool declarations** — Each instance owns its tool declarations in `config.yaml` (seeded from `agent.md` at creation). Closed by default: no declaration = no built-in tools. See [`docs/tool-permissions.md`](docs/tool-permissions.md).
+- **Tool rules** — Parameterized rules like `Bash(curl *)` or `Read(/src/*)` provide fine-grained call-time enforcement. Deny rules like `Bash(rm *)` block specific patterns.
+- **Inherited caps** — Child effective tools = intersection of (declared tools ∩ parent's effective tools).
 
 **Slash commands** (intercepted in WebSocket handler, never reach agent):
 
@@ -332,10 +327,6 @@ agents:
 | `/secrets set NAME=VALUE` | Store a secret |
 | `/secrets rm NAME` | Remove a secret |
 | `/secrets list` | List secret names (not values) |
-| `/tools set <agent> <tools>` | Set tool override |
-| `/tools deny <agent> <tools>` | Set deny rules |
-| `/tools rm <agent>` | Clear override |
-| `/tools list [agent]` | Show overrides |
 
 ## Instance Config
 
@@ -356,7 +347,7 @@ channels:
     allowed_channels: ["C123"]
 ```
 
-**Tool declarations** are seeded from `agent.md` at instance creation and owned by the instance thereafter. Changes to `agent.md` `allowed_tools` do not flow to existing instances — each instance's `config.yaml` is the source of truth. The operator policy layer (`config/config.yaml agents[name]`) still constrains on top as a security boundary.
+**Tool declarations** are seeded from `agent.md` at instance creation and owned by the instance thereafter. Changes to `agent.md` `allowed_tools` do not flow to existing instances — each instance's `config.yaml` is the source of truth.
 
 **What lives where:**
 
@@ -365,7 +356,6 @@ channels:
 | Model override, reasoning effort | `instances/<uuid>/config.yaml` | Per-instance operational config |
 | Tool declarations | `instances/<uuid>/config.yaml` | Seeded from agent.md, instance-owned thereafter |
 | Channel bindings (Telegram/Slack) | `instances/<uuid>/config.yaml` | Per-instance, multiple agents can have channels |
-| Tool policy (`agents[name]`) | `config/config.yaml` | Operator security constraint, keyed by agent name |
 | Secrets | `config/config.yaml` | Operator-level, referenced by `${NAME}` |
 | Persona, memory | `instances/<uuid>/persona.md`, `memory.md` | Agent-editable identity (chowned to agent UID) |
 
@@ -408,7 +398,7 @@ Defense-in-depth security architecture. Covers Docker containment, process isola
 
 ### [`docs/tool-permissions.md`](docs/tool-permissions.md) — Tool Permissions
 
-The layered tool permission system. Covers the rule format (`Tool(pattern)` with wildcards), how permissions combine across four sources (agent definition, operator config, parent agent, skill activation), call-time enforcement with the `toolrules` package, Bash command analysis using a real shell parser (catches `$(rm -rf /)` inside subshells), path normalization for file tools, and the complete frontmatter reference for agent and skill YAML fields.
+The layered tool permission system. Covers the rule format (`Tool(pattern)` with wildcards), how permissions combine across sources (instance config, parent agent, skill activation), call-time enforcement with the `toolrules` package, Bash command analysis using a real shell parser (catches `$(rm -rf /)` inside subshells), path normalization for file tools, and the complete frontmatter reference for agent and skill YAML fields.
 
 ### [`docs/system-reminders.md`](docs/system-reminders.md) — Context Provider System
 

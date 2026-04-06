@@ -937,8 +937,6 @@ func TestApplyModelOverride(t *testing.T) {
 
 // fullMockCP implements ControlPlane with full method support for model resolution tests.
 type fullMockCP struct {
-	tools              map[string][]string
-	denyTools          map[string][]string
 	secretNames        []string
 	secretEnv          []string
 	providerType       string
@@ -950,19 +948,6 @@ type fullMockCP struct {
 	providerTypes      []string
 }
 
-func (m *fullMockCP) AgentTools(name string) ([]string, bool) {
-	if m.tools == nil {
-		return nil, false
-	}
-	t, ok := m.tools[name]
-	return t, ok
-}
-func (m *fullMockCP) AgentDisallowedTools(name string) []string {
-	if m.denyTools == nil {
-		return nil
-	}
-	return m.denyTools[name]
-}
 func (m *fullMockCP) SecretNames() []string { return m.secretNames }
 func (m *fullMockCP) SecretEnv() []string   { return m.secretEnv }
 func (m *fullMockCP) ProviderInfo() (string, string, string, bool) {

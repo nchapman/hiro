@@ -30,12 +30,6 @@ type ProviderConfig struct {
 	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty"` // optional API base URL override
 }
 
-// AgentPolicy defines operator-level overrides for a named agent.
-type AgentPolicy struct {
-	AllowedTools    []string `yaml:"allowed_tools,omitempty"`
-	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
-}
-
 // ApprovedNode represents a worker node that has been approved to join the cluster.
 type ApprovedNode struct {
 	Name       string `yaml:"name" json:"name"`
@@ -66,7 +60,6 @@ type Config struct {
 	DefaultModel string                    `yaml:"default_model,omitempty"` // "provider/model" format
 	Timezone     string                    `yaml:"timezone,omitempty"`      // IANA timezone (e.g. "America/New_York"), defaults to UTC
 	Secrets      map[string]string         `yaml:"secrets,omitempty"`
-	Agents       map[string]AgentPolicy    `yaml:"agents,omitempty"`
 	Cluster      ClusterConfig             `yaml:"cluster,omitempty"`
 }
 
@@ -79,9 +72,6 @@ func (cfg *Config) initMaps() {
 	}
 	if cfg.Secrets == nil {
 		cfg.Secrets = make(map[string]string)
-	}
-	if cfg.Agents == nil {
-		cfg.Agents = make(map[string]AgentPolicy)
 	}
 }
 
@@ -107,7 +97,6 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 		config: Config{
 			Providers: make(map[string]ProviderConfig),
 			Secrets:   make(map[string]string),
-			Agents:    make(map[string]AgentPolicy),
 		},
 	}
 
@@ -127,8 +116,7 @@ func Load(path string, logger *slog.Logger) (*ControlPlane, error) {
 	cfg.initMaps()
 	cp.config = cfg
 	logger.Info("loaded control plane config", "path", path,
-		"providers", len(cfg.Providers), "secrets", len(cfg.Secrets),
-		"agent_policies", len(cfg.Agents))
+		"providers", len(cfg.Providers), "secrets", len(cfg.Secrets))
 	return cp, nil
 }
 
@@ -178,7 +166,6 @@ func (cp *ControlPlane) hasContent() bool {
 		len(cp.config.Providers) > 0 ||
 		cp.config.DefaultModel != "" ||
 		len(cp.config.Secrets) > 0 ||
-		len(cp.config.Agents) > 0 ||
 		cp.config.Cluster.Mode != "" ||
 		cp.config.Cluster.TrackerURL != "" ||
 		len(cp.config.Cluster.ApprovedNodes) > 0 ||
@@ -249,8 +236,7 @@ func (cp *ControlPlane) Reload() error {
 
 	cp.config = cfg
 	cp.logger.Info("reloaded config.yaml from disk", "path", cp.path,
-		"providers", len(cfg.Providers), "secrets", len(cfg.Secrets),
-		"agent_policies", len(cfg.Agents))
+		"providers", len(cfg.Providers), "secrets", len(cfg.Secrets))
 	return nil
 }
 

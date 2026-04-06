@@ -31,9 +31,6 @@ func TestLoadExistingFile(t *testing.T) {
 	data := `secrets:
   API_KEY: "sk-123"
   DB_URL: "postgres://localhost"
-agents:
-  researcher:
-    allowed_tools: [Read, Grep]
 `
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -52,18 +49,6 @@ agents:
 		t.Errorf("unexpected secret names: %v", names)
 	}
 
-	tools, ok := cp.AgentTools("researcher")
-	if !ok {
-		t.Fatal("expected researcher policy to exist")
-	}
-	if len(tools) != 2 || tools[0] != "Read" || tools[1] != "Grep" {
-		t.Errorf("unexpected tools: %v", tools)
-	}
-
-	_, ok = cp.AgentTools("operator")
-	if ok {
-		t.Error("expected no policy for operator")
-	}
 }
 
 func TestSaveRoundtrip(t *testing.T) {
@@ -76,7 +61,6 @@ func TestSaveRoundtrip(t *testing.T) {
 	}
 
 	cp.SetSecret("TOKEN", "abc123")
-	cp.SetAgentTools("worker", []string{"Read", "Grep"})
 
 	if err := cp.Save(); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -93,12 +77,8 @@ func TestSaveRoundtrip(t *testing.T) {
 		t.Errorf("expected [TOKEN], got %v", names)
 	}
 
-	tools, ok := cp2.AgentTools("worker")
-	if !ok {
-		t.Fatal("expected worker policy")
-	}
-	if len(tools) != 2 {
-		t.Errorf("expected 2 tools, got %d", len(tools))
+	if names := cp2.SecretNames(); len(names) != 1 || names[0] != "TOKEN" {
+		t.Errorf("expected [TOKEN] after roundtrip, got %v", names)
 	}
 }
 
@@ -137,45 +117,6 @@ func TestSecretCRUD(t *testing.T) {
 	}
 
 	cp.DeleteSecret("nonexistent") // no-op
-}
-
-func TestAgentToolsCRUD(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	_, ok := cp.AgentTools("worker")
-	if ok {
-		t.Error("expected no policy initially")
-	}
-
-	cp.SetAgentTools("worker", []string{"Bash", "Read"})
-	tools, ok := cp.AgentTools("worker")
-	if !ok || len(tools) != 2 {
-		t.Errorf("expected 2 tools, got %v", tools)
-	}
-
-	cp.ClearAgentTools("worker")
-	_, ok = cp.AgentTools("worker")
-	if ok {
-		t.Error("expected no policy after clear")
-	}
-}
-
-func TestAllPolicies(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	cp.SetAgentTools("a", []string{"bash"})
-	cp.SetAgentTools("b", []string{"Grep"})
-
-	policies := cp.AllPolicies()
-	if len(policies) != 2 {
-		t.Fatalf("expected 2 policies, got %d", len(policies))
-	}
-
-	// Verify it's a copy — modifying shouldn't affect original
-	delete(policies, "a")
-	if _, ok := cp.AgentTools("a"); !ok {
-		t.Error("deleting from returned map should not affect ControlPlane")
-	}
 }
 
 // --- Command tests ---
@@ -256,67 +197,6 @@ func TestCommandSecretsList(t *testing.T) {
 	}
 	if !strings.Contains(result, "A") || !strings.Contains(result, "B") {
 		t.Errorf("expected both secret names in output: %s", result)
-	}
-}
-
-func TestCommandToolsSet(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	result, err := cp.HandleCommand("/tools set researcher Read,Grep,Glob")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "researcher") {
-		t.Errorf("unexpected result: %s", result)
-	}
-
-	tools, ok := cp.AgentTools("researcher")
-	if !ok {
-		t.Fatal("expected policy")
-	}
-	if len(tools) != 3 {
-		t.Errorf("expected 3 tools, got %v", tools)
-	}
-}
-
-func TestCommandToolsList(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"Bash"})
-
-	result, err := cp.HandleCommand("/tools list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "worker") || !strings.Contains(result, "Bash") {
-		t.Errorf("unexpected result: %s", result)
-	}
-}
-
-func TestCommandToolsListSpecific(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"Bash", "Grep"})
-
-	result, err := cp.HandleCommand("/tools list worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "Bash") || !strings.Contains(result, "Grep") {
-		t.Errorf("unexpected result: %s", result)
-	}
-}
-
-func TestCommandToolsRm(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"bash"})
-
-	_, err := cp.HandleCommand("/tools rm worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, ok := cp.AgentTools("worker")
-	if ok {
-		t.Error("expected no policy after rm")
 	}
 }
 
@@ -948,186 +828,6 @@ func TestDefaultModelSpec(t *testing.T) {
 	}
 }
 
-// --- Deny tools tests ---
-
-func TestAgentDisallowedToolsCRUD(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	if dt := cp.AgentDisallowedTools("worker"); len(dt) != 0 {
-		t.Errorf("expected no deny tools initially, got %v", dt)
-	}
-
-	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)", "Bash(sudo *)"})
-	dt := cp.AgentDisallowedTools("worker")
-	if len(dt) != 2 || dt[0] != "Bash(rm *)" {
-		t.Errorf("expected 2 deny tools, got %v", dt)
-	}
-
-	// Allow tools should be independent.
-	cp.SetAgentTools("worker", []string{"Bash", "Read"})
-	dt = cp.AgentDisallowedTools("worker")
-	if len(dt) != 2 {
-		t.Errorf("SetAgentTools should not affect deny tools, got %v", dt)
-	}
-
-	// Clear deny tools preserves allow.
-	cp.ClearAgentDisallowedTools("worker")
-	if dt := cp.AgentDisallowedTools("worker"); len(dt) != 0 {
-		t.Errorf("expected no deny tools after clear, got %v", dt)
-	}
-	tools, ok := cp.AgentTools("worker")
-	if !ok || len(tools) != 2 {
-		t.Errorf("allow tools should survive ClearAgentDisallowedTools, got %v ok=%v", tools, ok)
-	}
-}
-
-func TestSetAgentTools_PreservesDisallowedTools(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
-	cp.SetAgentTools("worker", []string{"Bash"})
-
-	dt := cp.AgentDisallowedTools("worker")
-	if len(dt) != 1 || dt[0] != "Bash(rm *)" {
-		t.Errorf("deny tools should be preserved by SetAgentTools, got %v", dt)
-	}
-}
-
-func TestClearAgentTools_PreservesDisallowedTools(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"Bash"})
-	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
-
-	cp.ClearAgentTools("worker")
-
-	// Policy should still exist because deny tools remain.
-	dt := cp.AgentDisallowedTools("worker")
-	if len(dt) != 1 {
-		t.Errorf("deny tools should survive ClearAgentTools, got %v", dt)
-	}
-}
-
-func TestDisallowedToolsSaveRoundtrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-
-	cp, _ := Load(path, testLogger())
-	cp.SetAgentTools("worker", []string{"Bash", "Read"})
-	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
-	if err := cp.Save(); err != nil {
-		t.Fatal(err)
-	}
-
-	cp2, err := Load(path, testLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	dt := cp2.AgentDisallowedTools("worker")
-	if len(dt) != 1 || dt[0] != "Bash(rm *)" {
-		t.Errorf("deny tools should roundtrip, got %v", dt)
-	}
-	tools, ok := cp2.AgentTools("worker")
-	if !ok || len(tools) != 2 {
-		t.Errorf("allow tools should roundtrip, got %v", tools)
-	}
-}
-
-func TestCommandToolsDeny(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	result, err := cp.HandleCommand("/tools deny researcher Bash(rm *),Bash(sudo *)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "researcher") {
-		t.Errorf("unexpected result: %s", result)
-	}
-
-	dt := cp.AgentDisallowedTools("researcher")
-	if len(dt) != 2 {
-		t.Errorf("expected 2 deny tools, got %v", dt)
-	}
-}
-
-func TestCommandToolsRm_ClearsBoth(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-	cp.SetAgentTools("worker", []string{"Bash"})
-	cp.SetAgentDisallowedTools("worker", []string{"Bash(rm *)"})
-
-	_, err := cp.HandleCommand("/tools rm worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, ok := cp.AgentTools("worker")
-	if ok {
-		t.Error("expected no allow tools after rm")
-	}
-	if dt := cp.AgentDisallowedTools("worker"); len(dt) != 0 {
-		t.Errorf("expected no deny tools after rm, got %v", dt)
-	}
-}
-
-// --- parseToolList tests ---
-
-func TestParseToolList_SimpleCommas(t *testing.T) {
-	result := parseToolList([]string{"Bash,Read,Write"})
-	if len(result) != 3 || result[0] != "Bash" || result[1] != "Read" || result[2] != "Write" {
-		t.Errorf("expected [Bash Read Write], got %v", result)
-	}
-}
-
-func TestParseToolList_PreservesParentheses(t *testing.T) {
-	// "Bash(curl *),Read" should stay as two items, not split inside parens.
-	result := parseToolList([]string{"Bash(curl", "*),Read"})
-	if len(result) != 2 || result[0] != "Bash(curl *)" || result[1] != "Read" {
-		t.Errorf("expected [Bash(curl *) Read], got %v", result)
-	}
-}
-
-func TestParseToolList_CommaInsideParens(t *testing.T) {
-	// SpawnInstance(worker,researcher) — comma inside parens should not split.
-	result := parseToolList([]string{"SpawnInstance(worker,researcher),Read"})
-	if len(result) != 2 || result[0] != "SpawnInstance(worker,researcher)" || result[1] != "Read" {
-		t.Errorf("expected [SpawnInstance(worker,researcher) Read], got %v", result)
-	}
-}
-
-func TestCommandToolsSet_RejectsMalformedRules(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	result, err := cp.HandleCommand("/tools set researcher Bash(")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "Invalid rule") {
-		t.Errorf("expected invalid rule error, got: %s", result)
-	}
-	// Should not have set anything.
-	if _, ok := cp.AgentTools("researcher"); ok {
-		t.Error("malformed rule should not be stored")
-	}
-}
-
-func TestCommandToolsDeny_RejectsMalformedRules(t *testing.T) {
-	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
-
-	result, err := cp.HandleCommand("/tools deny researcher Bash()")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "Invalid rule") {
-		t.Errorf("expected invalid rule error, got: %s", result)
-	}
-}
-
-func TestParseToolList_SpaceSeparatedArgs(t *testing.T) {
-	// When shell splits "Bash(curl *)" into ["Bash(curl", "*)"]
-	result := parseToolList([]string{"Bash(curl", "*)"})
-	if len(result) != 1 || result[0] != "Bash(curl *)" {
-		t.Errorf("expected [Bash(curl *)], got %v", result)
-	}
-}
-
 // --- Reset ---
 
 func TestReset(t *testing.T) {
@@ -1243,7 +943,7 @@ func TestCommandHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, cmd := range []string{"/help", "/clear", "/secrets", "/tools", "/cluster"} {
+	for _, cmd := range []string{"/help", "/clear", "/secrets", "/cluster"} {
 		if !strings.Contains(result, cmd) {
 			t.Errorf("help text should mention %q", cmd)
 		}
