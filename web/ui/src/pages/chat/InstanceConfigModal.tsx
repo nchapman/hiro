@@ -214,7 +214,7 @@ export default function InstanceConfigModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{instanceName}</DialogTitle>
         </DialogHeader>
@@ -224,7 +224,7 @@ export default function InstanceConfigModal({
             Loading...
           </div>
         ) : (
-          <div className="flex flex-col gap-4 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-5 overflow-y-auto pr-1 -mr-1">
             {isStopped && (
               <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
                 Changes take effect when the instance starts.
@@ -232,9 +232,9 @@ export default function InstanceConfigModal({
             )}
 
             {/* Model & Reasoning */}
-            <div className="flex flex-col gap-3">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Model</Label>
-              <div className="flex flex-col gap-1.5">
+            <section className="rounded-lg bg-background p-4">
+              <h3 className="mb-3 text-sm font-medium">Model</h3>
+              <div className="flex flex-col gap-3">
                 <ModelPicker
                   models={models}
                   currentModelId={currentModelId}
@@ -243,151 +243,162 @@ export default function InstanceConfigModal({
                     setModel(info?.provider ? formatModelSpec(info.provider, id) : id)
                   }}
                 />
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Reasoning effort</Label>
+                  <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {reasoningOptions.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs">Reasoning effort</Label>
-                <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {reasoningOptions.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            </section>
 
             {/* Persona */}
-            <div className="flex flex-col gap-3">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Persona</Label>
-              <div className="flex gap-2">
-                <div className="flex flex-1 flex-col gap-1">
-                  <Label className="text-xs">Name</Label>
-                  <Input
-                    value={personaName}
-                    onChange={(e) => setPersonaName(e.target.value)}
-                    placeholder="Display name"
-                  />
+            <section className="rounded-lg bg-background p-4">
+              <h3 className="mb-3 text-sm font-medium">Persona</h3>
+              <div className="flex flex-col gap-3">
+                <div className="flex gap-3">
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground">Name</Label>
+                    <Input
+                      value={personaName}
+                      onChange={(e) => setPersonaName(e.target.value)}
+                      placeholder="Display name"
+                    />
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground">Description</Label>
+                    <Input
+                      value={personaDesc}
+                      onChange={(e) => setPersonaDesc(e.target.value)}
+                      placeholder="Short description"
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-1 flex-col gap-1">
-                  <Label className="text-xs">Description</Label>
-                  <Input
-                    value={personaDesc}
-                    onChange={(e) => setPersonaDesc(e.target.value)}
-                    placeholder="Short description"
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Instructions</Label>
+                  <Textarea
+                    className="text-xs min-h-16"
+                    placeholder="Persona instructions for the system prompt..."
+                    value={personaBody}
+                    onChange={(e) => setPersonaBody(e.target.value)}
                   />
                 </div>
               </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Instructions</Label>
-                <Textarea
-                  className="text-xs min-h-16"
-                  placeholder="Persona instructions for the system prompt..."
-                  value={personaBody}
-                  onChange={(e) => setPersonaBody(e.target.value)}
-                />
-              </div>
-            </div>
+            </section>
 
             {/* Tools */}
-            <div className="flex flex-col gap-3">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tools</Label>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs">Allowed</Label>
-                <Textarea
-                  className="font-mono text-xs min-h-20"
-                  placeholder={"Bash\nRead\nWrite\nBash(curl *)"}
-                  value={allowedTools}
-                  onChange={(e) => setAllowedTools(e.target.value)}
-                />
-                <p className="text-[11px] text-muted-foreground">One tool per line. Supports patterns like Bash(curl *).</p>
+            <section className="rounded-lg bg-background p-4">
+              <h3 className="mb-3 text-sm font-medium">Tools</h3>
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Allowed</Label>
+                  <Textarea
+                    className="font-mono text-xs min-h-20"
+                    placeholder={"Bash\nRead\nWrite\nBash(curl *)"}
+                    value={allowedTools}
+                    onChange={(e) => setAllowedTools(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground">One tool per line. Supports patterns like Bash(curl *).</p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Disallowed</Label>
+                  <Textarea
+                    className="font-mono text-xs min-h-10"
+                    placeholder="Bash(rm *)"
+                    value={disallowedTools}
+                    onChange={(e) => setDisallowedTools(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Deny rules override the allowed list above.</p>
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs">Disallowed</Label>
-                <Textarea
-                  className="font-mono text-xs min-h-10"
-                  placeholder="Bash(rm *)"
-                  value={disallowedTools}
-                  onChange={(e) => setDisallowedTools(e.target.value)}
-                />
-                <p className="text-[11px] text-muted-foreground">Deny rules override the allowed list above.</p>
-              </div>
-            </div>
+            </section>
 
             {/* Memory */}
-            <div className="flex flex-col gap-3">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memory</Label>
+            <section className="rounded-lg bg-background p-4">
+              <h3 className="mb-3 text-sm font-medium">Memory</h3>
               <Textarea
                 className="text-xs min-h-16"
                 placeholder="Agent memories..."
                 value={memory}
                 onChange={(e) => setMemory(e.target.value)}
               />
-              <p className="text-[11px] text-muted-foreground">Managed by the agent. Manual edits take effect on the next turn.</p>
-            </div>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">Managed by the agent. Manual edits take effect on the next turn.</p>
+            </section>
 
             {/* Channels */}
-            <div className="flex flex-col gap-3">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Channels</Label>
-
-              {/* Telegram */}
-              <div className="flex flex-col gap-2 rounded-md border p-3">
-                <Label className="text-xs font-medium">Telegram</Label>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Bot token</Label>
-                  <Input
-                    className="font-mono text-xs"
-                    value={tgBotToken}
-                    onChange={(e) => setTgBotToken(e.target.value)}
-                    placeholder="${TELEGRAM_BOT}"
-                  />
+            <section className="rounded-lg bg-background p-4">
+              <h3 className="mb-3 text-sm font-medium">Channels</h3>
+              <div className="flex flex-col gap-4">
+                {/* Telegram */}
+                <div className="flex flex-col gap-2.5">
+                  <Label className="text-xs font-medium">Telegram</Label>
+                  <div className="flex gap-3">
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Bot token</Label>
+                      <Input
+                        className="font-mono text-xs"
+                        value={tgBotToken}
+                        onChange={(e) => setTgBotToken(e.target.value)}
+                        placeholder="${TELEGRAM_BOT}"
+                      />
+                    </div>
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Allowed chats</Label>
+                      <Input
+                        className="font-mono text-xs"
+                        value={tgAllowedChats}
+                        onChange={(e) => setTgAllowedChats(e.target.value)}
+                        placeholder="12345, 67890"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Allowed chats</Label>
-                  <Input
-                    className="font-mono text-xs"
-                    value={tgAllowedChats}
-                    onChange={(e) => setTgAllowedChats(e.target.value)}
-                    placeholder="12345, 67890"
-                  />
+
+                <div className="border-t" />
+
+                {/* Slack */}
+                <div className="flex flex-col gap-2.5">
+                  <Label className="text-xs font-medium">Slack</Label>
+                  <div className="flex gap-3">
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Bot token</Label>
+                      <Input
+                        className="font-mono text-xs"
+                        value={slBotToken}
+                        onChange={(e) => setSlBotToken(e.target.value)}
+                        placeholder="${SLACK_BOT}"
+                      />
+                    </div>
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Signing secret</Label>
+                      <Input
+                        className="font-mono text-xs"
+                        value={slSigningSecret}
+                        onChange={(e) => setSlSigningSecret(e.target.value)}
+                        placeholder="${SLACK_SIGN}"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Allowed channels</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      value={slAllowedChannels}
+                      onChange={(e) => setSlAllowedChannels(e.target.value)}
+                      placeholder="C123, C456"
+                    />
+                  </div>
                 </div>
               </div>
-
-              {/* Slack */}
-              <div className="flex flex-col gap-2 rounded-md border p-3">
-                <Label className="text-xs font-medium">Slack</Label>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Bot token</Label>
-                  <Input
-                    className="font-mono text-xs"
-                    value={slBotToken}
-                    onChange={(e) => setSlBotToken(e.target.value)}
-                    placeholder="${SLACK_BOT}"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Signing secret</Label>
-                  <Input
-                    className="font-mono text-xs"
-                    value={slSigningSecret}
-                    onChange={(e) => setSlSigningSecret(e.target.value)}
-                    placeholder="${SLACK_SIGN}"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Allowed channels</Label>
-                  <Input
-                    className="font-mono text-xs"
-                    value={slAllowedChannels}
-                    onChange={(e) => setSlAllowedChannels(e.target.value)}
-                    placeholder="C123, C456"
-                  />
-                </div>
-              </div>
-              <p className="text-[11px] text-muted-foreground">Use secret references like ${"{SECRET_NAME}"} for tokens.</p>
-            </div>
+              <p className="mt-3 text-[11px] text-muted-foreground">Use secret references like ${"{SECRET_NAME}"} for tokens.</p>
+            </section>
           </div>
         )}
 
