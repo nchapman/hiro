@@ -49,7 +49,7 @@ func renderSubscriptionListing(subs []platformdb.Subscription) string {
 			nextFire = s.NextFire.Format("2006-01-02 15:04")
 		}
 		schedule := s.Trigger.Expr
-		if s.Trigger.Type == "once" {
+		if s.Trigger.Type == triggerTypeOnce {
 			schedule = s.Trigger.At
 		}
 		fmt.Fprintf(&b, "| %s | %s | `%s` | %s | %s |\n",

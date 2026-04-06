@@ -169,6 +169,127 @@ func TestSubscriptionCascadeDelete(t *testing.T) {
 	}
 }
 
+func TestUpdateSubscriptionStatus(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "op", Mode: "persistent"})
+	nextFire := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	d.CreateSubscription(ctx, Subscription{
+		ID: "sub-1", InstanceID: "inst-1", Name: "status-test",
+		Trigger: TriggerDef{Type: "cron", Expr: "* * * * *"},
+		Message: "x", Status: "active", NextFire: &nextFire,
+	})
+
+	// Update status only (no next_fire change).
+	if err := d.UpdateSubscriptionStatus(ctx, "sub-1", "paused", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := d.GetSubscription(ctx, "sub-1")
+	if got.Status != "paused" {
+		t.Errorf("expected 'paused', got %q", got.Status)
+	}
+
+	// Update status with a new next_fire.
+	newFire := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	if err := d.UpdateSubscriptionStatus(ctx, "sub-1", "active", &newFire); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = d.GetSubscription(ctx, "sub-1")
+	if got.Status != "active" {
+		t.Errorf("expected 'active', got %q", got.Status)
+	}
+	if got.NextFire == nil {
+		t.Fatal("expected non-nil next_fire")
+	}
+
+	// Clear next_fire by passing zero time pointer.
+	zero := time.Time{}
+	if err := d.UpdateSubscriptionStatus(ctx, "sub-1", "paused", &zero); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = d.GetSubscription(ctx, "sub-1")
+	if got.NextFire != nil {
+		t.Error("expected nil next_fire after clearing with zero time")
+	}
+
+	// Non-existent subscription.
+	err := d.UpdateSubscriptionStatus(ctx, "no-such-id", "active", nil)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestListAllSubscriptions(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	// Empty list.
+	all, err := d.ListAllSubscriptions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Errorf("expected 0, got %d", len(all))
+	}
+
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "op", Mode: "persistent"})
+	d.CreateInstance(ctx, Instance{ID: "inst-2", AgentName: "op", Mode: "persistent"})
+
+	nextFire := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	d.CreateSubscription(ctx, Subscription{
+		ID: "sub-a", InstanceID: "inst-1", Name: "a",
+		Trigger: TriggerDef{Type: "cron", Expr: "* * * * *"},
+		Message: "a", Status: "active", NextFire: &nextFire,
+	})
+	d.CreateSubscription(ctx, Subscription{
+		ID: "sub-b", InstanceID: "inst-2", Name: "b",
+		Trigger: TriggerDef{Type: "cron", Expr: "0 9 * * *"},
+		Message: "b", Status: "paused", NextFire: &nextFire,
+	})
+
+	all, err = d.ListAllSubscriptions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Errorf("expected 2, got %d", len(all))
+	}
+	// Ordered by instance_id then created_at.
+	if all[0].InstanceID != "inst-1" || all[1].InstanceID != "inst-2" {
+		t.Errorf("unexpected order: %s, %s", all[0].InstanceID, all[1].InstanceID)
+	}
+}
+
+func TestDeleteSubscriptionByName(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "op", Mode: "persistent"})
+	nextFire := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	d.CreateSubscription(ctx, Subscription{
+		ID: "sub-1", InstanceID: "inst-1", Name: "to-delete",
+		Trigger: TriggerDef{Type: "cron", Expr: "* * * * *"},
+		Message: "x", Status: "active", NextFire: &nextFire,
+	})
+
+	if err := d.DeleteSubscriptionByName(ctx, "inst-1", "to-delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be gone.
+	_, err := d.GetSubscription(ctx, "sub-1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+
+	// Deleting again should return not found.
+	err = d.DeleteSubscriptionByName(ctx, "inst-1", "to-delete")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound on second delete, got %v", err)
+	}
+}
+
 func TestSessionBySubscription(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
