@@ -86,7 +86,11 @@ func TestClusterAPI_ListPending_WithNodes(t *testing.T) {
 
 	ids := map[string]bool{}
 	for _, n := range nodes {
-		ids[n["node_id"].(string)] = true
+		id, ok := n["node_id"].(string)
+		if !ok {
+			t.Fatal("node_id is not a string")
+		}
+		ids[id] = true
 	}
 	if !ids["node-aaa"] || !ids["node-bbb"] {
 		t.Errorf("missing expected node IDs: %v", ids)
@@ -207,7 +211,7 @@ func TestClusterAPI_RevokeConnectedNode(t *testing.T) {
 	// Set up: approved + registered online.
 	cp.ApproveNode("node-rev", "RevWorker")
 	cp.Save()
-	nr.Register("node-rev", "RevWorker", 4, "10.0.0.5:8081", "direct")
+	nr.Register("node-rev", "RevWorker", 4, "10.0.0.5:8081", cluster.ViaDirect)
 
 	// Revoke via API.
 	req := authedRequest(t, srv, "DELETE", "/api/cluster/approved/node-rev", nil)
@@ -253,7 +257,7 @@ func TestClusterAPI_RevokeOfflineNode(t *testing.T) {
 
 	cp.ApproveNode("node-off", "OffWorker")
 	cp.Save()
-	nr.Register("node-off", "OffWorker", 4, "10.0.0.6:8081", "relay")
+	nr.Register("node-off", "OffWorker", 4, "10.0.0.6:8081", cluster.ViaRelay)
 	nr.SetOffline("node-off")
 
 	req := authedRequest(t, srv, "DELETE", "/api/cluster/approved/node-off", nil)
@@ -279,7 +283,7 @@ func TestClusterAPI_RevokeDisconnectsBeforeSave(t *testing.T) {
 
 	cp.ApproveNode("node-save-fail", "FailWorker")
 	cp.Save()
-	nr.Register("node-save-fail", "FailWorker", 4, "10.0.0.8:8081", "direct")
+	nr.Register("node-save-fail", "FailWorker", 4, "10.0.0.8:8081", cluster.ViaDirect)
 
 	// Get auth token before making config dir unwritable.
 	token := loginAndGetToken(t, srv)
@@ -375,11 +379,11 @@ func TestClusterAPI_Settings_NodeFiltering(t *testing.T) {
 
 	// n1: approved + online — should appear
 	cp.ApproveNode("n1", "Worker 1")
-	nr.Register("n1", "Worker 1", 4, "10.0.0.1:8081", "direct")
+	nr.Register("n1", "Worker 1", 4, "10.0.0.1:8081", cluster.ViaDirect)
 
 	// n2: was approved, now revoked but still in registry — should NOT appear
 	cp.ApproveNode("n2", "Worker 2")
-	nr.Register("n2", "Worker 2", 4, "10.0.0.2:8081", "relay")
+	nr.Register("n2", "Worker 2", 4, "10.0.0.2:8081", cluster.ViaRelay)
 	cp.RevokeNode("n2") // removes from approved, adds to revoked
 	cp.Save()
 
@@ -392,11 +396,21 @@ func TestClusterAPI_Settings_NodeFiltering(t *testing.T) {
 	settings := getClusterSettings(t, srv)
 
 	// Check nodes list.
-	nodes := settings["nodes"].([]any)
+	nodeSlice, ok := settings["nodes"].([]any)
+	if !ok {
+		t.Fatal("nodes is not a []any")
+	}
 	nodeIDs := map[string]bool{}
-	for _, raw := range nodes {
-		n := raw.(map[string]any)
-		nodeIDs[n["id"].(string)] = true
+	for _, raw := range nodeSlice {
+		n, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatal("node entry is not a map[string]any")
+		}
+		id, ok := n["id"].(string)
+		if !ok {
+			t.Fatal("node id is not a string")
+		}
+		nodeIDs[id] = true
 	}
 
 	if !nodeIDs["home"] {
@@ -432,15 +446,21 @@ func TestClusterAPI_Settings_OfflineApproved(t *testing.T) {
 
 	cp.ApproveNode("n-off", "Offline Worker")
 	cp.Save()
-	nr.Register("n-off", "Offline Worker", 4, "10.0.0.7:8081", "direct")
+	nr.Register("n-off", "Offline Worker", 4, "10.0.0.7:8081", cluster.ViaDirect)
 	nr.SetOffline("n-off")
 
 	settings := getClusterSettings(t, srv)
-	nodes := settings["nodes"].([]any)
+	nodeSlice, ok := settings["nodes"].([]any)
+	if !ok {
+		t.Fatal("nodes is not a []any")
+	}
 
 	found := false
-	for _, raw := range nodes {
-		n := raw.(map[string]any)
+	for _, raw := range nodeSlice {
+		n, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatal("node entry is not a map[string]any")
+		}
 		if n["id"] == "n-off" {
 			found = true
 			if n["status"] != "offline" {
@@ -535,8 +555,15 @@ func assertNodeAbsentFromSettings(t *testing.T, srv *Server, nodeID string) {
 
 	// Check nodes list.
 	if rawNodes, ok := settings["nodes"]; ok {
-		for _, raw := range rawNodes.([]any) {
-			n := raw.(map[string]any)
+		nodeList, ok := rawNodes.([]any)
+		if !ok {
+			t.Fatal("nodes is not a []any")
+		}
+		for _, raw := range nodeList {
+			n, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatal("node entry is not a map[string]any")
+			}
 			if n["id"] == nodeID {
 				t.Errorf("node %s should not appear in settings nodes list", nodeID)
 			}

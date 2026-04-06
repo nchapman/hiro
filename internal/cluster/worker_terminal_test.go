@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -27,14 +28,7 @@ func TestWorkerTerminalEnv(t *testing.T) {
 
 	// Should include PATH from environment if set.
 	if pathVal := os.Getenv("PATH"); pathVal != "" {
-		found := false
-		for _, e := range env {
-			if e == "PATH="+pathVal {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(env, "PATH="+pathVal) {
 			t.Error("expected PATH from environment to be included")
 		}
 	}
@@ -45,13 +39,7 @@ func TestWorkerTerminalEnv_IncludesSetVars(t *testing.T) {
 	t.Setenv("STARSHIP_CONFIG", "/tmp/starship.toml")
 
 	env := workerTerminalEnv()
-	found := false
-	for _, e := range env {
-		if e == "STARSHIP_CONFIG=/tmp/starship.toml" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(env, "STARSHIP_CONFIG=/tmp/starship.toml")
 	if !found {
 		t.Error("expected STARSHIP_CONFIG to be included in terminal env")
 	}

@@ -440,7 +440,7 @@ func TestSubscriptionProvider_WithSubscriptions(t *testing.T) {
 		t.Fatal("expected non-nil result")
 	}
 
-	text := result.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, result.Message.Content[0])
 	if !strings.Contains(text, "daily") || !strings.Contains(text, "0 9 * * *") {
 		t.Errorf("expected schedule listing, got %q", text)
 	}

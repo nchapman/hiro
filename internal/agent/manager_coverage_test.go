@@ -1909,7 +1909,7 @@ func TestCreateInferenceLoop_EmptyProvider(t *testing.T) {
 		AgentConfig: config.AgentConfig{Name: "test"},
 		Logger:      slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
-	loop, err := mgr.createInferenceLoop(t.Context(), loopCfg, models.ModelSpec{}, "", "")
+	loop, err := mgr.createInferenceLoop(t.Context(), &loopCfg, models.ModelSpec{}, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

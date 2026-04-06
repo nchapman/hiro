@@ -214,7 +214,7 @@ func TestComputeDeltas_MergesIntoSingleMessage(t *testing.T) {
 		t.Fatalf("expected 2 entries, got %d", len(dr.Entries))
 	}
 	// Text should contain both.
-	text := got[0].Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, got[0].Content[0])
 	if !strings.Contains(text, "agents here") || !strings.Contains(text, "skills here") {
 		t.Error("merged message should contain text from both providers")
 	}
@@ -333,7 +333,7 @@ func TestBuildDeltaMessage_Structure(t *testing.T) {
 	msg := buildDeltaMessage("hello world", "agents", []string{"b", "a"}, []string{"d", "c"})
 
 	// Content should be wrapped in system-reminder.
-	text := msg.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, msg.Content[0])
 	if !strings.Contains(text, "<system-reminder>") || !strings.Contains(text, "hello world") {
 		t.Error("expected system-reminder wrapped content")
 	}
@@ -423,7 +423,7 @@ func TestReplayLatestHash(t *testing.T) {
 
 func TestBuildContentMessage_Structure(t *testing.T) {
 	msg := buildContentMessage("test content", "memory", "abc123")
-	text := msg.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, msg.Content[0])
 	if !strings.Contains(text, "<system-reminder>") || !strings.Contains(text, "test content") {
 		t.Error("expected system-reminder wrapped content")
 	}
@@ -460,7 +460,7 @@ func TestSkillProvider_Initial(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected initial announcement")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Skills") || !strings.Contains(text, "**deploy**") {
 		t.Errorf("expected skills listing, got: %s", text)
 	}
@@ -536,7 +536,7 @@ func TestSkillProvider_CompactionResets(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected full re-announcement after compaction")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Skills") {
 		t.Error("expected initial-style listing after compaction")
 	}
@@ -595,7 +595,7 @@ func TestSecretProvider_Initial(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected initial announcement")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Secrets") || !strings.Contains(text, "`API_KEY`") {
 		t.Errorf("expected secrets listing, got: %s", text)
 	}
@@ -652,7 +652,7 @@ func TestSecretProvider_CompactionResets(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected full re-announcement after compaction")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Secrets") {
 		t.Error("expected initial-style listing after compaction")
 	}
@@ -705,7 +705,7 @@ func TestMemoryProvider_Initial(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected initial memory announcement")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Memories") || !strings.Contains(text, "user likes Go") {
 		t.Errorf("expected memory content, got: %s", text)
 	}
@@ -758,7 +758,7 @@ func TestMemoryProvider_CompactionResets(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected re-emission after compaction")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Memories") {
 		t.Error("expected memories section")
 	}
@@ -792,7 +792,7 @@ func TestTodoProvider_Initial(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected initial todo announcement")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Current Tasks") || !strings.Contains(text, "Fix bug") {
 		t.Errorf("expected todo content, got: %s", text)
 	}
@@ -843,7 +843,7 @@ func TestTodoProvider_CompactionResets(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected re-emission after compaction")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "## Current Tasks") {
 		t.Error("expected tasks section")
 	}

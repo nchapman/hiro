@@ -31,8 +31,8 @@ func TestRegisterOverwrite(t *testing.T) {
 	t.Parallel()
 
 	r := NewNodeRegistry()
-	_ = r.Register("node-1", "Node 1 v1", 2, "1.2.3.4:8080", "direct")
-	_ = r.Register("node-1", "Node 1 v2", 8, "5.6.7.8:9090", "relay")
+	_ = r.Register("node-1", "Node 1 v1", 2, "1.2.3.4:8080", ViaDirect)
+	_ = r.Register("node-1", "Node 1 v2", 8, "5.6.7.8:9090", ViaRelay)
 
 	node, ok := r.Get("node-1")
 	if !ok {
@@ -44,8 +44,8 @@ func TestRegisterOverwrite(t *testing.T) {
 	if node.Capacity != 8 {
 		t.Fatalf("expected capacity 8, got %d", node.Capacity)
 	}
-	if node.Via != "relay" {
-		t.Fatalf("expected via %q, got %q", "relay", node.Via)
+	if node.Via != ViaRelay {
+		t.Fatalf("expected via %q, got %q", ViaRelay, node.Via)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestNodeRegistry_RegisterWithViaAndAddr(t *testing.T) {
 	t.Parallel()
 
 	r := NewNodeRegistry()
-	err := r.Register("node-1", "Node 1", 4, "10.0.0.1:50000", "relay")
+	err := r.Register("node-1", "Node 1", 4, "10.0.0.1:50000", ViaRelay)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestNodeRegistry_RegisterWithViaAndAddr(t *testing.T) {
 	if node.Addr != "10.0.0.1:50000" {
 		t.Fatalf("Addr = %q, want %q", node.Addr, "10.0.0.1:50000")
 	}
-	if node.Via != "relay" {
-		t.Fatalf("Via = %q, want %q", node.Via, "relay")
+	if node.Via != ViaRelay {
+		t.Fatalf("Via = %q, want %q", node.Via, ViaRelay)
 	}
 }

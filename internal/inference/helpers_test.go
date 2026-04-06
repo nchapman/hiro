@@ -8,6 +8,16 @@ import (
 	"charm.land/fantasy"
 )
 
+// textPartText extracts the text from a fantasy.TextPart with a checked type assertion.
+func textPartText(t *testing.T, part fantasy.MessagePart) string {
+	t.Helper()
+	tp, ok := part.(fantasy.TextPart)
+	if !ok {
+		t.Fatalf("expected fantasy.TextPart, got %T", part)
+	}
+	return tp.Text
+}
+
 func TestEstimateTokens(t *testing.T) {
 	tests := []struct {
 		input string

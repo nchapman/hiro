@@ -158,7 +158,7 @@ type Loop struct {
 }
 
 // NewLoop creates an inference loop for a session.
-func NewLoop(cfg LoopConfig) (*Loop, error) {
+func NewLoop(cfg *LoopConfig) (*Loop, error) {
 	l := &Loop{
 		instanceID:     cfg.InstanceID,
 		sessionID:      cfg.SessionID,
@@ -848,7 +848,7 @@ func (l *Loop) reloadAgentDefinition(cfg *config.AgentConfig) {
 // buildLocalTools creates tools that run in the control plane process.
 // This includes persistent-only tools (todos, memory, history), spawn and
 // management tools, and the Skill tool. Results are filtered by AllowedTools.
-func (l *Loop) buildLocalTools(cfg LoopConfig) []Tool {
+func (l *Loop) buildLocalTools(cfg *LoopConfig) []Tool {
 	var localTools []Tool
 
 	if cfg.Mode.IsPersistent() && cfg.SessionDir != "" {

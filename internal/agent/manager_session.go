@@ -336,7 +336,7 @@ func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance,
 		m.instanceDir(instanceID), sessDir, handle.Worker, allowedTools,
 		inst.allowLayers, inst.denyRules, hasSkills, modelSpec, inst.notifications)
 
-	loop, err := m.createInferenceLoop(ctx, loopCfg, modelSpec, apiKey, baseURL)
+	loop, err := m.createInferenceLoop(ctx, &loopCfg, modelSpec, apiKey, baseURL)
 	if err != nil {
 		handle.Kill()
 		handle.Close()
@@ -414,12 +414,12 @@ func (m *Manager) pushConfigUpdate(agentName string) {
 	m.mu.RUnlock()
 
 	for _, t := range targets {
-		m.pushConfigToInstance(t.id, t.parentID, t.mode, pc)
+		m.pushConfigToInstance(t.id, t.parentID, t.mode, &pc)
 	}
 }
 
 // pushConfigToInstance applies a resolved config update to a single running instance.
-func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.AgentMode, pc configPushContext) {
+func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.AgentMode, pc *configPushContext) {
 	inst := m.getInstance(instanceID)
 	if inst == nil {
 		return // removed between snapshot and push
@@ -443,7 +443,7 @@ func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.
 
 // pushToolsAndModel updates tool rules and model on an instance's inference loop.
 // Caller must hold inst.mu.
-func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string, mode config.AgentMode, pc configPushContext) {
+func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string, mode config.AgentMode, pc *configPushContext) {
 	// Recompute effective tools from updated config.
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(pc.cfg, parentID)
 	if err != nil {

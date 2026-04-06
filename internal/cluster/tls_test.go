@@ -100,7 +100,11 @@ func TestMutualTLS_Handshake(t *testing.T) {
 		defer conn.Close()
 
 		// Complete the handshake.
-		tlsConn := conn.(*tls.Conn)
+		tlsConn, ok := conn.(*tls.Conn)
+		if !ok {
+			errCh <- fmt.Errorf("expected *tls.Conn, got %T", conn)
+			return
+		}
 		if err := tlsConn.Handshake(); err != nil {
 			errCh <- fmt.Errorf("server handshake: %w", err)
 			return
@@ -176,7 +180,9 @@ func TestMutualTLS_WrongServerKey(t *testing.T) {
 		if err != nil {
 			return
 		}
-		conn.(*tls.Conn).Handshake()
+		if tc, ok := conn.(*tls.Conn); ok {
+			tc.Handshake()
+		}
 		conn.Close()
 	}()
 
@@ -214,7 +220,9 @@ func TestMutualTLS_NoPubKeyVerification(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		conn.(*tls.Conn).Handshake()
+		if tc, ok := conn.(*tls.Conn); ok {
+			tc.Handshake()
+		}
 		buf := make([]byte, 5)
 		n, _ := conn.Read(buf)
 		conn.Write(buf[:n])
@@ -258,7 +266,10 @@ func TestPubKeyFromCert(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		tlsConn := conn.(*tls.Conn)
+		tlsConn, ok := conn.(*tls.Conn)
+		if !ok {
+			panic(fmt.Sprintf("expected *tls.Conn, got %T", conn))
+		}
 		tlsConn.Handshake()
 		pub, _ := PubKeyFromCert(tlsConn.ConnectionState())
 		resultCh <- pub

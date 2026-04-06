@@ -43,8 +43,9 @@ func TestFetch_SSRFBlocksNonRoutable(t *testing.T) {
 
 	// With SSRF enabled, even localhost test servers are blocked.
 	client := &http.Client{Transport: ssrfTransport}
-	_, err := client.Get(ts.URL)
+	resp, err := client.Get(ts.URL)
 	if err == nil {
+		resp.Body.Close()
 		t.Fatal("expected SSRF transport to block localhost")
 	}
 	if !strings.Contains(err.Error(), "non-public") {

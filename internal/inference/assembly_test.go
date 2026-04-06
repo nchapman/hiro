@@ -83,7 +83,7 @@ func TestAssemble_ReturnsMessages(t *testing.T) {
 	}
 
 	// Verify message order.
-	text0 := result.Messages[0].Content[0].(fantasy.TextPart).Text
+	text0 := textPartText(t, result.Messages[0].Content[0])
 	if text0 != "hello" {
 		t.Errorf("first message = %q, want hello", text0)
 	}
@@ -265,7 +265,7 @@ func TestResolveItem_SummaryItem(t *testing.T) {
 	if msg.Role != fantasy.MessageRoleUser {
 		t.Errorf("expected user role for summary, got %s", msg.Role)
 	}
-	text := msg.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, msg.Content[0])
 	if !strings.Contains(text, "conversation_summary") {
 		t.Error("expected conversation_summary tag in summary message")
 	}

@@ -24,7 +24,10 @@ func testIdentityFromSeed(seed byte) *cluster.NodeIdentity {
 	s := make([]byte, ed25519.SeedSize)
 	s[0] = seed
 	priv := ed25519.NewKeyFromSeed(s)
-	pub := priv.Public().(ed25519.PublicKey)
+	pub, ok := priv.Public().(ed25519.PublicKey)
+	if !ok {
+		panic("ed25519 public key type assertion failed")
+	}
 	hash := sha256.Sum256(pub)
 	return &cluster.NodeIdentity{PrivateKey: priv, PublicKey: pub, NodeID: hex.EncodeToString(hash[:])}
 }
@@ -96,11 +99,9 @@ func TestStream_ApprovedRegistration(t *testing.T) {
 
 	var connectErr error
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		connectErr = ws.Connect(ctx)
-	}()
+	})
 
 	// Wait for registration to appear in registry.
 	deadline := time.Now().Add(3 * time.Second)
@@ -298,9 +299,7 @@ func TestStream_ToolExecution(t *testing.T) {
 	// Node reads messages in background and handles tool requests.
 	var toolReceived *pb.ExecuteToolRemote
 	var nodeWg sync.WaitGroup
-	nodeWg.Add(1)
-	go func() {
-		defer nodeWg.Done()
+	nodeWg.Go(func() {
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
@@ -319,7 +318,7 @@ func TestStream_ToolExecution(t *testing.T) {
 				})
 			}
 		}
-	}()
+	})
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -440,11 +439,9 @@ func TestStream_mTLS_NoPinning(t *testing.T) {
 
 	var connectErr error
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		connectErr = ws.Connect(ctx)
-	}()
+	})
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

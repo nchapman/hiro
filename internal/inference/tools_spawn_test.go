@@ -264,7 +264,7 @@ func TestAgentListingProvider_InitialAnnouncement(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected initial delta result")
 	}
-	text := dr.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr.Message.Content[0])
 	if !strings.Contains(text, "**assistant**") {
 		t.Error("expected assistant in listing")
 	}
@@ -319,7 +319,7 @@ func TestAgentListingProvider_DeltaOnAdd(t *testing.T) {
 	if dr2 == nil {
 		t.Fatal("expected delta for new agent")
 	}
-	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr2.Message.Content[0])
 	if !strings.Contains(text, "expert") {
 		t.Error("expected expert in delta")
 	}
@@ -349,7 +349,7 @@ func TestAgentListingProvider_DeltaOnRemove(t *testing.T) {
 	if dr2 == nil {
 		t.Fatal("expected delta for removed agent")
 	}
-	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr2.Message.Content[0])
 	if !strings.Contains(text, "no longer available") {
 		t.Error("expected removal notice")
 	}
@@ -424,7 +424,7 @@ func TestAgentListingProvider_SimultaneousAddAndRemove(t *testing.T) {
 	if dr2 == nil {
 		t.Fatal("expected delta for add+remove")
 	}
-	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr2.Message.Content[0])
 	if !strings.Contains(text, "critic") {
 		t.Error("expected critic in new agents")
 	}
@@ -451,7 +451,7 @@ func TestAgentListingProvider_AllAgentsRemoved(t *testing.T) {
 	if dr2 == nil {
 		t.Fatal("expected delta for removal")
 	}
-	text := dr2.Message.Content[0].(fantasy.TextPart).Text
+	text := textPartText(t, dr2.Message.Content[0])
 	if !strings.Contains(text, "no longer available") {
 		t.Error("expected removal notice")
 	}
@@ -483,6 +483,9 @@ func TestRenderAgentListing_InitialSorted(t *testing.T) {
 	assistantIdx := strings.Index(text, "assistant")
 	if criticIdx < 0 || assistantIdx < 0 {
 		t.Fatal("expected both agents in listing")
+	}
+	if criticIdx > assistantIdx {
+		t.Error("expected critic before assistant (definition order)")
 	}
 }
 

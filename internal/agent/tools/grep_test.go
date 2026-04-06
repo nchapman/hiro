@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -574,7 +575,7 @@ func TestGrepContentFallback(t *testing.T) {
 	}
 	// Should not have line numbers like "  1: "
 	lineNumRe := regexp.MustCompile(`^\d+:`)
-	for _, line := range strings.Split(resp.Content, "\n") {
+	for line := range strings.SplitSeq(resp.Content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasSuffix(line, ":") {
 			continue
@@ -748,12 +749,7 @@ func TestBuildRgBaseArgs(t *testing.T) {
 	args := buildRgBaseArgs(params)
 
 	hasFlag := func(flag string) bool {
-		for _, a := range args {
-			if a == flag {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(args, flag)
 	}
 
 	if !hasFlag("--hidden") {

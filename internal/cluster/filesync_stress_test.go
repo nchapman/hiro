@@ -105,7 +105,7 @@ func countFiles(dir string) int {
 	count := 0
 	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible entries, keep walking
 		}
 		base := filepath.Base(path)
 		if strings.Contains(base, ".conflict.") || strings.HasPrefix(base, ".hiro-tmp-") {
@@ -122,7 +122,7 @@ func countConflictFiles(dir string) int {
 	count := 0
 	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible entries, keep walking
 		}
 		if strings.Contains(filepath.Base(path), ".conflict.") {
 			count++
@@ -250,9 +250,7 @@ func TestStress_AtomicWriteIntegrity(t *testing.T) {
 	var readerWg sync.WaitGroup
 
 	// Reader goroutine: continuously reads and checks for partial content.
-	readerWg.Add(1)
-	go func() {
-		defer readerWg.Done()
+	readerWg.Go(func() {
 		for !readerDone.Load() {
 			data, err := os.ReadFile(filePath)
 			if err != nil {
@@ -271,7 +269,7 @@ func TestStress_AtomicWriteIntegrity(t *testing.T) {
 				}
 			}
 		}
-	}()
+	})
 
 	// Writer goroutines.
 	var writerWg sync.WaitGroup
@@ -353,7 +351,7 @@ func TestStress_ConflictDetection(t *testing.T) {
 		})
 
 		// Simulate a local edit (mtime = now, well past the baseline).
-		os.WriteFile(absPath, []byte(fmt.Sprintf("local-%d", i)), 0o644)
+		os.WriteFile(absPath, fmt.Appendf(nil, "local-%d", i), 0o644)
 		now := time.Now()
 		os.Chtimes(absPath, now, now)
 
@@ -362,7 +360,7 @@ func TestStress_ConflictDetection(t *testing.T) {
 		remoteMtime := baseMtime.Add(1 * time.Second)
 		err := svc.ApplyFileUpdate(&pb.FileUpdate{
 			Path:           relPath,
-			Content:        []byte(fmt.Sprintf("remote-%d", i)),
+			Content:        fmt.Appendf(nil, "remote-%d", i),
 			Mode:           0o644,
 			MtimeUnixNanos: remoteMtime.UnixNano(),
 			OriginNode:     "leader",
@@ -400,7 +398,7 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 	const n = 100
 	for i := range n {
 		path := filepath.Join(leaderDir, "workspace", fmt.Sprintf("file-%03d.txt", i))
-		os.WriteFile(path, []byte(fmt.Sprintf("original-%d", i)), 0o644)
+		os.WriteFile(path, fmt.Appendf(nil, "original-%d", i), 0o644)
 	}
 
 	leader := NewFileSyncService(FileSyncConfig{
@@ -412,9 +410,7 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 	// Modifier goroutine: continuously mutates random files during snapshot.
 	stop := make(chan struct{})
 	var modifierWg sync.WaitGroup
-	modifierWg.Add(1)
-	go func() {
-		defer modifierWg.Done()
+	modifierWg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -422,11 +418,11 @@ func TestStress_InitialSyncWithConcurrentModifications(t *testing.T) {
 			default:
 				i := rand.Intn(n)
 				path := filepath.Join(leaderDir, "workspace", fmt.Sprintf("file-%03d.txt", i))
-				os.WriteFile(path, []byte(fmt.Sprintf("modified-%d-%d", i, time.Now().UnixNano())), 0o644)
+				os.WriteFile(path, fmt.Appendf(nil, "modified-%d-%d", i, time.Now().UnixNano()), 0o644)
 				time.Sleep(time.Millisecond)
 			}
 		}
-	}()
+	})
 
 	// Create snapshot while modifications are happening.
 	data, err := leader.CreateInitialSync()
@@ -562,7 +558,7 @@ func TestStress_DeepDirectoryTree(t *testing.T) {
 			dir := filepath.Join(parts...)
 			os.MkdirAll(dir, 0o755)
 			file := filepath.Join(dir, "leaf.txt")
-			os.WriteFile(file, []byte(fmt.Sprintf("tree-%d-level-%d", tree, level)), 0o644)
+			os.WriteFile(file, fmt.Appendf(nil, "tree-%d-level-%d", tree, level), 0o644)
 
 			rel, _ := filepath.Rel(p.leaderDir, file)
 			allFiles = append(allFiles, rel)
@@ -607,7 +603,7 @@ func TestStress_DeleteDuringSync(t *testing.T) {
 	dir := filepath.Join(p.leaderDir, "workspace", "ephemeral")
 	os.MkdirAll(dir, 0o755)
 	for i := range n {
-		os.WriteFile(filepath.Join(dir, fmt.Sprintf("file-%03d.txt", i)), []byte(fmt.Sprintf("doomed-%d", i)), 0o644)
+		os.WriteFile(filepath.Join(dir, fmt.Sprintf("file-%03d.txt", i)), fmt.Appendf(nil, "doomed-%d", i), 0o644)
 	}
 
 	// Wait for propagation.
@@ -654,7 +650,7 @@ func TestStress_ReconnectionGap(t *testing.T) {
 	for i := range baseFiles {
 		path := filepath.Join(p.leaderDir, "workspace", "shared", fmt.Sprintf("file-%03d.txt", i))
 		os.MkdirAll(filepath.Dir(path), 0o755)
-		os.WriteFile(path, []byte(fmt.Sprintf("base-%d", i)), 0o644)
+		os.WriteFile(path, fmt.Appendf(nil, "base-%d", i), 0o644)
 	}
 	waitFor(t, 10*time.Second, func() bool {
 		return countFiles(filepath.Join(p.workerDir, "workspace", "shared")) >= baseFiles
@@ -669,12 +665,12 @@ func TestStress_ReconnectionGap(t *testing.T) {
 	// Leader: add 30 new files.
 	for i := range 30 {
 		path := filepath.Join(p.leaderDir, "workspace", "shared", fmt.Sprintf("gap-new-%03d.txt", i))
-		os.WriteFile(path, []byte(fmt.Sprintf("gap-new-%d", i)), 0o644)
+		os.WriteFile(path, fmt.Appendf(nil, "gap-new-%d", i), 0o644)
 	}
 	// Leader: modify 10 existing files.
 	for i := range 10 {
 		path := filepath.Join(p.leaderDir, "workspace", "shared", fmt.Sprintf("file-%03d.txt", i))
-		os.WriteFile(path, []byte(fmt.Sprintf("gap-modified-%d", i)), 0o644)
+		os.WriteFile(path, fmt.Appendf(nil, "gap-modified-%d", i), 0o644)
 	}
 	// Leader: delete 5 files.
 	for i := 45; i < 50; i++ {
@@ -693,7 +689,7 @@ func TestStress_ReconnectionGap(t *testing.T) {
 	knownFiles := make(map[string]int64)
 	filepath.WalkDir(filepath.Join(p.workerDir, "workspace"), func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil
+			return nil //nolint:nilerr // skip inaccessible entries, keep walking
 		}
 		relPath, _ := filepath.Rel(p.workerDir, path)
 		if shouldIgnore(relPath) || strings.Contains(filepath.Base(path), ".conflict.") {
@@ -701,7 +697,7 @@ func TestStress_ReconnectionGap(t *testing.T) {
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // skip entries where Info() fails
 		}
 		knownFiles[relPath] = info.ModTime().UnixNano()
 		return nil

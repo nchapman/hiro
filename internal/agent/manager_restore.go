@@ -74,7 +74,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 
 	// Start running instances.
 	for _, e := range toStart {
-		if m.restoreRunningInstance(ctx, e) {
+		if m.restoreRunningInstance(ctx, &e) {
 			restored++
 		}
 	}
@@ -130,7 +130,7 @@ func (m *Manager) registerStoppedInstances(stopped []restoreEntry) int {
 
 // restoreRunningInstance restarts a single persistent instance from its DB record.
 // Returns true if the instance was successfully restored.
-func (m *Manager) restoreRunningInstance(ctx context.Context, e restoreEntry) bool {
+func (m *Manager) restoreRunningInstance(ctx context.Context, e *restoreEntry) bool {
 	// Verify instance dir exists.
 	if _, err := os.Stat(m.instanceDir(e.dbInst.ID)); os.IsNotExist(err) {
 		m.logger.Warn("instance dir missing, removing orphaned DB record",

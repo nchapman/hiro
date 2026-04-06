@@ -420,7 +420,7 @@ func (m *Manager) RunTriggered(ctx context.Context, sub platformdb.Subscription)
 	)
 	loopCfg.IsTriggeredSession = true
 
-	tmpLoop, err := m.createInferenceLoop(ctx, loopCfg, modelSpec, apiKey, baseURL)
+	tmpLoop, err := m.createInferenceLoop(ctx, &loopCfg, modelSpec, apiKey, baseURL)
 	if err != nil {
 		return fmt.Errorf("creating triggered loop: %w", err)
 	}

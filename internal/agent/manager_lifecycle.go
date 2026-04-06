@@ -357,7 +357,7 @@ func (m *Manager) agentHasSkills(cfg config.AgentConfig) bool {
 
 // createInferenceLoop creates a language model and inference loop for the instance.
 // Returns nil loop if no provider is configured (test mode).
-func (m *Manager) createInferenceLoop(ctx context.Context, loopCfg inference.LoopConfig, modelSpec models.ModelSpec, apiKey, baseURL string) (*inference.Loop, error) {
+func (m *Manager) createInferenceLoop(ctx context.Context, loopCfg *inference.LoopConfig, modelSpec models.ModelSpec, apiKey, baseURL string) (*inference.Loop, error) {
 	if modelSpec.Provider == "" {
 		return nil, nil
 	}
@@ -474,7 +474,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		m.logger.With("component", "notifications", "instance_id", instanceID),
 	)
 	loopCfg := m.buildLoopConfig(instanceID, sessionID, cfg, mode, instDir, sessDir, handle.Worker, allowedTools, allowLayers, denyRules, hasSkills, modelSpec, notifications)
-	loop, err := m.createInferenceLoop(spawnCtx, loopCfg, modelSpec, apiKey, baseURL)
+	loop, err := m.createInferenceLoop(spawnCtx, &loopCfg, modelSpec, apiKey, baseURL)
 	if err != nil {
 		handle.Kill()
 		cleanup()

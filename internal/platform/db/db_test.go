@@ -625,9 +625,7 @@ func TestConcurrentWrites(t *testing.T) {
 
 	// Goroutine per session: append messages (simulates persistTurn).
 	for i := range numSessions {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sessID := fmt.Sprintf("sess-%d", i)
 			for j := range msgsPerSession {
 				role := "user"
@@ -640,14 +638,12 @@ func TestConcurrentWrites(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	// Goroutine per session: record usage (simulates recordUsage).
 	for i := range numSessions {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sessID := fmt.Sprintf("sess-%d", i)
 			for j := range usagePerSession {
 				events := []UsageEvent{{
@@ -661,14 +657,12 @@ func TestConcurrentWrites(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	// Goroutine: insert log batches (simulates loghandler flushing).
 	for i := range logBatches {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			entries := []LogEntry{{
 				Level:   "info",
 				Message: fmt.Sprintf("test log batch %d", i),
@@ -676,7 +670,7 @@ func TestConcurrentWrites(t *testing.T) {
 			if err := d.InsertLogs(ctx, entries); err != nil {
 				errs <- fmt.Errorf("InsertLogs batch=%d: %w", i, err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

@@ -552,7 +552,10 @@ func TestExpandToolsForSkill_ParameterizedRulesEnforced(t *testing.T) {
 	// Find the Bash proxy tool and test that rules are enforced.
 	for _, tool := range l.tools {
 		if tool.Info().Name == "Bash" {
-			pt := tool.AgentTool.(*proxyTool)
+			pt, ok := tool.AgentTool.(*proxyTool)
+			if !ok {
+				t.Fatal("expected *proxyTool")
+			}
 			// kubectl should be allowed.
 			resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 				ID: "call-1", Name: "Bash",
@@ -815,7 +818,10 @@ func TestUpdateToolRules_WithDenyRules(t *testing.T) {
 	// Find the Bash proxy and verify deny rules are applied.
 	for _, tool := range l.tools {
 		if tool.Info().Name == "Bash" {
-			pt := tool.AgentTool.(*proxyTool)
+			pt, ok := tool.AgentTool.(*proxyTool)
+			if !ok {
+				t.Fatal("expected *proxyTool")
+			}
 			resp, err := pt.Run(context.Background(), fantasy.ToolCall{
 				ID: "call-1", Name: "Bash",
 				Input: `{"command":"rm -rf /"}`,

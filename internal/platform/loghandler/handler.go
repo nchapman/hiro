@@ -109,14 +109,14 @@ func (h *Handler) Enabled(_ context.Context, level slog.Level) bool {
 
 // Handle processes a log record: writes to stdout synchronously,
 // then pushes to the async DB buffer and notifies SSE subscribers.
-func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
+func (h *Handler) Handle(ctx context.Context, r slog.Record) error { //nolint:gocritic // slog.Handler interface requires value receiver
 	// Always write to stdout first.
 	if err := h.text.Handle(ctx, r); err != nil {
 		return err
 	}
 
 	// Build the DB entry from the record + pre-resolved attrs.
-	e := h.buildEntry(r)
+	e := h.buildEntry(&r)
 
 	// Fan out to SSE subscribers (non-blocking).
 	h.shared.subs.publish(e)
@@ -165,7 +165,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 }
 
 // buildEntry extracts a LogEntry from a slog.Record plus pre-resolved attrs.
-func (h *Handler) buildEntry(r slog.Record) platformdb.LogEntry {
+func (h *Handler) buildEntry(r *slog.Record) platformdb.LogEntry {
 	ts := r.Time
 	if ts.IsZero() {
 		ts = time.Now()

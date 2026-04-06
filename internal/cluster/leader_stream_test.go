@@ -97,7 +97,7 @@ func TestLeaderStream_DetectConnectionType(t *testing.T) {
 
 	// Without relay configured, everything is direct.
 	via := ls.detectConnectionType("192.168.1.1:50000")
-	if via != "direct" {
+	if via != ViaDirect {
 		t.Fatalf("expected 'direct' without relay, got %q", via)
 	}
 
@@ -106,13 +106,13 @@ func TestLeaderStream_DetectConnectionType(t *testing.T) {
 
 	// Peer IP matching relay should be "relay".
 	via = ls.detectConnectionType("10.0.0.100:50000")
-	if via != "relay" {
+	if via != ViaRelay {
 		t.Fatalf("expected 'relay' for relay IP, got %q", via)
 	}
 
 	// Different peer IP should be "direct".
 	via = ls.detectConnectionType("192.168.1.1:50000")
-	if via != "direct" {
+	if via != ViaDirect {
 		t.Fatalf("expected 'direct' for non-relay IP, got %q", via)
 	}
 }

@@ -48,11 +48,12 @@ linters:
         - style
         - performance
       disabled-checks:
-        - hugeParam
         - rangeValCopy
         - unnamedResult
         - paramTypeCombine
-        - exposedSyncMutex
+      settings:
+        hugeParam:
+          sizeThreshold: 256
     revive:
       rules:
         - name: blank-imports
@@ -105,20 +106,16 @@ linters:
           - errcheck
           - gocritic
           - noctx
-          - bodyclose
           - unparam
           - fatcontext
           - prealloc
-          - nilerr
           - revive
           - mnd
           - goconst
           - funlen
           - gocognit
           - nestif
-          - forcetypeassert
           - gosec
-          - modernize
       # Generated protobuf code
       - path: \.pb\.go$
         linters:

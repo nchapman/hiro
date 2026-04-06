@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -402,13 +403,7 @@ func TestWatchAndSync_NewDirWithFile(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
-		found := false
-		for _, p := range sent {
-			if p == wantPath {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(sent, wantPath)
 		mu.Unlock()
 		if found {
 			return

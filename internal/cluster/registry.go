@@ -27,6 +27,12 @@ const (
 	NodeOffline NodeStatus = "offline"
 )
 
+// Connection type constants for NodeInfo.Via.
+const (
+	ViaDirect = "direct"
+	ViaRelay  = "relay"
+)
+
 // NodeInfo describes a node in the cluster.
 type NodeInfo struct {
 	ID          NodeID     `json:"id"`

@@ -73,7 +73,7 @@ func TestHandleGetClusterSettings_LeaderWithNodes(t *testing.T) {
 
 	cp.ApproveNode("w1", "Worker One")
 	cp.Save()
-	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", "direct")
+	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", cluster.ViaDirect)
 
 	settings := getClusterSettings(t, srv)
 
@@ -90,7 +90,10 @@ func TestHandleGetClusterSettings_LeaderWithNodes(t *testing.T) {
 	foundHome := false
 	foundW1 := false
 	for _, raw := range nodes {
-		n := raw.(map[string]any)
+		n, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatal("node entry is not a map[string]any")
+		}
 		switch n["id"] {
 		case "home":
 			foundHome = true
@@ -175,7 +178,7 @@ func TestHandleClusterReset_Success(t *testing.T) {
 	// Add some state to verify it gets cleared.
 	cp.ApproveNode("w1", "Worker One")
 	cp.Save()
-	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", "direct")
+	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", cluster.ViaDirect)
 	pr.AddOrUpdate(newPendingNode("p1", "Pending One"))
 
 	req := authedRequest(t, srv, "POST", "/api/settings/cluster/reset", nil)
@@ -201,8 +204,8 @@ func TestHandleClusterReset_DisconnectsNodes(t *testing.T) {
 	srv, _, nr, _, disconnected := newClusterTestServer(t)
 	srv.SetRestartFunc(func() {}) // no-op
 
-	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", "direct")
-	nr.Register("w2", "Worker Two", 4, "10.0.0.2:8081", "direct")
+	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", cluster.ViaDirect)
+	nr.Register("w2", "Worker Two", 4, "10.0.0.2:8081", cluster.ViaDirect)
 
 	req := authedRequest(t, srv, "POST", "/api/settings/cluster/reset", nil)
 	rec := httptest.NewRecorder()
@@ -299,7 +302,7 @@ func TestHandleTerminalNodes_NoRegistry(t *testing.T) {
 func TestHandleTerminalNodes_WithRegistry(t *testing.T) {
 	srv, _, nr, _, _ := newClusterTestServer(t)
 
-	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", "direct")
+	nr.Register("w1", "Worker One", 4, "10.0.0.1:8081", cluster.ViaDirect)
 
 	req := authedRequest(t, srv, "GET", "/api/terminal/nodes", nil)
 	rec := httptest.NewRecorder()

@@ -292,10 +292,10 @@ func (s *LeaderStream) detectConnectionType(peerAddr string) string {
 	if hasRelay {
 		peerHost, _, _ := net.SplitHostPort(peerAddr)
 		if relayIPs[peerHost] {
-			return "relay"
+			return ViaRelay
 		}
 	}
-	return "direct"
+	return ViaDirect
 }
 
 // readLoop processes incoming messages from a node.
