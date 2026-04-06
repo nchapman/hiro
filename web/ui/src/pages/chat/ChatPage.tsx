@@ -464,6 +464,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           {usage && usage.event_count > 0 && <TokenCounter usage={usage} />}
           <button
             onClick={() => setConfigOpen(true)}
+            title="Instance settings"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground"
           >
             <HugeiconsIcon icon={Settings01Icon} className="h-4 w-4" />

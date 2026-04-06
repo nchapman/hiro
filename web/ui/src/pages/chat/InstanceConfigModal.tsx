@@ -122,7 +122,9 @@ export default function InstanceConfigModal({
       const body: Record<string, unknown> = {}
       if (model !== original?.model) body.model = model
       if (reasoningEffort !== original?.reasoning_effort) body.reasoning_effort = reasoningEffort
-      if (allowedTools !== original?.allowed_tools.join("\n")) {
+      const toolsChanged = allowedTools !== original?.allowed_tools.join("\n")
+        || disallowedTools !== original?.disallowed_tools.join("\n")
+      if (toolsChanged) {
         body.allowed_tools = allowedTools.split("\n").map((s) => s.trim()).filter(Boolean)
         body.disallowed_tools = disallowedTools.split("\n").map((s) => s.trim()).filter(Boolean)
       }
@@ -155,7 +157,7 @@ export default function InstanceConfigModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{instanceName}</DialogTitle>
         </DialogHeader>
@@ -167,10 +169,38 @@ export default function InstanceConfigModal({
         ) : (
           <div className="flex flex-col gap-4 overflow-y-auto pr-1">
             {isStopped && (
-              <p className="text-xs text-muted-foreground">
+              <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
                 Changes take effect when the instance starts.
-              </p>
+              </div>
             )}
+
+            {/* Model & Reasoning */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Model</Label>
+              <div className="flex flex-col gap-1.5">
+                <ModelPicker
+                  models={models}
+                  currentModelId={currentModelId}
+                  onSelect={(id) => {
+                    const info = models.find((m) => m.id === id)
+                    setModel(info?.provider ? formatModelSpec(info.provider, id) : id)
+                  }}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Reasoning effort</Label>
+                <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reasoningOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
             {/* Persona */}
             <div className="flex flex-col gap-3">
@@ -204,34 +234,6 @@ export default function InstanceConfigModal({
               </div>
             </div>
 
-            {/* Model & Reasoning */}
-            <div className="flex flex-col gap-3">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Model</Label>
-              <div className="flex flex-col gap-1.5">
-                <ModelPicker
-                  models={models}
-                  currentModelId={currentModelId}
-                  onSelect={(id) => {
-                    const info = models.find((m) => m.id === id)
-                    setModel(info?.provider ? formatModelSpec(info.provider, id) : id)
-                  }}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs">Reasoning effort</Label>
-                <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {reasoningOptions.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
             {/* Tools */}
             <div className="flex flex-col gap-3">
               <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tools</Label>
@@ -243,6 +245,7 @@ export default function InstanceConfigModal({
                   value={allowedTools}
                   onChange={(e) => setAllowedTools(e.target.value)}
                 />
+                <p className="text-[11px] text-muted-foreground">One tool per line. Supports patterns like Bash(curl *).</p>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs">Disallowed</Label>
@@ -252,6 +255,7 @@ export default function InstanceConfigModal({
                   value={disallowedTools}
                   onChange={(e) => setDisallowedTools(e.target.value)}
                 />
+                <p className="text-[11px] text-muted-foreground">Deny rules override the allowed list above.</p>
               </div>
             </div>
 
@@ -264,6 +268,7 @@ export default function InstanceConfigModal({
                 value={memory}
                 onChange={(e) => setMemory(e.target.value)}
               />
+              <p className="text-[11px] text-muted-foreground">Managed by the agent. Manual edits take effect on the next turn.</p>
             </div>
           </div>
         )}
