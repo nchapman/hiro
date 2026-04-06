@@ -70,6 +70,13 @@ func (r *Router) Register(ch Channel) {
 	r.mu.Unlock()
 }
 
+// Unregister removes a channel from the router by name.
+func (r *Router) Unregister(name string) {
+	r.mu.Lock()
+	delete(r.channels, name)
+	r.mu.Unlock()
+}
+
 // Channel returns the named channel, or nil.
 func (r *Router) Channel(name string) Channel {
 	r.mu.RLock()

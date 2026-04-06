@@ -92,6 +92,21 @@ type Manager struct {
 	clusterService *cluster.LeaderService // cluster orchestration; nil = standalone
 	scheduler      *Scheduler             // cron scheduler; nil until SetScheduler called
 	timezone       *time.Location         // server timezone for cron evaluation
+	lifecycleHook  InstanceLifecycleHook  // optional hook for instance start/stop events
+}
+
+// InstanceLifecycleHook is called when instances start or stop, allowing
+// external systems (e.g. channel management) to react without creating
+// import cycles between the agent and channel packages.
+type InstanceLifecycleHook interface {
+	// OnInstanceStart is called after an instance is fully registered and running.
+	// instDir is the instance's filesystem directory.
+	OnInstanceStart(ctx context.Context, instanceID, instDir string) error
+
+	// OnInstanceStop is called when an instance is being stopped or removed.
+	// Must be idempotent — may be called multiple times for the same instance
+	// (e.g. softStop followed by removeInstance during delete).
+	OnInstanceStop(instanceID string)
 }
 
 // ControlPlane is the interface the Manager uses for operator-level config.
@@ -105,6 +120,7 @@ type ControlPlane interface {
 	ProviderByType(providerType string) (apiKey string, baseURL string, ok bool)
 	ConfiguredProviderTypes() []string
 	DefaultModelSpec() models.ModelSpec
+	ResolveSecret(value string) string
 }
 
 // NewManager creates a new agent manager. rootDir is the hiro platform root

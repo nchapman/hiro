@@ -901,6 +901,7 @@ func (m *fullMockCP) ConfiguredProviderTypes() []string { return m.providerTypes
 func (m *fullMockCP) DefaultModelSpec() models.ModelSpec {
 	return m.defaultModel
 }
+func (m *fullMockCP) ResolveSecret(value string) string { return value }
 
 func TestResolveModelSpec_NilCP(t *testing.T) {
 	mgr, _ := setupTestManager(t) // nil CP by default

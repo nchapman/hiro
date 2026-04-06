@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -155,53 +154,6 @@ func (d *DB) DeleteInstance(ctx context.Context, id string) error {
 	}
 	if n == 0 {
 		return fmt.Errorf("instance %s not found", id)
-	}
-	return nil
-}
-
-// InstanceConfig holds per-instance configuration as a JSON blob.
-type InstanceConfig struct {
-	ModelOverride   string `json:"model_override,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-}
-
-// GetInstanceConfig reads the per-instance config JSON.
-func (d *DB) GetInstanceConfig(ctx context.Context, instanceID string) (InstanceConfig, error) {
-	var raw string
-	err := d.db.QueryRowContext(ctx, "SELECT COALESCE(config, '{}') FROM instances WHERE id = ?", instanceID).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return InstanceConfig{}, fmt.Errorf("instance %s: %w", instanceID, ErrNotFound)
-	}
-	if err != nil {
-		return InstanceConfig{}, err
-	}
-	var cfg InstanceConfig
-	if raw != "" && raw != "{}" {
-		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-			return InstanceConfig{}, fmt.Errorf("parsing instance config: %w", err)
-		}
-	}
-	return cfg, nil
-}
-
-// UpdateInstanceConfig writes the per-instance config JSON.
-func (d *DB) UpdateInstanceConfig(ctx context.Context, instanceID string, cfg InstanceConfig) error {
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshaling instance config: %w", err)
-	}
-	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
-	result, err := d.db.ExecContext(ctx, "UPDATE instances SET config = ? WHERE id = ?", string(raw), instanceID)
-	if err != nil {
-		return fmt.Errorf("updating instance config: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("instance %s not found", instanceID)
 	}
 	return nil
 }

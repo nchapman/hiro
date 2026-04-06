@@ -92,6 +92,11 @@ func (m *Manager) teardownInstance(id string, h *WorkerHandle, opts teardownOpts
 // softStop gracefully shuts down a persistent instance's worker process
 // but keeps it in the registry with status "stopped".
 func (m *Manager) softStop(id string) {
+	// Notify lifecycle hook before teardown (e.g. stop channels).
+	if m.lifecycleHook != nil {
+		m.lifecycleHook.OnInstanceStop(id)
+	}
+
 	// Capture the handle under both locks and mark stopped atomically.
 	// Lock order: m.mu → inst.mu (no reverse path exists in the codebase).
 	// Both locks are needed: m.mu for watchWorker, inst.mu for SendMessage/UpdateConfig.
@@ -173,6 +178,11 @@ func (m *Manager) watchWorker(instanceID string, handle *WorkerHandle) {
 			continue
 		}
 
+		// Stop per-instance channels before tearing down the worker.
+		if m.lifecycleHook != nil {
+			m.lifecycleHook.OnInstanceStop(id)
+		}
+
 		if deadInst.info.Mode.IsPersistent() {
 			m.mu.Lock()
 			if deadInst.info.Status == InstanceStatusStopped {
@@ -238,6 +248,11 @@ func formatJobNotification(c *pb.JobCompletion) inference.Notification {
 // removeInstance gracefully shuts down and removes an instance from the registry.
 // Ephemeral instance directories are cleaned up.
 func (m *Manager) removeInstance(id string) {
+	// Notify lifecycle hook before teardown (e.g. stop channels).
+	if m.lifecycleHook != nil {
+		m.lifecycleHook.OnInstanceStop(id)
+	}
+
 	m.mu.Lock()
 	inst, ok := m.instances[id]
 	var h *WorkerHandle

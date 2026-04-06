@@ -1,48 +1,8 @@
 package controlplane
 
 import (
-	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 )
-
-func TestTelegramConfig_Nil(t *testing.T) {
-	t.Parallel()
-
-	cp := &ControlPlane{config: Config{}}
-	if cfg := cp.TelegramConfig(); cfg != nil {
-		t.Errorf("expected nil, got %+v", cfg)
-	}
-}
-
-func TestTelegramConfig_Configured(t *testing.T) {
-	t.Parallel()
-
-	cp := &ControlPlane{config: Config{
-		Channels: ChannelsConfig{
-			Telegram: &TelegramChannelConfig{
-				BotToken:     "${MY_TOKEN}",
-				Instance:     "operator",
-				AllowedChats: []int64{100, 200},
-			},
-		},
-	}}
-
-	cfg := cp.TelegramConfig()
-	if cfg == nil {
-		t.Fatal("expected non-nil config")
-	}
-	if cfg.BotToken != "${MY_TOKEN}" {
-		t.Errorf("bot_token = %q", cfg.BotToken)
-	}
-	if cfg.Instance != "operator" {
-		t.Errorf("instance = %q", cfg.Instance)
-	}
-	if len(cfg.AllowedChats) != 2 {
-		t.Errorf("allowed_chats = %v", cfg.AllowedChats)
-	}
-}
 
 func TestResolveSecret_LiteralValue(t *testing.T) {
 	t.Parallel()
@@ -104,88 +64,5 @@ func TestResolveSecret_PartialSyntax(t *testing.T) {
 	// Missing opening — not a reference.
 	if v := cp.ResolveSecret("NOCURLY}"); v != "NOCURLY}" {
 		t.Errorf("got %q", v)
-	}
-}
-
-func TestSlackConfig_Nil(t *testing.T) {
-	t.Parallel()
-
-	cp := &ControlPlane{config: Config{}}
-	if cfg := cp.SlackConfig(); cfg != nil {
-		t.Errorf("expected nil, got %+v", cfg)
-	}
-}
-
-func TestSlackConfig_Configured(t *testing.T) {
-	t.Parallel()
-
-	cp := &ControlPlane{config: Config{
-		Channels: ChannelsConfig{
-			Slack: &SlackChannelConfig{
-				BotToken:        "${SLACK_TOKEN}",
-				SigningSecret:   "${SLACK_SIGNING}",
-				Instance:        "operator",
-				AllowedChannels: []string{"C123", "C456"},
-			},
-		},
-	}}
-
-	cfg := cp.SlackConfig()
-	if cfg == nil {
-		t.Fatal("expected non-nil config")
-	}
-	if cfg.BotToken != "${SLACK_TOKEN}" {
-		t.Errorf("bot_token = %q", cfg.BotToken)
-	}
-	if cfg.Instance != "operator" {
-		t.Errorf("instance = %q", cfg.Instance)
-	}
-	if len(cfg.AllowedChannels) != 2 {
-		t.Errorf("allowed_channels = %v", cfg.AllowedChannels)
-	}
-}
-
-func TestHasContent_WithSlackOnly(t *testing.T) {
-	t.Parallel()
-
-	cp := &ControlPlane{config: Config{
-		Channels: ChannelsConfig{
-			Slack: &SlackChannelConfig{BotToken: "tok"},
-		},
-	}}
-	cp.config.initMaps()
-
-	if !cp.hasContent() {
-		t.Error("expected hasContent() = true with Slack config")
-	}
-}
-
-func TestHasContent_WithChannels(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	cp := &ControlPlane{
-		config: Config{
-			Channels: ChannelsConfig{
-				Telegram: &TelegramChannelConfig{BotToken: "tok"},
-			},
-		},
-		path:   path,
-		logger: slog.Default(),
-	}
-	cp.config.initMaps()
-
-	// hasContent should return true for channel-only config.
-	if !cp.hasContent() {
-		t.Error("expected hasContent() = true with channel config")
-	}
-
-	// Save should write the file.
-	if err := cp.Save(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("config file not written: %v", err)
 	}
 }

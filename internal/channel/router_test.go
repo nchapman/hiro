@@ -884,6 +884,26 @@ func TestRouter_ChannelAccessor(t *testing.T) {
 	}
 }
 
+func TestRouter_Unregister(t *testing.T) {
+	t.Parallel()
+
+	r := testRouter(t, newMockManager())
+
+	ch := &mockChannel{name: "telegram:abc123"}
+	r.Register(ch)
+	if got := r.Channel("telegram:abc123"); got == nil {
+		t.Fatal("expected non-nil after Register")
+	}
+
+	r.Unregister("telegram:abc123")
+	if got := r.Channel("telegram:abc123"); got != nil {
+		t.Error("expected nil after Unregister")
+	}
+
+	// Unregister a non-existent name is a no-op.
+	r.Unregister("nonexistent")
+}
+
 func TestRouter_GetBinding(t *testing.T) {
 	t.Parallel()
 

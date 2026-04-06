@@ -177,17 +177,18 @@ func (m *Manager) resolveSessionForRestore(ctx context.Context, instanceID, agen
 }
 
 // restoreInstanceConfig restores per-instance config (model override, reasoning effort)
-// from the platform database.
+// from the instance's config.yaml file.
 func (m *Manager) restoreInstanceConfig(ctx context.Context, instanceID string) {
-	instCfg, err := m.pdb.GetInstanceConfig(ctx, instanceID)
+	instCfg, err := config.LoadInstanceConfig(m.instanceDir(instanceID))
 	if err != nil {
+		m.logger.Warn("failed to load instance config", "instance", instanceID, "error", err)
 		return
 	}
-	if instCfg.ModelOverride == "" && instCfg.ReasoningEffort == "" {
+	if instCfg.Model == "" && instCfg.ReasoningEffort == "" {
 		return
 	}
 	effort := instCfg.ReasoningEffort
-	if err := m.UpdateInstanceConfig(ctx, instanceID, instCfg.ModelOverride, &effort); err != nil {
+	if err := m.UpdateInstanceConfig(ctx, instanceID, instCfg.Model, &effort); err != nil {
 		m.logger.Warn("failed to restore instance config",
 			"instance", instanceID, "error", err)
 	}

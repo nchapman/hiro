@@ -45,6 +45,7 @@ const (
 
 // Channel is the Telegram messaging channel.
 type Channel struct {
+	name        string // channel name (default: "telegram")
 	token       string
 	instance    string // agent name or instance ID to bind to
 	allowedChat map[int64]bool
@@ -60,6 +61,7 @@ type Channel struct {
 
 // Config holds the configuration for a Telegram channel.
 type Config struct {
+	Name         string  // channel name (default: "telegram"); use "telegram:<instanceID>" for per-instance channels
 	Token        string  // bot API token (already resolved from secret)
 	Instance     string  // agent name or instance ID
 	AllowedChats []int64 // optional whitelist (empty = allow all)
@@ -84,7 +86,13 @@ func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
 		pt = pollTimeout
 	}
 
+	name := cfg.Name
+	if name == "" {
+		name = "telegram"
+	}
+
 	return &Channel{
+		name:        name,
 		token:       cfg.Token,
 		instance:    cfg.Instance,
 		allowedChat: allowed,
@@ -92,13 +100,13 @@ func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
 		baseURL:     baseURL,
 		pollTimeout: pt,
 		client:      &http.Client{Timeout: time.Duration(pt+pollTimeoutPadding) * time.Second},
-		logger:      logger.With("channel", "telegram"),
+		logger:      logger.With("channel", name),
 		stopCh:      make(chan struct{}),
 	}
 }
 
-// Name returns "telegram".
-func (c *Channel) Name() string { return "telegram" }
+// Name returns the channel name (default "telegram", or a custom name for per-instance channels).
+func (c *Channel) Name() string { return c.name }
 
 // Trusted returns false — external channels cannot run sensitive commands.
 func (c *Channel) Trusted() bool { return false }

@@ -136,46 +136,6 @@ func TestDeleteInstance(t *testing.T) {
 	}
 }
 
-func TestInstanceConfig(t *testing.T) {
-	d := openTestDB(t)
-	ctx := context.Background()
-	d.CreateInstance(ctx, Instance{ID: "inst-1", AgentName: "worker", Mode: "persistent"})
-
-	// Default config is empty.
-	cfg, err := d.GetInstanceConfig(ctx, "inst-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ModelOverride != "" || cfg.ReasoningEffort != "" {
-		t.Errorf("expected empty config, got %+v", cfg)
-	}
-
-	// Update config.
-	err = d.UpdateInstanceConfig(ctx, "inst-1", InstanceConfig{
-		ModelOverride:   "claude-3-opus",
-		ReasoningEffort: "high",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, _ = d.GetInstanceConfig(ctx, "inst-1")
-	if cfg.ModelOverride != "claude-3-opus" || cfg.ReasoningEffort != "high" {
-		t.Errorf("unexpected config: %+v", cfg)
-	}
-
-	// Non-existent.
-	_, err = d.GetInstanceConfig(ctx, "no-such")
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
-
-	err = d.UpdateInstanceConfig(ctx, "no-such", InstanceConfig{})
-	if err == nil {
-		t.Error("expected error for non-existent instance")
-	}
-}
-
 func TestDeleteInstance_CascadesSessions(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()

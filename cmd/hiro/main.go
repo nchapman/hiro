@@ -21,8 +21,6 @@ import (
 	"github.com/nchapman/hiro/internal/agent"
 	"github.com/nchapman/hiro/internal/api"
 	"github.com/nchapman/hiro/internal/channel"
-	slackchannel "github.com/nchapman/hiro/internal/channel/slack"
-	telegramchannel "github.com/nchapman/hiro/internal/channel/telegram"
 	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
@@ -114,6 +112,7 @@ type app struct {
 	mgr        *agent.Manager
 	scheduler  *agent.Scheduler
 	chanRouter *channel.Router
+	chanMgr    *channelManager
 
 	// Cluster state — only populated for leader mode.
 	cs             clusterState
@@ -432,6 +431,13 @@ func (a *app) startManager() error {
 
 	a.mgr.WatchAgentDefinitions(a.fsWatcher)
 
+	// Create the channel router and lifecycle hook before RestoreInstances
+	// so restored instances get their per-instance channels started.
+	usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
+	a.chanRouter = channel.NewRouter(a.ctx, a.mgr, a.cp, usage, a.logger)
+	a.chanMgr = newChannelManager(a.chanRouter, a.cp, a.srv.Mux(), a.logger)
+	a.mgr.SetLifecycleHook(a.chanMgr)
+
 	if err := a.mgr.RestoreInstances(a.ctx); err != nil {
 		a.logger.Warn("failed to restore some agent instances", "error", err)
 	}
@@ -454,87 +460,29 @@ func (a *app) startManager() error {
 	return nil
 }
 
-// initChannels creates the channel router, registers channels, and starts
-// notification pumps. Called after the operator agent is bootstrapped.
+// initChannels registers the web channel and starts channels for the leader.
+// The router and lifecycle hook were already created in startManager before
+// RestoreInstances, so restored instances already have their channels running.
 func (a *app) initChannels(leaderID string) {
 	providerType, _, _, _ := a.cp.ProviderInfo()
 	a.logger.Info("leader agent ready", "id", leaderID, "provider", providerType)
 	a.srv.SetManager(a.mgr, leaderID)
 
-	usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
-	router := channel.NewRouter(a.ctx, a.mgr, a.cp, usage, a.logger)
-	a.chanRouter = router
+	wc := webchannel.New(a.chanRouter, a.mgr, a.logger)
+	a.chanRouter.Register(wc)
+	a.srv.SetRouter(a.chanRouter, wc)
 
-	wc := webchannel.New(router, a.mgr, a.logger)
-	router.Register(wc)
-	a.srv.SetRouter(router, wc)
+	// Start notification pump for the leader instance.
+	a.chanRouter.StartNotificationPump(a.ctx, leaderID)
 
-	// Start notification pumps for all persistent instances.
-	// The pump must use the app context (not a WebSocket context) so it
-	// survives individual channel connections disconnecting.
-	router.StartNotificationPump(a.ctx, leaderID)
-	// TODO: start pumps for other persistent instances (child agents with
-	// schedules/triggers). Currently only the operator gets one.
-
-	a.startTelegramChannel(router)
-	a.startSlackChannel(router)
-}
-
-// startTelegramChannel creates and starts the Telegram channel if configured.
-func (a *app) startTelegramChannel(router *channel.Router) {
-	tgCfg := a.cp.TelegramConfig()
-	if tgCfg == nil {
-		return
+	// The lifecycle hook fires on startInstance, but the leader was
+	// bootstrapped before the router had a web channel. Trigger the
+	// hook now so the leader's channels (if any) get started.
+	if a.chanMgr != nil {
+		if err := a.chanMgr.OnInstanceStart(a.ctx, leaderID, a.mgr.InstanceDir(leaderID)); err != nil {
+			a.logger.Warn("failed to start channels for leader instance", "error", err)
+		}
 	}
-
-	token := a.cp.ResolveSecret(tgCfg.BotToken)
-	if token == "" {
-		a.logger.Warn("telegram channel configured but bot_token is empty or secret not found")
-		return
-	}
-
-	tg := telegramchannel.New(telegramchannel.Config{
-		Token:        token,
-		Instance:     tgCfg.Instance,
-		AllowedChats: tgCfg.AllowedChats,
-	}, router, a.logger)
-	router.Register(tg)
-
-	if err := tg.Start(a.ctx); err != nil {
-		a.logger.Warn("failed to start telegram channel", "error", err)
-		return
-	}
-	a.logger.Info("telegram channel started", "instance", tgCfg.Instance)
-}
-
-// startSlackChannel creates and starts the Slack channel if configured.
-func (a *app) startSlackChannel(router *channel.Router) {
-	slackCfg := a.cp.SlackConfig()
-	if slackCfg == nil {
-		return
-	}
-
-	botToken := a.cp.ResolveSecret(slackCfg.BotToken)
-	signingSecret := a.cp.ResolveSecret(slackCfg.SigningSecret)
-	if botToken == "" || signingSecret == "" {
-		a.logger.Warn("slack channel configured but bot_token or signing_secret is empty or secret not found")
-		return
-	}
-
-	sc := slackchannel.New(slackchannel.Config{
-		BotToken:        botToken,
-		SigningSecret:   signingSecret,
-		Instance:        slackCfg.Instance,
-		AllowedChannels: slackCfg.AllowedChannels,
-		Mux:             a.srv.Mux(),
-	}, router, a.logger)
-	router.Register(sc)
-
-	if err := sc.Start(a.ctx); err != nil {
-		a.logger.Warn("failed to start slack channel", "error", err)
-		return
-	}
-	a.logger.Info("slack channel started", "instance", slackCfg.Instance)
 }
 
 // serve starts the HTTP server and blocks until shutdown signal or restart.

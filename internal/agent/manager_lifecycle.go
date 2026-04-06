@@ -275,6 +275,9 @@ func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displ
 	if err := os.WriteFile(filepath.Join(instDir, "memory.md"), nil, fsperm.FilePrivate); err != nil {
 		return fmt.Errorf("creating memory.md: %w", err)
 	}
+	if err := config.SaveInstanceConfig(instDir, config.InstanceConfig{}); err != nil {
+		return fmt.Errorf("creating config.yaml: %w", err)
+	}
 	return nil
 }
 
@@ -328,9 +331,13 @@ func (m *Manager) acquireUIDAndChown(instanceID, instDir string) (uint32, uint32
 		return 0, 0, fmt.Errorf("acquiring UID: %w", err)
 	}
 	// Transfer ownership of the instance dir (and all contents) to the agent user.
+	// config.yaml is skipped — it stays root-owned so the agent cannot read it.
 	if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if config.IsInstanceConfigFile(path, instDir) {
+			return nil // keep root-owned
 		}
 		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
 	}); err != nil {
@@ -617,4 +624,11 @@ func (m *Manager) registerAndStartInstance(ctx context.Context, inst *instance) 
 		"mode", inst.info.Mode,
 		"parent", parentID,
 	)
+
+	// Notify lifecycle hook (e.g. channel manager) after the instance is running.
+	if m.lifecycleHook != nil {
+		if err := m.lifecycleHook.OnInstanceStart(ctx, instanceID, m.instanceDir(instanceID)); err != nil {
+			m.logger.Warn("lifecycle hook OnInstanceStart failed", "instance", instanceID, "error", err)
+		}
+	}
 }

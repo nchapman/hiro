@@ -69,15 +69,20 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		inst.loop.SetReasoningEffort(*reasoningEffort)
 	}
 
-	// Persist config to DB so it survives restarts.
-	if m.pdb != nil {
-		cfg := platformdb.InstanceConfig{
-			ModelOverride:   inst.info.Model,
-			ReasoningEffort: inst.loop.ReasoningEffort(),
-		}
-		if err := m.pdb.UpdateInstanceConfig(ctx, instanceID, cfg); err != nil {
-			m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
-		}
+	// Persist config to filesystem so it survives restarts.
+	// Read-modify-write to preserve existing channel config.
+	// inst.mu serializes model/effort writers but does not protect
+	// against concurrent writers of other config sections.
+	instDir := m.instanceDir(instanceID)
+	existing, loadErr := config.LoadInstanceConfig(instDir)
+	if loadErr != nil {
+		m.logger.Warn("failed to load instance config for update; channel config may be lost",
+			"instance", instanceID, "error", loadErr)
+	}
+	existing.Model = inst.info.Model
+	existing.ReasoningEffort = inst.loop.ReasoningEffort()
+	if err := config.SaveInstanceConfig(instDir, existing); err != nil {
+		m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
 	}
 
 	return nil

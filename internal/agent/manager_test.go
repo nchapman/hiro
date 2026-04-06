@@ -1549,6 +1549,7 @@ func (m *mockCP) ProviderInfo() (string, string, string, bool) {
 func (m *mockCP) ProviderByType(string) (string, string, bool) { return "", "", false }
 func (m *mockCP) ConfiguredProviderTypes() []string            { return nil }
 func (m *mockCP) DefaultModelSpec() models.ModelSpec           { return models.ModelSpec{} }
+func (m *mockCP) ResolveSecret(value string) string            { return value }
 
 func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
 	t.Helper()

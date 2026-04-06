@@ -107,6 +107,12 @@ func (m *Manager) SecretEnv() []string {
 	return m.cp.SecretEnv()
 }
 
+// SetLifecycleHook registers a hook that is called when instances start or stop.
+// Must be set before RestoreInstances so restored instances trigger the hook.
+func (m *Manager) SetLifecycleHook(hook InstanceLifecycleHook) {
+	m.lifecycleHook = hook
+}
+
 // SetScheduler sets the cron scheduler for subscription management.
 func (m *Manager) SetScheduler(s *Scheduler) {
 	m.scheduler = s
@@ -186,6 +192,11 @@ func (m *Manager) sharedSkillsDir() string {
 
 func (m *Manager) instanceDir(id string) string {
 	return filepath.Join(m.rootDir, "instances", id)
+}
+
+// InstanceDir returns the filesystem path for an instance's directory.
+func (m *Manager) InstanceDir(id string) string {
+	return m.instanceDir(id)
 }
 
 func (m *Manager) instanceSessionDir(instanceID, sessionID string) string {

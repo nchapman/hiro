@@ -41,6 +41,7 @@ const (
 
 // Channel is the Slack messaging channel.
 type Channel struct {
+	name           string // channel name (default: "slack")
 	botToken       string
 	signingSecret  string
 	instance       string // agent name or instance ID to bind to
@@ -49,17 +50,20 @@ type Channel struct {
 	apiURL         string // Slack API base URL (overridable for tests)
 	client         *http.Client
 	mux            *http.ServeMux // HTTP mux to register webhook routes on
+	routePattern   string         // HTTP route for webhook events
 	logger         *slog.Logger
 }
 
 // Config holds the configuration for a Slack channel.
 type Config struct {
+	Name            string         // channel name (default: "slack"); use "slack:<instanceID>" for per-instance channels
 	BotToken        string         // bot OAuth token (already resolved)
 	SigningSecret   string         // signing secret (already resolved)
 	Instance        string         // agent name or instance ID
 	AllowedChannels []string       // optional whitelist (empty = allow all)
 	APIURL          string         // override for testing (default: https://slack.com/api)
 	Mux             *http.ServeMux // HTTP mux to register routes on
+	RoutePattern    string         // HTTP route pattern (default: "POST /api/slack/events")
 }
 
 // New creates a new Slack channel.
@@ -74,7 +78,18 @@ func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
 		apiURL = slackAPIURL
 	}
 
+	name := cfg.Name
+	if name == "" {
+		name = "slack"
+	}
+
+	routePattern := cfg.RoutePattern
+	if routePattern == "" {
+		routePattern = "POST /api/slack/events"
+	}
+
 	return &Channel{
+		name:           name,
 		botToken:       cfg.BotToken,
 		signingSecret:  cfg.SigningSecret,
 		instance:       cfg.Instance,
@@ -83,12 +98,13 @@ func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
 		apiURL:         apiURL,
 		client:         &http.Client{Timeout: httpClientTimeout},
 		mux:            cfg.Mux,
-		logger:         logger.With("channel", "slack"),
+		routePattern:   routePattern,
+		logger:         logger.With("channel", name),
 	}
 }
 
-// Name returns "slack".
-func (c *Channel) Name() string { return "slack" }
+// Name returns the channel name (default "slack", or a custom name for per-instance channels).
+func (c *Channel) Name() string { return c.name }
 
 // Trusted returns false — external channels cannot run sensitive commands.
 func (c *Channel) Trusted() bool { return false }
@@ -96,9 +112,9 @@ func (c *Channel) Trusted() bool { return false }
 // Start registers the webhook HTTP routes. The HTTP server is managed externally.
 func (c *Channel) Start(_ context.Context) error {
 	if c.mux != nil {
-		c.mux.HandleFunc("POST /api/slack/events", c.handleEvents)
+		c.mux.HandleFunc(c.routePattern, c.handleEvents)
 	}
-	c.logger.Info("starting slack channel", "instance", c.instance)
+	c.logger.Info("starting slack channel", "instance", c.instance, "route", c.routePattern)
 	return nil
 }
 

@@ -59,27 +59,6 @@ type ClusterConfig struct {
 	RevokedNodes  map[string]RevokedNode  `yaml:"revoked_nodes,omitempty"`  // keyed by NodeID — explicitly revoked
 }
 
-// TelegramChannelConfig holds settings for the Telegram messaging channel.
-type TelegramChannelConfig struct {
-	BotToken     string  `yaml:"bot_token"`               // bot token or ${SECRET_NAME} reference
-	Instance     string  `yaml:"instance"`                // agent name or instance ID to bind to
-	AllowedChats []int64 `yaml:"allowed_chats,omitempty"` // optional whitelist of chat IDs
-}
-
-// SlackChannelConfig holds settings for the Slack messaging channel.
-type SlackChannelConfig struct {
-	BotToken        string   `yaml:"bot_token"`                  // bot token or ${SECRET_NAME} reference
-	SigningSecret   string   `yaml:"signing_secret"`             // signing secret or ${SECRET_NAME} reference
-	Instance        string   `yaml:"instance"`                   // agent name or instance ID to bind to
-	AllowedChannels []string `yaml:"allowed_channels,omitempty"` // optional whitelist of channel IDs
-}
-
-// ChannelsConfig holds settings for external messaging channels.
-type ChannelsConfig struct {
-	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
-	Slack    *SlackChannelConfig    `yaml:"slack,omitempty"`
-}
-
 // Config is the on-disk representation of the control plane state.
 type Config struct {
 	Auth         AuthConfig                `yaml:"auth,omitempty"`
@@ -89,7 +68,6 @@ type Config struct {
 	Secrets      map[string]string         `yaml:"secrets,omitempty"`
 	Agents       map[string]AgentPolicy    `yaml:"agents,omitempty"`
 	Cluster      ClusterConfig             `yaml:"cluster,omitempty"`
-	Channels     ChannelsConfig            `yaml:"channels,omitempty"`
 }
 
 // initMaps ensures all map fields are non-nil. ApprovedNodes is intentionally
@@ -204,9 +182,7 @@ func (cp *ControlPlane) hasContent() bool {
 		cp.config.Cluster.Mode != "" ||
 		cp.config.Cluster.TrackerURL != "" ||
 		len(cp.config.Cluster.ApprovedNodes) > 0 ||
-		len(cp.config.Cluster.RevokedNodes) > 0 ||
-		cp.config.Channels.Telegram != nil ||
-		cp.config.Channels.Slack != nil
+		len(cp.config.Cluster.RevokedNodes) > 0
 }
 
 // Reset wipes all in-memory state and removes the config file from disk.
