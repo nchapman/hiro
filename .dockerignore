@@ -7,9 +7,13 @@ web/ui/dist
 # Root-level docs (keep internal/**/*.md for go:embed)
 /*.md
 
-# Agent and skill definitions are mounted at runtime, not baked in
+# Runtime state — seeded by the binary at startup, not baked in
 agents/
+config/
+db/
+instances/
 skills/
+workspace/
 
 # Secrets
 *.pem

@@ -26,13 +26,14 @@ Thumbs.db
 .env.local
 !.env.example
 
-# Workspace (runtime state — defaults are embedded in the binary)
+# Runtime state — the binary seeds these at startup
 /agents/
+/config/
+/db/
+/instances/
 /sessions/
 /skills/
-
-# Control plane config (contains secrets)
-/config/
+/workspace/
 
 # Test
 coverage.out
