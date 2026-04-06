@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -41,6 +42,10 @@ interface InstanceConfig {
   reasoning_effort: string
   allowed_tools: string[]
   disallowed_tools: string[]
+  persona_name: string
+  persona_description: string
+  persona_body: string
+  memory: string
 }
 
 const reasoningOptions = [
@@ -66,6 +71,10 @@ export default function InstanceConfigModal({
   const [reasoningEffort, setReasoningEffort] = useState("")
   const [allowedTools, setAllowedTools] = useState("")
   const [disallowedTools, setDisallowedTools] = useState("")
+  const [personaName, setPersonaName] = useState("")
+  const [personaDesc, setPersonaDesc] = useState("")
+  const [personaBody, setPersonaBody] = useState("")
+  const [memory, setMemory] = useState("")
   const [original, setOriginal] = useState<InstanceConfig | null>(null)
 
   const fetchConfig = useCallback(async () => {
@@ -78,6 +87,10 @@ export default function InstanceConfigModal({
       setReasoningEffort(data.reasoning_effort)
       setAllowedTools(data.allowed_tools.join("\n"))
       setDisallowedTools(data.disallowed_tools.join("\n"))
+      setPersonaName(data.persona_name)
+      setPersonaDesc(data.persona_description)
+      setPersonaBody(data.persona_body)
+      setMemory(data.memory)
       setOriginal(data)
     } catch {
       toast.error("Failed to load instance config")
@@ -96,8 +109,12 @@ export default function InstanceConfigModal({
     if (reasoningEffort !== original.reasoning_effort) return true
     if (allowedTools !== original.allowed_tools.join("\n")) return true
     if (disallowedTools !== original.disallowed_tools.join("\n")) return true
+    if (personaName !== original.persona_name) return true
+    if (personaDesc !== original.persona_description) return true
+    if (personaBody !== original.persona_body) return true
+    if (memory !== original.memory) return true
     return false
-  }, [model, reasoningEffort, allowedTools, disallowedTools, original])
+  }, [model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, original])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -105,12 +122,14 @@ export default function InstanceConfigModal({
       const body: Record<string, unknown> = {}
       if (model !== original?.model) body.model = model
       if (reasoningEffort !== original?.reasoning_effort) body.reasoning_effort = reasoningEffort
-      const newAllowed = allowedTools.split("\n").map((s) => s.trim()).filter(Boolean)
-      const newDisallowed = disallowedTools.split("\n").map((s) => s.trim()).filter(Boolean)
       if (allowedTools !== original?.allowed_tools.join("\n")) {
-        body.allowed_tools = newAllowed
-        body.disallowed_tools = newDisallowed
+        body.allowed_tools = allowedTools.split("\n").map((s) => s.trim()).filter(Boolean)
+        body.disallowed_tools = disallowedTools.split("\n").map((s) => s.trim()).filter(Boolean)
       }
+      if (personaName !== original?.persona_name) body.persona_name = personaName
+      if (personaDesc !== original?.persona_description) body.persona_description = personaDesc
+      if (personaBody !== original?.persona_body) body.persona_body = personaBody
+      if (memory !== original?.memory) body.memory = memory
 
       const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/config`, {
         method: "PUT",
@@ -129,14 +148,14 @@ export default function InstanceConfigModal({
     } finally {
       setSaving(false)
     }
-  }, [instanceId, model, reasoningEffort, allowedTools, disallowedTools, original, onConfigChanged, onOpenChange])
+  }, [instanceId, model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, original, onConfigChanged, onOpenChange])
 
   // Extract current model ID for matching against the model list.
   const [, currentModelId] = parseModelSpec(model)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{instanceName}</DialogTitle>
         </DialogHeader>
@@ -146,60 +165,104 @@ export default function InstanceConfigModal({
             Loading...
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 overflow-y-auto pr-1">
             {isStopped && (
               <p className="text-xs text-muted-foreground">
                 Changes take effect when the instance starts.
               </p>
             )}
 
-            {/* Model */}
-            <div className="flex flex-col gap-1.5">
-              <Label>Model</Label>
-              <ModelPicker
-                models={models}
-                currentModelId={currentModelId}
-                onSelect={(id) => {
-                  const info = models.find((m) => m.id === id)
-                  setModel(info?.provider ? formatModelSpec(info.provider, id) : id)
-                }}
-              />
+            {/* Persona */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Persona</Label>
+              <div className="flex gap-2">
+                <div className="flex flex-1 flex-col gap-1">
+                  <Label className="text-xs">Name</Label>
+                  <Input
+                    value={personaName}
+                    onChange={(e) => setPersonaName(e.target.value)}
+                    placeholder="Display name"
+                  />
+                </div>
+                <div className="flex flex-1 flex-col gap-1">
+                  <Label className="text-xs">Description</Label>
+                  <Input
+                    value={personaDesc}
+                    onChange={(e) => setPersonaDesc(e.target.value)}
+                    placeholder="Short description"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Instructions</Label>
+                <Textarea
+                  className="text-xs min-h-16"
+                  placeholder="Persona instructions for the system prompt..."
+                  value={personaBody}
+                  onChange={(e) => setPersonaBody(e.target.value)}
+                />
+              </div>
             </div>
 
-            {/* Reasoning Effort */}
-            <div className="flex flex-col gap-1.5">
-              <Label>Reasoning effort</Label>
-              <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {reasoningOptions.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Model & Reasoning */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Model</Label>
+              <div className="flex flex-col gap-1.5">
+                <ModelPicker
+                  models={models}
+                  currentModelId={currentModelId}
+                  onSelect={(id) => {
+                    const info = models.find((m) => m.id === id)
+                    setModel(info?.provider ? formatModelSpec(info.provider, id) : id)
+                  }}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Reasoning effort</Label>
+                <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reasoningOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {/* Allowed Tools */}
-            <div className="flex flex-col gap-1.5">
-              <Label>Allowed tools</Label>
+            {/* Tools */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tools</Label>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Allowed</Label>
+                <Textarea
+                  className="font-mono text-xs min-h-20"
+                  placeholder={"Bash\nRead\nWrite\nBash(curl *)"}
+                  value={allowedTools}
+                  onChange={(e) => setAllowedTools(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Disallowed</Label>
+                <Textarea
+                  className="font-mono text-xs min-h-10"
+                  placeholder="Bash(rm *)"
+                  value={disallowedTools}
+                  onChange={(e) => setDisallowedTools(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Memory */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memory</Label>
               <Textarea
-                className="font-mono text-xs min-h-20"
-                placeholder={"Bash\nRead\nWrite\nBash(curl *)"}
-                value={allowedTools}
-                onChange={(e) => setAllowedTools(e.target.value)}
-              />
-            </div>
-
-            {/* Disallowed Tools */}
-            <div className="flex flex-col gap-1.5">
-              <Label>Disallowed tools</Label>
-              <Textarea
-                className="font-mono text-xs min-h-10"
-                placeholder="Bash(rm *)"
-                value={disallowedTools}
-                onChange={(e) => setDisallowedTools(e.target.value)}
+                className="text-xs min-h-16"
+                placeholder="Agent memories..."
+                value={memory}
+                onChange={(e) => setMemory(e.target.value)}
               />
             </div>
           </div>
