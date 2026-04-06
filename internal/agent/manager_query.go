@@ -120,6 +120,17 @@ func (m *Manager) enrichPersonaNames(infos []InstanceInfo) {
 	}
 }
 
+// GetInstanceConfig returns the per-instance config.yaml for an instance.
+func (m *Manager) GetInstanceConfig(instanceID string) (config.InstanceConfig, error) {
+	m.mu.RLock()
+	_, ok := m.instances[instanceID]
+	m.mu.RUnlock()
+	if !ok {
+		return config.InstanceConfig{}, ErrInstanceNotFound
+	}
+	return config.LoadInstanceConfig(m.instanceDir(instanceID))
+}
+
 // GetHistory returns recent messages from the active session of a persistent instance.
 func (m *Manager) GetHistory(ctx context.Context, instanceID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()

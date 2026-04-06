@@ -70,7 +70,7 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		inst.loop.SetReasoningEffort(*reasoningEffort)
 	}
 
-	if len(allowedTools) > 0 {
+	if allowedTools != nil {
 		if err := m.applyToolOverrides(inst, allowedTools, disallowedTools); err != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 	}
 	existing.Model = inst.info.Model
 	existing.ReasoningEffort = inst.loop.ReasoningEffort()
-	if len(allowedTools) > 0 {
+	if allowedTools != nil {
 		existing.AllowedTools = allowedTools
 		existing.DisallowedTools = disallowedTools
 	}
@@ -97,6 +97,53 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 	}
 
 	return nil
+}
+
+// UpdateStoppedInstanceConfig persists config changes for a stopped instance.
+// Changes take effect when the instance is next started.
+func (m *Manager) UpdateStoppedInstanceConfig(instanceID, model string, reasoningEffort *string, allowedTools, disallowedTools []string) error {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return fmt.Errorf("instance %q not found", instanceID)
+	}
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	if inst.info.Status != InstanceStatusStopped {
+		return fmt.Errorf("instance %q: %w", instanceID, ErrInstanceNotStopped)
+	}
+
+	// Validate tool rules before persisting.
+	if len(allowedTools) > 0 {
+		if _, err := toolrules.ParseRules(allowedTools); err != nil {
+			return fmt.Errorf("invalid allowed tool rules: %w", err)
+		}
+	}
+	if len(disallowedTools) > 0 {
+		if _, err := toolrules.ParseRules(disallowedTools); err != nil {
+			return fmt.Errorf("invalid disallowed tool rules: %w", err)
+		}
+	}
+	if reasoningEffort != nil && !validReasoningEffort(*reasoningEffort) {
+		return fmt.Errorf("invalid reasoning effort %q", *reasoningEffort)
+	}
+
+	instDir := m.instanceDir(instanceID)
+	existing, loadErr := config.LoadInstanceConfig(instDir)
+	if loadErr != nil {
+		m.logger.Warn("failed to load instance config for stopped update",
+			"instance", instanceID, "error", loadErr)
+	}
+	if model != "" {
+		existing.Model = model
+	}
+	if reasoningEffort != nil {
+		existing.ReasoningEffort = *reasoningEffort
+	}
+	if allowedTools != nil {
+		existing.AllowedTools = allowedTools
+		existing.DisallowedTools = disallowedTools
+	}
+	return config.SaveInstanceConfig(instDir, existing)
 }
 
 // applyToolOverrides validates, recomputes, and pushes new tool declarations

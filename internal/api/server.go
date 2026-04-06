@@ -169,6 +169,8 @@ func (s *Server) instanceRoutes() {
 	s.mux.HandleFunc("POST /api/instances/{id}/start", s.requireAuth(s.handleStartInstance))
 	s.mux.HandleFunc("POST /api/instances/{id}/clear", s.requireAuth(s.handleClearInstance))
 	s.mux.HandleFunc("DELETE /api/instances/{id}", s.requireAuth(s.handleDeleteInstance))
+	s.mux.HandleFunc("GET /api/instances/{id}/config", s.requireAuth(s.handleGetInstanceConfig))
+	s.mux.HandleFunc("PUT /api/instances/{id}/config", s.requireAuth(s.handlePutInstanceConfig))
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleSessionMessages))
 	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
 	s.mux.HandleFunc("GET /api/provider-types", s.requireAuth(s.handleListProviderTypes))

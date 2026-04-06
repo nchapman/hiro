@@ -7,6 +7,7 @@ import {
   StopIcon,
   PlayIcon,
   Delete01Icon,
+  Settings01Icon,
 } from "@hugeicons/core-free-icons"
 import {
   DropdownMenu,
@@ -37,6 +38,7 @@ import ModelSelector from "@/pages/chat/ModelSelector"
 import TokenCounter from "@/pages/chat/TokenCounter"
 import { AssistantMessage, UserMessage } from "@/pages/chat/ChatMessages"
 import ChatInputArea from "@/pages/chat/ChatInput"
+import InstanceConfigModal from "@/pages/chat/InstanceConfigModal"
 
 // --- Session cache ---
 
@@ -92,6 +94,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     }
   }, [session?.id])
 
+  const [configOpen, setConfigOpen] = useState(false)
   const isStopped = session?.status === "stopped"
   const isRoot = session ? !session.mode || !session.parent_id : false
   const wsSessionId = isStopped ? null : (session?.id ?? null)
@@ -459,6 +462,12 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         </div>
         <div className="flex items-center gap-2">
           {usage && usage.event_count > 0 && <TokenCounter usage={usage} />}
+          <button
+            onClick={() => setConfigOpen(true)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground"
+          >
+            <HugeiconsIcon icon={Settings01Icon} className="h-4 w-4" />
+          </button>
           {!isRoot && (
           <DropdownMenu>
             <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground">
@@ -584,6 +593,16 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           onSend={handleSend}
         />
       )}
+
+      <InstanceConfigModal
+        instanceId={session.id}
+        instanceName={session.name}
+        isStopped={isStopped}
+        open={configOpen}
+        onOpenChange={setConfigOpen}
+        models={models}
+        onConfigChanged={onSessionsChanged}
+      />
     </div>
   )
 }
