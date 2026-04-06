@@ -20,6 +20,8 @@ import (
 
 	"github.com/nchapman/hiro/internal/agent"
 	"github.com/nchapman/hiro/internal/api"
+	"github.com/nchapman/hiro/internal/channel"
+	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
 	"github.com/nchapman/hiro/internal/platform"
@@ -449,6 +451,20 @@ func (a *app) startManager() error {
 			"provider", providerType,
 		)
 		a.srv.SetManager(a.mgr, leaderID)
+
+		// Create channel router and web channel.
+		usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
+		router := channel.NewRouter(a.mgr, a.cp, usage, a.logger)
+		wc := webchannel.New(router, a.mgr, a.logger)
+		router.Register(wc)
+		a.srv.SetRouter(router, wc)
+
+		// Start notification pumps for all persistent instances.
+		// The pump must use the app context (not a WebSocket context) so it
+		// survives individual channel connections disconnecting.
+		router.StartNotificationPump(a.ctx, leaderID)
+		// TODO: start pumps for other persistent instances (child agents with
+		// schedules/triggers). Currently only the operator gets one.
 	}
 
 	return nil

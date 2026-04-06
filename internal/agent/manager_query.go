@@ -37,6 +37,9 @@ var ErrInstanceNotFound = errors.New("instance not found")
 // ErrInstanceNotStopped is returned when an operation requires a stopped instance.
 var ErrInstanceNotStopped = errors.New("instance is not stopped")
 
+// ErrInstanceStopped is returned when an operation requires a running instance.
+var ErrInstanceStopped = errors.New("instance is stopped")
+
 // GetInstance returns info about an instance (running or stopped).
 // Name and Description are resolved from persona.md frontmatter.
 func (m *Manager) GetInstance(instanceID string) (InstanceInfo, bool) {

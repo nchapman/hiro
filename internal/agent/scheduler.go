@@ -383,7 +383,7 @@ func (m *Manager) RunTriggered(ctx context.Context, sub platformdb.Subscription)
 	defer inst.mu.Unlock()
 
 	if inst.info.Status == InstanceStatusStopped {
-		return fmt.Errorf("instance %s is stopped", sub.InstanceID)
+		return fmt.Errorf("instance %s: %w", sub.InstanceID, ErrInstanceStopped)
 	}
 	if inst.loop == nil {
 		return fmt.Errorf("instance %s has no inference loop", sub.InstanceID)

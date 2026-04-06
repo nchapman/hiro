@@ -42,7 +42,7 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 	defer inst.mu.Unlock()
 
 	if inst.info.Status == InstanceStatusStopped {
-		return fmt.Errorf("instance %q is stopped", instanceID)
+		return fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
 	}
 	if inst.loop == nil {
 		return fmt.Errorf("instance %q has no inference loop", instanceID)
@@ -152,7 +152,7 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 
 	// Status check inside lock to avoid race with softStop/watchWorker.
 	if inst.info.Status == InstanceStatusStopped {
-		return "", fmt.Errorf("instance %q is stopped", instanceID)
+		return "", fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
 	}
 
 	// Capture old handle so we can shut it down after the new spawn.

@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/nchapman/hiro/internal/agent"
+	"github.com/nchapman/hiro/internal/channel"
+	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
@@ -35,6 +37,8 @@ type Server struct {
 	cmdHandler      CommandHandler             // control plane command handler (nil = no commands)
 	cp              *controlplane.ControlPlane // control plane (for auth + settings)
 	pdb             *platformdb.DB             // platform database (nil = no usage endpoints)
+	router          *channel.Router            // channel router (nil = not yet wired)
+	webChannel      *webchannel.Channel        // web UI channel (nil = not yet wired)
 	startManager    func() error               // callback to start the instance manager (set by main)
 	startCluster    func() error               // callback to start the cluster gRPC server (set by main)
 	requestRestart  func()                     // callback to request a process restart (set by main)
@@ -68,6 +72,41 @@ func NewServer(logger *slog.Logger, webFS fs.FS, cp *controlplane.ControlPlane, 
 	}
 	s.routes()
 	return s
+}
+
+// SetManager sets the agent manager and leader agent ID for handling chat.
+func (s *Server) SetManager(m *agent.Manager, leaderID string) {
+	s.manager = m
+	s.leaderID = leaderID
+}
+
+// SetStartManager sets the callback to start the agent manager.
+// Used by the setup endpoint to boot the manager after initial config.
+func (s *Server) SetStartManager(fn func() error) {
+	s.startManager = fn
+}
+
+// SetStartCluster sets the callback to start the cluster gRPC server.
+// Used by the setup endpoint when leader mode is selected.
+func (s *Server) SetStartCluster(fn func() error) {
+	s.startCluster = fn
+}
+
+// SetRestartFunc sets the callback to request a process restart.
+// Used by the setup endpoint when worker mode requires a restart.
+func (s *Server) SetRestartFunc(fn func()) {
+	s.requestRestart = fn
+}
+
+// SetWatcher sets the filesystem watcher for pushing live updates.
+func (s *Server) SetWatcher(w *watcher.Watcher) {
+	s.watcher = w
+}
+
+// SetRouter sets the channel router and web channel for handling chat.
+func (s *Server) SetRouter(r *channel.Router, wc *webchannel.Channel) {
+	s.router = r
+	s.webChannel = wc
 }
 
 // hasManager reports whether the agent manager has been initialized.

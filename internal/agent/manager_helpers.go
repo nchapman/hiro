@@ -72,7 +72,7 @@ func (m *Manager) acquireInstance(ctx context.Context, instanceID string) (*inst
 
 	if inst.info.Status == InstanceStatusStopped {
 		inst.mu.Unlock()
-		return nil, ctx, fmt.Errorf("instance %q is stopped", instanceID)
+		return nil, ctx, fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
 	}
 
 	ctx = inference.ContextWithCallChain(ctx, instanceID)
