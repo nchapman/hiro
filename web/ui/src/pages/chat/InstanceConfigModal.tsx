@@ -169,7 +169,7 @@ export default function InstanceConfigModal({
             {/* Reasoning Effort */}
             <div className="flex flex-col gap-1.5">
               <Label>Reasoning effort</Label>
-              <Select value={reasoningEffort} onValueChange={setReasoningEffort}>
+              <Select value={reasoningEffort} onValueChange={(v) => { if (v !== null) setReasoningEffort(v) }}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
