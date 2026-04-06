@@ -42,8 +42,18 @@ func (s *Server) handleGetInstanceConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Use the resolved model from InstanceInfo when the config has no
+	// explicit override — empty model in config means "use the default",
+	// and we want to show what's actually in effect.
+	model := cfg.Model
+	if model == "" {
+		if info, ok := s.manager.GetInstance(id); ok && info.Model != "" {
+			model = info.Model
+		}
+	}
+
 	resp := instanceConfigResponse{
-		Model:           cfg.Model,
+		Model:           model,
 		ReasoningEffort: cfg.ReasoningEffort,
 		AllowedTools:    cfg.AllowedTools,
 		DisallowedTools: cfg.DisallowedTools,
