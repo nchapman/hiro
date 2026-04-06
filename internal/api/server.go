@@ -109,6 +109,9 @@ func (s *Server) SetRouter(r *channel.Router, wc *webchannel.Channel) {
 	s.webChannel = wc
 }
 
+// Mux returns the HTTP mux for registering additional routes (e.g. Slack webhooks).
+func (s *Server) Mux() *http.ServeMux { return s.mux }
+
 // hasManager reports whether the agent manager has been initialized.
 func (s *Server) hasManager() bool { return s.manager != nil }
 

@@ -107,6 +107,59 @@ func TestResolveSecret_PartialSyntax(t *testing.T) {
 	}
 }
 
+func TestSlackConfig_Nil(t *testing.T) {
+	t.Parallel()
+
+	cp := &ControlPlane{config: Config{}}
+	if cfg := cp.SlackConfig(); cfg != nil {
+		t.Errorf("expected nil, got %+v", cfg)
+	}
+}
+
+func TestSlackConfig_Configured(t *testing.T) {
+	t.Parallel()
+
+	cp := &ControlPlane{config: Config{
+		Channels: ChannelsConfig{
+			Slack: &SlackChannelConfig{
+				BotToken:        "${SLACK_TOKEN}",
+				SigningSecret:   "${SLACK_SIGNING}",
+				Instance:        "operator",
+				AllowedChannels: []string{"C123", "C456"},
+			},
+		},
+	}}
+
+	cfg := cp.SlackConfig()
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.BotToken != "${SLACK_TOKEN}" {
+		t.Errorf("bot_token = %q", cfg.BotToken)
+	}
+	if cfg.Instance != "operator" {
+		t.Errorf("instance = %q", cfg.Instance)
+	}
+	if len(cfg.AllowedChannels) != 2 {
+		t.Errorf("allowed_channels = %v", cfg.AllowedChannels)
+	}
+}
+
+func TestHasContent_WithSlackOnly(t *testing.T) {
+	t.Parallel()
+
+	cp := &ControlPlane{config: Config{
+		Channels: ChannelsConfig{
+			Slack: &SlackChannelConfig{BotToken: "tok"},
+		},
+	}}
+	cp.config.initMaps()
+
+	if !cp.hasContent() {
+		t.Error("expected hasContent() = true with Slack config")
+	}
+}
+
 func TestHasContent_WithChannels(t *testing.T) {
 	t.Parallel()
 

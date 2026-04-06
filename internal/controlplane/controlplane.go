@@ -66,9 +66,18 @@ type TelegramChannelConfig struct {
 	AllowedChats []int64 `yaml:"allowed_chats,omitempty"` // optional whitelist of chat IDs
 }
 
+// SlackChannelConfig holds settings for the Slack messaging channel.
+type SlackChannelConfig struct {
+	BotToken        string   `yaml:"bot_token"`                  // bot token or ${SECRET_NAME} reference
+	SigningSecret   string   `yaml:"signing_secret"`             // signing secret or ${SECRET_NAME} reference
+	Instance        string   `yaml:"instance"`                   // agent name or instance ID to bind to
+	AllowedChannels []string `yaml:"allowed_channels,omitempty"` // optional whitelist of channel IDs
+}
+
 // ChannelsConfig holds settings for external messaging channels.
 type ChannelsConfig struct {
 	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
+	Slack    *SlackChannelConfig    `yaml:"slack,omitempty"`
 }
 
 // Config is the on-disk representation of the control plane state.
@@ -196,7 +205,8 @@ func (cp *ControlPlane) hasContent() bool {
 		cp.config.Cluster.TrackerURL != "" ||
 		len(cp.config.Cluster.ApprovedNodes) > 0 ||
 		len(cp.config.Cluster.RevokedNodes) > 0 ||
-		cp.config.Channels.Telegram != nil
+		cp.config.Channels.Telegram != nil ||
+		cp.config.Channels.Slack != nil
 }
 
 // Reset wipes all in-memory state and removes the config file from disk.

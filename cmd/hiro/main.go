@@ -21,6 +21,7 @@ import (
 	"github.com/nchapman/hiro/internal/agent"
 	"github.com/nchapman/hiro/internal/api"
 	"github.com/nchapman/hiro/internal/channel"
+	slackchannel "github.com/nchapman/hiro/internal/channel/slack"
 	telegramchannel "github.com/nchapman/hiro/internal/channel/telegram"
 	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
@@ -113,6 +114,7 @@ type app struct {
 	mgr        *agent.Manager
 	scheduler  *agent.Scheduler
 	telegramCh *telegramchannel.Channel
+	slackCh    *slackchannel.Channel
 
 	// Cluster state — only populated for leader mode.
 	cs             clusterState
@@ -475,6 +477,7 @@ func (a *app) initChannels(leaderID string) {
 	// schedules/triggers). Currently only the operator gets one.
 
 	a.startTelegramChannel(router)
+	a.startSlackChannel(router)
 }
 
 // startTelegramChannel creates and starts the Telegram channel if configured.
@@ -503,6 +506,37 @@ func (a *app) startTelegramChannel(router *channel.Router) {
 	}
 	a.telegramCh = tg
 	a.logger.Info("telegram channel started", "instance", tgCfg.Instance)
+}
+
+// startSlackChannel creates and starts the Slack channel if configured.
+func (a *app) startSlackChannel(router *channel.Router) {
+	slackCfg := a.cp.SlackConfig()
+	if slackCfg == nil {
+		return
+	}
+
+	botToken := a.cp.ResolveSecret(slackCfg.BotToken)
+	signingSecret := a.cp.ResolveSecret(slackCfg.SigningSecret)
+	if botToken == "" || signingSecret == "" {
+		a.logger.Warn("slack channel configured but bot_token or signing_secret is empty or secret not found")
+		return
+	}
+
+	sc := slackchannel.New(slackchannel.Config{
+		BotToken:        botToken,
+		SigningSecret:   signingSecret,
+		Instance:        slackCfg.Instance,
+		AllowedChannels: slackCfg.AllowedChannels,
+		Mux:             a.srv.Mux(),
+	}, router, a.logger)
+	router.Register(sc)
+
+	if err := sc.Start(a.ctx); err != nil {
+		a.logger.Warn("failed to start slack channel", "error", err)
+		return
+	}
+	a.slackCh = sc
+	a.logger.Info("slack channel started", "instance", slackCfg.Instance)
 }
 
 // serve starts the HTTP server and blocks until shutdown signal or restart.
@@ -562,6 +596,9 @@ func (a *app) shutdown() {
 	}
 	if a.telegramCh != nil {
 		_ = a.telegramCh.Stop()
+	}
+	if a.slackCh != nil {
+		_ = a.slackCh.Stop()
 	}
 	if a.srv != nil {
 		a.srv.ShutdownTerminalSessions()
