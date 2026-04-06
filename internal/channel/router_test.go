@@ -10,11 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"path/filepath"
+
 	"charm.land/fantasy"
 
 	"github.com/nchapman/hiro/internal/agent"
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
+	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
 // --- Mocks ---
@@ -790,6 +793,55 @@ func TestUsageQuerier_Nil(t *testing.T) {
 	result := q.BuildUsageInfo(context.Background(), "inst-1")
 	if result != nil {
 		t.Errorf("expected nil for nil querier, got %+v", result)
+	}
+}
+
+func TestUsageQuerier_WithDB(t *testing.T) {
+	t.Parallel()
+
+	pdb, err := platformdb.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pdb.Close()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1", Model: "test-model"}
+	mgr.activeSessions["inst-1"] = "session-1"
+
+	q := &UsageQuerier{PDB: pdb, Manager: mgr}
+	result := q.BuildUsageInfo(context.Background(), "inst-1")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// No usage data in DB yet, but the model and context window should be set.
+	if result.Model != "test-model" {
+		t.Errorf("model = %q, want %q", result.Model, "test-model")
+	}
+	// All token counts should be zero.
+	if result.SessionInputTokens != 0 || result.SessionOutputTokens != 0 {
+		t.Errorf("expected zero session tokens, got in=%d out=%d",
+			result.SessionInputTokens, result.SessionOutputTokens)
+	}
+}
+
+func TestUsageQuerier_NoManager(t *testing.T) {
+	t.Parallel()
+
+	pdb, err := platformdb.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pdb.Close()
+
+	// No manager — should still return a result with zero values.
+	q := &UsageQuerier{PDB: pdb, Manager: nil}
+	result := q.BuildUsageInfo(context.Background(), "inst-1")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Model != "" {
+		t.Errorf("model = %q, want empty", result.Model)
 	}
 }
 

@@ -577,6 +577,43 @@ func TestHandleUpdate_EmptyText(t *testing.T) {
 	}
 }
 
+func TestMakeBufferingOnEvent(t *testing.T) {
+	t.Parallel()
+
+	var buf strings.Builder
+	onEvent := makeBufferingOnEvent(&buf)
+
+	// Delta events.
+	_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "hello "})
+	_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "world"})
+	if buf.String() != "hello world" {
+		t.Errorf("buf = %q", buf.String())
+	}
+
+	// Error after content — includes separator.
+	_ = onEvent(ipc.ChatEvent{Type: "error", Content: "oops"})
+	if !strings.Contains(buf.String(), "\n\nError: oops") {
+		t.Errorf("buf = %q, want separator before error", buf.String())
+	}
+
+	// Error on empty buffer — no separator.
+	var buf2 strings.Builder
+	onEvent2 := makeBufferingOnEvent(&buf2)
+	_ = onEvent2(ipc.ChatEvent{Type: "error", Content: "fail"})
+	if buf2.String() != "Error: fail" {
+		t.Errorf("buf = %q, want no separator", buf2.String())
+	}
+
+	// Ignored event types.
+	var buf3 strings.Builder
+	onEvent3 := makeBufferingOnEvent(&buf3)
+	_ = onEvent3(ipc.ChatEvent{Type: "tool_call", ToolName: "Bash"})
+	_ = onEvent3(ipc.ChatEvent{Type: "reasoning_delta", Content: "thinking"})
+	if buf3.String() != "" {
+		t.Errorf("buf = %q, want empty", buf3.String())
+	}
+}
+
 func TestHandleUpdate_NilMessage(t *testing.T) {
 	t.Parallel()
 
