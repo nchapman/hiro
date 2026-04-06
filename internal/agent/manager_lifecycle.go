@@ -261,8 +261,9 @@ func (m *Manager) Shutdown() {
 	m.logger.Info("instance manager shut down")
 }
 
-// seedInstanceFiles creates persona.md and memory.md in a new instance directory.
-func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displayDesc, personaBody string) error {
+// seedInstanceFiles creates persona.md, memory.md, and config.yaml in a new instance directory.
+// config.yaml is seeded with the agent's tool declarations so the instance owns its own tool config.
+func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displayDesc, personaBody string, allowedTools, disallowedTools []string) error {
 	if mode.IsPersistent() && (displayName != "" || displayDesc != "" || personaBody != "") {
 		if err := config.WritePersonaFile(instDir, displayName, displayDesc, personaBody); err != nil {
 			return fmt.Errorf("creating persona.md: %w", err)
@@ -275,7 +276,10 @@ func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displ
 	if err := os.WriteFile(filepath.Join(instDir, "memory.md"), nil, fsperm.FilePrivate); err != nil {
 		return fmt.Errorf("creating memory.md: %w", err)
 	}
-	if err := config.SaveInstanceConfig(instDir, config.InstanceConfig{}); err != nil {
+	if err := config.SaveInstanceConfig(instDir, config.InstanceConfig{
+		AllowedTools:    allowedTools,
+		DisallowedTools: disallowedTools,
+	}); err != nil {
 		return fmt.Errorf("creating config.yaml: %w", err)
 	}
 	return nil
@@ -415,7 +419,7 @@ func (m *Manager) spawnWorker(ctx context.Context, cfg config.AgentConfig, nodeI
 // prepareInstanceDirs creates instance and session directories, seeding state files
 // for new instances. Returns the instance dir, session dir, and whether the instance
 // dir was newly created.
-func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.AgentMode, displayName, displayDesc, personaBody string) (instDir, sessDir string, dirIsNew bool, err error) {
+func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.AgentMode, displayName, displayDesc, personaBody string, allowedTools, disallowedTools []string) (instDir, sessDir string, dirIsNew bool, err error) {
 	instDir = m.instanceDir(instanceID)
 	_, statErr := os.Stat(instDir)
 	dirIsNew = os.IsNotExist(statErr)
@@ -423,7 +427,7 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 		return "", "", false, fmt.Errorf("creating instance dir: %w", err)
 	}
 	if dirIsNew {
-		if err := seedInstanceFiles(instDir, mode, displayName, displayDesc, personaBody); err != nil {
+		if err := seedInstanceFiles(instDir, mode, displayName, displayDesc, personaBody, allowedTools, disallowedTools); err != nil {
 			return "", "", false, err
 		}
 	}
@@ -435,17 +439,19 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 }
 
 func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) {
-	instDir, sessDir, dirIsNew, err := m.prepareInstanceDirs(instanceID, sessionID, mode, displayName, displayDesc, personaBody)
+	instDir, sessDir, dirIsNew, err := m.prepareInstanceDirs(instanceID, sessionID, mode, displayName, displayDesc, personaBody, cfg.AllowedTools, cfg.DisallowedTools)
 	if err != nil {
 		return "", err
 	}
-	resolvedNodeID := nodeID
-	if resolvedNodeID == "" {
-		resolvedNodeID = ipc.HomeNodeID
+	if nodeID == "" {
+		nodeID = ipc.HomeNodeID
 	}
-	if err := m.registerInstanceInDB(ctx, instanceID, sessionID, cfg, mode, parentID, resolvedNodeID); err != nil {
+	if err := m.registerInstanceInDB(ctx, instanceID, sessionID, cfg, mode, parentID, nodeID); err != nil {
 		return "", err
 	}
+	// Instance config is the source of truth for tool declarations.
+	// Override the agent definition's tools with the instance's config.yaml.
+	applyInstanceToolConfig(instDir, &cfg)
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, parentID)
 	if err != nil {
 		return "", err
@@ -488,7 +494,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		return "", err
 	}
 
-	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, cfg, mode, parentID, resolvedNodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, effectiveTools, allowLayers, denyRules, uid, gid, supplementaryGroups))
+	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, effectiveTools, allowLayers, denyRules, uid, gid, supplementaryGroups))
 	return instanceID, nil
 }
 

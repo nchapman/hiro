@@ -16,6 +16,7 @@ import (
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/provider"
+	"github.com/nchapman/hiro/internal/toolrules"
 	"github.com/nchapman/hiro/internal/watcher"
 )
 
@@ -30,7 +31,7 @@ func validReasoningEffort(effort string) bool {
 
 // UpdateInstanceConfig changes the model and/or reasoning effort for a running instance.
 // Changes take effect on the next Chat() call.
-func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string) error {
+func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string, allowedTools, disallowedTools []string) error {
 	inst := m.getInstance(instanceID)
 	if inst == nil {
 		return fmt.Errorf("instance %q not found", instanceID)
@@ -69,6 +70,12 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		inst.loop.SetReasoningEffort(*reasoningEffort)
 	}
 
+	if len(allowedTools) > 0 {
+		if err := m.applyToolOverrides(inst, allowedTools, disallowedTools); err != nil {
+			return err
+		}
+	}
+
 	// Persist config to filesystem so it survives restarts.
 	// Read-modify-write to preserve existing channel config.
 	// inst.mu serializes model/effort writers but does not protect
@@ -81,10 +88,44 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 	}
 	existing.Model = inst.info.Model
 	existing.ReasoningEffort = inst.loop.ReasoningEffort()
+	if len(allowedTools) > 0 {
+		existing.AllowedTools = allowedTools
+		existing.DisallowedTools = disallowedTools
+	}
 	if err := config.SaveInstanceConfig(instDir, existing); err != nil {
 		m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
 	}
 
+	return nil
+}
+
+// applyToolOverrides validates, recomputes, and pushes new tool declarations
+// to a running instance. Caller must hold inst.mu.
+func (m *Manager) applyToolOverrides(inst *instance, allowedTools, disallowedTools []string) error {
+	if _, err := toolrules.ParseRules(allowedTools); err != nil {
+		return fmt.Errorf("invalid allowed tool rules: %w", err)
+	}
+	if len(disallowedTools) > 0 {
+		if _, err := toolrules.ParseRules(disallowedTools); err != nil {
+			return fmt.Errorf("invalid disallowed tool rules: %w", err)
+		}
+	}
+	agentCfg, err := config.LoadAgentDir(m.agentDefDir(inst.agentName))
+	if err != nil {
+		return fmt.Errorf("loading agent config for tool update: %w", err)
+	}
+	agentCfg.AllowedTools = allowedTools
+	agentCfg.DisallowedTools = disallowedTools
+	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(agentCfg, inst.info.ParentID)
+	if err != nil {
+		return fmt.Errorf("computing effective tools: %w", err)
+	}
+	hasSkills := m.agentHasSkills(agentCfg)
+	allowedToolsMap := buildAllowedToolsMap(effectiveTools, inst.info.Mode, hasSkills)
+	inst.effectiveTools = effectiveTools
+	inst.allowLayers = allowLayers
+	inst.denyRules = denyRules
+	inst.loop.UpdateToolRules(allowedToolsMap, allowLayers, denyRules)
 	return nil
 }
 
@@ -289,8 +330,8 @@ func (m *Manager) resolveSessionConfig(inst *instance) (sessionConfig, error) {
 	}
 
 	hasSkills := m.agentHasSkills(cfg)
-	// Recompute effective tools from current config (agent.md + CP + parent).
-	// This picks up any permission changes since the instance was created.
+	// Instance config is the source of truth for tool declarations.
+	applyInstanceToolConfig(m.instanceDir(inst.info.ID), &cfg)
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, inst.info.ParentID)
 	if err != nil {
 		return sessionConfig{}, fmt.Errorf("computing effective tools: %w", err)
@@ -449,8 +490,11 @@ func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.
 // pushToolsAndModel updates tool rules and model on an instance's inference loop.
 // Caller must hold inst.mu.
 func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string, mode config.AgentMode, pc *configPushContext) {
-	// Recompute effective tools from updated config.
-	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(pc.cfg, parentID)
+	// Instance config is the source of truth for tool declarations.
+	// Agent.md changes to tools don't flow to existing instances.
+	cfg := pc.cfg
+	applyInstanceToolConfig(m.instanceDir(instanceID), &cfg)
+	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, parentID)
 	if err != nil {
 		m.logger.Warn("failed to recompute tools for config push",
 			"agent", pc.cfg.Name, "instance", instanceID, "error", err)

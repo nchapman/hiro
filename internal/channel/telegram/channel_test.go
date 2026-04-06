@@ -113,7 +113,7 @@ func (m *mockManager) SendMetaMessage(context.Context, string, string, func(ipc.
 	return "", nil
 }
 func (m *mockManager) NewSession(string) (string, error) { return "new", nil }
-func (m *mockManager) UpdateInstanceConfig(context.Context, string, string, *string) error {
+func (m *mockManager) UpdateInstanceConfig(context.Context, string, string, *string, []string, []string) error {
 	return nil
 }
 func (m *mockManager) InstanceNotifications(string) *inference.NotificationQueue {

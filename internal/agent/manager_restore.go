@@ -188,7 +188,7 @@ func (m *Manager) restoreInstanceConfig(ctx context.Context, instanceID string) 
 		return
 	}
 	effort := instCfg.ReasoningEffort
-	if err := m.UpdateInstanceConfig(ctx, instanceID, instCfg.Model, &effort); err != nil {
+	if err := m.UpdateInstanceConfig(ctx, instanceID, instCfg.Model, &effort, nil, nil); err != nil {
 		m.logger.Warn("failed to restore instance config",
 			"instance", instanceID, "error", err)
 	}

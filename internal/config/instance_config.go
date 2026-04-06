@@ -17,6 +17,8 @@ const instanceConfigFileName = "config.yaml"
 type InstanceConfig struct {
 	Model           string                  `yaml:"model,omitempty"`
 	ReasoningEffort string                  `yaml:"reasoning_effort,omitempty"`
+	AllowedTools    []string                `yaml:"allowed_tools,omitempty"`
+	DisallowedTools []string                `yaml:"disallowed_tools,omitempty"`
 	Channels        *InstanceChannelsConfig `yaml:"channels,omitempty"`
 }
 

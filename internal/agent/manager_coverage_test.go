@@ -473,7 +473,7 @@ func TestValidReasoningEffort(t *testing.T) {
 
 func TestUpdateInstanceConfig_NotFound(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	err := mgr.UpdateInstanceConfig(t.Context(), "nonexistent", "model", nil)
+	err := mgr.UpdateInstanceConfig(t.Context(), "nonexistent", "model", nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent instance")
 	}
@@ -489,7 +489,7 @@ func TestUpdateInstanceConfig_Stopped(t *testing.T) {
 	}
 	mgr.StopInstance(id)
 
-	err = mgr.UpdateInstanceConfig(t.Context(), id, "model", nil)
+	err = mgr.UpdateInstanceConfig(t.Context(), id, "model", nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for stopped instance")
 	}
@@ -505,7 +505,7 @@ func TestUpdateInstanceConfig_NoLoop(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	err = mgr.UpdateInstanceConfig(t.Context(), id, "", nil)
+	err = mgr.UpdateInstanceConfig(t.Context(), id, "", nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for instance with no loop")
 	}
@@ -522,7 +522,7 @@ func TestUpdateInstanceConfig_NoLoopWithEffort(t *testing.T) {
 	}
 
 	effort := "high"
-	err = mgr.UpdateInstanceConfig(t.Context(), id, "", &effort)
+	err = mgr.UpdateInstanceConfig(t.Context(), id, "", &effort, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for instance with no loop")
 	}
@@ -591,7 +591,7 @@ func TestSeedInstanceFiles_PersistentWithDisplayNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "My Agent", "A helpful agent", ""); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "My Agent", "A helpful agent", "", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -620,7 +620,7 @@ func TestSeedInstanceFiles_PersistentWithPersonaBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "Backend Lead", "Owns API rewrite", "You focus on Go and PostgreSQL."); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "Backend Lead", "Owns API rewrite", "You focus on Go and PostgreSQL.", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -643,7 +643,7 @@ func TestSeedInstanceFiles_EphemeralEmptyPersona(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModeEphemeral, "", "", ""); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModeEphemeral, "", "", "", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -665,7 +665,7 @@ func TestSeedInstanceFiles_PersistentNoDisplayName(t *testing.T) {
 	}
 
 	// Persistent but no display name/desc — should create empty persona.md.
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "", "", ""); err != nil {
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "", "", "", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -675,6 +675,87 @@ func TestSeedInstanceFiles_PersistentNoDisplayName(t *testing.T) {
 	}
 	if len(data) != 0 {
 		t.Errorf("persona.md should be empty when no display name, got %q", string(data))
+	}
+}
+
+func TestSeedInstanceFiles_ToolsSeeded(t *testing.T) {
+	dir := t.TempDir()
+	instDir := filepath.Join(dir, "inst")
+	os.MkdirAll(instDir, 0o755)
+
+	tools := []string{"Bash", "Read", "Write"}
+	denied := []string{"Bash(rm *)"}
+	if err := seedInstanceFiles(instDir, config.ModePersistent, "", "", "", tools, denied); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	instCfg, err := config.LoadInstanceConfig(instDir)
+	if err != nil {
+		t.Fatalf("LoadInstanceConfig: %v", err)
+	}
+	if len(instCfg.AllowedTools) != 3 {
+		t.Errorf("AllowedTools: got %v, want 3 items", instCfg.AllowedTools)
+	}
+	if len(instCfg.DisallowedTools) != 1 || instCfg.DisallowedTools[0] != "Bash(rm *)" {
+		t.Errorf("DisallowedTools: got %v", instCfg.DisallowedTools)
+	}
+}
+
+func TestApplyInstanceToolConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Save instance config with custom tools.
+	config.SaveInstanceConfig(dir, config.InstanceConfig{
+		AllowedTools:    []string{"Read", "Glob"},
+		DisallowedTools: []string{"Read(/etc/*)"},
+	})
+
+	// Agent config has broader tools.
+	cfg := config.AgentConfig{
+		AllowedTools:    []string{"Bash", "Read", "Write", "Glob", "Grep"},
+		DisallowedTools: nil,
+	}
+
+	// Instance config should override.
+	applyInstanceToolConfig(dir, &cfg)
+	if len(cfg.AllowedTools) != 2 || cfg.AllowedTools[0] != "Read" {
+		t.Errorf("AllowedTools not overridden: got %v", cfg.AllowedTools)
+	}
+	if len(cfg.DisallowedTools) != 1 || cfg.DisallowedTools[0] != "Read(/etc/*)" {
+		t.Errorf("DisallowedTools not overridden: got %v", cfg.DisallowedTools)
+	}
+}
+
+func TestApplyInstanceToolConfig_NoInstanceTools(t *testing.T) {
+	dir := t.TempDir()
+
+	// Save instance config without tools (e.g. pre-existing instance).
+	config.SaveInstanceConfig(dir, config.InstanceConfig{Model: "test"})
+
+	cfg := config.AgentConfig{
+		AllowedTools: []string{"Bash", "Read"},
+	}
+	original := make([]string, len(cfg.AllowedTools))
+	copy(original, cfg.AllowedTools)
+
+	// Should not override — fall back to agent.md.
+	applyInstanceToolConfig(dir, &cfg)
+	if len(cfg.AllowedTools) != len(original) {
+		t.Errorf("AllowedTools should not change: got %v", cfg.AllowedTools)
+	}
+}
+
+func TestApplyInstanceToolConfig_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := config.AgentConfig{
+		AllowedTools: []string{"Bash", "Read"},
+	}
+
+	// No config.yaml — should not override.
+	applyInstanceToolConfig(dir, &cfg)
+	if len(cfg.AllowedTools) != 2 {
+		t.Errorf("AllowedTools should not change: got %v", cfg.AllowedTools)
 	}
 }
 
@@ -1162,7 +1243,7 @@ func TestSetInstanceStatus_WithPDB(t *testing.T) {
 
 func TestPrepareInstanceDirs_NewInstance(t *testing.T) {
 	mgr, dir := setupTestManager(t)
-	instDir, sessDir, dirIsNew, err := mgr.prepareInstanceDirs("new-inst-id", "new-sess-id", config.ModePersistent, "", "", "")
+	instDir, sessDir, dirIsNew, err := mgr.prepareInstanceDirs("new-inst-id", "new-sess-id", config.ModePersistent, "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1194,7 +1275,7 @@ func TestPrepareInstanceDirs_ExistingInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, dirIsNew, err := mgr.prepareInstanceDirs("existing-inst", "new-sess", config.ModePersistent, "", "", "")
+	_, _, dirIsNew, err := mgr.prepareInstanceDirs("existing-inst", "new-sess", config.ModePersistent, "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

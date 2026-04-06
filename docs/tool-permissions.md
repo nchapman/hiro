@@ -1,6 +1,6 @@
 # Tool Permissions
 
-Hiro controls which tools agents can use through a layered permission system. Permissions are defined at four levels: agent definition, operator config, parent agent, and skill activation. They are enforced in two phases: at registration time (which tools the agent sees) and at call time (whether a specific invocation is allowed).
+Hiro controls which tools agents can use through a layered permission system. Permissions are defined at four levels: instance config (seeded from agent definition), operator config, parent agent, and skill activation. They are enforced in two phases: at registration time (which tools the agent sees) and at call time (whether a specific invocation is allowed).
 
 ## Quick Reference
 
@@ -65,11 +65,20 @@ Rules apply to the 10 tools registered in the rule checker: Bash, Read, Write, E
 
 Permissions come from four sources, evaluated in order:
 
-### 1. Agent Definition (`agent.md`)
+### 1. Instance Config (`instances/<uuid>/config.yaml`)
 
-The agent author declares what tools the agent needs:
+Each instance owns its tool declarations. These are **seeded from `agent.md`** at creation time and decoupled thereafter — changes to `agent.md` `allowed_tools` do not flow to existing instances.
 
 ```yaml
+# instances/<uuid>/config.yaml
+allowed_tools: [Bash(curl *), Read, Grep, WebFetch]
+disallowed_tools: [Bash(rm *)]
+```
+
+The agent definition (`agent.md`) provides the initial template:
+
+```yaml
+# agents/researcher/agent.md
 ---
 name: researcher
 allowed_tools: [Bash(curl *), Read, Grep, WebFetch]
@@ -77,10 +86,10 @@ disallowed_tools: [Bash(rm *)]
 ---
 ```
 
-- `allowed_tools` — tools the agent can use. **Closed by default**: omitting this field means the agent gets no remote tools.
+- `allowed_tools` — tools the instance can use. **Closed by default**: omitting this field means the agent gets no remote tools.
 - `disallowed_tools` — tools explicitly blocked, even if allowed above.
 
-An agent with no `allowed_tools` field can still use structural tools (SpawnInstance, memory, etc.) based on its mode.
+An instance with no `allowed_tools` field can still use structural tools (SpawnInstance, memory, etc.) based on its mode.
 
 ### 2. Operator Config (`config.yaml`)
 

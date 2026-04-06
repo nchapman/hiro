@@ -133,7 +133,7 @@ type ManagerInterface interface {
 	SendMessageWithFiles(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error)
 	SendMetaMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
 	NewSession(instanceID string) (string, error)
-	UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string) error
+	UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string, allowedTools, disallowedTools []string) error
 	InstanceNotifications(instanceID string) *inference.NotificationQueue
 	ActiveSessionID(instanceID string) string
 	GetInstance(instanceID string) (agent.InstanceInfo, bool)

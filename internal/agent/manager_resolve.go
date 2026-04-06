@@ -24,6 +24,20 @@ var persistentTools = []string{
 //  2. The control plane override (if any)
 //  3. The parent's effective tools (if any)
 //
+// applyInstanceToolConfig overrides the agent config's tool declarations with
+// the instance's config.yaml values. Instance config is the source of truth
+// for tool declarations — tools are seeded from agent.md at creation and owned
+// by the instance thereafter. Falls back to agent.md if no instance tools exist
+// (backward compat for pre-existing instances).
+func applyInstanceToolConfig(instDir string, cfg *config.AgentConfig) {
+	instCfg, err := config.LoadInstanceConfig(instDir)
+	if err != nil || len(instCfg.AllowedTools) == 0 {
+		return // no instance config or no tools declared — use agent.md defaults
+	}
+	cfg.AllowedTools = instCfg.AllowedTools
+	cfg.DisallowedTools = instCfg.DisallowedTools
+}
+
 // Allow layers enforce per-source parameter restrictions at call time.
 // A tool call must be allowed by ALL layers (within a layer, rules are OR'd;
 // across layers, they are AND'd). Deny rules are merged from all sources;

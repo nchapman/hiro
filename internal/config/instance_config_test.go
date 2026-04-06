@@ -134,6 +134,30 @@ func TestSaveInstanceConfig_Overwrites(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadInstanceConfig_WithTools(t *testing.T) {
+	dir := t.TempDir()
+	want := InstanceConfig{
+		AllowedTools:    []string{"Bash", "Read", "Write", "Glob"},
+		DisallowedTools: []string{"Bash(rm *)"},
+	}
+	if err := SaveInstanceConfig(dir, want); err != nil {
+		t.Fatalf("SaveInstanceConfig: %v", err)
+	}
+	got, err := LoadInstanceConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadInstanceConfig: %v", err)
+	}
+	if len(got.AllowedTools) != 4 {
+		t.Errorf("AllowedTools: got %v, want 4 items", got.AllowedTools)
+	}
+	if got.AllowedTools[0] != "Bash" {
+		t.Errorf("AllowedTools[0]: got %q, want %q", got.AllowedTools[0], "Bash")
+	}
+	if len(got.DisallowedTools) != 1 || got.DisallowedTools[0] != "Bash(rm *)" {
+		t.Errorf("DisallowedTools: got %v", got.DisallowedTools)
+	}
+}
+
 func TestIsInstanceConfigFile(t *testing.T) {
 	instDir := "/instances/abc123"
 	if !IsInstanceConfigFile("/instances/abc123/config.yaml", instDir) {

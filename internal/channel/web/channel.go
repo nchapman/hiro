@@ -57,6 +57,8 @@ type ChatMessage struct {
 	Usage           *channel.UsageInfo `json:"usage,omitempty"`
 	Model           string             `json:"model,omitempty"`
 	ReasoningEffort *string            `json:"reasoning_effort,omitempty"`
+	AllowedTools    []string           `json:"allowed_tools,omitempty"`
+	DisallowedTools []string           `json:"disallowed_tools,omitempty"`
 	Attachments     []ChatAttachment   `json:"attachments,omitempty"`
 }
 
@@ -261,7 +263,7 @@ func (c *Channel) handleUserMessage(ctx context.Context, conn *websocket.Conn, i
 // handleConfigMessage processes a config change (model switch, reasoning toggle).
 // This is web-specific and does not go through the Router.
 func (c *Channel) handleConfigMessage(ctx context.Context, conn *websocket.Conn, instanceID string, msg ChatMessage) error {
-	if err := c.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort); err != nil {
+	if err := c.manager.UpdateInstanceConfig(ctx, instanceID, msg.Model, msg.ReasoningEffort, msg.AllowedTools, msg.DisallowedTools); err != nil {
 		c.logger.Warn("config update failed", "instance_id", instanceID, "error", err)
 		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: err.Error()})
 	} else {

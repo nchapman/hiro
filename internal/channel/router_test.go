@@ -72,7 +72,7 @@ func (m *mockManager) NewSession(instanceID string) (string, error) {
 	return "new-session-id", nil
 }
 
-func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, re *string) error {
+func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, re *string, _, _ []string) error {
 	if m.updateConfigFn != nil {
 		return m.updateConfigFn(ctx, instanceID, model, re)
 	}

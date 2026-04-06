@@ -344,6 +344,8 @@ Per-instance operational configuration lives in `instances/<uuid>/config.yaml`. 
 ```yaml
 model: anthropic/claude-sonnet-4           # optional model override
 reasoning_effort: high                              # optional
+allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch]
+disallowed_tools: [Bash(rm *)]
 channels:
   telegram:
     bot_token: ${TELEGRAM_BOT}                      # secret reference
@@ -354,13 +356,16 @@ channels:
     allowed_channels: ["C123"]
 ```
 
+**Tool declarations** are seeded from `agent.md` at instance creation and owned by the instance thereafter. Changes to `agent.md` `allowed_tools` do not flow to existing instances — each instance's `config.yaml` is the source of truth. The operator policy layer (`config/config.yaml agents[name]`) still constrains on top as a security boundary.
+
 **What lives where:**
 
 | Config | Location | Why |
 |--------|----------|-----|
 | Model override, reasoning effort | `instances/<uuid>/config.yaml` | Per-instance operational config |
+| Tool declarations | `instances/<uuid>/config.yaml` | Seeded from agent.md, instance-owned thereafter |
 | Channel bindings (Telegram/Slack) | `instances/<uuid>/config.yaml` | Per-instance, multiple agents can have channels |
-| Tool policy (`agents[name]`) | `config/config.yaml` | Operator security policy, keyed by agent name |
+| Tool policy (`agents[name]`) | `config/config.yaml` | Operator security constraint, keyed by agent name |
 | Secrets | `config/config.yaml` | Operator-level, referenced by `${NAME}` |
 | Persona, memory | `instances/<uuid>/persona.md`, `memory.md` | Agent-editable identity (chowned to agent UID) |
 

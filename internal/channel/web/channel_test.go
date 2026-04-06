@@ -58,7 +58,7 @@ func (m *mockManager) SendMetaMessage(context.Context, string, string, func(ipc.
 
 func (m *mockManager) NewSession(string) (string, error) { return "new", nil }
 
-func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, re *string) error {
+func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, re *string, _, _ []string) error {
 	if m.updateConfigFn != nil {
 		return m.updateConfigFn(ctx, instanceID, model, re)
 	}
