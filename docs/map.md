@@ -36,7 +36,7 @@ The core of instance lifecycle management. Split into focused files (was 1,742 L
 |------|-----|------|
 | `manager.go` | 164 | Core types (Manager, instance, InstanceInfo, WorkerHandle), constructor, registry primitives |
 | `manager_lifecycle.go` | 611 | CreateInstance, SpawnEphemeral, StopInstance, DeleteInstance, startInstance, Shutdown |
-| `manager_session.go` | 511 | StartInstance (restart), NewSession, UpdateInstanceConfig, config push/watch |
+| `manager_session.go` | 511 | StartInstance (restart), NewSession, UpdateInstanceConfig (model/reasoning to filesystem), agent definition config push/watch |
 | `manager_query.go` | 278 | GetInstance, ListInstances, GetHistory, InstanceByAgentName, IsDescendant |
 | `manager_worker.go` | 249 | shutdownHandle, cleanupWorker, softStop, watchWorker, removeInstance |
 | `manager_resolve.go` | 327 | computeEffectiveTools, buildAllowedToolsMap, tool rules, resolveProvider/Model/Credentials |
@@ -493,7 +493,7 @@ Files over 500 LOC or with high cyclomatic complexity deserve the most attention
 | `cmd/hiro/main.go` | 584 | CLI parsing, bootstrap, HTTP server setup |
 | `api/files.go` | 555 | File CRUD — path traversal security surface |
 | `api/server.go` | 528 | Router setup, middleware stack |
-| `agent/manager_session.go` | 511 | Session management, config push |
+| `agent/manager_session.go` | 511 | Session management, model/reasoning config, agent definition push |
 | `cmd/hiro/worker_node.go` | 496 | Worker node connection lifecycle |
 | `api/chat.go` | 479 | WebSocket chat handler |
 | `cluster/leader_service.go` | 446 | gRPC service with stream management |

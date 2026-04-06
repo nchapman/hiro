@@ -128,6 +128,7 @@ Agent Worker Process (hiro agent)
 agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inference Loop + spawns worker
                                                                        ↓
                                                               instances/<uuid>/
+                                                                config.yaml (root-owned, 0600)
                                                                 persona.md
                                                                 memory.md
                                                                 sessions/<session-id>/
@@ -138,7 +139,7 @@ agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inferen
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
-- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Persistent instances survive restarts via `RestoreInstances()`.
+- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `config.yaml` (control-plane-managed, root-owned), `persona.md`, and `memory.md`. Persistent instances survive restarts via `RestoreInstances()`.
 - **Sessions** are task-scoped work within an instance. An instance has a single active session at a time. Session-level state includes `todos.yaml` (created on first TodoWrite call), `scratch/`, and `tmp/`. A new session is created on `/clear`, replacing the previous one.
 - **Agent mode** (ephemeral, persistent) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
@@ -335,6 +336,39 @@ agents:
 | `/tools deny <agent> <tools>` | Set deny rules |
 | `/tools rm <agent>` | Clear override |
 | `/tools list [agent]` | Show overrides |
+
+## Instance Config
+
+Per-instance operational configuration lives in `instances/<uuid>/config.yaml`. This file is **root-owned with `0600` permissions** — agent worker processes cannot read or modify it. Only the control plane reads and writes this file.
+
+```yaml
+model: anthropic/claude-sonnet-4           # optional model override
+reasoning_effort: high                              # optional
+channels:
+  telegram:
+    bot_token: ${TELEGRAM_BOT}                      # secret reference
+    allowed_chats: [12345]
+  slack:
+    bot_token: ${SLACK_BOT}
+    signing_secret: ${SLACK_SIGN}
+    allowed_channels: ["C123"]
+```
+
+**What lives where:**
+
+| Config | Location | Why |
+|--------|----------|-----|
+| Model override, reasoning effort | `instances/<uuid>/config.yaml` | Per-instance operational config |
+| Channel bindings (Telegram/Slack) | `instances/<uuid>/config.yaml` | Per-instance, multiple agents can have channels |
+| Tool policy (`agents[name]`) | `config/config.yaml` | Operator security policy, keyed by agent name |
+| Secrets | `config/config.yaml` | Operator-level, referenced by `${NAME}` |
+| Persona, memory | `instances/<uuid>/persona.md`, `memory.md` | Agent-editable identity (chowned to agent UID) |
+
+**Filesystem protection:** During `acquireUIDAndChown`, `config.yaml` is skipped — it stays root-owned while the rest of the instance directory is transferred to the agent UID. This uses the same protection model as `config/config.yaml`.
+
+**Channel lifecycle:** Per-instance channels are managed via `InstanceLifecycleHook` (`cmd/hiro/channels.go`). When an instance starts, its `config.yaml` is read and any configured channels are created. When it stops, channels are destroyed. Each instance gets unique channel names (`telegram:<instanceID>`, `slack:<instanceID>`) and Slack webhook routes (`POST /api/instances/{id}/slack/events`).
+
+**Implementation:** `internal/config/instance_config.go` provides `LoadInstanceConfig`/`SaveInstanceConfig`. The web channel's config message handler calls `Manager.UpdateInstanceConfig` which does a read-modify-write to preserve channel config while updating model/reasoning fields.
 
 ## Creating Agents at Runtime
 
