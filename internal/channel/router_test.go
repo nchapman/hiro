@@ -672,6 +672,24 @@ func TestNotificationPump_Idempotent(t *testing.T) {
 	r.StopNotificationPump("inst-1")
 }
 
+func TestEnsureNotificationPump(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	q := inference.NewNotificationQueue(slog.Default())
+	mgr.notifications["inst-1"] = q
+
+	r := testRouter(t, mgr)
+
+	// EnsureNotificationPump uses the router's context.
+	r.EnsureNotificationPump("inst-1")
+	// Idempotent.
+	r.EnsureNotificationPump("inst-1")
+
+	r.StopNotificationPump("inst-1")
+}
+
 func TestFanOut_ChannelClosedUnbinds(t *testing.T) {
 	t.Parallel()
 
