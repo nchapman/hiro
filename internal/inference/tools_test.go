@@ -407,6 +407,36 @@ func TestProxyTool_UnmatchedTool_PassesThrough(t *testing.T) {
 	}
 }
 
+// --- ProviderOptions getter/setter ---
+
+func TestProxyTool_ProviderOptions(t *testing.T) {
+	pt := &proxyTool{
+		info:     fantasy.ToolInfo{Name: "Read"},
+		executor: &fakeExecutor{},
+		logger:   testLogger,
+	}
+
+	// Default is nil.
+	opts := pt.ProviderOptions()
+	if opts != nil {
+		t.Error("expected nil ProviderOptions by default")
+	}
+
+	// Set and retrieve.
+	newOpts := make(fantasy.ProviderOptions)
+	pt.SetProviderOptions(newOpts)
+	opts = pt.ProviderOptions()
+	if opts == nil {
+		t.Fatal("expected non-nil ProviderOptions after set")
+	}
+
+	// Set back to nil.
+	pt.SetProviderOptions(nil)
+	if pt.ProviderOptions() != nil {
+		t.Error("expected nil after resetting to nil")
+	}
+}
+
 // --- Skill tool expansion tests ---
 
 // newTestLoop creates a minimal Loop for testing expandToolsForSkill and UpdateToolRules.

@@ -130,6 +130,37 @@ func TestModelsForProvider_HasReasoningLevels(t *testing.T) {
 	t.Error("expected at least one model with reasoning levels")
 }
 
+func TestModelsForProviders_Multiple(t *testing.T) {
+	models := ModelsForProviders([]string{"anthropic", "openrouter"})
+	anthropic := ModelsForProvider("anthropic")
+	openrouter := ModelsForProvider("openrouter")
+
+	if len(models) != len(anthropic)+len(openrouter) {
+		t.Errorf("expected %d models, got %d", len(anthropic)+len(openrouter), len(models))
+	}
+}
+
+func TestModelsForProviders_Empty(t *testing.T) {
+	models := ModelsForProviders(nil)
+	if len(models) != 0 {
+		t.Errorf("expected 0 models for nil providers, got %d", len(models))
+	}
+
+	models = ModelsForProviders([]string{})
+	if len(models) != 0 {
+		t.Errorf("expected 0 models for empty providers, got %d", len(models))
+	}
+}
+
+func TestModelsForProviders_UnknownProvider(t *testing.T) {
+	models := ModelsForProviders([]string{"anthropic", "totally-fake"})
+	anthropic := ModelsForProvider("anthropic")
+
+	if len(models) != len(anthropic) {
+		t.Errorf("expected %d models (fake provider contributes 0), got %d", len(anthropic), len(models))
+	}
+}
+
 func TestRegistryPopulated(t *testing.T) {
 	ensureInit()
 	if len(registry) < 10 {

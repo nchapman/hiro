@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nchapman/hiro/internal/models"
 )
@@ -1124,5 +1125,241 @@ func TestParseToolList_SpaceSeparatedArgs(t *testing.T) {
 	result := parseToolList([]string{"Bash(curl", "*)"})
 	if len(result) != 1 || result[0] != "Bash(curl *)" {
 		t.Errorf("expected [Bash(curl *)], got %v", result)
+	}
+}
+
+// --- Reset ---
+
+func TestReset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cp, _ := Load(path, testLogger())
+	cp.SetSecret("API_KEY", "secret-value")
+	if err := cp.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// File should exist after save.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("expected config file to exist after Save")
+	}
+
+	if err := cp.Reset(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Secrets should be empty.
+	if len(cp.SecretNames()) != 0 {
+		t.Errorf("expected no secrets after Reset, got %v", cp.SecretNames())
+	}
+
+	// Config file should be removed.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("expected config file to be removed after Reset")
+	}
+}
+
+func TestReset_MissingFile(t *testing.T) {
+	// Reset should succeed even when the config file doesn't exist.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cp, _ := Load(path, testLogger())
+
+	if err := cp.Reset(); err != nil {
+		t.Fatalf("Reset should not error on missing file: %v", err)
+	}
+}
+
+func TestReset_ClearsSigner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cp, _ := Load(path, testLogger())
+	cp.SetPasswordHash("some-hash")
+
+	// Force signer creation by calling TokenSigner.
+	_, _ = cp.TokenSigner()
+
+	if err := cp.Reset(); err != nil {
+		t.Fatal(err)
+	}
+
+	// After reset, password hash should be gone.
+	cp.mu.RLock()
+	hash := cp.config.Auth.PasswordHash
+	signer := cp.signer
+	cp.mu.RUnlock()
+	if hash != "" {
+		t.Error("expected empty password hash after reset")
+	}
+	if signer != nil {
+		t.Error("expected nil signer after reset")
+	}
+}
+
+// --- Timezone ---
+
+func TestTimezone_Default(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cp, _ := Load(path, testLogger())
+
+	loc := cp.Timezone()
+	if loc != time.UTC {
+		t.Errorf("expected UTC, got %v", loc)
+	}
+}
+
+func TestTimezone_Valid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := `timezone: "America/New_York"`
+	os.WriteFile(path, []byte(data), 0o600)
+
+	cp, _ := Load(path, testLogger())
+	loc := cp.Timezone()
+	if loc.String() != "America/New_York" {
+		t.Errorf("expected America/New_York, got %v", loc)
+	}
+}
+
+func TestTimezone_Invalid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := `timezone: "Not/A/Real/Zone"`
+	os.WriteFile(path, []byte(data), 0o600)
+
+	cp, _ := Load(path, testLogger())
+	loc := cp.Timezone()
+	if loc != time.UTC {
+		t.Errorf("expected UTC fallback for invalid timezone, got %v", loc)
+	}
+}
+
+// --- handleHelp ---
+
+func TestCommandHelp(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	result, err := cp.HandleCommand("/help")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, cmd := range []string{"/help", "/clear", "/secrets", "/tools", "/cluster"} {
+		if !strings.Contains(result, cmd) {
+			t.Errorf("help text should mention %q", cmd)
+		}
+	}
+}
+
+// --- NodeApprovalCheck ---
+
+func TestNodeApprovalCheck_Pending(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	status := cp.NodeApprovalCheck("unknown-node")
+	if status != NodeStatusPending {
+		t.Errorf("expected Pending, got %d", status)
+	}
+}
+
+func TestNodeApprovalCheck_Approved(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.ApproveNode("node-1", "Worker 1")
+
+	status := cp.NodeApprovalCheck("node-1")
+	if status != NodeStatusApproved {
+		t.Errorf("expected Approved, got %d", status)
+	}
+}
+
+func TestNodeApprovalCheck_Revoked(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.ApproveNode("node-1", "Worker 1")
+	cp.RevokeNode("node-1")
+
+	status := cp.NodeApprovalCheck("node-1")
+	if status != NodeStatusRevoked {
+		t.Errorf("expected Revoked, got %d", status)
+	}
+}
+
+func TestNodeApprovalCheck_RevokedTakesPrecedence(t *testing.T) {
+	// If a node is in both maps (shouldn't happen normally), revoked wins.
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.ApproveNode("node-1", "Worker 1")
+
+	// Manually add to revoked without removing from approved.
+	cp.mu.Lock()
+	if cp.config.Cluster.RevokedNodes == nil {
+		cp.config.Cluster.RevokedNodes = make(map[string]RevokedNode)
+	}
+	cp.config.Cluster.RevokedNodes["node-1"] = RevokedNode{Name: "Worker 1"}
+	cp.mu.Unlock()
+
+	status := cp.NodeApprovalCheck("node-1")
+	if status != NodeStatusRevoked {
+		t.Errorf("expected Revoked to take precedence, got %d", status)
+	}
+}
+
+// --- ClearAllClusterNodes ---
+
+func TestClearAllClusterNodes(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.ApproveNode("node-1", "Worker 1")
+	cp.ApproveNode("node-2", "Worker 2")
+	cp.RevokeNode("node-1")
+
+	cp.ClearAllClusterNodes()
+
+	if nodes := cp.ApprovedNodes(); nodes != nil {
+		t.Errorf("expected nil approved nodes, got %v", nodes)
+	}
+	if cp.IsNodeRevoked("node-1") {
+		t.Error("expected no revoked nodes after clear")
+	}
+}
+
+// --- Cluster setters ---
+
+func TestSetClusterTrackerURL(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetClusterTrackerURL("https://tracker.example.com")
+	if got := cp.ClusterTrackerURL(); got != "https://tracker.example.com" {
+		t.Errorf("expected tracker URL, got %q", got)
+	}
+}
+
+func TestSetClusterLeaderAddr(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetClusterLeaderAddr("10.0.0.1:9090")
+	if got := cp.ClusterLeaderAddr(); got != "10.0.0.1:9090" {
+		t.Errorf("expected leader addr, got %q", got)
+	}
+}
+
+func TestSetClusterNodeName(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+
+	cp.SetClusterNodeName("my-worker")
+	if got := cp.ClusterNodeName(); got != "my-worker" {
+		t.Errorf("expected node name, got %q", got)
+	}
+}
+
+func TestClusterTrackerURL_ConfigVsEnvPrecedence(t *testing.T) {
+	cp, _ := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	cp.SetClusterTrackerURL("https://config-value.com")
+
+	// Without env var, config value is used.
+	if got := cp.ClusterTrackerURL(); got != "https://config-value.com" {
+		t.Errorf("expected config value, got %q", got)
+	}
+
+	// Env var takes precedence.
+	t.Setenv("HIRO_TRACKER_URL", "https://env-value.com")
+	if got := cp.ClusterTrackerURL(); got != "https://env-value.com" {
+		t.Errorf("expected env var to take precedence, got %q", got)
 	}
 }
