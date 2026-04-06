@@ -105,5 +105,5 @@ func WritePersonaFile(instanceDir, name, description, body string) error {
 	}
 	sb.WriteString(body)
 
-	return atomicWrite(path, []byte(sb.String()), fsperm.FilePrivate)
+	return atomicWrite(path, []byte(sb.String()))
 }

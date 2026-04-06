@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,7 +69,7 @@ func SaveInstanceConfig(instDir string, cfg InstanceConfig) error {
 	if err != nil {
 		return fmt.Errorf("marshaling instance config: %w", err)
 	}
-	return atomicWrite(path, data, fsperm.FilePrivate)
+	return atomicWrite(path, data)
 }
 
 // IsInstanceConfigFile reports whether the given path (relative to an

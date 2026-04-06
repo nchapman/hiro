@@ -24,17 +24,18 @@ func WriteMemoryFile(instanceDir, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), fsperm.DirPrivate); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
-	return atomicWrite(path, []byte(content), fsperm.FilePrivate)
+	return atomicWrite(path, []byte(content))
 }
 
 // atomicWrite writes content to path via a temp file + rename.
-func atomicWrite(path string, content []byte, mode os.FileMode) error {
+// Files are always created with fsperm.FilePrivate (0600).
+func atomicWrite(path string, content []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".hiro-tmp-*")
 	if err != nil {
 		return err
 	}
 	tmp := f.Name()
-	if err := f.Chmod(mode); err != nil {
+	if err := f.Chmod(fsperm.FilePrivate); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err
