@@ -82,15 +82,13 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 
 ### 5. Tool Capability System
 
-Agent capabilities are controlled by a closed-by-default tool whitelist. An agent can only use a tool if all three layers permit it:
+Agent capabilities are controlled by a closed-by-default tool whitelist. An agent can only use a tool if both layers permit it:
 
 ```
-Effective tools = declared tools ∩ control plane policy ∩ parent's effective tools
+Effective tools = instance declared tools ∩ parent's effective tools
 ```
 
-**Declared tools:** Each agent declares the tools it needs in `agent.md` frontmatter (`tools: [Bash, Read, ...]`). If no tools are declared, the agent gets no built-in tools.
-
-**Control plane policy:** Operators can further restrict an agent's tools via `config.yaml` or the `/tools` slash command. These overrides can only remove tools, never add ones the agent didn't declare.
+**Instance tool declarations:** Each instance owns its tool declarations in `config.yaml` (root-owned, `0600`). Tools are seeded from the agent definition (`agent.md`) at creation time and can be modified by the operator via the control plane. If no tools are declared, the agent gets no built-in tools.
 
 **Parent inheritance:** A child agent's effective tools are intersected with its parent's effective tools. A child can never have more capabilities than its parent.
 

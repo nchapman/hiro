@@ -16,14 +16,6 @@ var persistentTools = []string{
 	"TodoWrite", "HistorySearch", "HistoryRecall",
 }
 
-// computeEffectiveTools returns the set of tool names this instance can use,
-// plus the parsed allow/deny rules for call-time enforcement.
-//
-// Tool name set is computed as the intersection of:
-//  1. The agent's declared tools (from agent.md frontmatter)
-//  2. The control plane override (if any)
-//  3. The parent's effective tools (if any)
-//
 // applyInstanceToolConfig overrides the agent config's tool declarations with
 // the instance's config.yaml values. Instance config is the source of truth
 // for tool declarations — tools are seeded from agent.md at creation and owned
@@ -38,6 +30,13 @@ func applyInstanceToolConfig(instDir string, cfg *config.AgentConfig) {
 	cfg.DisallowedTools = instCfg.DisallowedTools
 }
 
+// computeEffectiveTools returns the set of tool names this instance can use,
+// plus the parsed allow/deny rules for call-time enforcement.
+//
+// Tool name set is computed as the intersection of:
+//  1. The instance's declared tools (from config.yaml, seeded from agent.md at creation)
+//  2. The parent's effective tools (if any)
+//
 // Allow layers enforce per-source parameter restrictions at call time.
 // A tool call must be allowed by ALL layers (within a layer, rules are OR'd;
 // across layers, they are AND'd). Deny rules are merged from all sources;

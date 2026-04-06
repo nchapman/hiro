@@ -1,7 +1,7 @@
 // Package controlplane manages operator-level configuration that agents
-// cannot access or modify. It holds secrets, per-agent tool policies,
-// authentication, and LLM provider settings. It reads from config.yaml
-// at startup and writes state back on shutdown.
+// cannot access or modify. It holds secrets, authentication, cluster
+// settings, and LLM provider settings. It reads from config.yaml at
+// startup and writes state back on shutdown.
 package controlplane
 
 import (

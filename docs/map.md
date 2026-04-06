@@ -288,16 +288,15 @@ Wire protocol for leader ↔ worker WebSocket communication.
 
 ## 10. Control Plane (`internal/controlplane/`)
 
-Operator-level config management — auth, providers, secrets, tool policies, clustering. Split into focused files (was 631 LOC monolith).
+Operator-level config management — auth, providers, secrets, clustering. Split into focused files.
 
 | File | LOC | Role |
 |------|-----|------|
-| `commands.go` | 305 | Slash command parsing (`/secrets`, `/tools`, `/cluster`) |
+| `commands.go` | 167 | Slash command parsing (`/secrets`, `/cluster`) |
 | `controlplane.go` | 258 | Core types (Config, ControlPlane), Load/Save/Reload, initMaps |
 | `controlplane_cluster.go` | 205 | ClusterMode, join token CRUD, ValidateJoinToken, node approval, env var overrides |
 | `controlplane_providers.go` | 152 | Provider CRUD, ProviderInfo, maskKey, default resolution |
 | `controlplane_auth.go` | 89 | NeedsSetup, PasswordHash, SetPasswordHash, TokenSigner |
-| `controlplane_policies.go` | 86 | AgentTools, SetAgentTools, ClearAgentTools, AllPolicies |
 | `controlplane_secrets.go` | 54 | SecretNames, SecretEnv, SetSecret, DeleteSecret |
 
 **Tests**: `controlplane_test.go` (53 tests covering auth, providers, secrets, policies, cluster, commands, reload, error paths).

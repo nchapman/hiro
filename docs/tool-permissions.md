@@ -1,6 +1,6 @@
 # Tool Permissions
 
-Hiro controls which tools agents can use through a layered permission system. Permissions are defined at four levels: instance config (seeded from agent definition), operator config, parent agent, and skill activation. They are enforced in two phases: at registration time (which tools the agent sees) and at call time (whether a specific invocation is allowed).
+Hiro controls which tools agents can use through a layered permission system. Permissions are defined at three levels: instance config (seeded from agent definition), parent agent, and skill activation. They are enforced in two phases: at registration time (which tools the agent sees) and at call time (whether a specific invocation is allowed).
 
 ## Quick Reference
 
@@ -91,30 +91,7 @@ disallowed_tools: [Bash(rm *)]
 
 An instance with no `allowed_tools` field can still use structural tools (SpawnInstance, memory, etc.) based on its mode.
 
-### 2. Operator Config (`config.yaml`)
-
-The operator can override tool access per agent via config.yaml or the `/tools` command:
-
-```yaml
-# config.yaml
-agents:
-  researcher:
-    allowed_tools: [Read, Grep]           # restrict to read-only
-    disallowed_tools: [Bash(curl *evil*)] # block specific patterns
-```
-
-```
-/tools set researcher Read,Grep,Bash(curl *)
-/tools deny researcher Bash(rm *),Bash(sudo *)
-/tools rm researcher
-/tools list
-```
-
-Changes take effect immediately on running agents — the filesystem watcher detects config.yaml changes and pushes updated tool rules to all affected instances.
-
-If no operator override exists for an agent, the agent uses its declared tools without restriction.
-
-### 3. Parent Agent
+### 2. Parent Agent
 
 When an agent spawns a child, the child inherits the parent's tool restrictions. A child can never gain tools the parent doesn't have.
 
@@ -155,7 +132,7 @@ When the agent calls `Skill("deploy")`, it gains access to `kubectl` and `helm` 
 Which tools the agent sees is determined by **name-based intersection**:
 
 ```
-Effective tools = Agent declared ∩ Operator override ∩ Parent tools
+Effective tools = Instance declared ∩ Parent tools
 ```
 
 If any source doesn't include a tool by name, the agent can't use it. Whole-tool deny rules (e.g., `disallowed_tools: [Bash]`) also remove tools from the effective set entirely — the agent never sees them.
@@ -170,15 +147,15 @@ For tools that are visible, parameterized rules are enforced when the tool is ac
 - **Allow layers** are checked independently per source. Each layer must allow the call (cross-layer AND). Within a layer, any matching rule permits the call (within-layer OR).
 - **Unmatched** — if a layer has no rules for the tool being called, that layer has no opinion and doesn't block. Only layers with rules for the specific tool participate in the decision.
 
-Example with two sources:
+Example with parent inheritance:
 
 ```
-Agent:    allowed_tools: [Bash(curl *), Bash(git *)]
-Operator: allowed_tools: [Bash(curl *)]
+Parent:   allowed_tools: [Bash(curl *)]
+Child:    allowed_tools: [Bash(curl *), Bash(git *)]
 ```
 
 - `curl https://example.com` — allowed (matches both layers)
-- `git status` — denied (agent layer allows, operator layer has Bash rules but none match `git`)
+- `git status` — denied (child layer allows, parent layer has Bash rules but none match `git`)
 - `rm -rf /` — denied (neither layer allows)
 
 ### Deny Always Wins
@@ -298,18 +275,3 @@ metadata:
 | `arguments` | string[] | optional | Named parameters for argument substitution |
 | `metadata` | map | optional | Arbitrary key-value pairs (author, version, etc.) |
 
-### Operator Config (`config.yaml`)
-
-```yaml
-agents:
-  researcher:
-    allowed_tools: [Read, Grep, WebFetch]
-    disallowed_tools: [Bash(rm *), Bash(sudo *)]
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `allowed_tools` | string[] | Override: agent can only use these tools (intersected with agent definition) |
-| `disallowed_tools` | string[] | Additional deny rules (merged with agent definition denies) |
-
-Changes via `/tools set` and `/tools deny` take effect immediately on running agents.
