@@ -37,6 +37,17 @@ interface InstanceConfigModalProps {
   onConfigChanged: () => void
 }
 
+interface TelegramConfig {
+  bot_token: string
+  allowed_chats?: number[]
+}
+
+interface SlackConfig {
+  bot_token: string
+  signing_secret: string
+  allowed_channels?: string[]
+}
+
 interface InstanceConfig {
   model: string
   reasoning_effort: string
@@ -46,6 +57,8 @@ interface InstanceConfig {
   persona_description: string
   persona_body: string
   memory: string
+  telegram?: TelegramConfig
+  slack?: SlackConfig
 }
 
 const reasoningOptions = [
@@ -75,6 +88,12 @@ export default function InstanceConfigModal({
   const [personaDesc, setPersonaDesc] = useState("")
   const [personaBody, setPersonaBody] = useState("")
   const [memory, setMemory] = useState("")
+  // Channel state — empty string means "not configured".
+  const [tgBotToken, setTgBotToken] = useState("")
+  const [tgAllowedChats, setTgAllowedChats] = useState("")
+  const [slBotToken, setSlBotToken] = useState("")
+  const [slSigningSecret, setSlSigningSecret] = useState("")
+  const [slAllowedChannels, setSlAllowedChannels] = useState("")
   const [original, setOriginal] = useState<InstanceConfig | null>(null)
 
   const fetchConfig = useCallback(async () => {
@@ -91,6 +110,11 @@ export default function InstanceConfigModal({
       setPersonaDesc(data.persona_description)
       setPersonaBody(data.persona_body)
       setMemory(data.memory)
+      setTgBotToken(data.telegram?.bot_token ?? "")
+      setTgAllowedChats(data.telegram?.allowed_chats?.join(", ") ?? "")
+      setSlBotToken(data.slack?.bot_token ?? "")
+      setSlSigningSecret(data.slack?.signing_secret ?? "")
+      setSlAllowedChannels(data.slack?.allowed_channels?.join(", ") ?? "")
       setOriginal(data)
     } catch {
       toast.error("Failed to load instance config")
@@ -103,6 +127,20 @@ export default function InstanceConfigModal({
     if (open) fetchConfig()
   }, [open, fetchConfig])
 
+  // Serialize current channel state to compare with original.
+  const tgChanged = useMemo(() => {
+    const origToken = original?.telegram?.bot_token ?? ""
+    const origChats = original?.telegram?.allowed_chats?.join(", ") ?? ""
+    return tgBotToken !== origToken || tgAllowedChats !== origChats
+  }, [tgBotToken, tgAllowedChats, original])
+
+  const slChanged = useMemo(() => {
+    const origToken = original?.slack?.bot_token ?? ""
+    const origSecret = original?.slack?.signing_secret ?? ""
+    const origChannels = original?.slack?.allowed_channels?.join(", ") ?? ""
+    return slBotToken !== origToken || slSigningSecret !== origSecret || slAllowedChannels !== origChannels
+  }, [slBotToken, slSigningSecret, slAllowedChannels, original])
+
   const hasChanges = useMemo(() => {
     if (!original) return false
     if (model !== original.model) return true
@@ -113,8 +151,10 @@ export default function InstanceConfigModal({
     if (personaDesc !== original.persona_description) return true
     if (personaBody !== original.persona_body) return true
     if (memory !== original.memory) return true
+    if (tgChanged) return true
+    if (slChanged) return true
     return false
-  }, [model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, original])
+  }, [model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, tgChanged, slChanged, original])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -132,6 +172,23 @@ export default function InstanceConfigModal({
       if (personaDesc !== original?.persona_description) body.persona_description = personaDesc
       if (personaBody !== original?.persona_body) body.persona_body = personaBody
       if (memory !== original?.memory) body.memory = memory
+      if (tgChanged) {
+        body.telegram = {
+          bot_token: tgBotToken,
+          ...(tgAllowedChats.trim() && {
+            allowed_chats: tgAllowedChats.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n)),
+          }),
+        }
+      }
+      if (slChanged) {
+        body.slack = {
+          bot_token: slBotToken,
+          signing_secret: slSigningSecret,
+          ...(slAllowedChannels.trim() && {
+            allowed_channels: slAllowedChannels.split(",").map((s) => s.trim()).filter(Boolean),
+          }),
+        }
+      }
 
       const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/config`, {
         method: "PUT",
@@ -150,7 +207,7 @@ export default function InstanceConfigModal({
     } finally {
       setSaving(false)
     }
-  }, [instanceId, model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, original, onConfigChanged, onOpenChange])
+  }, [instanceId, model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, tgBotToken, tgAllowedChats, tgChanged, slBotToken, slSigningSecret, slAllowedChannels, slChanged, original, onConfigChanged, onOpenChange])
 
   // Extract current model ID for matching against the model list.
   const [, currentModelId] = parseModelSpec(model)
@@ -269,6 +326,67 @@ export default function InstanceConfigModal({
                 onChange={(e) => setMemory(e.target.value)}
               />
               <p className="text-[11px] text-muted-foreground">Managed by the agent. Manual edits take effect on the next turn.</p>
+            </div>
+
+            {/* Channels */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Channels</Label>
+
+              {/* Telegram */}
+              <div className="flex flex-col gap-2 rounded-md border p-3">
+                <Label className="text-xs font-medium">Telegram</Label>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Bot token</Label>
+                  <Input
+                    className="font-mono text-xs"
+                    value={tgBotToken}
+                    onChange={(e) => setTgBotToken(e.target.value)}
+                    placeholder="${TELEGRAM_BOT}"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Allowed chats</Label>
+                  <Input
+                    className="font-mono text-xs"
+                    value={tgAllowedChats}
+                    onChange={(e) => setTgAllowedChats(e.target.value)}
+                    placeholder="12345, 67890"
+                  />
+                </div>
+              </div>
+
+              {/* Slack */}
+              <div className="flex flex-col gap-2 rounded-md border p-3">
+                <Label className="text-xs font-medium">Slack</Label>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Bot token</Label>
+                  <Input
+                    className="font-mono text-xs"
+                    value={slBotToken}
+                    onChange={(e) => setSlBotToken(e.target.value)}
+                    placeholder="${SLACK_BOT}"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Signing secret</Label>
+                  <Input
+                    className="font-mono text-xs"
+                    value={slSigningSecret}
+                    onChange={(e) => setSlSigningSecret(e.target.value)}
+                    placeholder="${SLACK_SIGN}"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Allowed channels</Label>
+                  <Input
+                    className="font-mono text-xs"
+                    value={slAllowedChannels}
+                    onChange={(e) => setSlAllowedChannels(e.target.value)}
+                    placeholder="C123, C456"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Use secret references like ${"{SECRET_NAME}"} for tokens.</p>
             </div>
           </div>
         )}

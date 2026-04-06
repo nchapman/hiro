@@ -113,6 +113,19 @@ func (m *Manager) SetLifecycleHook(hook InstanceLifecycleHook) {
 	m.lifecycleHook = hook
 }
 
+// RestartChannels tears down and re-creates channels for a running instance
+// by cycling the lifecycle hook. This is used when channel config changes
+// via the API. No-op if no lifecycle hook is set.
+func (m *Manager) RestartChannels(ctx context.Context, instanceID string) {
+	if m.lifecycleHook == nil {
+		return
+	}
+	m.lifecycleHook.OnInstanceStop(instanceID)
+	if err := m.lifecycleHook.OnInstanceStart(ctx, instanceID, m.instanceDir(instanceID)); err != nil {
+		m.logger.Warn("lifecycle hook restart failed", "instance", instanceID, "error", err)
+	}
+}
+
 // SetScheduler sets the cron scheduler for subscription management.
 func (m *Manager) SetScheduler(s *Scheduler) {
 	m.scheduler = s

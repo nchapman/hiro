@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,21 @@ type instanceConfigResponse struct {
 	PersonaDesc     string   `json:"persona_description"`
 	PersonaBody     string   `json:"persona_body"`
 	Memory          string   `json:"memory"`
+
+	// Channel config — uses secret references (e.g. ${SLACK_BOT}), not resolved values.
+	Telegram *telegramConfigJSON `json:"telegram,omitempty"`
+	Slack    *slackConfigJSON    `json:"slack,omitempty"`
+}
+
+type telegramConfigJSON struct {
+	BotToken     string  `json:"bot_token"`
+	AllowedChats []int64 `json:"allowed_chats,omitempty"`
+}
+
+type slackConfigJSON struct {
+	BotToken        string   `json:"bot_token"`
+	SigningSecret   string   `json:"signing_secret"`
+	AllowedChannels []string `json:"allowed_channels,omitempty"`
 }
 
 // instanceConfigRequest is the JSON shape for PUT /api/instances/{id}/config.
@@ -33,6 +49,11 @@ type instanceConfigRequest struct {
 	PersonaDesc     *string   `json:"persona_description,omitempty"`
 	PersonaBody     *string   `json:"persona_body,omitempty"`
 	Memory          *string   `json:"memory,omitempty"`
+
+	// Channel config — pointer so nil = "not sent", non-nil = "set/update".
+	// Send with empty bot_token to remove a channel.
+	Telegram *telegramConfigJSON `json:"telegram,omitempty"`
+	Slack    *slackConfigJSON    `json:"slack,omitempty"`
 }
 
 func (s *Server) handleGetInstanceConfig(w http.ResponseWriter, r *http.Request) {
@@ -52,9 +73,12 @@ func (s *Server) handleGetInstanceConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Use the resolved model from InstanceInfo when the config has no
-	// explicit override — empty model in config means "use the default",
-	// and we want to show what's actually in effect.
+	writeJSON(w, http.StatusOK, s.buildConfigResponse(id, cfg))
+}
+
+// buildConfigResponse assembles the GET response from config.yaml, persona.md,
+// memory.md, and InstanceInfo.
+func (s *Server) buildConfigResponse(id string, cfg config.InstanceConfig) instanceConfigResponse {
 	model := cfg.Model
 	if model == "" {
 		if info, ok := s.manager.GetInstance(id); ok && info.Model != "" {
@@ -62,7 +86,6 @@ func (s *Server) handleGetInstanceConfig(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Read persona.md and memory.md from the instance directory.
 	instDir := s.manager.InstanceDir(id)
 	persona, _ := config.ReadPersonaFile(instDir)
 	memory, _ := config.ReadMemoryFile(instDir)
@@ -77,14 +100,22 @@ func (s *Server) handleGetInstanceConfig(w http.ResponseWriter, r *http.Request)
 		PersonaBody:     persona.Body,
 		Memory:          memory,
 	}
-	// Return empty arrays instead of null for cleaner JSON.
 	if resp.AllowedTools == nil {
 		resp.AllowedTools = []string{}
 	}
 	if resp.DisallowedTools == nil {
 		resp.DisallowedTools = []string{}
 	}
-	writeJSON(w, http.StatusOK, resp)
+
+	if ch := cfg.Channels; ch != nil {
+		if tg := ch.Telegram; tg != nil {
+			resp.Telegram = &telegramConfigJSON{BotToken: tg.BotToken, AllowedChats: tg.AllowedChats}
+		}
+		if sl := ch.Slack; sl != nil {
+			resp.Slack = &slackConfigJSON{BotToken: sl.BotToken, SigningSecret: sl.SigningSecret, AllowedChannels: sl.AllowedChannels}
+		}
+	}
+	return resp
 }
 
 func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +167,7 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := s.applyInstanceFileUpdates(id, req); err != nil {
+	if err := s.applyInstanceFileUpdates(r.Context(), id, info, req); err != nil {
 		s.logger.Error("failed to write instance files", "id", id, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -145,25 +176,12 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// applyInstanceFileUpdates writes persona.md and memory.md changes from a config request.
-func (s *Server) applyInstanceFileUpdates(id string, req instanceConfigRequest) error {
+// applyInstanceFileUpdates writes persona.md, memory.md, and channel config changes.
+func (s *Server) applyInstanceFileUpdates(ctx context.Context, id string, info agent.InstanceInfo, req instanceConfigRequest) error {
 	instDir := s.manager.InstanceDir(id)
 
-	if req.PersonaName != nil || req.PersonaDesc != nil || req.PersonaBody != nil {
-		existing, _ := config.ReadPersonaFile(instDir)
-		name, desc, body := existing.Name, existing.Description, existing.Body
-		if req.PersonaName != nil {
-			name = *req.PersonaName
-		}
-		if req.PersonaDesc != nil {
-			desc = *req.PersonaDesc
-		}
-		if req.PersonaBody != nil {
-			body = *req.PersonaBody
-		}
-		if err := config.WritePersonaFile(instDir, name, desc, body); err != nil {
-			return fmt.Errorf("writing persona.md: %w", err)
-		}
+	if err := applyPersonaUpdate(instDir, req); err != nil {
+		return err
 	}
 
 	if req.Memory != nil {
@@ -172,5 +190,77 @@ func (s *Server) applyInstanceFileUpdates(id string, req instanceConfigRequest) 
 		}
 	}
 
+	if req.Telegram != nil || req.Slack != nil {
+		if err := s.applyChannelUpdate(ctx, id, instDir, info, req); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// applyPersonaUpdate writes persona.md if any persona field was sent.
+func applyPersonaUpdate(instDir string, req instanceConfigRequest) error {
+	if req.PersonaName == nil && req.PersonaDesc == nil && req.PersonaBody == nil {
+		return nil
+	}
+	existing, _ := config.ReadPersonaFile(instDir)
+	name, desc, body := existing.Name, existing.Description, existing.Body
+	if req.PersonaName != nil {
+		name = *req.PersonaName
+	}
+	if req.PersonaDesc != nil {
+		desc = *req.PersonaDesc
+	}
+	if req.PersonaBody != nil {
+		body = *req.PersonaBody
+	}
+	if err := config.WritePersonaFile(instDir, name, desc, body); err != nil {
+		return fmt.Errorf("writing persona.md: %w", err)
+	}
+	return nil
+}
+
+// applyChannelUpdate writes channel config to config.yaml and restarts channel
+// bindings for running instances.
+func (s *Server) applyChannelUpdate(ctx context.Context, id, instDir string, info agent.InstanceInfo, req instanceConfigRequest) error {
+	existing, _ := config.LoadInstanceConfig(instDir)
+	if existing.Channels == nil {
+		existing.Channels = &config.InstanceChannelsConfig{}
+	}
+
+	if req.Telegram != nil {
+		existing.Channels.Telegram = mapTelegramConfig(req.Telegram)
+	}
+	if req.Slack != nil {
+		existing.Channels.Slack = mapSlackConfig(req.Slack)
+	}
+	if existing.Channels.Telegram == nil && existing.Channels.Slack == nil {
+		existing.Channels = nil
+	}
+
+	if err := config.SaveInstanceConfig(instDir, existing); err != nil {
+		return fmt.Errorf("writing channel config: %w", err)
+	}
+
+	if info.Status == agent.InstanceStatusRunning {
+		s.manager.RestartChannels(ctx, id)
+	}
+	return nil
+}
+
+// mapTelegramConfig converts JSON request to config struct. Empty bot_token removes the channel.
+func mapTelegramConfig(j *telegramConfigJSON) *config.InstanceTelegramConfig {
+	if j.BotToken == "" {
+		return nil
+	}
+	return &config.InstanceTelegramConfig{BotToken: j.BotToken, AllowedChats: j.AllowedChats}
+}
+
+// mapSlackConfig converts JSON request to config struct. Empty bot_token removes the channel.
+func mapSlackConfig(j *slackConfigJSON) *config.InstanceSlackConfig {
+	if j.BotToken == "" {
+		return nil
+	}
+	return &config.InstanceSlackConfig{BotToken: j.BotToken, SigningSecret: j.SigningSecret, AllowedChannels: j.AllowedChannels}
 }
