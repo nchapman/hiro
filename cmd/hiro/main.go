@@ -21,6 +21,7 @@ import (
 	"github.com/nchapman/hiro/internal/agent"
 	"github.com/nchapman/hiro/internal/api"
 	"github.com/nchapman/hiro/internal/channel"
+	telegramchannel "github.com/nchapman/hiro/internal/channel/telegram"
 	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
@@ -107,10 +108,11 @@ type app struct {
 	lh     *loghandler.Handler
 	cp     *controlplane.ControlPlane
 
-	fsWatcher *watcher.Watcher
-	srv       *api.Server
-	mgr       *agent.Manager
-	scheduler *agent.Scheduler
+	fsWatcher  *watcher.Watcher
+	srv        *api.Server
+	mgr        *agent.Manager
+	scheduler  *agent.Scheduler
+	telegramCh *telegramchannel.Channel
 
 	// Cluster state — only populated for leader mode.
 	cs             clusterState
@@ -445,29 +447,62 @@ func (a *app) startManager() error {
 		return err
 	}
 	if leaderID != "" {
-		providerType, _, _, _ := a.cp.ProviderInfo()
-		a.logger.Info("leader agent ready",
-			"id", leaderID,
-			"provider", providerType,
-		)
-		a.srv.SetManager(a.mgr, leaderID)
-
-		// Create channel router and web channel.
-		usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
-		router := channel.NewRouter(a.mgr, a.cp, usage, a.logger)
-		wc := webchannel.New(router, a.mgr, a.logger)
-		router.Register(wc)
-		a.srv.SetRouter(router, wc)
-
-		// Start notification pumps for all persistent instances.
-		// The pump must use the app context (not a WebSocket context) so it
-		// survives individual channel connections disconnecting.
-		router.StartNotificationPump(a.ctx, leaderID)
-		// TODO: start pumps for other persistent instances (child agents with
-		// schedules/triggers). Currently only the operator gets one.
+		a.initChannels(leaderID)
 	}
 
 	return nil
+}
+
+// initChannels creates the channel router, registers channels, and starts
+// notification pumps. Called after the operator agent is bootstrapped.
+func (a *app) initChannels(leaderID string) {
+	providerType, _, _, _ := a.cp.ProviderInfo()
+	a.logger.Info("leader agent ready", "id", leaderID, "provider", providerType)
+	a.srv.SetManager(a.mgr, leaderID)
+
+	usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
+	router := channel.NewRouter(a.mgr, a.cp, usage, a.logger)
+
+	wc := webchannel.New(router, a.mgr, a.logger)
+	router.Register(wc)
+	a.srv.SetRouter(router, wc)
+
+	// Start notification pumps for all persistent instances.
+	// The pump must use the app context (not a WebSocket context) so it
+	// survives individual channel connections disconnecting.
+	router.StartNotificationPump(a.ctx, leaderID)
+	// TODO: start pumps for other persistent instances (child agents with
+	// schedules/triggers). Currently only the operator gets one.
+
+	a.startTelegramChannel(router)
+}
+
+// startTelegramChannel creates and starts the Telegram channel if configured.
+func (a *app) startTelegramChannel(router *channel.Router) {
+	tgCfg := a.cp.TelegramConfig()
+	if tgCfg == nil {
+		return
+	}
+
+	token := a.cp.ResolveSecret(tgCfg.BotToken)
+	if token == "" {
+		a.logger.Warn("telegram channel configured but bot_token is empty or secret not found")
+		return
+	}
+
+	tg := telegramchannel.New(telegramchannel.Config{
+		Token:        token,
+		Instance:     tgCfg.Instance,
+		AllowedChats: tgCfg.AllowedChats,
+	}, router, a.logger)
+	router.Register(tg)
+
+	if err := tg.Start(a.ctx); err != nil {
+		a.logger.Warn("failed to start telegram channel", "error", err)
+		return
+	}
+	a.telegramCh = tg
+	a.logger.Info("telegram channel started", "instance", tgCfg.Instance)
 }
 
 // serve starts the HTTP server and blocks until shutdown signal or restart.
@@ -524,6 +559,9 @@ func (a *app) shutdown() {
 	}
 	if a.cs.fileSync != nil {
 		a.cs.fileSync.Stop()
+	}
+	if a.telegramCh != nil {
+		_ = a.telegramCh.Stop()
 	}
 	if a.srv != nil {
 		a.srv.ShutdownTerminalSessions()

@@ -73,21 +73,37 @@ func (r *Router) Channel(name string) Channel {
 	return r.channels[name]
 }
 
+// GetBinding returns the binding for a conversation key, or nil.
+func (r *Router) GetBinding(conversationKey string) *Binding {
+	r.bindMu.RLock()
+	defer r.bindMu.RUnlock()
+	return r.bindings[conversationKey]
+}
+
+// Manager returns the underlying manager interface. Used by channels that
+// need to resolve instance IDs from bindings.
+func (r *Router) Manager() ManagerInterface {
+	return r.manager
+}
+
 // Bind creates a mapping from a conversation key to a target (instance ID or
 // agent name). The channelName identifies which channel owns this binding.
-func (r *Router) Bind(conversationKey, channelName, target string) {
+// Returns the created binding.
+func (r *Router) Bind(conversationKey, channelName, target string) *Binding {
 	r.mu.RLock()
 	ch := r.channels[channelName]
 	r.mu.RUnlock()
 
-	r.bindMu.Lock()
-	r.bindings[conversationKey] = &Binding{
+	b := &Binding{
 		ConversationKey: conversationKey,
 		ChannelName:     channelName,
 		Target:          target,
 		Channel:         ch,
 	}
+	r.bindMu.Lock()
+	r.bindings[conversationKey] = b
 	r.bindMu.Unlock()
+	return b
 }
 
 // Unbind removes a conversation binding.
