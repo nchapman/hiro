@@ -79,6 +79,7 @@ func (s *Server) routes() {
 	s.settingsRoutes()
 	s.instanceRoutes()
 	s.usageRoutes()
+	s.subscriptionRoutes()
 	s.logRoutes()
 	s.fileRoutes()
 	s.terminalRoutes()

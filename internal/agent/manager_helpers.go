@@ -112,6 +112,11 @@ func (m *Manager) SetScheduler(s *Scheduler) {
 	m.scheduler = s
 }
 
+// GetScheduler returns the cron scheduler, or nil if not set.
+func (m *Manager) GetScheduler() *Scheduler {
+	return m.scheduler
+}
+
 // SetTimezone sets the server timezone for cron evaluation.
 func (m *Manager) SetTimezone(tz *time.Location) {
 	m.timezone = tz

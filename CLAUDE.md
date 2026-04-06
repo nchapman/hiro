@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hiro is a distributed AI agent platform written in Go. A single binary serves an HTTP API, a WebSocket chat endpoint, and an embedded React dashboard. Agents are defined as markdown files with YAML frontmatter; they run agentic loops backed by [charm.land/fantasy](https://charm.land/fantasy) and can spawn/manage child agents.
 
+## CRITICAL: Docker Only
+
+**NEVER run `./hiro` directly.** This app only runs in Docker. To test changes, rebuild and start Docker:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+Running locally creates runtime directories (`agents/`, `db/`, `instances/`, etc.) in the repo root and conflicts with Docker port bindings.
+
 ## Build & Dev Commands
 
 ```bash

@@ -259,6 +259,21 @@ func (d *DB) ResumeInstanceSubscriptions(ctx context.Context, instanceID string)
 	return scanSubscriptions(rows)
 }
 
+// ListAllSubscriptions returns all subscriptions across all instances,
+// ordered by instance_id then created_at.
+func (d *DB) ListAllSubscriptions(ctx context.Context) ([]Subscription, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT id, instance_id, name, trigger, message, status, next_fire, last_fired,
+		        fire_count, error_count, last_error, created_at
+		 FROM subscriptions ORDER BY instance_id, created_at`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSubscriptions(rows)
+}
+
 // DeleteSubscription removes a subscription.
 func (d *DB) DeleteSubscription(ctx context.Context, id string) error {
 	d.writeMu.Lock()
@@ -294,7 +309,7 @@ func checkSubRowsAffected(result sql.Result, id string) error {
 		return fmt.Errorf("checking rows affected: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("subscription %s not found", id)
+		return fmt.Errorf("subscription %s: %w", id, ErrNotFound)
 	}
 	return nil
 }

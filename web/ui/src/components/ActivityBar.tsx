@@ -14,6 +14,7 @@ import {
   Message01Icon,
   FolderOpenIcon,
   NoteIcon,
+  Calendar03Icon,
   Settings01Icon,
   Logout01Icon,
   TerminalIcon,
@@ -23,7 +24,7 @@ import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 
-export type Activity = "chat" | "files" | "logs" | "settings"
+export type Activity = "chat" | "files" | "logs" | "schedules" | "settings"
 
 interface ActivityBarProps {
   activity: Activity
@@ -36,6 +37,7 @@ const activities: { id: Activity; icon: IconSvgElement; label: string }[] = [
   { id: "chat", icon: Message01Icon, label: "Chat" },
   { id: "files", icon: FolderOpenIcon, label: "Files" },
   { id: "logs", icon: NoteIcon, label: "Logs" },
+  { id: "schedules", icon: Calendar03Icon, label: "Schedules" },
   { id: "settings", icon: Settings01Icon, label: "Settings" },
 ]
 

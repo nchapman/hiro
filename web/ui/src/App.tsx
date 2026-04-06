@@ -19,6 +19,7 @@ import Chat from "@/pages/chat/ChatPage"
 const TerminalPage = lazy(() => import("@/pages/terminal/TerminalPage"))
 const FilesPage = lazy(() => import("@/pages/files/FilesPage"))
 const LogsPage = lazy(() => import("@/pages/logs/LogsPage"))
+const SchedulesPage = lazy(() => import("@/pages/schedules/SchedulesPage"))
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"))
 const SharedFilePage = lazy(() => import("@/pages/shared/SharedFilePage"))
 
@@ -89,6 +90,37 @@ const logsSkeleton = (
   </div>
 )
 
+/** Skeleton fallback for the Schedules section — shows header + card outlines. */
+const schedulesSkeleton = (
+  <div className="flex h-full flex-1 flex-col overflow-hidden">
+    <div className="flex h-12 items-center gap-2 border-b px-4">
+      <span className="font-heading text-sm font-medium mr-2">Schedules</span>
+      <Skeleton className="h-7 w-28 rounded-md" />
+      <Skeleton className="h-7 w-24 rounded-md" />
+      <Skeleton className="h-7 w-48 rounded-md" />
+    </div>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div key={i} className="flex flex-col gap-3 rounded-xl border p-4">
+          <Skeleton className="h-4 w-24 rounded" />
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 2 }).map((_, j) => (
+              <div key={j} className="flex items-center gap-3 rounded-lg border border-border/50 p-3">
+                <Skeleton className="h-2 w-2 rounded-full" />
+                <Skeleton className="h-4 w-32 rounded" />
+                <Skeleton className="h-4 w-16 rounded" />
+                <Skeleton className="h-4 w-24 rounded" />
+                <div className="flex-1" />
+                <Skeleton className="h-4 w-20 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)
+
 /** Skeleton fallback for the Settings section — shows header + card outlines. */
 const settingsSkeleton = (
   <div className="flex h-full flex-1 flex-col">
@@ -110,7 +142,7 @@ const settingsSkeleton = (
 )
 
 /** All known top-level route prefixes — used for unknown-path redirect. */
-const KNOWN_PREFIXES = ["/chat", "/files", "/logs", "/settings", "/terminal", "/shared", "/setup", "/login", "/worker"]
+const KNOWN_PREFIXES = ["/chat", "/files", "/logs", "/schedules", "/settings", "/terminal", "/shared", "/setup", "/login", "/worker"]
 
 /**
  * Derives the current activity from the URL pathname.
@@ -120,6 +152,7 @@ const KNOWN_PREFIXES = ["/chat", "/files", "/logs", "/settings", "/terminal", "/
 function activityFromPath(pathname: string): Activity {
   if (pathname.startsWith("/files")) return "files"
   if (pathname.startsWith("/logs")) return "logs"
+  if (pathname.startsWith("/schedules")) return "schedules"
   if (pathname.startsWith("/settings")) return "settings"
   return "chat"
 }
@@ -459,6 +492,17 @@ export default function App() {
                   <ErrorBoundary section="Logs">
                     <Suspense fallback={logsSkeleton}>
                       <LogsPage />
+                    </Suspense>
+                  </ErrorBoundary>
+                </div>
+              )}
+
+              {/* Schedules — mounted on first visit, stays alive */}
+              {visited.has("schedules") && (
+                <div className={cn("flex flex-1 overflow-hidden", activity !== "schedules" && "hidden")}>
+                  <ErrorBoundary section="Schedules">
+                    <Suspense fallback={schedulesSkeleton}>
+                      <SchedulesPage />
                     </Suspense>
                   </ErrorBoundary>
                 </div>
