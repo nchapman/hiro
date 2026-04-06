@@ -464,6 +464,7 @@ func (a *app) initChannels(leaderID string) {
 
 	usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
 	router := channel.NewRouter(a.mgr, a.cp, usage, a.logger)
+	router.SetContext(a.ctx)
 
 	wc := webchannel.New(router, a.mgr, a.logger)
 	router.Register(wc)

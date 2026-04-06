@@ -163,6 +163,11 @@ func (c *Channel) HandleConn(ctx context.Context, conn *websocket.Conn, instance
 
 	c.router.Bind(conversationKey, "web", instanceID)
 
+	// Ensure a notification pump is running for this instance. Uses the
+	// Router's app context (not the WebSocket context) so the pump survives
+	// this connection closing. Idempotent — no-op if already running.
+	c.router.EnsureNotificationPump(instanceID)
+
 	defer func() {
 		c.mu.Lock()
 		delete(c.conns, conversationKey)

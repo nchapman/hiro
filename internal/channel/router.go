@@ -32,6 +32,7 @@ type Router struct {
 	manager    ManagerInterface
 	cmdHandler CommandHandler
 	usage      *UsageQuerier
+	ctx        context.Context // parent context for notification pumps
 
 	mu       sync.RWMutex
 	channels map[string]Channel // name → channel
@@ -47,16 +48,24 @@ type Router struct {
 }
 
 // NewRouter creates a Router wired to the given Manager and command handler.
+// The ctx controls the lifetime of all notification pumps.
 func NewRouter(mgr ManagerInterface, cmdHandler CommandHandler, usage *UsageQuerier, logger *slog.Logger) *Router {
 	return &Router{
 		manager:    mgr,
 		cmdHandler: cmdHandler,
 		usage:      usage,
+		ctx:        context.Background(),
 		channels:   make(map[string]Channel),
 		bindings:   make(map[string]*Binding),
 		pumps:      make(map[string]context.CancelFunc),
 		logger:     logger.With("component", "router"),
 	}
+}
+
+// SetContext sets the parent context for notification pumps. Should be called
+// before any pumps are started, typically with the application lifecycle context.
+func (r *Router) SetContext(ctx context.Context) {
+	r.ctx = ctx
 }
 
 // Register adds a channel to the router.
@@ -260,6 +269,13 @@ func (r *Router) StartNotificationPump(ctx context.Context, instanceID string) {
 	r.pumpMu.Unlock()
 
 	go r.runNotificationPump(pumpCtx, instanceID)
+}
+
+// EnsureNotificationPump starts a pump if one isn't running, using the
+// Router's parent context. Safe to call from any channel — the pump runs
+// for the lifetime of the Router, not the caller.
+func (r *Router) EnsureNotificationPump(instanceID string) {
+	r.StartNotificationPump(r.ctx, instanceID)
 }
 
 // StopNotificationPump cancels the pump for an instance.
