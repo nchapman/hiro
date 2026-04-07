@@ -22,7 +22,11 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
+import {
+  ArrowDown01Icon,
+  Add01Icon,
+  Delete01Icon,
+} from "@hugeicons/core-free-icons"
 import { formatTokenCount } from "@/lib/format"
 import { parseModelSpec, formatModelSpec } from "@/pages/settings/DefaultModelCard"
 import type { ModelInfo } from "@/lib/chat-types"
@@ -88,12 +92,7 @@ export default function InstanceConfigModal({
   const [personaDesc, setPersonaDesc] = useState("")
   const [personaBody, setPersonaBody] = useState("")
   const [memory, setMemory] = useState("")
-  // Channel state — empty string means "not configured".
-  const [tgBotToken, setTgBotToken] = useState("")
-  const [tgAllowedChats, setTgAllowedChats] = useState("")
-  const [slBotToken, setSlBotToken] = useState("")
-  const [slSigningSecret, setSlSigningSecret] = useState("")
-  const [slAllowedChannels, setSlAllowedChannels] = useState("")
+  const [channels, setChannels] = useState<{ telegram?: TelegramConfig; slack?: SlackConfig }>({})
   const [original, setOriginal] = useState<InstanceConfig | null>(null)
 
   const fetchConfig = useCallback(async () => {
@@ -110,11 +109,7 @@ export default function InstanceConfigModal({
       setPersonaDesc(data.persona_description)
       setPersonaBody(data.persona_body)
       setMemory(data.memory)
-      setTgBotToken(data.telegram?.bot_token ?? "")
-      setTgAllowedChats(data.telegram?.allowed_chats?.join(", ") ?? "")
-      setSlBotToken(data.slack?.bot_token ?? "")
-      setSlSigningSecret(data.slack?.signing_secret ?? "")
-      setSlAllowedChannels(data.slack?.allowed_channels?.join(", ") ?? "")
+      setChannels({ telegram: data.telegram, slack: data.slack })
       setOriginal(data)
     } catch {
       toast.error("Failed to load instance config")
@@ -127,20 +122,6 @@ export default function InstanceConfigModal({
     if (open) fetchConfig()
   }, [open, fetchConfig])
 
-  // Serialize current channel state to compare with original.
-  const tgChanged = useMemo(() => {
-    const origToken = original?.telegram?.bot_token ?? ""
-    const origChats = original?.telegram?.allowed_chats?.join(", ") ?? ""
-    return tgBotToken !== origToken || tgAllowedChats !== origChats
-  }, [tgBotToken, tgAllowedChats, original])
-
-  const slChanged = useMemo(() => {
-    const origToken = original?.slack?.bot_token ?? ""
-    const origSecret = original?.slack?.signing_secret ?? ""
-    const origChannels = original?.slack?.allowed_channels?.join(", ") ?? ""
-    return slBotToken !== origToken || slSigningSecret !== origSecret || slAllowedChannels !== origChannels
-  }, [slBotToken, slSigningSecret, slAllowedChannels, original])
-
   const hasChanges = useMemo(() => {
     if (!original) return false
     if (model !== original.model) return true
@@ -151,10 +132,8 @@ export default function InstanceConfigModal({
     if (personaDesc !== original.persona_description) return true
     if (personaBody !== original.persona_body) return true
     if (memory !== original.memory) return true
-    if (tgChanged) return true
-    if (slChanged) return true
     return false
-  }, [model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, tgChanged, slChanged, original])
+  }, [model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, original])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -172,23 +151,6 @@ export default function InstanceConfigModal({
       if (personaDesc !== original?.persona_description) body.persona_description = personaDesc
       if (personaBody !== original?.persona_body) body.persona_body = personaBody
       if (memory !== original?.memory) body.memory = memory
-      if (tgChanged) {
-        body.telegram = {
-          bot_token: tgBotToken,
-          ...(tgAllowedChats.trim() && {
-            allowed_chats: tgAllowedChats.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n)),
-          }),
-        }
-      }
-      if (slChanged) {
-        body.slack = {
-          bot_token: slBotToken,
-          signing_secret: slSigningSecret,
-          ...(slAllowedChannels.trim() && {
-            allowed_channels: slAllowedChannels.split(",").map((s) => s.trim()).filter(Boolean),
-          }),
-        }
-      }
 
       const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/config`, {
         method: "PUT",
@@ -207,9 +169,24 @@ export default function InstanceConfigModal({
     } finally {
       setSaving(false)
     }
-  }, [instanceId, model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, tgBotToken, tgAllowedChats, tgChanged, slBotToken, slSigningSecret, slAllowedChannels, slChanged, original, onConfigChanged, onOpenChange])
+  }, [instanceId, model, reasoningEffort, allowedTools, disallowedTools, personaName, personaDesc, personaBody, memory, original, onConfigChanged, onOpenChange])
 
-  // Extract current model ID for matching against the model list.
+  // Channel connect/disconnect are immediate — they call the API directly
+  // and refresh the config, rather than being part of the deferred Save.
+  const connectChannel = useCallback(async (channelData: Record<string, unknown>) => {
+    const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(channelData),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+    await fetchConfig() // refresh to get masked tokens back
+    onConfigChanged()
+  }, [instanceId, fetchConfig, onConfigChanged])
+
   const [, currentModelId] = parseModelSpec(model)
 
   return (
@@ -333,72 +310,11 @@ export default function InstanceConfigModal({
             </section>
 
             {/* Channels */}
-            <section className="rounded-lg bg-background p-4">
-              <h3 className="mb-3 text-sm font-medium">Channels</h3>
-              <div className="flex flex-col gap-4">
-                {/* Telegram */}
-                <div className="flex flex-col gap-2.5">
-                  <Label className="text-xs font-medium">Telegram</Label>
-                  <div className="flex gap-3">
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Label className="text-[11px] text-muted-foreground">Bot token</Label>
-                      <Input
-                        className="font-mono text-xs"
-                        value={tgBotToken}
-                        onChange={(e) => setTgBotToken(e.target.value)}
-                        placeholder="${TELEGRAM_BOT}"
-                      />
-                    </div>
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Label className="text-[11px] text-muted-foreground">Allowed chats</Label>
-                      <Input
-                        className="font-mono text-xs"
-                        value={tgAllowedChats}
-                        onChange={(e) => setTgAllowedChats(e.target.value)}
-                        placeholder="12345, 67890"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border-t" />
-
-                {/* Slack */}
-                <div className="flex flex-col gap-2.5">
-                  <Label className="text-xs font-medium">Slack</Label>
-                  <div className="flex gap-3">
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Label className="text-[11px] text-muted-foreground">Bot token</Label>
-                      <Input
-                        className="font-mono text-xs"
-                        value={slBotToken}
-                        onChange={(e) => setSlBotToken(e.target.value)}
-                        placeholder="${SLACK_BOT}"
-                      />
-                    </div>
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Label className="text-[11px] text-muted-foreground">Signing secret</Label>
-                      <Input
-                        className="font-mono text-xs"
-                        value={slSigningSecret}
-                        onChange={(e) => setSlSigningSecret(e.target.value)}
-                        placeholder="${SLACK_SIGN}"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Allowed channels</Label>
-                    <Input
-                      className="font-mono text-xs"
-                      value={slAllowedChannels}
-                      onChange={(e) => setSlAllowedChannels(e.target.value)}
-                      placeholder="C123, C456"
-                    />
-                  </div>
-                </div>
-              </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">Use secret references like ${"{SECRET_NAME}"} for tokens.</p>
-            </section>
+            <ChannelsSection
+              telegram={channels.telegram}
+              slack={channels.slack}
+              onConnect={connectChannel}
+            />
           </div>
         )}
 
@@ -412,6 +328,226 @@ export default function InstanceConfigModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// --- Channels section ---
+
+type ChannelType = "telegram" | "slack"
+
+const channelTypes: { id: ChannelType; label: string }[] = [
+  { id: "telegram", label: "Telegram" },
+  { id: "slack", label: "Slack" },
+]
+
+function ChannelsSection({
+  telegram,
+  slack,
+  onConnect,
+}: {
+  telegram?: TelegramConfig
+  slack?: SlackConfig
+  onConnect: (data: Record<string, unknown>) => Promise<void>
+}) {
+  const [adding, setAdding] = useState<ChannelType | null>(null)
+  const [connecting, setConnecting] = useState(false)
+
+  // Add form state
+  const [tgToken, setTgToken] = useState("")
+  const [tgChats, setTgChats] = useState("")
+  const [slToken, setSlToken] = useState("")
+  const [slSecret, setSlSecret] = useState("")
+  const [slChannels, setSlChannels] = useState("")
+
+  const configured = [
+    ...(telegram ? [{ type: "telegram" as const, label: "Telegram", maskedToken: telegram.bot_token }] : []),
+    ...(slack ? [{ type: "slack" as const, label: "Slack", maskedToken: slack.bot_token }] : []),
+  ]
+  const available = channelTypes.filter((ct) =>
+    !configured.some((c) => c.type === ct.id)
+  )
+
+  const resetForm = () => {
+    setAdding(null)
+    setTgToken("")
+    setTgChats("")
+    setSlToken("")
+    setSlSecret("")
+    setSlChannels("")
+  }
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    try {
+      if (adding === "telegram") {
+        await onConnect({
+          telegram: {
+            bot_token: tgToken,
+            ...(tgChats.trim() && {
+              allowed_chats: tgChats.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n)),
+            }),
+          },
+        })
+      } else if (adding === "slack") {
+        await onConnect({
+          slack: {
+            bot_token: slToken,
+            signing_secret: slSecret,
+            ...(slChannels.trim() && {
+              allowed_channels: slChannels.split(",").map((s) => s.trim()).filter(Boolean),
+            }),
+          },
+        })
+      }
+      toast.success(`${adding === "telegram" ? "Telegram" : "Slack"} connected`)
+      resetForm()
+    } catch (err) {
+      toast.error(`Failed to connect: ${err instanceof Error ? err.message : "unknown error"}`)
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const handleDisconnect = async (type: ChannelType) => {
+    try {
+      await onConnect({ [type]: { bot_token: "" } })
+      toast.success(`${type === "telegram" ? "Telegram" : "Slack"} disconnected`)
+    } catch (err) {
+      toast.error(`Failed to disconnect: ${err instanceof Error ? err.message : "unknown error"}`)
+    }
+  }
+
+  const canConnect = adding === "telegram" ? tgToken.trim() !== ""
+    : adding === "slack" ? slToken.trim() !== "" && slSecret.trim() !== ""
+    : false
+
+  return (
+    <section className="rounded-lg bg-background p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium">Channels</h3>
+        {available.length > 0 && !adding && (
+          <Popover>
+            <PopoverTrigger
+              render={<Button variant="outline" size="sm" className="h-7 gap-1 text-xs" />}
+            >
+              <HugeiconsIcon icon={Add01Icon} className="h-3.5 w-3.5" />
+              Add
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-40 p-1">
+              {available.map((ct) => (
+                <button
+                  key={ct.id}
+                  onClick={() => setAdding(ct.id)}
+                  className="flex w-full rounded-md px-2 py-1.5 text-xs hover:bg-accent cursor-pointer"
+                >
+                  {ct.label}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {/* Configured channels */}
+        {configured.map((ch) => (
+          <div key={ch.type} className="flex items-center justify-between rounded-md border border-foreground/10 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{ch.label}</span>
+              <span className="font-mono text-xs text-muted-foreground">{ch.maskedToken}</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-destructive"
+              onClick={() => handleDisconnect(ch.type)}
+            >
+              <HugeiconsIcon icon={Delete01Icon} className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+
+        {/* Empty state */}
+        {configured.length === 0 && !adding && (
+          <p className="text-xs text-muted-foreground py-1">No channels connected.</p>
+        )}
+
+        {/* Add form */}
+        {adding === "telegram" && (
+          <div className="flex flex-col gap-3 rounded-md border border-foreground/10 p-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Telegram</Label>
+              <button onClick={resetForm} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer">Cancel</button>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-[11px] text-muted-foreground">Bot token</Label>
+              <Input
+                className="font-mono text-xs"
+                type="password"
+                value={tgToken}
+                onChange={(e) => setTgToken(e.target.value)}
+                placeholder="Paste your bot token from BotFather"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-[11px] text-muted-foreground">Allowed chat IDs <span className="text-muted-foreground/60">(optional)</span></Label>
+              <Input
+                className="font-mono text-xs"
+                value={tgChats}
+                onChange={(e) => setTgChats(e.target.value)}
+                placeholder="12345, 67890"
+              />
+            </div>
+            <Button size="sm" onClick={handleConnect} disabled={!canConnect || connecting}>
+              {connecting ? "Connecting..." : "Connect"}
+            </Button>
+          </div>
+        )}
+
+        {adding === "slack" && (
+          <div className="flex flex-col gap-3 rounded-md border border-foreground/10 p-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Slack</Label>
+              <button onClick={resetForm} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer">Cancel</button>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Label className="text-[11px] text-muted-foreground">Bot token</Label>
+                <Input
+                  className="font-mono text-xs"
+                  type="password"
+                  value={slToken}
+                  onChange={(e) => setSlToken(e.target.value)}
+                  placeholder="xoxb-..."
+                />
+              </div>
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Label className="text-[11px] text-muted-foreground">Signing secret</Label>
+                <Input
+                  className="font-mono text-xs"
+                  type="password"
+                  value={slSecret}
+                  onChange={(e) => setSlSecret(e.target.value)}
+                  placeholder="Signing secret"
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-[11px] text-muted-foreground">Allowed channels <span className="text-muted-foreground/60">(optional)</span></Label>
+              <Input
+                className="font-mono text-xs"
+                value={slChannels}
+                onChange={(e) => setSlChannels(e.target.value)}
+                placeholder="C123, C456"
+              />
+            </div>
+            <Button size="sm" onClick={handleConnect} disabled={!canConnect || connecting}>
+              {connecting ? "Connecting..." : "Connect"}
+            </Button>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

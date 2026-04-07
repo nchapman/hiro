@@ -38,6 +38,18 @@ type slackConfigJSON struct {
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
 }
 
+// maskToken returns "••••last4" for display, or empty if the value is empty.
+func maskToken(s string) string {
+	const maskSuffix = 4
+	if s == "" {
+		return ""
+	}
+	if len(s) <= maskSuffix {
+		return "••••"
+	}
+	return "••••" + s[len(s)-maskSuffix:]
+}
+
 // instanceConfigRequest is the JSON shape for PUT /api/instances/{id}/config.
 // Pointer-to-slice fields distinguish "not sent" (nil) from "explicitly empty" ([]).
 type instanceConfigRequest struct {
@@ -109,10 +121,10 @@ func (s *Server) buildConfigResponse(id string, cfg config.InstanceConfig) insta
 
 	if ch := cfg.Channels; ch != nil {
 		if tg := ch.Telegram; tg != nil {
-			resp.Telegram = &telegramConfigJSON{BotToken: tg.BotToken, AllowedChats: tg.AllowedChats}
+			resp.Telegram = &telegramConfigJSON{BotToken: maskToken(tg.BotToken), AllowedChats: tg.AllowedChats}
 		}
 		if sl := ch.Slack; sl != nil {
-			resp.Slack = &slackConfigJSON{BotToken: sl.BotToken, SigningSecret: sl.SigningSecret, AllowedChannels: sl.AllowedChannels}
+			resp.Slack = &slackConfigJSON{BotToken: maskToken(sl.BotToken), SigningSecret: maskToken(sl.SigningSecret), AllowedChannels: sl.AllowedChannels}
 		}
 	}
 	return resp
