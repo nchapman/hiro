@@ -37,16 +37,23 @@ type slackConfigJSON struct {
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
 }
 
-// maskToken returns "••••last4" for display, or empty if the value is empty.
+// maskToken masks a secret value for display. Returns "" for empty strings.
+// Shows the last few characters so users can identify which token is configured:
+//
+//	len ≤ 8  → "••••"
+//	len ≤ 20 → "••••" + last 4
+//	len > 20 → first 4 + "••••" + last 4
 func maskToken(s string) string {
-	const maskSuffix = 4
-	if s == "" {
+	switch {
+	case s == "":
 		return ""
-	}
-	if len(s) <= maskSuffix {
+	case len(s) <= 8: //nolint:mnd // short tokens are fully masked
 		return "••••"
+	case len(s) <= 20: //nolint:mnd // medium tokens show suffix
+		return "••••" + s[len(s)-4:]
+	default: // long tokens show prefix + suffix for identification
+		return s[:4] + "••••" + s[len(s)-4:]
 	}
-	return "••••" + s[len(s)-maskSuffix:]
 }
 
 // instanceConfigRequest is the JSON shape for PUT /api/instances/{id}/config.
