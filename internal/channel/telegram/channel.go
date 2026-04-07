@@ -48,7 +48,6 @@ type Channel struct {
 	name        string // channel name (default: "telegram")
 	token       string
 	instance    string // agent name or instance ID to bind to
-	allowedChat map[int64]bool
 	router      *channel.Router
 	baseURL     string // Telegram API base URL (overridable for tests)
 	pollTimeout int    // getUpdates timeout in seconds
@@ -61,21 +60,15 @@ type Channel struct {
 
 // Config holds the configuration for a Telegram channel.
 type Config struct {
-	Name         string  // channel name (default: "telegram"); use "telegram:<instanceID>" for per-instance channels
-	Token        string  // bot API token (already resolved from secret)
-	Instance     string  // agent name or instance ID
-	AllowedChats []int64 // optional whitelist (empty = allow all)
-	BaseURL      string  // override for testing (default: https://api.telegram.org)
-	PollTimeout  int     // override for testing (default: 30 seconds)
+	Name        string // channel name (default: "telegram"); use "telegram:<instanceID>" for per-instance channels
+	Token       string // bot API token (already resolved from secret)
+	Instance    string // agent name or instance ID
+	BaseURL     string // override for testing (default: https://api.telegram.org)
+	PollTimeout int    // override for testing (default: 30 seconds)
 }
 
 // New creates a new Telegram channel.
 func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
-	allowed := make(map[int64]bool, len(cfg.AllowedChats))
-	for _, id := range cfg.AllowedChats {
-		allowed[id] = true
-	}
-
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = "https://api.telegram.org"
@@ -95,7 +88,6 @@ func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
 		name:        name,
 		token:       cfg.Token,
 		instance:    cfg.Instance,
-		allowedChat: allowed,
 		router:      router,
 		baseURL:     baseURL,
 		pollTimeout: pt,
@@ -188,13 +180,38 @@ func (c *Channel) handleUpdate(ctx context.Context, u update) {
 		return
 	}
 
-	// Whitelist check.
-	if len(c.allowedChat) > 0 && !c.allowedChat[msg.Chat.ID] {
-		c.logger.Debug("ignoring message from non-allowed chat",
-			"chat_id", msg.Chat.ID,
-			"user", msg.From.Username,
-		)
-		return
+	// Access check: approve/block/pending.
+	if ac := c.router.AccessChecker(); ac != nil {
+		senderKey := conversationKeyFor(msg.Chat.ID)
+		displayName := msg.Chat.Title
+		if displayName == "" {
+			displayName = msg.From.FirstName
+			if msg.From.Username != "" {
+				displayName += " (@" + msg.From.Username + ")"
+			}
+		}
+		const sampleLen = 100
+		sample := msg.Text
+		if len(sample) > sampleLen {
+			sample = sample[:sampleLen]
+		}
+
+		result := ac.CheckAccess(c.instance, senderKey, displayName, sample)
+		switch result {
+		case channel.AccessDeny:
+			c.logger.Debug("blocked message from blocked sender",
+				"chat_id", msg.Chat.ID,
+				"user", msg.From.Username,
+			)
+			return
+		case channel.AccessPending:
+			c.logger.Info("sender pending approval",
+				"chat_id", msg.Chat.ID,
+				"user", msg.From.Username,
+			)
+			_ = c.sendMessage(ctx, msg.Chat.ID, "Your message is awaiting approval from the operator.")
+			return
+		}
 	}
 
 	conversationKey := conversationKeyFor(msg.Chat.ID)

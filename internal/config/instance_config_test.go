@@ -59,13 +59,11 @@ func TestSaveAndLoadInstanceConfig_Full(t *testing.T) {
 		ReasoningEffort: "medium",
 		Channels: &InstanceChannelsConfig{
 			Telegram: &InstanceTelegramConfig{
-				BotToken:     "${TELEGRAM_BOT}",
-				AllowedChats: []int64{12345, 67890},
+				BotToken: "${TELEGRAM_BOT}",
 			},
 			Slack: &InstanceSlackConfig{
-				BotToken:        "${SLACK_BOT}",
-				SigningSecret:   "${SLACK_SIGN}",
-				AllowedChannels: []string{"C123", "C456"},
+				BotToken:      "${SLACK_BOT}",
+				SigningSecret: "${SLACK_SIGN}",
 			},
 		},
 	}
@@ -88,17 +86,11 @@ func TestSaveAndLoadInstanceConfig_Full(t *testing.T) {
 	if got.Channels.Telegram.BotToken != "${TELEGRAM_BOT}" {
 		t.Errorf("Telegram.BotToken: got %q", got.Channels.Telegram.BotToken)
 	}
-	if len(got.Channels.Telegram.AllowedChats) != 2 {
-		t.Errorf("Telegram.AllowedChats: got %v", got.Channels.Telegram.AllowedChats)
-	}
 	if got.Channels.Slack == nil {
 		t.Fatal("Slack is nil")
 	}
 	if got.Channels.Slack.BotToken != "${SLACK_BOT}" {
 		t.Errorf("Slack.BotToken: got %q", got.Channels.Slack.BotToken)
-	}
-	if len(got.Channels.Slack.AllowedChannels) != 2 {
-		t.Errorf("Slack.AllowedChannels: got %v", got.Channels.Slack.AllowedChannels)
 	}
 }
 

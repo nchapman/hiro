@@ -157,10 +157,12 @@ function activityFromPath(pathname: string): Activity {
   return "chat"
 }
 
-/** Parse the chat session ID from the URL, if on a /chat/:sessionId route. */
+/** Parse the chat session ID from the URL, matching /chat/:sessionId and /chat/:sessionId/config. */
 function sessionIdFromPath(pathname: string): string | undefined {
-  const match = matchPath("/chat/:sessionId", pathname)
-  return match?.params.sessionId
+  const exact = matchPath("/chat/:sessionId", pathname)
+  if (exact) return exact.params.sessionId
+  const nested = matchPath("/chat/:sessionId/config", pathname)
+  return nested?.params.sessionId
 }
 
 export default function App() {
@@ -249,6 +251,7 @@ export default function App() {
   // Only show a toast when genuinely new nodes appear (not on reconnects).
   const pendingToastId = useRef<string | number | null>(null)
   const knownPendingIds = useRef<Set<string>>(new Set())
+  const lastPendingNodeCount = useRef(0)
   useEffect(() => {
     if (appState.kind !== "ready" || clusterMode !== "leader") return
     const fetchPending = async () => {
@@ -260,12 +263,12 @@ export default function App() {
           const count = data.length
           setPendingNodeCount(count)
 
-          // Detect genuinely new nodes (not previously seen).
           const newNodes = data.filter((n) => !knownPendingIds.current.has(n.node_id))
+          const countChanged = count !== lastPendingNodeCount.current
           knownPendingIds.current = currentIds
+          lastPendingNodeCount.current = count
 
-          if (count > 0 && (newNodes.length > 0 || pendingToastId.current !== null)) {
-            // Show or update the toast whenever there are pending nodes.
+          if (count > 0 && (newNodes.length > 0 || countChanged)) {
             if (pendingToastId.current !== null) {
               toast.dismiss(pendingToastId.current)
             }
@@ -300,8 +303,67 @@ export default function App() {
       }
       setPendingNodeCount(0)
       knownPendingIds.current = new Set()
+      lastPendingNodeCount.current = 0
     }
   }, [appState.kind, clusterMode, navigate])
+
+  // Poll for pending channel senders across all instances.
+  // Only dismiss+recreate the toast when new senders appear or the count changes.
+  const pendingChannelToastId = useRef<string | number | null>(null)
+  const knownPendingSenders = useRef<Set<string>>(new Set())
+  const lastPendingCount = useRef(0)
+  useEffect(() => {
+    if (appState.kind !== "ready") return
+    const fetchPendingChannels = async () => {
+      try {
+        const res = await fetch("/api/channel-access/pending")
+        if (res.ok) {
+          const data: { count: number; items: { key: string; instance_id: string }[] } = await res.json()
+          const currentIds = new Set(data.items.map((s) => `${s.instance_id}:${s.key}`))
+          const newSenders = data.items.filter((s) => !knownPendingSenders.current.has(`${s.instance_id}:${s.key}`))
+          const countChanged = data.count !== lastPendingCount.current
+          knownPendingSenders.current = currentIds
+          lastPendingCount.current = data.count
+
+          if (data.count > 0 && (newSenders.length > 0 || countChanged) ) {
+            if (pendingChannelToastId.current !== null) {
+              toast.dismiss(pendingChannelToastId.current)
+            }
+            const label = data.count === 1
+              ? "A channel sender is waiting for approval"
+              : `${data.count} channel senders are waiting for approval`
+            pendingChannelToastId.current = toast.info(label, {
+              duration: Infinity,
+              action: {
+                label: "Review",
+                onClick: () => {
+                  toast.dismiss(pendingChannelToastId.current!)
+                  pendingChannelToastId.current = null
+                  if (data.items.length > 0) {
+                    navigate(`/chat/${data.items[0].instance_id}/config`)
+                  }
+                },
+              },
+            })
+          } else if (data.count === 0 && pendingChannelToastId.current !== null) {
+            toast.dismiss(pendingChannelToastId.current)
+            pendingChannelToastId.current = null
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    fetchPendingChannels()
+    const interval = setInterval(fetchPendingChannels, 5000)
+    return () => {
+      clearInterval(interval)
+      if (pendingChannelToastId.current !== null) {
+        toast.dismiss(pendingChannelToastId.current)
+        pendingChannelToastId.current = null
+      }
+      knownPendingSenders.current = new Set()
+      lastPendingCount.current = 0
+    }
+  }, [appState.kind, navigate])
 
   // Auto-select first persistent running session (once)
   useEffect(() => {

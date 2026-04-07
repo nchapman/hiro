@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -94,7 +95,13 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     }
   }, [session?.id])
 
-  const [configOpen, setConfigOpen] = useState(false)
+  const location = useLocation()
+  const nav = useNavigate()
+  const configOpen = useMemo(() => session ? location.pathname === `/chat/${session.id}/config` : false, [location.pathname, session])
+  const setConfigOpen = useCallback((open: boolean) => {
+    if (!session) return
+    nav(open ? `/chat/${session.id}/config` : `/chat/${session.id}`, { replace: true })
+  }, [session, nav])
   const isStopped = session?.status === "stopped"
   const isRoot = session ? !session.mode || !session.parent_id : false
   const wsSessionId = isStopped ? null : (session?.id ?? null)

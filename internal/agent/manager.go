@@ -86,13 +86,14 @@ type Manager struct {
 	cp      ControlPlane // operator-level tool/secret config
 	logger  *slog.Logger
 
-	workerFactory  WorkerFactory          // creates agent workers (default = OS processes)
-	uidPool        *uidpool.Pool          // per-agent Unix user isolation; nil = disabled
-	pdb            *platformdb.DB         // unified platform database
-	clusterService *cluster.LeaderService // cluster orchestration; nil = standalone
-	scheduler      *Scheduler             // cron scheduler; nil until SetScheduler called
-	timezone       *time.Location         // server timezone for cron evaluation
-	lifecycleHook  InstanceLifecycleHook  // optional hook for instance start/stop events
+	workerFactory  WorkerFactory               // creates agent workers (default = OS processes)
+	uidPool        *uidpool.Pool               // per-agent Unix user isolation; nil = disabled
+	pdb            *platformdb.DB              // unified platform database
+	clusterService *cluster.LeaderService      // cluster orchestration; nil = standalone
+	scheduler      *Scheduler                  // cron scheduler; nil until SetScheduler called
+	timezone       *time.Location              // server timezone for cron evaluation
+	lifecycleHook  InstanceLifecycleHook       // optional hook for instance start/stop events
+	configLocker   config.InstanceConfigLocker // serializes config.yaml read-modify-write; nil = no locking
 }
 
 // InstanceLifecycleHook is called when instances start or stop, allowing

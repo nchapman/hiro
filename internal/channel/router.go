@@ -29,10 +29,11 @@ var sensitiveCommands = map[string]bool{
 // notifications back to the originating channels. It is the bridge
 // between channels and the Manager.
 type Router struct {
-	manager    ManagerInterface
-	cmdHandler CommandHandler
-	usage      *UsageQuerier
-	ctx        context.Context // parent context for notification pumps
+	manager       ManagerInterface
+	cmdHandler    CommandHandler
+	usage         *UsageQuerier
+	accessChecker AccessChecker
+	ctx           context.Context // parent context for notification pumps
 
 	mu       sync.RWMutex
 	channels map[string]Channel // name → channel
@@ -95,6 +96,16 @@ func (r *Router) GetBinding(conversationKey string) *Binding {
 // need to resolve instance IDs from bindings.
 func (r *Router) Manager() ManagerInterface {
 	return r.manager
+}
+
+// SetAccessChecker sets the access checker for channel sender approval.
+func (r *Router) SetAccessChecker(ac AccessChecker) {
+	r.accessChecker = ac
+}
+
+// AccessChecker returns the configured access checker, or nil.
+func (r *Router) AccessChecker() AccessChecker {
+	return r.accessChecker
 }
 
 // Bind creates a mapping from a conversation key to a target (instance ID or

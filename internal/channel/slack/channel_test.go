@@ -493,16 +493,21 @@ func TestEventCallback_IgnoresSubtypes(t *testing.T) {
 	}
 }
 
-func TestAllowedChannels(t *testing.T) {
+func TestAccessChecker(t *testing.T) {
 	t.Parallel()
 
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
 	mgr.agentInstances["operator"] = "inst-1"
 
-	var sentCount atomic.Int32
-	slackAPI := mockSlackAPI(t, func(string, string, string) error {
-		sentCount.Add(1)
+	var dispatchCount atomic.Int32
+	var pendingReplies atomic.Int32
+	slackAPI := mockSlackAPI(t, func(ch, text, ts string) error {
+		if text == "Your message is awaiting approval from the operator." {
+			pendingReplies.Add(1)
+		} else {
+			dispatchCount.Add(1)
+		}
 		return nil
 	})
 	defer slackAPI.Close()
@@ -510,13 +515,19 @@ func TestAllowedChannels(t *testing.T) {
 	secret := "test-secret"
 	mux := http.NewServeMux()
 	router := testRouter(t, mgr)
+	router.SetAccessChecker(&mockAccessChecker{
+		results: map[string]channel.AccessResult{
+			"slack:C_BLOCKED": channel.AccessDeny,
+			"slack:C_PENDING": channel.AccessPending,
+			"slack:C_ALLOWED": channel.AccessAllow,
+		},
+	})
 	ch := New(Config{
-		BotToken:        "xoxb-test",
-		SigningSecret:   secret,
-		Instance:        "operator",
-		AllowedChannels: []string{"C_ALLOWED"},
-		APIURL:          slackAPI.URL,
-		Mux:             mux,
+		BotToken:      "xoxb-test",
+		SigningSecret: secret,
+		Instance:      "operator",
+		APIURL:        slackAPI.URL,
+		Mux:           mux,
 	}, router, slog.Default())
 	router.Register(ch)
 	_ = ch.Start(t.Context())
@@ -533,12 +544,24 @@ func TestAllowedChannels(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
+	// Message from pending channel.
+	pending := map[string]any{
+		"type": "event_callback",
+		"event": map[string]any{
+			"type": "message", "channel": "C_PENDING", "user": "U1",
+			"text": "hi", "ts": "1.2",
+		},
+	}
+	req = makeEventRequest(t, "/api/slack/events", secret, pending)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
 	// Message from allowed channel.
 	allowed := map[string]any{
 		"type": "event_callback",
 		"event": map[string]any{
 			"type": "message", "channel": "C_ALLOWED", "user": "U1",
-			"text": "hi", "ts": "1.2",
+			"text": "hi", "ts": "1.3",
 		},
 	}
 	req = makeEventRequest(t, "/api/slack/events", secret, allowed)
@@ -546,12 +569,26 @@ func TestAllowedChannels(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	waitFor(t, 2*time.Second, func() bool {
-		return sentCount.Load() >= 1
+		return dispatchCount.Load() >= 1 && pendingReplies.Load() >= 1
 	})
 
-	if n := sentCount.Load(); n != 1 {
-		t.Errorf("sent %d messages, want 1 (only allowed channel)", n)
+	if n := dispatchCount.Load(); n != 1 {
+		t.Errorf("sent %d dispatch messages, want 1 (only allowed channel)", n)
 	}
+	if n := pendingReplies.Load(); n != 1 {
+		t.Errorf("sent %d pending replies, want 1", n)
+	}
+}
+
+type mockAccessChecker struct {
+	results map[string]channel.AccessResult
+}
+
+func (m *mockAccessChecker) CheckAccess(_, senderKey, _, _ string) channel.AccessResult {
+	if r, ok := m.results[senderKey]; ok {
+		return r
+	}
+	return channel.AccessPending
 }
 
 func TestDeliver_PostsToThread(t *testing.T) {

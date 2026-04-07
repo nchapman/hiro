@@ -292,7 +292,7 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 	mgr.StopInstance(childID)
 
 	// Add Telegram channel.
-	body := `{"telegram": {"bot_token": "123456:AAHfoobar", "allowed_chats": [111, 222]}}`
+	body := `{"telegram": {"bot_token": "123456:AAHfoobar"}}`
 	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -312,9 +312,6 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 	}
 	if resp.Telegram.BotToken != "••••obar" {
 		t.Errorf("telegram.bot_token=%q, want masked ••••obar", resp.Telegram.BotToken)
-	}
-	if len(resp.Telegram.AllowedChats) != 2 {
-		t.Errorf("telegram.allowed_chats=%v, want 2 items", resp.Telegram.AllowedChats)
 	}
 
 	// Remove Telegram channel (empty bot_token).
@@ -345,7 +342,7 @@ func TestPutInstanceConfig_SlackChannel(t *testing.T) {
 	mgr.StopInstance(childID)
 
 	// Add Slack channel.
-	body := `{"slack": {"bot_token": "xoxb-test-token", "signing_secret": "secret123", "allowed_channels": ["C123"]}}`
+	body := `{"slack": {"bot_token": "xoxb-test-token", "signing_secret": "secret123"}}`
 	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -367,9 +364,6 @@ func TestPutInstanceConfig_SlackChannel(t *testing.T) {
 	}
 	if resp.Slack.SigningSecret != "••••t123" {
 		t.Errorf("slack.signing_secret=%q, want masked ••••t123", resp.Slack.SigningSecret)
-	}
-	if len(resp.Slack.AllowedChannels) != 1 || resp.Slack.AllowedChannels[0] != "C123" {
-		t.Errorf("slack.allowed_channels=%v, want [C123]", resp.Slack.AllowedChannels)
 	}
 }
 

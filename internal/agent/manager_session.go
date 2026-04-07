@@ -76,25 +76,18 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		}
 	}
 
-	// Persist config to filesystem so it survives restarts.
-	// Read-modify-write to preserve existing channel config.
-	// inst.mu serializes model/effort writers but does not protect
-	// against concurrent writers of other config sections.
-	instDir := m.instanceDir(instanceID)
-	existing, loadErr := config.LoadInstanceConfig(instDir)
-	if loadErr != nil {
-		m.logger.Warn("failed to load instance config for update; channel config may be lost",
-			"instance", instanceID, "error", loadErr)
-	}
-	existing.Model = inst.info.Model
-	existing.ReasoningEffort = inst.loop.ReasoningEffort()
-	if allowedTools != nil {
-		existing.AllowedTools = allowedTools
-		existing.DisallowedTools = disallowedTools
-	}
-	if err := config.SaveInstanceConfig(instDir, existing); err != nil {
-		m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
-	}
+	// Persist config to filesystem, serialized with other config.yaml writers.
+	newModel := inst.info.Model
+	newEffort := inst.loop.ReasoningEffort()
+	m.persistInstanceConfig(instanceID, func(existing *config.InstanceConfig) error {
+		existing.Model = newModel
+		existing.ReasoningEffort = newEffort
+		if allowedTools != nil {
+			existing.AllowedTools = allowedTools
+			existing.DisallowedTools = disallowedTools
+		}
+		return nil
+	})
 
 	return nil
 }
@@ -127,27 +120,45 @@ func (m *Manager) UpdateStoppedInstanceConfig(instanceID, model string, reasonin
 		return fmt.Errorf("invalid reasoning effort %q", *reasoningEffort)
 	}
 
-	instDir := m.instanceDir(instanceID)
-	existing, loadErr := config.LoadInstanceConfig(instDir)
-	if loadErr != nil {
-		m.logger.Warn("failed to load instance config for stopped update",
-			"instance", instanceID, "error", loadErr)
-	}
-	if model != "" {
-		existing.Model = model
-	}
-	if reasoningEffort != nil {
-		existing.ReasoningEffort = *reasoningEffort
-	}
-	if allowedTools != nil {
-		existing.AllowedTools = allowedTools
-		existing.DisallowedTools = disallowedTools
-	}
-	return config.SaveInstanceConfig(instDir, existing)
+	return m.persistInstanceConfigErr(instanceID, func(existing *config.InstanceConfig) error {
+		if model != "" {
+			existing.Model = model
+		}
+		if reasoningEffort != nil {
+			existing.ReasoningEffort = *reasoningEffort
+		}
+		if allowedTools != nil {
+			existing.AllowedTools = allowedTools
+			existing.DisallowedTools = disallowedTools
+		}
+		return nil
+	})
 }
 
 // applyToolOverrides validates, recomputes, and pushes new tool declarations
 // to a running instance. Caller must hold inst.mu.
+// persistInstanceConfig applies a modify function to the instance's config.yaml
+// through the config locker (if set) or directly. Errors are logged, not returned.
+func (m *Manager) persistInstanceConfig(instanceID string, modify func(*config.InstanceConfig) error) {
+	if err := m.persistInstanceConfigErr(instanceID, modify); err != nil {
+		m.logger.Warn("failed to persist instance config", "instance", instanceID, "error", err)
+	}
+}
+
+// persistInstanceConfigErr applies a modify function to the instance's config.yaml
+// through the config locker (if set) or directly.
+func (m *Manager) persistInstanceConfigErr(instanceID string, modify func(*config.InstanceConfig) error) error {
+	if m.configLocker != nil {
+		return m.configLocker.ModifyConfig(instanceID, modify)
+	}
+	instDir := m.instanceDir(instanceID)
+	existing, _ := config.LoadInstanceConfig(instDir)
+	if err := modify(&existing); err != nil {
+		return err
+	}
+	return config.SaveInstanceConfig(instDir, existing)
+}
+
 func (m *Manager) applyToolOverrides(inst *instance, allowedTools, disallowedTools []string) error {
 	if _, err := toolrules.ParseRules(allowedTools); err != nil {
 		return fmt.Errorf("invalid allowed tool rules: %w", err)

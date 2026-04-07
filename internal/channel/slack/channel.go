@@ -41,38 +41,31 @@ const (
 
 // Channel is the Slack messaging channel.
 type Channel struct {
-	name           string // channel name (default: "slack")
-	botToken       string
-	signingSecret  string
-	instance       string // agent name or instance ID to bind to
-	allowedChannel map[string]bool
-	router         *channel.Router
-	apiURL         string // Slack API base URL (overridable for tests)
-	client         *http.Client
-	mux            *http.ServeMux // HTTP mux to register webhook routes on
-	routePattern   string         // HTTP route for webhook events
-	logger         *slog.Logger
+	name          string // channel name (default: "slack")
+	botToken      string
+	signingSecret string
+	instance      string // agent name or instance ID to bind to
+	router        *channel.Router
+	apiURL        string // Slack API base URL (overridable for tests)
+	client        *http.Client
+	mux           *http.ServeMux // HTTP mux to register webhook routes on
+	routePattern  string         // HTTP route for webhook events
+	logger        *slog.Logger
 }
 
 // Config holds the configuration for a Slack channel.
 type Config struct {
-	Name            string         // channel name (default: "slack"); use "slack:<instanceID>" for per-instance channels
-	BotToken        string         // bot OAuth token (already resolved)
-	SigningSecret   string         // signing secret (already resolved)
-	Instance        string         // agent name or instance ID
-	AllowedChannels []string       // optional whitelist (empty = allow all)
-	APIURL          string         // override for testing (default: https://slack.com/api)
-	Mux             *http.ServeMux // HTTP mux to register routes on
-	RoutePattern    string         // HTTP route pattern (default: "POST /api/slack/events")
+	Name          string         // channel name (default: "slack"); use "slack:<instanceID>" for per-instance channels
+	BotToken      string         // bot OAuth token (already resolved)
+	SigningSecret string         // signing secret (already resolved)
+	Instance      string         // agent name or instance ID
+	APIURL        string         // override for testing (default: https://slack.com/api)
+	Mux           *http.ServeMux // HTTP mux to register routes on
+	RoutePattern  string         // HTTP route pattern (default: "POST /api/slack/events")
 }
 
 // New creates a new Slack channel.
 func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
-	allowed := make(map[string]bool, len(cfg.AllowedChannels))
-	for _, id := range cfg.AllowedChannels {
-		allowed[id] = true
-	}
-
 	apiURL := cfg.APIURL
 	if apiURL == "" {
 		apiURL = slackAPIURL
@@ -89,17 +82,16 @@ func New(cfg Config, router *channel.Router, logger *slog.Logger) *Channel {
 	}
 
 	return &Channel{
-		name:           name,
-		botToken:       cfg.BotToken,
-		signingSecret:  cfg.SigningSecret,
-		instance:       cfg.Instance,
-		allowedChannel: allowed,
-		router:         router,
-		apiURL:         apiURL,
-		client:         &http.Client{Timeout: httpClientTimeout},
-		mux:            cfg.Mux,
-		routePattern:   routePattern,
-		logger:         logger.With("channel", name),
+		name:          name,
+		botToken:      cfg.BotToken,
+		signingSecret: cfg.SigningSecret,
+		instance:      cfg.Instance,
+		router:        router,
+		apiURL:        apiURL,
+		client:        &http.Client{Timeout: httpClientTimeout},
+		mux:           cfg.Mux,
+		routePattern:  routePattern,
+		logger:        logger.With("channel", name),
 	}
 }
 
@@ -202,13 +194,37 @@ func (c *Channel) handleEventCallback(ctx context.Context, body []byte) {
 		return
 	}
 
-	// Whitelist check.
-	if len(c.allowedChannel) > 0 && !c.allowedChannel[evt.Channel] {
-		c.logger.Debug("ignoring message from non-allowed channel",
-			"channel", evt.Channel,
-			"user", evt.User,
-		)
-		return
+	// Access check: approve/block/pending.
+	if ac := c.router.AccessChecker(); ac != nil {
+		senderKey := "slack:" + evt.Channel
+		const sampleLen = 100
+		sample := evt.Text
+		if len(sample) > sampleLen {
+			sample = sample[:sampleLen]
+		}
+
+		// Slack events don't include the channel name, so we use the channel ID
+		// as the display name. The operator can identify it in their Slack workspace.
+		result := ac.CheckAccess(c.instance, senderKey, evt.Channel, sample)
+		switch result {
+		case channel.AccessDeny:
+			c.logger.Debug("blocked message from blocked channel",
+				"channel", evt.Channel,
+				"user", evt.User,
+			)
+			return
+		case channel.AccessPending:
+			c.logger.Info("channel pending approval",
+				"channel", evt.Channel,
+				"user", evt.User,
+			)
+			threadTS := evt.ThreadTS
+			if threadTS == "" {
+				threadTS = evt.TS
+			}
+			_ = c.postMessage(ctx, evt.Channel, threadTS, "Your message is awaiting approval from the operator.")
+			return
+		}
 	}
 
 	c.logger.Info("received message",

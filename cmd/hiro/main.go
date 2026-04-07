@@ -435,6 +435,10 @@ func (a *app) startManager() error {
 	// so restored instances get their per-instance channels started.
 	usage := &channel.UsageQuerier{PDB: a.pdb, Manager: a.mgr}
 	a.chanRouter = channel.NewRouter(a.ctx, a.mgr, a.cp, usage, a.logger)
+	ac := channel.NewConfigAccessChecker(a.mgr, a.logger)
+	a.chanRouter.SetAccessChecker(ac)
+	a.srv.SetAccessChecker(ac)
+	a.mgr.SetConfigLocker(ac)
 	a.chanMgr = newChannelManager(a.chanRouter, a.cp, a.srv.Mux(), a.logger)
 	a.mgr.SetLifecycleHook(a.chanMgr)
 

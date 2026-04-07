@@ -120,10 +120,9 @@ func (cm *channelManager) startTelegram(ctx context.Context, instanceID string, 
 
 	channelName := "telegram:" + instanceID
 	tg := telegramchannel.New(telegramchannel.Config{
-		Name:         channelName,
-		Token:        token,
-		Instance:     instanceID,
-		AllowedChats: cfg.AllowedChats,
+		Name:     channelName,
+		Token:    token,
+		Instance: instanceID,
 	}, cm.router, cm.logger)
 	cm.router.Register(tg)
 
@@ -146,13 +145,12 @@ func (cm *channelManager) startSlack(ctx context.Context, instanceID string, cfg
 	routePattern := fmt.Sprintf("POST /api/instances/%s/slack/events", instanceID)
 
 	sc := slackchannel.New(slackchannel.Config{
-		Name:            channelName,
-		BotToken:        botToken,
-		SigningSecret:   signingSecret,
-		Instance:        instanceID,
-		AllowedChannels: cfg.AllowedChannels,
-		Mux:             cm.mux,
-		RoutePattern:    routePattern,
+		Name:          channelName,
+		BotToken:      botToken,
+		SigningSecret: signingSecret,
+		Instance:      instanceID,
+		Mux:           cm.mux,
+		RoutePattern:  routePattern,
 	}, cm.router, cm.logger)
 	cm.router.Register(sc)
 

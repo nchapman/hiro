@@ -32,26 +32,27 @@ type CommandHandler interface {
 
 // Server is the HTTP server for the Hiro leader.
 type Server struct {
-	manager         *agent.Manager             // instance manager (nil = no instances)
-	leaderID        string                     // ID of the leader instance for chat
-	cmdHandler      CommandHandler             // control plane command handler (nil = no commands)
-	cp              *controlplane.ControlPlane // control plane (for auth + settings)
-	pdb             *platformdb.DB             // platform database (nil = no usage endpoints)
-	router          *channel.Router            // channel router (nil = not yet wired)
-	webChannel      *webchannel.Channel        // web UI channel (nil = not yet wired)
-	startManager    func() error               // callback to start the instance manager (set by main)
-	startCluster    func() error               // callback to start the cluster gRPC server (set by main)
-	requestRestart  func()                     // callback to request a process restart (set by main)
-	nodeRegistry    *cluster.NodeRegistry      // cluster node registry (leader mode only)
-	pendingRegistry *cluster.PendingRegistry   // pending node approval registry (leader mode only)
-	workerStatus    func() string              // returns worker connection status (worker mode only)
-	disconnectNode  func(string)               // forcefully disconnect a node (leader mode only)
-	termSessions    *TerminalSessionManager    // terminal session manager (nil = no terminal)
-	webFS           fs.FS                      // embedded web UI files (nil = no UI serving)
-	rootDir         string                     // platform root directory (for terminal working dir)
-	watcher         *watcher.Watcher           // filesystem watcher for HIRO_ROOT (nil = no watching)
-	logHandler      *loghandler.Handler        // log handler for real-time streaming (nil = no log SSE)
-	limiter         *loginLimiter              // login rate limiter (per-server for testability)
+	manager         *agent.Manager               // instance manager (nil = no instances)
+	leaderID        string                       // ID of the leader instance for chat
+	cmdHandler      CommandHandler               // control plane command handler (nil = no commands)
+	cp              *controlplane.ControlPlane   // control plane (for auth + settings)
+	pdb             *platformdb.DB               // platform database (nil = no usage endpoints)
+	router          *channel.Router              // channel router (nil = not yet wired)
+	accessChecker   *channel.ConfigAccessChecker // channel sender approval (nil = not yet wired)
+	webChannel      *webchannel.Channel          // web UI channel (nil = not yet wired)
+	startManager    func() error                 // callback to start the instance manager (set by main)
+	startCluster    func() error                 // callback to start the cluster gRPC server (set by main)
+	requestRestart  func()                       // callback to request a process restart (set by main)
+	nodeRegistry    *cluster.NodeRegistry        // cluster node registry (leader mode only)
+	pendingRegistry *cluster.PendingRegistry     // pending node approval registry (leader mode only)
+	workerStatus    func() string                // returns worker connection status (worker mode only)
+	disconnectNode  func(string)                 // forcefully disconnect a node (leader mode only)
+	termSessions    *TerminalSessionManager      // terminal session manager (nil = no terminal)
+	webFS           fs.FS                        // embedded web UI files (nil = no UI serving)
+	rootDir         string                       // platform root directory (for terminal working dir)
+	watcher         *watcher.Watcher             // filesystem watcher for HIRO_ROOT (nil = no watching)
+	logHandler      *loghandler.Handler          // log handler for real-time streaming (nil = no log SSE)
+	limiter         *loginLimiter                // login rate limiter (per-server for testability)
 	mux             *http.ServeMux
 	logger          *slog.Logger
 }
@@ -107,6 +108,11 @@ func (s *Server) SetWatcher(w *watcher.Watcher) {
 func (s *Server) SetRouter(r *channel.Router, wc *webchannel.Channel) {
 	s.router = r
 	s.webChannel = wc
+}
+
+// SetAccessChecker sets the channel access checker for sender approval management.
+func (s *Server) SetAccessChecker(ac *channel.ConfigAccessChecker) {
+	s.accessChecker = ac
 }
 
 // Mux returns the HTTP mux for registering additional routes (e.g. Slack webhooks).
@@ -171,6 +177,11 @@ func (s *Server) instanceRoutes() {
 	s.mux.HandleFunc("DELETE /api/instances/{id}", s.requireAuth(s.handleDeleteInstance))
 	s.mux.HandleFunc("GET /api/instances/{id}/config", s.requireAuth(s.handleGetInstanceConfig))
 	s.mux.HandleFunc("PUT /api/instances/{id}/config", s.requireAuth(s.handlePutInstanceConfig))
+	s.mux.HandleFunc("GET /api/instances/{id}/channel-access", s.requireAuth(s.handleListChannelAccess))
+	s.mux.HandleFunc("POST /api/instances/{id}/channel-access/{senderKey}/approve", s.requireAuth(s.handleApproveChannelSender))
+	s.mux.HandleFunc("POST /api/instances/{id}/channel-access/{senderKey}/block", s.requireAuth(s.handleBlockChannelSender))
+	s.mux.HandleFunc("DELETE /api/instances/{id}/channel-access/{senderKey}", s.requireAuth(s.handleDismissChannelSender))
+	s.mux.HandleFunc("GET /api/channel-access/pending", s.requireAuth(s.handleGlobalPendingChannelAccess))
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleSessionMessages))
 	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
 	s.mux.HandleFunc("GET /api/provider-types", s.requireAuth(s.handleListProviderTypes))

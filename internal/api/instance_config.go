@@ -27,14 +27,12 @@ type instanceConfigResponse struct {
 }
 
 type telegramConfigJSON struct {
-	BotToken     string  `json:"bot_token"`
-	AllowedChats []int64 `json:"allowed_chats,omitempty"`
+	BotToken string `json:"bot_token"`
 }
 
 type slackConfigJSON struct {
-	BotToken        string   `json:"bot_token"`
-	SigningSecret   string   `json:"signing_secret"`
-	AllowedChannels []string `json:"allowed_channels,omitempty"`
+	BotToken      string `json:"bot_token"`
+	SigningSecret string `json:"signing_secret"`
 }
 
 // maskToken masks a secret value for display. Returns "" for empty strings.
@@ -127,10 +125,10 @@ func (s *Server) buildConfigResponse(id string, cfg config.InstanceConfig) insta
 
 	if ch := cfg.Channels; ch != nil {
 		if tg := ch.Telegram; tg != nil {
-			resp.Telegram = &telegramConfigJSON{BotToken: maskToken(tg.BotToken), AllowedChats: tg.AllowedChats}
+			resp.Telegram = &telegramConfigJSON{BotToken: maskToken(tg.BotToken)}
 		}
 		if sl := ch.Slack; sl != nil {
-			resp.Slack = &slackConfigJSON{BotToken: maskToken(sl.BotToken), SigningSecret: maskToken(sl.SigningSecret), AllowedChannels: sl.AllowedChannels}
+			resp.Slack = &slackConfigJSON{BotToken: maskToken(sl.BotToken), SigningSecret: maskToken(sl.SigningSecret)}
 		}
 	}
 	return resp
@@ -240,24 +238,40 @@ func applyPersonaUpdate(instDir string, req instanceConfigRequest) error {
 }
 
 // applyChannelUpdate writes channel config to config.yaml and restarts channel
-// bindings for running instances.
+// bindings for running instances. Uses the access checker's per-instance lock
+// to prevent lost-update races with concurrent sender status changes.
 func (s *Server) applyChannelUpdate(id, instDir string, info agent.InstanceInfo, req instanceConfigRequest) error {
-	existing, _ := config.LoadInstanceConfig(instDir)
-	if existing.Channels == nil {
-		existing.Channels = &config.InstanceChannelsConfig{}
+	modify := func(existing *config.InstanceConfig) error {
+		if existing.Channels == nil {
+			existing.Channels = &config.InstanceChannelsConfig{}
+		}
+		if req.Telegram != nil {
+			existing.Channels.Telegram = mapTelegramConfig(req.Telegram)
+		}
+		if req.Slack != nil {
+			existing.Channels.Slack = mapSlackConfig(req.Slack)
+		}
+		if existing.Channels.Telegram == nil && existing.Channels.Slack == nil && len(existing.Channels.Senders) == 0 {
+			existing.Channels = nil
+		}
+		return nil
 	}
 
-	if req.Telegram != nil {
-		existing.Channels.Telegram = mapTelegramConfig(req.Telegram)
+	var err error
+	if s.accessChecker != nil {
+		err = s.accessChecker.ModifyConfig(id, modify)
+	} else {
+		// Fallback for tests without an access checker.
+		existing, loadErr := config.LoadInstanceConfig(instDir)
+		if loadErr != nil {
+			return fmt.Errorf("loading instance config: %w", loadErr)
+		}
+		if modErr := modify(&existing); modErr != nil {
+			return modErr
+		}
+		err = config.SaveInstanceConfig(instDir, existing)
 	}
-	if req.Slack != nil {
-		existing.Channels.Slack = mapSlackConfig(req.Slack)
-	}
-	if existing.Channels.Telegram == nil && existing.Channels.Slack == nil {
-		existing.Channels = nil
-	}
-
-	if err := config.SaveInstanceConfig(instDir, existing); err != nil {
+	if err != nil {
 		return fmt.Errorf("writing channel config: %w", err)
 	}
 
@@ -272,7 +286,7 @@ func mapTelegramConfig(j *telegramConfigJSON) *config.InstanceTelegramConfig {
 	if j.BotToken == "" {
 		return nil
 	}
-	return &config.InstanceTelegramConfig{BotToken: j.BotToken, AllowedChats: j.AllowedChats}
+	return &config.InstanceTelegramConfig{BotToken: j.BotToken}
 }
 
 // mapSlackConfig converts JSON request to config struct. Empty bot_token removes the channel.
@@ -280,5 +294,5 @@ func mapSlackConfig(j *slackConfigJSON) *config.InstanceSlackConfig {
 	if j.BotToken == "" {
 		return nil
 	}
-	return &config.InstanceSlackConfig{BotToken: j.BotToken, SigningSecret: j.SigningSecret, AllowedChannels: j.AllowedChannels}
+	return &config.InstanceSlackConfig{BotToken: j.BotToken, SigningSecret: j.SigningSecret}
 }

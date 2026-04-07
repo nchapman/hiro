@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 
 	"github.com/nchapman/hiro/internal/cluster"
+	"github.com/nchapman/hiro/internal/config"
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
@@ -111,6 +112,12 @@ func (m *Manager) SecretEnv() []string {
 // Must be set before RestoreInstances so restored instances trigger the hook.
 func (m *Manager) SetLifecycleHook(hook InstanceLifecycleHook) {
 	m.lifecycleHook = hook
+}
+
+// SetConfigLocker sets the instance config locker for serializing config.yaml
+// read-modify-write operations across all writers.
+func (m *Manager) SetConfigLocker(locker config.InstanceConfigLocker) {
+	m.configLocker = locker
 }
 
 // RestartChannels tears down and re-creates channels for a running instance

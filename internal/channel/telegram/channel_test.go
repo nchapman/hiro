@@ -263,7 +263,7 @@ func TestFormatEvents_WithError(t *testing.T) {
 	}
 }
 
-func TestAllowedChats(t *testing.T) {
+func TestAccessChecker(t *testing.T) {
 	t.Parallel()
 
 	mgr := newMockManager()
@@ -271,28 +271,39 @@ func TestAllowedChats(t *testing.T) {
 	mgr.agentInstances["operator"] = "inst-1"
 
 	var sentMessages atomic.Int32
+	var pendingReplies atomic.Int32
 	srv := mockTelegramAPI(t, func(offset int64) []update {
 		if offset == 0 {
 			return []update{
-				{UpdateID: 1, Message: &message{Chat: chat{ID: 999}, From: user{Username: "attacker"}, Text: "hi"}},
-				{UpdateID: 2, Message: &message{Chat: chat{ID: 100}, From: user{Username: "allowed"}, Text: "hello"}},
+				{UpdateID: 1, Message: &message{Chat: chat{ID: 999}, From: user{Username: "blocked"}, Text: "hi"}},
+				{UpdateID: 2, Message: &message{Chat: chat{ID: 888}, From: user{Username: "unknown"}, Text: "hello"}},
+				{UpdateID: 3, Message: &message{Chat: chat{ID: 100}, From: user{Username: "allowed"}, Text: "hello"}},
 			}
 		}
-		// Return empty after first batch — poll loop will re-poll.
 		return nil
 	}, func(chatID int64, text string) error {
-		sentMessages.Add(1)
+		if text == "Your message is awaiting approval from the operator." {
+			pendingReplies.Add(1)
+		} else {
+			sentMessages.Add(1)
+		}
 		return nil
 	})
 	defer srv.Close()
 
 	router := testRouter(t, mgr)
+	router.SetAccessChecker(&mockAccessChecker{
+		results: map[string]channel.AccessResult{
+			"tg:999": channel.AccessDeny,
+			"tg:888": channel.AccessPending,
+			"tg:100": channel.AccessAllow,
+		},
+	})
 	ch := New(Config{
-		Token:        "test-token",
-		Instance:     "operator",
-		AllowedChats: []int64{100}, // Only allow chat 100
-		BaseURL:      srv.URL,
-		PollTimeout:  1,
+		Token:       "test-token",
+		Instance:    "operator",
+		BaseURL:     srv.URL,
+		PollTimeout: 1,
 	}, router, slog.Default())
 	router.Register(ch)
 
@@ -300,13 +311,26 @@ func TestAllowedChats(t *testing.T) {
 	defer cancel()
 	_ = ch.Start(ctx)
 
-	// Wait for processing.
 	time.Sleep(500 * time.Millisecond)
 
-	// Only the allowed chat (100) should get a response.
+	// Blocked chat: no messages. Pending: 1 pending reply. Allowed: 1 dispatched.
 	if n := sentMessages.Load(); n != 1 {
-		t.Errorf("sent %d messages, want 1 (only allowed chat)", n)
+		t.Errorf("sent %d dispatch messages, want 1 (only allowed chat)", n)
 	}
+	if n := pendingReplies.Load(); n != 1 {
+		t.Errorf("sent %d pending replies, want 1", n)
+	}
+}
+
+type mockAccessChecker struct {
+	results map[string]channel.AccessResult
+}
+
+func (m *mockAccessChecker) CheckAccess(_, senderKey, _, _ string) channel.AccessResult {
+	if r, ok := m.results[senderKey]; ok {
+		return r
+	}
+	return channel.AccessPending
 }
 
 func TestEndToEnd_MessageAndResponse(t *testing.T) {
