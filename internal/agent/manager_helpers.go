@@ -115,13 +115,14 @@ func (m *Manager) SetLifecycleHook(hook InstanceLifecycleHook) {
 
 // RestartChannels tears down and re-creates channels for a running instance
 // by cycling the lifecycle hook. This is used when channel config changes
-// via the API. No-op if no lifecycle hook is set.
-func (m *Manager) RestartChannels(ctx context.Context, instanceID string) {
+// via the API. Uses the manager's long-lived context so channels survive
+// beyond the HTTP request that triggered the restart.
+func (m *Manager) RestartChannels(instanceID string) {
 	if m.lifecycleHook == nil {
 		return
 	}
 	m.lifecycleHook.OnInstanceStop(instanceID)
-	if err := m.lifecycleHook.OnInstanceStart(ctx, instanceID, m.instanceDir(instanceID)); err != nil {
+	if err := m.lifecycleHook.OnInstanceStart(m.ctx, instanceID, m.instanceDir(instanceID)); err != nil {
 		m.logger.Warn("lifecycle hook restart failed", "instance", instanceID, "error", err)
 	}
 }

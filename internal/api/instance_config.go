@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,7 +178,7 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := s.applyInstanceFileUpdates(r.Context(), id, info, req); err != nil {
+	if err := s.applyInstanceFileUpdates(id, info, req); err != nil {
 		s.logger.Error("failed to write instance files", "id", id, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -189,7 +188,7 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 }
 
 // applyInstanceFileUpdates writes persona.md, memory.md, and channel config changes.
-func (s *Server) applyInstanceFileUpdates(ctx context.Context, id string, info agent.InstanceInfo, req instanceConfigRequest) error {
+func (s *Server) applyInstanceFileUpdates(id string, info agent.InstanceInfo, req instanceConfigRequest) error {
 	instDir := s.manager.InstanceDir(id)
 
 	if err := applyPersonaUpdate(instDir, req); err != nil {
@@ -203,7 +202,7 @@ func (s *Server) applyInstanceFileUpdates(ctx context.Context, id string, info a
 	}
 
 	if req.Telegram != nil || req.Slack != nil {
-		if err := s.applyChannelUpdate(ctx, id, instDir, info, req); err != nil {
+		if err := s.applyChannelUpdate(id, instDir, info, req); err != nil {
 			return err
 		}
 	}
@@ -235,7 +234,7 @@ func applyPersonaUpdate(instDir string, req instanceConfigRequest) error {
 
 // applyChannelUpdate writes channel config to config.yaml and restarts channel
 // bindings for running instances.
-func (s *Server) applyChannelUpdate(ctx context.Context, id, instDir string, info agent.InstanceInfo, req instanceConfigRequest) error {
+func (s *Server) applyChannelUpdate(id, instDir string, info agent.InstanceInfo, req instanceConfigRequest) error {
 	existing, _ := config.LoadInstanceConfig(instDir)
 	if existing.Channels == nil {
 		existing.Channels = &config.InstanceChannelsConfig{}
@@ -256,7 +255,7 @@ func (s *Server) applyChannelUpdate(ctx context.Context, id, instDir string, inf
 	}
 
 	if info.Status == agent.InstanceStatusRunning {
-		s.manager.RestartChannels(ctx, id)
+		s.manager.RestartChannels(id)
 	}
 	return nil
 }

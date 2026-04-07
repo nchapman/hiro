@@ -13,6 +13,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -208,9 +213,15 @@ export default function InstanceConfigModal({
               </div>
             )}
 
+            {/* Channels — open by default */}
+            <ChannelsSection
+              telegram={channels.telegram}
+              slack={channels.slack}
+              onConnect={connectChannel}
+            />
+
             {/* Model & Reasoning */}
-            <section className="rounded-lg bg-background p-4">
-              <h3 className="mb-3 text-sm font-medium">Model</h3>
+            <AccordionSection title="Model">
               <div className="flex flex-col gap-3">
                 <ModelPicker
                   models={models}
@@ -234,11 +245,10 @@ export default function InstanceConfigModal({
                   </Select>
                 </div>
               </div>
-            </section>
+            </AccordionSection>
 
             {/* Persona */}
-            <section className="rounded-lg bg-background p-4">
-              <h3 className="mb-3 text-sm font-medium">Persona</h3>
+            <AccordionSection title="Persona">
               <div className="flex flex-col gap-3">
                 <div className="flex gap-3">
                   <div className="flex flex-1 flex-col gap-1.5">
@@ -268,11 +278,10 @@ export default function InstanceConfigModal({
                   />
                 </div>
               </div>
-            </section>
+            </AccordionSection>
 
             {/* Tools */}
-            <section className="rounded-lg bg-background p-4">
-              <h3 className="mb-3 text-sm font-medium">Tools</h3>
+            <AccordionSection title="Tools">
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs text-muted-foreground">Allowed</Label>
@@ -282,7 +291,7 @@ export default function InstanceConfigModal({
                     value={allowedTools}
                     onChange={(e) => setAllowedTools(e.target.value)}
                   />
-                  <p className="text-[11px] text-muted-foreground">One tool per line. Supports patterns like Bash(curl *).</p>
+                  <p className="text-[11px] text-muted-foreground">Supports patterns like Bash(curl *).</p>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs text-muted-foreground">Disallowed</Label>
@@ -295,11 +304,10 @@ export default function InstanceConfigModal({
                   <p className="text-[11px] text-muted-foreground">Deny rules override the allowed list above.</p>
                 </div>
               </div>
-            </section>
+            </AccordionSection>
 
             {/* Memory */}
-            <section className="rounded-lg bg-background p-4">
-              <h3 className="mb-3 text-sm font-medium">Memory</h3>
+            <AccordionSection title="Memory">
               <Textarea
                 className="text-xs min-h-16"
                 placeholder="Agent memories..."
@@ -307,14 +315,7 @@ export default function InstanceConfigModal({
                 onChange={(e) => setMemory(e.target.value)}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">Managed by the agent. Manual edits take effect on the next turn.</p>
-            </section>
-
-            {/* Channels */}
-            <ChannelsSection
-              telegram={channels.telegram}
-              slack={channels.slack}
-              onConnect={connectChannel}
-            />
+            </AccordionSection>
           </div>
         )}
 
@@ -328,6 +329,38 @@ export default function InstanceConfigModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// --- Accordion section ---
+
+function AccordionSection({
+  title,
+  defaultOpen = false,
+  children,
+  actions,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+  actions?: React.ReactNode
+}) {
+  return (
+    <Collapsible defaultOpen={defaultOpen} className="rounded-lg bg-background">
+      <div className="flex items-center justify-between px-4 py-3">
+        <CollapsibleTrigger className="flex flex-1 items-center gap-2 cursor-pointer text-sm font-medium">
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            className="h-3.5 w-3.5 shrink-0 transition-transform [[data-closed]_&]:-rotate-90"
+          />
+          {title}
+        </CollapsibleTrigger>
+        {actions}
+      </div>
+      <CollapsibleContent className="px-4 pb-4">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -421,33 +454,30 @@ function ChannelsSection({
     : adding === "slack" ? slToken.trim() !== "" && slSecret.trim() !== ""
     : false
 
-  return (
-    <section className="rounded-lg bg-background p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">Channels</h3>
-        {available.length > 0 && !adding && (
-          <Popover>
-            <PopoverTrigger
-              render={<Button variant="outline" size="sm" className="h-7 gap-1 text-xs" />}
-            >
-              <HugeiconsIcon icon={Add01Icon} className="h-3.5 w-3.5" />
-              Add
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-40 p-1">
-              {available.map((ct) => (
-                <button
-                  key={ct.id}
-                  onClick={() => setAdding(ct.id)}
-                  className="flex w-full rounded-md px-2 py-1.5 text-xs hover:bg-accent cursor-pointer"
-                >
-                  {ct.label}
-                </button>
-              ))}
-            </PopoverContent>
-          </Popover>
-        )}
-      </div>
+  const addButton = available.length > 0 && !adding ? (
+    <Popover>
+      <PopoverTrigger
+        render={<Button variant="outline" size="sm" className="h-7 gap-1 text-xs" />}
+      >
+        <HugeiconsIcon icon={Add01Icon} className="h-3.5 w-3.5" />
+        Add
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-40 p-1">
+        {available.map((ct) => (
+          <button
+            key={ct.id}
+            onClick={() => setAdding(ct.id)}
+            className="flex w-full rounded-md px-2 py-1.5 text-xs hover:bg-accent cursor-pointer"
+          >
+            {ct.label}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  ) : undefined
 
+  return (
+    <AccordionSection title="Channels" defaultOpen actions={addButton}>
       <div className="flex flex-col gap-3">
         {/* Configured channels */}
         {configured.map((ch) => (
@@ -547,7 +577,7 @@ function ChannelsSection({
           </div>
         )}
       </div>
-    </section>
+    </AccordionSection>
   )
 }
 

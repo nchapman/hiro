@@ -92,7 +92,10 @@ export function mapCssVars(colors: Record<string, string>): Record<string, strin
 
   // Muted — inactive/subtle areas
   set("--muted", tabInactiveBg || adjustBrightness(bg, 0.03))
-  set("--muted-foreground", descFg || adjustAlpha(fg, 0.55))
+  // Use descFg only if it's meaningfully different from fg (some themes
+  // set descriptionForeground to the same value as editor.foreground).
+  const mutedFg = descFg && descFg !== fg ? descFg : adjustAlpha(fg, 0.55)
+  set("--muted-foreground", mutedFg)
 
   // Accent — hover/active highlight
   set("--accent", listHover || lineHighlight || adjustBrightness(bg, 0.06))
