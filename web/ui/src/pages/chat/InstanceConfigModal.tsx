@@ -278,7 +278,7 @@ export default function InstanceConfigModal({
                   <Label className="text-xs text-muted-foreground">Allowed</Label>
                   <Textarea
                     className="font-mono text-xs min-h-20"
-                    placeholder={"Bash\nRead\nWrite\nBash(curl *)"}
+                    placeholder="One tool per line"
                     value={allowedTools}
                     onChange={(e) => setAllowedTools(e.target.value)}
                   />
@@ -288,7 +288,7 @@ export default function InstanceConfigModal({
                   <Label className="text-xs text-muted-foreground">Disallowed</Label>
                   <Textarea
                     className="font-mono text-xs min-h-10"
-                    placeholder="Bash(rm *)"
+                    placeholder="One rule per line"
                     value={disallowedTools}
                     onChange={(e) => setDisallowedTools(e.target.value)}
                   />
