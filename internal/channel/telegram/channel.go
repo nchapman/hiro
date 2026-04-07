@@ -223,17 +223,31 @@ func (c *Channel) handleUpdate(ctx context.Context, u update) {
 		"text_length", len(msg.Text),
 	)
 
-	c.dispatchMessage(ctx, msg.Chat.ID, conversationKey, b, msg.Text)
+	c.dispatchMessage(ctx, msg.Chat.ID, conversationKey, b, msg.Text, strconv.FormatInt(msg.Chat.ID, 10))
 }
 
 // dispatchMessage resolves the instance and dispatches a message through the Router.
-func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversationKey string, b *channel.Binding, text string) {
+func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversationKey string, b *channel.Binding, text, chatIDStr string) {
 	instanceID := b.ResolveInstanceID(c.router.Manager())
 	if instanceID == "" {
 		c.logger.Warn("could not resolve instance", "chat_id", chatID, "target", c.instance)
 		_ = c.sendMessage(ctx, chatID, "Agent is not available.")
 		return
 	}
+
+	// Ensure a per-chat session exists for this Telegram conversation.
+	channelKey := "tg:" + chatIDStr
+	sessionID, err := c.router.Manager().EnsureSession(ctx, instanceID, channelKey)
+	if err != nil {
+		c.logger.Warn("failed to ensure telegram session",
+			"chat_id", chatID,
+			"instance_id", instanceID,
+			"error", err,
+		)
+		_ = c.sendMessage(ctx, chatID, "Agent is temporarily unavailable. Please try again later.")
+		return
+	}
+	b.SessionID = sessionID
 
 	// Ensure notifications for this instance are pumped to all channels.
 	c.router.EnsureNotificationPump(instanceID)
@@ -249,16 +263,17 @@ func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversatio
 		return c.sendLong(ctx, chatID, resp)
 	}
 
-	err := c.router.Dispatch(ctx, channel.InboundMessage{
+	if dispErr := c.router.Dispatch(ctx, channel.InboundMessage{
 		ConversationKey: conversationKey,
 		InstanceID:      instanceID,
+		SessionID:       sessionID,
 		ChannelName:     "telegram",
+		ChannelKey:      channelKey,
 		Text:            text,
 		OnEvent:         onEvent,
 		OnDone:          onDone,
-	})
-	if err != nil {
-		c.logger.Warn("dispatch failed", "chat_id", chatID, "error", err)
+	}); dispErr != nil {
+		c.logger.Warn("dispatch failed", "chat_id", chatID, "error", dispErr)
 	}
 }
 

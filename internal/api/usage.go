@@ -52,8 +52,18 @@ func (s *Server) handleInstanceUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	model = info.Model
 
-	// Use the active session for usage tracking.
-	sessionID := s.manager.ActiveSessionID(id)
+	// Try query param, then fall back to web session for usage tracking.
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID != "" {
+		// Validate the supplied session belongs to this instance.
+		sess, err := s.pdb.GetSession(r.Context(), sessionID)
+		if err != nil || sess.InstanceID != id {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+	} else {
+		sessionID = s.manager.SessionIDForChannel(id, "web")
+	}
 	if sessionID == "" {
 		sessionID = id // fallback
 	}

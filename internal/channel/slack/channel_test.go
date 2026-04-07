@@ -55,18 +55,29 @@ func (m *mockManager) SendMessageWithFiles(_ context.Context, instanceID, msg st
 	return m.SendMessage(context.Background(), instanceID, msg, onEvent)
 }
 
+func (m *mockManager) SendMessageToSession(ctx context.Context, instanceID, _, msg string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessage(ctx, instanceID, msg, onEvent)
+}
+func (m *mockManager) SendMessageToSessionWithFiles(ctx context.Context, instanceID, _, msg string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessageWithFiles(ctx, instanceID, msg, files, onEvent)
+}
 func (m *mockManager) SendMetaMessage(context.Context, string, string, func(ipc.ChatEvent) error) (string, error) {
 	return "", nil
 }
-
-func (m *mockManager) NewSession(string) (string, error) { return "new", nil }
+func (m *mockManager) SendMetaMessageToSession(_ context.Context, _, _, _ string, _ func(ipc.ChatEvent) error) (string, error) {
+	return "", nil
+}
+func (m *mockManager) EnsureSession(_ context.Context, _, _ string) (string, error) {
+	return "test-session", nil
+}
+func (m *mockManager) NewSessionForChannel(string, string) (string, error) { return "new", nil }
 
 func (m *mockManager) UpdateInstanceConfig(context.Context, string, string, *string, []string, []string) error {
 	return nil
 }
 
 func (m *mockManager) InstanceNotifications(string) *inference.NotificationQueue { return nil }
-func (m *mockManager) ActiveSessionID(string) string                             { return "" }
+func (m *mockManager) SessionIDForChannel(string, string) string                 { return "" }
 
 func (m *mockManager) GetInstance(id string) (agent.InstanceInfo, bool) {
 	m.mu.Lock()

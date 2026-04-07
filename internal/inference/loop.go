@@ -35,8 +35,9 @@ type LoopConfig struct {
 	AgentConfig    config.AgentConfig
 	Mode           config.AgentMode
 	WorkingDir     string
-	InstanceDir    string // instance-level state: persona.md, memory.md
-	SessionDir     string // session-level state: todos.yaml, scratch/, tmp/
+	InstanceDir    string      // instance-level state: persona.md, memory.md
+	MemoryMu       *sync.Mutex // protects concurrent memory.md read-modify-write across sessions
+	SessionDir     string      // session-level state: todos.yaml, scratch/, tmp/
 	AgentDefDir    string
 	SharedSkillDir string
 	LM             fantasy.LanguageModel
@@ -856,7 +857,7 @@ func (l *Loop) buildLocalTools(cfg *LoopConfig) []Tool {
 	}
 
 	if cfg.Mode.IsPersistent() && cfg.InstanceDir != "" {
-		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir)...)
+		localTools = append(localTools, buildMemoryTools(cfg.InstanceDir, cfg.MemoryMu)...)
 	}
 
 	if cfg.Mode.IsPersistent() && cfg.PDB != nil {

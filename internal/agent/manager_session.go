@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,22 +33,20 @@ func validReasoningEffort(effort string) bool {
 
 // UpdateInstanceConfig changes the model and/or reasoning effort for a running instance.
 // Changes take effect on the next Chat() call.
-func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string, allowedTools, disallowedTools []string) error {
+func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string, allowedTools, disallowedTools []string) error { //nolint:funlen // multi-slot iteration makes this longer
 	inst := m.getInstance(instanceID)
 	if inst == nil {
 		return fmt.Errorf("instance %q not found", instanceID)
 	}
 
-	// Serialize with SendMessage to prevent concurrent access to instance state.
-	// Status and loop checks must be inside the lock to avoid races with softStop.
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
 
 	if inst.info.Status == InstanceStatusStopped {
 		return fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
 	}
-	if inst.loop == nil {
-		return fmt.Errorf("instance %q has no inference loop", instanceID)
+	if inst.anySlot() == nil {
+		return fmt.Errorf("instance %q has no active sessions", instanceID)
 	}
 
 	if model != "" && model != inst.info.Model {
@@ -59,7 +59,14 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		if err != nil {
 			return fmt.Errorf("creating language model %q: %w", model, err)
 		}
-		inst.loop.UpdateModel(lm, spec.String(), spec.Provider)
+		// Update model on all active session loops.
+		for _, slot := range inst.sessions {
+			slot.mu.Lock()
+			if slot.loop != nil {
+				slot.loop.UpdateModel(lm, spec.String(), spec.Provider)
+			}
+			slot.mu.Unlock()
+		}
 		inst.info.Model = spec.String()
 	}
 
@@ -67,7 +74,13 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		if !validReasoningEffort(*reasoningEffort) {
 			return fmt.Errorf("invalid reasoning effort %q", *reasoningEffort)
 		}
-		inst.loop.SetReasoningEffort(*reasoningEffort)
+		for _, slot := range inst.sessions {
+			slot.mu.Lock()
+			if slot.loop != nil {
+				slot.loop.SetReasoningEffort(*reasoningEffort)
+			}
+			slot.mu.Unlock()
+		}
 	}
 
 	if allowedTools != nil {
@@ -76,9 +89,12 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		}
 	}
 
-	// Persist config to filesystem, serialized with other config.yaml writers.
+	// Persist config to filesystem.
 	newModel := inst.info.Model
-	newEffort := inst.loop.ReasoningEffort()
+	var newEffort string
+	if slot := inst.anySlot(); slot != nil {
+		newEffort = slot.loop.ReasoningEffort()
+	}
 	m.persistInstanceConfig(instanceID, func(existing *config.InstanceConfig) error {
 		existing.Model = newModel
 		existing.ReasoningEffort = newEffort
@@ -183,8 +199,131 @@ func (m *Manager) applyToolOverrides(inst *instance, allowedTools, disallowedToo
 	inst.effectiveTools = effectiveTools
 	inst.allowLayers = allowLayers
 	inst.denyRules = denyRules
-	inst.loop.UpdateToolRules(allowedToolsMap, allowLayers, denyRules)
+	// Update tool rules on all active session loops.
+	for _, slot := range inst.sessions {
+		slot.mu.Lock()
+		if slot.loop != nil {
+			slot.loop.UpdateToolRules(allowedToolsMap, allowLayers, denyRules)
+		}
+		slot.mu.Unlock()
+	}
 	return nil
+}
+
+// maxSessionsPerInstance limits the number of concurrent session slots on a
+// single instance. This prevents resource exhaustion from many distinct
+// external channels (e.g. Telegram chats) each spawning a worker process.
+const maxSessionsPerInstance = 32
+
+// EnsureSession returns an existing session for the given channel key on the
+// instance, or creates a new one on demand. This is the main entrypoint for
+// channels to get a session — it handles DB lookup, session dir creation,
+// worker spawning, and loop creation.
+func (m *Manager) EnsureSession(ctx context.Context, instanceID, channelKey string) (string, error) {
+	inst := m.getInstance(instanceID)
+	if inst == nil {
+		return "", fmt.Errorf("%w: %s", ErrInstanceNotFound, instanceID)
+	}
+
+	inst.mu.Lock()
+
+	if inst.info.Status == InstanceStatusStopped {
+		inst.mu.Unlock()
+		return "", fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
+	}
+
+	// Check if a slot already exists for this channel.
+	if sid, ok := inst.channelIndex[channelKey]; ok {
+		slot := inst.sessions[sid]
+		if slot != nil && (slot.loop != nil || slot.worker != nil) {
+			slot.lastUsed = time.Now()
+			inst.mu.Unlock()
+			return sid, nil
+		}
+		// Slot exists but is idle-stopped (no worker/loop) — need to re-spawn.
+		// Remove it so we can create a fresh one below.
+		if slot != nil {
+			inst.removeSlot(sid)
+		}
+	}
+
+	// Guard against unbounded session growth from external channels.
+	if len(inst.sessions) >= maxSessionsPerInstance {
+		inst.mu.Unlock()
+		return "", fmt.Errorf("instance %q: too many concurrent sessions (max %d)", instanceID, maxSessionsPerInstance)
+	}
+
+	sessionID, err := m.createSessionSlot(ctx, inst, instanceID, channelKey)
+	inst.mu.Unlock()
+	return sessionID, err
+}
+
+// createSessionSlot resolves or creates a session ID, prepares directories,
+// spawns a worker+loop, and registers the slot. Caller must hold inst.mu.
+func (m *Manager) createSessionSlot(ctx context.Context, inst *instance, instanceID, channelKey string) (string, error) {
+	chType, chID := splitChannelKey(channelKey)
+	sessionID := m.resolveSessionIDFromDB(ctx, instanceID, chType, chID)
+
+	sessDir := m.instanceSessionDir(instanceID, sessionID)
+	if err := createSessionDirs(sessDir); err != nil {
+		return "", err
+	}
+	if err := m.registerSessionInDBWithChannel(instanceID, sessionID, inst.agentName, inst.info.Mode, chType, chID); err != nil {
+		if !errors.Is(err, platformdb.ErrDuplicate) {
+			return "", err
+		}
+	}
+	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", sessionID)
+
+	sc, err := m.resolveSessionConfig(inst)
+	if err != nil {
+		return "", err
+	}
+	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups)
+	spawnCtx := ctx
+	if inst.info.Mode.IsPersistent() {
+		spawnCtx = m.ctx
+	}
+	handle, loop, err := m.spawnSessionWorkerAndLoop(spawnCtx, inst, sc.agentConfig, spawnCfg, sc.allowedTools, sc.modelSpec, sc.apiKey, sc.baseURL, instanceID, sessionID, sessDir, channelKey)
+	if err != nil {
+		return "", err
+	}
+
+	slot := &sessionSlot{
+		sessionID: sessionID,
+		channel:   channelKey,
+		worker:    handle.Worker,
+		handle:    handle,
+		loop:      loop,
+		lastUsed:  time.Now(),
+	}
+	inst.addSlot(slot)
+
+	go m.watchSlotWorker(instanceID, sessionID, handle)
+	go m.watchSlotJobCompletions(spawnCtx, handle.Worker, inst.notifications, sessionID)
+
+	m.logger.Info("session created",
+		"instance", instanceID, "session", sessionID, "channel", channelKey, "agent", inst.agentName)
+	return sessionID, nil
+}
+
+// resolveSessionIDFromDB checks the DB for an existing active session for this channel.
+// Returns the existing session ID if found and its directory exists, or a new UUID.
+// Stopped sessions (from /clear) are skipped so a fresh session is created.
+func (m *Manager) resolveSessionIDFromDB(ctx context.Context, instanceID, chType, chID string) string {
+	if m.pdb != nil {
+		sess, ok, err := m.pdb.LatestSessionByChannel(ctx, instanceID, chType, chID)
+		if err != nil {
+			m.logger.Warn("failed to query latest session by channel",
+				"instance", instanceID, "channel_type", chType, "channel_id", chID, "error", err)
+		} else if ok && sess.Status != "stopped" {
+			sessDir := m.instanceSessionDir(instanceID, sess.ID)
+			if _, statErr := os.Stat(sessDir); statErr == nil {
+				return sess.ID
+			}
+		}
+	}
+	return uuid.Must(uuid.NewV7()).String()
 }
 
 // StartInstance restarts a stopped persistent instance, creating a new session.
@@ -217,17 +356,19 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 
 	// Resume the latest session if one exists, otherwise create a new one.
 	var sessionID string
+	channelKey := channelWeb // default channel for resumed instances
 	if m.pdb != nil {
 		if sess, ok, sessErr := m.pdb.LatestSessionByInstance(ctx, instanceID); sessErr != nil {
 			m.logger.Warn("failed to query latest session", "instance", instanceID, "error", sessErr)
 		} else if ok {
 			sessionID = sess.ID
+			channelKey = makeChannelKey(sess.ChannelType, sess.ChannelID)
 		}
 	}
 	if sessionID == "" {
 		sessionID = uuid.Must(uuid.NewV7()).String()
 	}
-	if _, err = m.startInstance(ctx, instanceID, sessionID, cfg, parentID, mode, inst.nodeID, "", "", ""); err != nil {
+	if _, err = m.startInstance(ctx, instanceID, sessionID, channelKey, cfg, parentID, mode, inst.nodeID, "", "", ""); err != nil {
 		// Re-register as stopped so the instance remains visible.
 		m.reregisterStopped(instanceID, inst)
 		return err
@@ -244,8 +385,16 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 }
 
 // NewSession ends the current session and starts a new one within the same instance.
-// This is the /clear handler — persona and memory persist, messages and todos reset.
+//
+// Deprecated: use NewSessionForChannel instead.
 func (m *Manager) NewSession(instanceID string) (string, error) {
+	return m.NewSessionForChannel(instanceID, channelWeb)
+}
+
+// NewSessionForChannel ends the session for a specific channel and starts a new one.
+// This is the /clear handler — persona and memory persist, messages and todos reset.
+// Only the named channel's session is affected; other channels keep their sessions.
+func (m *Manager) NewSessionForChannel(instanceID, channelKey string) (string, error) {
 	inst := m.getInstance(instanceID)
 	if inst == nil {
 		return "", ErrInstanceNotFound
@@ -254,74 +403,93 @@ func (m *Manager) NewSession(instanceID string) (string, error) {
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
 
-	// Status check inside lock to avoid race with softStop/watchWorker.
 	if inst.info.Status == InstanceStatusStopped {
 		return "", fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
 	}
 
-	// Capture old handle so we can shut it down after the new spawn.
-	// Nil it out before spawning the new worker — watchWorker uses
-	// pointer identity (inst.handle != handle) to detect stale exits.
-	oldHandle := inst.handle
-	inst.handle = nil
-	oldSession := inst.activeSession
+	// Detach old slot for this channel (if any) and mark its session stopped.
+	oldHandle, oldSessionID := m.detachChannelSlot(inst, channelKey)
+	if oldSessionID != "" {
+		m.markSessionStopped(oldSessionID)
+	}
 
-	m.markSessionStopped(oldSession)
-
-	// Create new session directory.
+	// Create new session directory and DB record.
 	newSessionID := uuid.Must(uuid.NewV7()).String()
 	sessDir := m.instanceSessionDir(instanceID, newSessionID)
 	if err := createSessionDirs(sessDir); err != nil {
 		return "", err
 	}
-
-	if err := m.registerSessionInDB(instanceID, newSessionID, inst.agentName, inst.info.Mode); err != nil {
+	chType, chID := splitChannelKey(channelKey)
+	if err := m.registerSessionInDBWithChannel(instanceID, newSessionID, inst.agentName, inst.info.Mode, chType, chID); err != nil {
 		return "", err
 	}
-
 	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", newSessionID)
 
 	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
 	}
-
 	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups)
 
 	// Shut down old worker concurrently while spawning the new one.
 	shutdownDone := m.shutdownOldWorkerAsync(oldHandle)
-
-	handle, loop, err := m.spawnSessionWorkerAndLoop(m.ctx, inst, sc.agentConfig, spawnCfg, sc.allowedTools, sc.modelSpec, sc.apiKey, sc.baseURL, instanceID, newSessionID, sessDir)
+	handle, loop, err := m.spawnSessionWorkerAndLoop(m.ctx, inst, sc.agentConfig, spawnCfg, sc.allowedTools, sc.modelSpec, sc.apiKey, sc.baseURL, instanceID, newSessionID, sessDir, channelKey)
 	if err != nil {
 		return m.failNewSession(shutdownDone, instanceID, newSessionID, sessDir, inst, err)
 	}
-
 	<-shutdownDone
 
-	inst.activeSession = newSessionID
-	inst.worker = handle.Worker
-	inst.handle = handle
-	inst.loop = loop
+	inst.addSlot(&sessionSlot{
+		sessionID: newSessionID,
+		channel:   channelKey,
+		worker:    handle.Worker,
+		handle:    handle,
+		loop:      loop,
+		lastUsed:  time.Now(),
+	})
 
-	go m.watchWorker(instanceID, handle)
-	go m.watchJobCompletions(m.ctx, handle.Worker, inst.notifications)
+	go m.watchSlotWorker(instanceID, newSessionID, handle)
+	go m.watchSlotJobCompletions(m.ctx, handle.Worker, inst.notifications, newSessionID)
 
 	m.logger.Info("new session created",
-		"instance", instanceID, "session", newSessionID, "agent", inst.agentName)
+		"instance", instanceID, "session", newSessionID, "channel", channelKey, "agent", inst.agentName)
 
 	return newSessionID, nil
 }
 
+// detachChannelSlot removes the slot for a channel key and returns its handle
+// for shutdown. Must be called with inst.mu held.
+func (m *Manager) detachChannelSlot(inst *instance, channelKey string) (oldHandle *WorkerHandle, oldSessionID string) {
+	oldSlot := inst.slotByChannel(channelKey)
+	if oldSlot == nil {
+		return nil, ""
+	}
+	oldHandle = oldSlot.handle
+	oldSessionID = oldSlot.sessionID
+	oldSlot.handle = nil // prevent watchSlotWorker from treating exit as unexpected
+	oldSlot.worker = nil
+	oldSlot.loop = nil
+	inst.removeSlot(oldSessionID)
+	return oldHandle, oldSessionID
+}
+
 // registerSessionInDB creates a session record in the platform database.
 func (m *Manager) registerSessionInDB(instanceID, sessionID, agentName string, mode config.AgentMode) error {
+	return m.registerSessionInDBWithChannel(instanceID, sessionID, agentName, mode, "", "")
+}
+
+// registerSessionInDBWithChannel creates a session record with channel info.
+func (m *Manager) registerSessionInDBWithChannel(instanceID, sessionID, agentName string, mode config.AgentMode, channelType, channelID string) error {
 	if m.pdb == nil {
 		return nil
 	}
 	return m.pdb.CreateSession(context.Background(), platformdb.Session{
-		ID:         sessionID,
-		InstanceID: instanceID,
-		AgentName:  agentName,
-		Mode:       string(mode),
+		ID:          sessionID,
+		InstanceID:  instanceID,
+		AgentName:   agentName,
+		Mode:        string(mode),
+		ChannelType: channelType,
+		ChannelID:   channelID,
 	})
 }
 
@@ -426,7 +594,7 @@ func (m *Manager) shutdownOldWorkerAsync(oldHandle *WorkerHandle) <-chan struct{
 
 // spawnSessionWorkerAndLoop creates a new worker and inference loop for a session.
 // Returns the handle and loop, or an error.
-func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance, cfg config.AgentConfig, spawnCfg ipc.SpawnConfig, allowedTools map[string]bool, modelSpec models.ModelSpec, apiKey, baseURL, instanceID, sessionID, sessDir string) (*WorkerHandle, *inference.Loop, error) {
+func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance, cfg config.AgentConfig, spawnCfg ipc.SpawnConfig, allowedTools map[string]bool, modelSpec models.ModelSpec, apiKey, baseURL, instanceID, sessionID, sessDir, channelKey string) (*WorkerHandle, *inference.Loop, error) {
 	handle, err := m.workerFactory(ctx, spawnCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("spawning agent %q: %w", cfg.Name, err)
@@ -438,7 +606,10 @@ func (m *Manager) spawnSessionWorkerAndLoop(ctx context.Context, inst *instance,
 	hasSkills := len(cfg.Skills) > 0 || m.agentHasSkills(cfg)
 	loopCfg := m.buildLoopConfig(instanceID, sessionID, cfg, inst.info.Mode,
 		m.instanceDir(instanceID), sessDir, handle.Worker, allowedTools,
-		inst.allowLayers, inst.denyRules, hasSkills, modelSpec, inst.notifications)
+		inst.allowLayers, inst.denyRules, hasSkills, modelSpec, inst.notifications, inst.memoryMu)
+	if strings.HasPrefix(channelKey, "trigger:") {
+		loopCfg.IsTriggeredSession = true
+	}
 
 	loop, err := m.createInferenceLoop(ctx, &loopCfg, modelSpec, apiKey, baseURL)
 	if err != nil {
@@ -536,7 +707,7 @@ func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.
 		return
 	}
 
-	if inst.loop != nil {
+	if len(inst.sessions) > 0 {
 		m.pushToolsAndModel(inst, instanceID, parentID, mode, pc)
 	}
 
@@ -561,7 +732,13 @@ func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string,
 		inst.effectiveTools = effectiveTools
 		inst.allowLayers = allowLayers
 		inst.denyRules = denyRules
-		inst.loop.UpdateToolRules(allowedTools, allowLayers, denyRules)
+		for _, slot := range inst.sessions {
+			slot.mu.Lock()
+			if slot.loop != nil {
+				slot.loop.UpdateToolRules(allowedTools, allowLayers, denyRules)
+			}
+			slot.mu.Unlock()
+		}
 	}
 
 	// Model switch.
@@ -577,7 +754,13 @@ func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string,
 			"agent", pc.cfg.Name, "model", pc.model, "error", lmErr)
 		return
 	}
-	inst.loop.UpdateModel(lm, pc.model, pc.modelSpec.Provider)
+	for _, slot := range inst.sessions {
+		slot.mu.Lock()
+		if slot.loop != nil {
+			slot.loop.UpdateModel(lm, pc.model, pc.modelSpec.Provider)
+		}
+		slot.mu.Unlock()
+	}
 	inst.info.Model = pc.model
 }
 

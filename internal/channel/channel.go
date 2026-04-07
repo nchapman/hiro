@@ -19,6 +19,9 @@ import (
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
+// channelKeyWeb is the default channel key for web UI connections.
+const channelKeyWeb = "web"
+
 // ErrChannelClosed is returned by Deliver when the conversation endpoint is
 // gone (e.g. WebSocket disconnected). The Router uses this to unbind the
 // conversation key automatically.
@@ -70,8 +73,15 @@ type InboundMessage struct {
 	// InstanceID is the target instance, resolved from the binding.
 	InstanceID string
 
+	// SessionID is the per-channel session, resolved via EnsureSession.
+	SessionID string
+
 	// ChannelName identifies which channel sent this (for trust checks).
 	ChannelName string
+
+	// ChannelKey is the compound channel key for session routing
+	// (e.g. "web", "tg:12345", "slack:C123:thread").
+	ChannelKey string
 
 	// Text is the user's message content.
 	Text string
@@ -131,11 +141,15 @@ type CommandHandler interface {
 type ManagerInterface interface {
 	SendMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
 	SendMessageWithFiles(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error)
+	SendMessageToSession(ctx context.Context, instanceID, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	SendMessageToSessionWithFiles(ctx context.Context, instanceID, sessionID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error)
 	SendMetaMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
-	NewSession(instanceID string) (string, error)
+	SendMetaMessageToSession(ctx context.Context, instanceID, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	EnsureSession(ctx context.Context, instanceID, channelKey string) (string, error)
+	NewSessionForChannel(instanceID, channelKey string) (string, error)
 	UpdateInstanceConfig(ctx context.Context, instanceID, model string, reasoningEffort *string, allowedTools, disallowedTools []string) error
 	InstanceNotifications(instanceID string) *inference.NotificationQueue
-	ActiveSessionID(instanceID string) string
+	SessionIDForChannel(instanceID, channelKey string) string
 	GetInstance(instanceID string) (agent.InstanceInfo, bool)
 	InstanceByAgentName(name string) (id string, running bool)
 }
@@ -147,8 +161,9 @@ type UsageQuerier struct {
 	Manager ManagerInterface
 }
 
-// BuildUsageInfo queries usage data for the active session of an instance.
-func (q *UsageQuerier) BuildUsageInfo(ctx context.Context, instanceID string) *UsageInfo {
+// BuildUsageInfo queries usage data for a specific session of an instance.
+// If sessionID is empty, it falls back to the web session.
+func (q *UsageQuerier) BuildUsageInfo(ctx context.Context, instanceID, sessionID string) *UsageInfo {
 	if q == nil || q.PDB == nil {
 		return nil
 	}
@@ -160,10 +175,12 @@ func (q *UsageQuerier) BuildUsageInfo(ctx context.Context, instanceID string) *U
 		}
 	}
 
-	sessionID := instanceID
-	if q.Manager != nil {
-		if sid := q.Manager.ActiveSessionID(instanceID); sid != "" {
-			sessionID = sid
+	if sessionID == "" {
+		sessionID = instanceID
+		if q.Manager != nil {
+			if sid := q.Manager.SessionIDForChannel(instanceID, channelKeyWeb); sid != "" {
+				sessionID = sid
+			}
 		}
 	}
 
@@ -200,6 +217,7 @@ type Binding struct {
 	ChannelName     string
 	Target          string // instance ID or agent name (resolved lazily)
 	Channel         Channel
+	SessionID       string // per-channel session for this binding
 }
 
 // ResolveInstanceID resolves the binding's target to an instance ID.

@@ -14,8 +14,8 @@ func ContextWithCallerID(ctx context.Context, callerID string) context.Context {
 	return context.WithValue(ctx, callerIDKey, callerID)
 }
 
-// callerIDFromContext returns the caller instance ID from the context.
-func callerIDFromContext(ctx context.Context) string {
+// CallerIDFromContext returns the caller instance ID from the context.
+func CallerIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(callerIDKey).(string)
 	return id
 }

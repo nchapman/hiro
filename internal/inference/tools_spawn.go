@@ -210,7 +210,7 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 					return fantasy.NewTextErrorResponse("prompt is required"), nil
 				}
 
-				callerID := callerIDFromContext(ctx)
+				callerID := CallerIDFromContext(ctx)
 				logger.Info("tool call", "tool", "SpawnInstance", "agent", input.Agent, "background", input.Background)
 
 				if input.Background {
@@ -283,7 +283,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 				const modePersistent = "persistent"
 				mode := modePersistent
 
-				callerID := callerIDFromContext(ctx)
+				callerID := CallerIDFromContext(ctx)
 				nodeID := input.Node
 
 				logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode, "name", input.Name)
@@ -354,7 +354,7 @@ func buildResumeInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.Agent
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
 			}
-			callerID := callerIDFromContext(ctx)
+			callerID := CallerIDFromContext(ctx)
 			scoped := NewScopedManager(mgr, callerID)
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
@@ -374,7 +374,7 @@ func buildListInstances(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentT
 		listInstancesDescription,
 		func(ctx context.Context, input struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			logger.Debug("tool call", "tool", "ListInstances")
-			callerID := callerIDFromContext(ctx)
+			callerID := CallerIDFromContext(ctx)
 			instances := mgr.ListChildInstances(callerID)
 			if len(instances) == 0 {
 				return fantasy.NewTextResponse("No child instances."), nil
@@ -407,7 +407,7 @@ func buildSendMessage(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentToo
 			if input.Message == "" {
 				return fantasy.NewTextErrorResponse("message is required"), nil
 			}
-			callerID := callerIDFromContext(ctx)
+			callerID := CallerIDFromContext(ctx)
 			scoped := NewScopedManager(mgr, callerID)
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
@@ -434,7 +434,7 @@ func buildStopInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTo
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
 			}
-			callerID := callerIDFromContext(ctx)
+			callerID := CallerIDFromContext(ctx)
 			scoped := NewScopedManager(mgr, callerID)
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
@@ -460,7 +460,7 @@ func buildDeleteInstance(mgr ipc.HostManager, logger *slog.Logger) fantasy.Agent
 			if input.InstanceID == "" {
 				return fantasy.NewTextErrorResponse("instance_id is required"), nil
 			}
-			callerID := callerIDFromContext(ctx)
+			callerID := CallerIDFromContext(ctx)
 			scoped := NewScopedManager(mgr, callerID)
 			if err := scoped.checkDescendant(input.InstanceID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

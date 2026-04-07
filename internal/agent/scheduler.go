@@ -8,10 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 
-	"github.com/nchapman/hiro/internal/config"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 )
 
@@ -370,110 +368,62 @@ func (s *Scheduler) signal() {
 }
 
 // RunTriggered runs an inference turn in a triggered session for a subscription.
-// Holds inst.mu for the full duration to serialize with SendMessage/SendMetaMessage,
-// because the worker process cannot safely handle concurrent tool execution (shared
-// env vars, CWD, and background task registry).
+// Each subscription gets its own session slot via EnsureSession, so triggered
+// sessions no longer block user channels.
 func (m *Manager) RunTriggered(ctx context.Context, sub platformdb.Subscription) error {
 	inst := m.getInstance(sub.InstanceID)
 	if inst == nil {
 		return fmt.Errorf("instance %s not found", sub.InstanceID)
 	}
 
-	inst.mu.Lock()
-	defer inst.mu.Unlock()
-
 	if inst.info.Status == InstanceStatusStopped {
 		return fmt.Errorf("instance %s: %w", sub.InstanceID, ErrInstanceStopped)
-	}
-	if inst.loop == nil {
-		return fmt.Errorf("instance %s has no inference loop", sub.InstanceID)
 	}
 
 	logger := m.logger.With("instance_id", sub.InstanceID, "sub_id", sub.ID, "sub_name", sub.Name)
 	logger.Info("running triggered session")
 
-	// Get or create the triggered session.
-	sessionID, sessionDir, err := m.ensureTriggeredSession(ctx, inst, sub.ID)
+	// Get or create the triggered session via EnsureSession.
+	channelKey := "trigger:" + sub.ID
+	sessionID, err := m.EnsureSession(ctx, sub.InstanceID, channelKey)
 	if err != nil {
 		return fmt.Errorf("ensuring triggered session: %w", err)
 	}
 	logger.Info("triggered session ready", "session_id", sessionID)
 
-	cfg, err := config.LoadAgentDir(m.agentDefDir(inst.agentName))
+	// Also register the subscription_id on the session if it's new.
+	m.ensureTriggeredSessionSubscription(ctx, inst, sub.ID, sessionID)
+
+	slot, slotCtx, err := m.acquireSlot(ctx, sub.InstanceID, sessionID)
 	if err != nil {
-		return fmt.Errorf("loading agent config: %w", err)
+		return fmt.Errorf("acquiring triggered session slot: %w", err)
 	}
+	defer slot.mu.Unlock()
 
-	hasSkills := m.agentHasSkills(cfg)
-	allowedTools := buildAllowedToolsMap(inst.effectiveTools, inst.info.Mode, hasSkills)
-
-	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
-	if err != nil {
-		return fmt.Errorf("resolving model: %w", err)
-	}
-
-	loopCfg := m.buildLoopConfig(
-		sub.InstanceID, sessionID, cfg, inst.info.Mode,
-		m.instanceDir(sub.InstanceID), sessionDir,
-		inst.worker, allowedTools, inst.allowLayers, inst.denyRules,
-		hasSkills, modelSpec, inst.notifications,
-	)
-	loopCfg.IsTriggeredSession = true
-
-	tmpLoop, err := m.createInferenceLoop(ctx, &loopCfg, modelSpec, apiKey, baseURL)
-	if err != nil {
-		return fmt.Errorf("creating triggered loop: %w", err)
-	}
-	if tmpLoop == nil {
-		return fmt.Errorf("no provider configured")
-	}
-
-	triggerCtx, triggerCancel := context.WithTimeout(ctx, triggeredTurnTimeout)
+	triggerCtx, triggerCancel := context.WithTimeout(slotCtx, triggeredTurnTimeout)
 	defer triggerCancel()
 
-	_, err = tmpLoop.Chat(triggerCtx, sub.Message, nil, nil)
+	_, err = slot.loop.Chat(triggerCtx, sub.Message, nil, nil)
 	return err
 }
 
-// ensureTriggeredSession finds or creates the session for a subscription.
-func (m *Manager) ensureTriggeredSession(ctx context.Context, inst *instance, subscriptionID string) (string, string, error) {
+// ensureTriggeredSessionSubscription links a session to a subscription in the DB
+// if not already linked. This is best-effort — EnsureSession handles the actual
+// session creation.
+func (m *Manager) ensureTriggeredSessionSubscription(ctx context.Context, _ *instance, subscriptionID, sessionID string) {
 	if m.pdb == nil {
-		return "", "", fmt.Errorf("no platform database")
+		return
 	}
-
-	// Look for an existing triggered session.
-	sess, found, err := m.pdb.SessionBySubscription(ctx, subscriptionID)
-	if err != nil {
-		return "", "", err
+	// Check if already linked.
+	if sess, found, _ := m.pdb.SessionBySubscription(ctx, subscriptionID); found && sess.ID == sessionID {
+		return
 	}
-	if found {
-		sessDir := m.instanceSessionDir(inst.info.ID, sess.ID)
-		if err := createSessionDirs(sessDir); err != nil {
-			return "", "", err
-		}
-		m.logger.Debug("reusing triggered session", "subscription_id", subscriptionID, "session_id", sess.ID)
-		return sess.ID, sessDir, nil
+	// Update the session's subscription_id.
+	// Best-effort — the session already exists in the DB from EnsureSession.
+	if err := m.pdb.LinkSessionToSubscription(ctx, sessionID, subscriptionID); err != nil {
+		m.logger.Warn("failed to link session to subscription",
+			"subscription_id", subscriptionID, "session_id", sessionID, "error", err)
 	}
-
-	// Create a new session for this subscription.
-	m.logger.Info("creating triggered session", "subscription_id", subscriptionID, "instance_id", inst.info.ID)
-	sessionID := uuid.Must(uuid.NewV7()).String()
-	sessDir := m.instanceSessionDir(inst.info.ID, sessionID)
-	if err := createSessionDirs(sessDir); err != nil {
-		return "", "", err
-	}
-
-	if err := m.pdb.CreateSession(ctx, platformdb.Session{
-		ID:             sessionID,
-		InstanceID:     inst.info.ID,
-		AgentName:      inst.agentName,
-		Mode:           string(inst.info.Mode),
-		SubscriptionID: subscriptionID,
-	}); err != nil {
-		return "", "", fmt.Errorf("creating triggered session: %w", err)
-	}
-
-	return sessionID, sessDir, nil
 }
 
 // --- min-heap for subscription scheduling ---

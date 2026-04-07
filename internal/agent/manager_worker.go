@@ -38,58 +38,29 @@ func (m *Manager) shutdownHandle(h *WorkerHandle) {
 	}
 }
 
-// cleanupWorker closes the worker handle and releases the UID.
-// The handle is captured under the lock to avoid races.
-func (m *Manager) cleanupWorker(id string, h *WorkerHandle) {
-	if h != nil {
-		h.Close()
-	}
-	if m.uidPool != nil {
-		m.uidPool.Release(id)
-	}
-}
-
-// detachWorker captures the worker handle under inst.mu and nils out the
-// worker, handle, and loop fields. If status is non-empty, it is set
-// atomically with the field nils. The returned handle can be shut down
-// outside both locks without races; callers must not hold inst.mu when
-// calling shutdownHandle (it blocks on I/O).
-func (m *Manager) detachWorker(inst *instance, status InstanceStatus) *WorkerHandle {
+// detachAllSlots captures all session slot handles under inst.mu and nils out
+// the worker/handle/loop fields on each slot. If status is non-empty, it is
+// set atomically with the field nils. Returns the captured handles for
+// shutdown outside the lock.
+func (m *Manager) detachAllSlots(inst *instance, status InstanceStatus) []*WorkerHandle {
 	inst.mu.Lock()
-	h := inst.handle
-	inst.worker = nil
-	inst.handle = nil
-	inst.loop = nil
+	var handles []*WorkerHandle
+	for _, slot := range inst.sessions {
+		if slot.handle != nil {
+			handles = append(handles, slot.handle)
+		}
+		slot.worker = nil
+		slot.handle = nil
+		slot.loop = nil
+	}
 	if status != "" {
 		inst.info.Status = status
 	}
 	inst.mu.Unlock()
-	return h
+	return handles
 }
 
-// teardownOpts controls what teardownInstance does after the worker is detached.
-type teardownOpts struct {
-	graceful  bool           // call shutdownHandle (false when process already dead)
-	removeDir bool           // os.RemoveAll(instanceDir)
-	status    InstanceStatus // set instance status (e.g. InstanceStatusStopped), zero = skip
-}
-
-// teardownInstance performs post-detach cleanup: optional graceful shutdown,
-// worker resource cleanup, status persistence, and directory removal.
-func (m *Manager) teardownInstance(id string, h *WorkerHandle, opts teardownOpts) {
-	if opts.graceful && h != nil {
-		m.shutdownHandle(h)
-	}
-	m.cleanupWorker(id, h)
-	if opts.status != "" {
-		m.setInstanceStatus(id, string(opts.status))
-	}
-	if opts.removeDir {
-		os.RemoveAll(m.instanceDir(id))
-	}
-}
-
-// softStop gracefully shuts down a persistent instance's worker process
+// softStop gracefully shuts down all session workers for a persistent instance
 // but keeps it in the registry with status "stopped".
 func (m *Manager) softStop(id string) {
 	// Notify lifecycle hook before teardown (e.g. stop channels).
@@ -97,20 +68,27 @@ func (m *Manager) softStop(id string) {
 		m.lifecycleHook.OnInstanceStop(id)
 	}
 
-	// Capture the handle under both locks and mark stopped atomically.
+	// Capture all handles under both locks and mark stopped atomically.
 	// Lock order: m.mu → inst.mu (no reverse path exists in the codebase).
-	// Both locks are needed: m.mu for watchWorker, inst.mu for SendMessage/UpdateConfig.
 	m.mu.Lock()
 	inst, ok := m.instances[id]
 	if !ok {
 		m.mu.Unlock()
 		return
 	}
-	h := m.detachWorker(inst, InstanceStatusStopped)
+	handles := m.detachAllSlots(inst, InstanceStatusStopped)
 	m.mu.Unlock()
 
-	// Shutdown the captured handle outside the lock (blocks on I/O).
-	m.teardownInstance(id, h, teardownOpts{graceful: true, status: InstanceStatusStopped})
+	// Shutdown all captured handles outside the lock (blocks on I/O).
+	for _, h := range handles {
+		m.shutdownHandle(h)
+		h.Close()
+	}
+	// Release UID and update DB status.
+	if m.uidPool != nil {
+		m.uidPool.Release(id)
+	}
+	m.setInstanceStatus(id, string(InstanceStatusStopped))
 
 	// Pause cron subscriptions for this instance.
 	if m.scheduler != nil {
@@ -133,11 +111,11 @@ func (m *Manager) reregisterStopped(id string, inst *instance) {
 	m.mu.Unlock()
 }
 
-// watchWorker monitors a worker's Done channel and handles unexpected exits.
-// The handle parameter identifies which worker generation this goroutine is
-// watching — if NewSession has replaced it by the time we acquire the lock,
-// this exit is stale and should be ignored.
-func (m *Manager) watchWorker(instanceID string, handle *WorkerHandle) {
+// watchSlotWorker monitors a single session slot's worker Done channel and
+// handles unexpected exits. The handle parameter identifies which worker
+// generation this goroutine is watching — if NewSessionForChannel has replaced
+// it by the time we acquire the lock, this exit is stale and should be ignored.
+func (m *Manager) watchSlotWorker(instanceID, sessionID string, handle *WorkerHandle) {
 	<-handle.Done
 
 	m.mu.RLock()
@@ -151,23 +129,46 @@ func (m *Manager) watchWorker(instanceID string, handle *WorkerHandle) {
 		return
 	}
 
-	// Check under inst.mu (which guards handle and status) whether this
-	// exit was intentional. NewSession replaces the handle before killing the
-	// old worker; softStop sets status to stopped. Comparing handles detects
-	// the case where NewSession completes before this goroutine acquires the lock.
+	// Check under inst.mu whether this exit was intentional.
 	inst.mu.Lock()
-	stale := inst.info.Status == InstanceStatusStopped || inst.handle != handle
+	slot := inst.sessions[sessionID]
+	stale := inst.info.Status == InstanceStatusStopped || slot == nil || slot.handle != handle
+	if !stale && slot != nil {
+		// Unexpected exit — remove this slot.
+		inst.removeSlot(sessionID)
+	}
+	allDead := len(inst.sessions) == 0
 	inst.mu.Unlock()
+
 	if stale {
 		return
 	}
 
-	m.logger.Warn("instance process exited unexpectedly",
-		"id", instanceID,
+	m.logger.Warn("session worker exited unexpectedly",
+		"instance", instanceID,
+		"session", sessionID,
 		"name", name,
 	)
 
-	// Handle the dead instance and its children.
+	// Clean up the dead worker's resources.
+	handle.Close()
+
+	// If all slots are dead on this instance, handle the full instance death
+	// (same as the old watchWorker behavior for single-session).
+	if !allDead {
+		return
+	}
+
+	m.logger.Warn("all session workers dead, handling instance death",
+		"id", instanceID,
+		"name", name,
+	)
+	m.handleInstanceDeath(instanceID)
+}
+
+// handleInstanceDeath handles cascading teardown when all session workers for an
+// instance have died unexpectedly.
+func (m *Manager) handleInstanceDeath(instanceID string) {
 	descendants := m.collectDescendants(instanceID)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		id := descendants[i]
@@ -178,7 +179,6 @@ func (m *Manager) watchWorker(instanceID string, handle *WorkerHandle) {
 			continue
 		}
 
-		// Stop per-instance channels before tearing down the worker.
 		if m.lifecycleHook != nil {
 			m.lifecycleHook.OnInstanceStop(id)
 		}
@@ -189,32 +189,47 @@ func (m *Manager) watchWorker(instanceID string, handle *WorkerHandle) {
 				m.mu.Unlock()
 				continue
 			}
-			h := m.detachWorker(deadInst, InstanceStatusStopped)
+			handles := m.detachAllSlots(deadInst, InstanceStatusStopped)
 			m.mu.Unlock()
 
-			m.teardownInstance(id, h, teardownOpts{status: InstanceStatusStopped})
+			for _, h := range handles {
+				h.Close()
+			}
+			m.setInstanceStatus(id, string(InstanceStatusStopped))
+			if m.uidPool != nil {
+				m.uidPool.Release(id)
+			}
 		} else {
 			m.mu.Lock()
-			h := m.detachWorker(deadInst, "")
+			handles := m.detachAllSlots(deadInst, "")
 			m.unregisterLocked(id, deadInst)
 			m.mu.Unlock()
 
-			m.teardownInstance(id, h, teardownOpts{removeDir: true})
+			for _, h := range handles {
+				h.Close()
+			}
+			os.RemoveAll(m.instanceDir(id))
+			if m.uidPool != nil {
+				m.uidPool.Release(id)
+			}
 		}
 	}
 }
 
-// watchJobCompletions monitors a worker for background task completions and
-// pushes notifications into the instance's notification queue. If the worker
-// does not support WatchJobs (e.g. test fakes), this is a no-op.
-func (m *Manager) watchJobCompletions(ctx context.Context, worker any, notifications *inference.NotificationQueue) {
+// watchSlotJobCompletions monitors a worker for background task completions and
+// pushes notifications into the instance's notification queue with the session ID
+// so they route to the correct channel. If the worker does not support WatchJobs
+// (e.g. test fakes), this is a no-op.
+func (m *Manager) watchSlotJobCompletions(ctx context.Context, worker any, notifications *inference.NotificationQueue, sessionID string) {
 	wc, ok := worker.(*grpcipc.WorkerClient)
 	if !ok {
 		return
 	}
 	ch := wc.WatchJobs(ctx, m.logger)
 	for completion := range ch {
-		notifications.Push(formatJobNotification(completion))
+		n := formatJobNotification(completion)
+		n.SessionID = sessionID
+		notifications.Push(n)
 	}
 }
 
@@ -255,9 +270,9 @@ func (m *Manager) removeInstance(id string) {
 
 	m.mu.Lock()
 	inst, ok := m.instances[id]
-	var h *WorkerHandle
+	var handles []*WorkerHandle
 	if ok {
-		h = m.detachWorker(inst, "")
+		handles = m.detachAllSlots(inst, "")
 	}
 	m.unregisterLocked(id, inst)
 	m.mu.Unlock()
@@ -266,8 +281,16 @@ func (m *Manager) removeInstance(id string) {
 		return
 	}
 
-	m.teardownInstance(id, h, teardownOpts{
-		graceful:  true,
-		removeDir: !inst.info.Mode.IsPersistent(),
-	})
+	// Gracefully shut down all session workers.
+	for _, h := range handles {
+		m.shutdownHandle(h)
+		h.Close()
+	}
+	// Release UID.
+	if m.uidPool != nil {
+		m.uidPool.Release(id)
+	}
+	if !inst.info.Mode.IsPersistent() {
+		os.RemoveAll(m.instanceDir(id))
+	}
 }

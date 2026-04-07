@@ -707,7 +707,7 @@ func TestManager_EphemeralCleanup(t *testing.T) {
 
 	// Start an ephemeral child directly
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
-	ephID, _ := mgr.startInstance(t.Context(), "ephemeral-test-id", "ephemeral-sess-id", cfg, parentID, config.ModeEphemeral, "", "", "", "")
+	ephID, _ := mgr.startInstance(t.Context(), "ephemeral-test-id", "ephemeral-sess-id", "web", cfg, parentID, config.ModeEphemeral, "", "", "", "")
 
 	sessDir := filepath.Join(dir, "instances", ephID)
 	if _, err := os.Stat(sessDir); err != nil {
@@ -1848,7 +1848,7 @@ Worker.`)
 
 	// Start an ephemeral agent directly
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("worker"))
-	mgr.startInstance(t.Context(), "test-eph-id", "test-eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "", "")
+	mgr.startInstance(t.Context(), "test-eph-id", "test-eph-sess-id", "web", cfg, "", config.ModeEphemeral, "", "", "", "")
 
 	spawnCfg := (*configs)[0]
 	if !spawnCfg.EffectiveTools["SpawnInstance"] {
@@ -2131,7 +2131,7 @@ Ephemeral child wanting groups.`)
 	}
 
 	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("eph-child"))
-	mgr.startInstance(t.Context(), "eph-id", "eph-sess-id", cfg, parentID, config.ModeEphemeral, "", "", "", "")
+	mgr.startInstance(t.Context(), "eph-id", "eph-sess-id", "web", cfg, parentID, config.ModeEphemeral, "", "", "", "")
 
 	childCfg := (*configs)[1]
 

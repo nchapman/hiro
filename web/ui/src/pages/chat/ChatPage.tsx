@@ -75,6 +75,9 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [reasoningEffort, setReasoningEffort] = useState("")
+  // Per-channel session ID received from the WebSocket "session" event.
+  // Used for fetching session-specific history and usage.
+  const [channelSessionId, setChannelSessionId] = useState<string | null>(null)
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
   const chatContainerRef = useRef<ChatContainerHandle>(null)
@@ -151,11 +154,46 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     [send]
   )
 
+  // Fetch history and usage when the channel session ID becomes available.
+  const fetchSessionData = useCallback((sid: string, gen: number, signal: AbortSignal) => {
+    if (!session) return
+    // Fetch usage with session_id parameter.
+    fetch(`/api/instances/${encodeURIComponent(session.id)}/usage?session_id=${encodeURIComponent(sid)}`, { signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: UsageInfo | null) => {
+        if (sessionGeneration.current === gen && data) setUsage(data)
+      })
+      .catch(() => {})
+    // Fetch messages from session-specific endpoint.
+    fetch(`/api/sessions/${encodeURIComponent(sid)}/messages`, { signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((history: import("@/lib/chat-types").HistoryMessage[]) => {
+        if (sessionGeneration.current !== gen) return
+        setMessages(mergeHistoryMessages(history))
+      })
+      .catch((err: Error) => {
+        if (err.name === "AbortError") return
+        if (sessionGeneration.current !== gen) return
+        setMessages([{
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "Failed to load conversation history.",
+        }])
+      })
+      .finally(() => {
+        if (sessionGeneration.current === gen) setLoadingHistory(false)
+      })
+  }, [session])
+
   // Load message history when agent changes — with per-session caching.
   useEffect(() => {
     const gen = ++sessionGeneration.current
 
     setOnMessage(() => {}) // clear stale handler immediately
+    setChannelSessionId(null)
 
     // Save outgoing session state to cache (strip any in-flight streaming message).
     const prevId = prevSessionIdRef.current
@@ -203,46 +241,17 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
     const ac = new AbortController()
 
-    // Only fetch data if not restored from cache.
-    if (!cached) {
-      fetch(`/api/instances/${encodeURIComponent(session.id)}/usage`, {
-        signal: ac.signal,
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: UsageInfo | null) => {
-          if (sessionGeneration.current === gen && data) setUsage(data)
-        })
-        .catch(() => {})
-      fetch(`/api/instances/${encodeURIComponent(session.id)}/messages`, {
-        signal: ac.signal,
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json()
-        })
-        .then((history: import("@/lib/chat-types").HistoryMessage[]) => {
-          if (sessionGeneration.current !== gen) return
-          setMessages(mergeHistoryMessages(history))
-        })
-        .catch((err: Error) => {
-          if (err.name === "AbortError") return
-          if (sessionGeneration.current !== gen) return
-          setMessages([
-            {
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: "Failed to load conversation history.",
-            },
-          ])
-        })
-        .finally(() => {
-          if (sessionGeneration.current === gen) setLoadingHistory(false)
-        })
-    }
-
     setOnMessage((msg: ChatWireMessage) => {
       if (sessionGeneration.current !== gen) return
       switch (msg.type) {
+        // The server sends a "session" event with the channel session ID
+        // immediately after WebSocket connection. Use it for history/usage.
+        case "session":
+          setChannelSessionId(msg.content ?? null)
+          if (msg.content && !cached) {
+            fetchSessionData(msg.content, gen, ac.signal)
+          }
+          break
         case "delta": {
           if (!streamingMsgId.current) {
             const id = crypto.randomUUID()
@@ -353,9 +362,11 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           ])
           break
         case "clear":
-          // Session was cleared — reset message state.
+          // Session was cleared — reset message state. The server will send
+          // a new "session" event with the replacement session ID.
           setMessages([])
           setUsage(null)
+          setChannelSessionId(null)
           streamingMsgId.current = null
           setStreaming(false)
           if (session?.id) sessionCache.current.delete(session.id)
@@ -377,7 +388,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
     })
 
     return () => ac.abort()
-  }, [session?.id, setOnMessage])
+  }, [session?.id, setOnMessage, fetchSessionData])
 
   const handleSend = useCallback(
     (text: string, wireAttachments: ChatAttachment[] | undefined, displayAttachments: MessageAttachment[]) => {

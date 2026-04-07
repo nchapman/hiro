@@ -131,15 +131,24 @@ func (m *Manager) GetInstanceConfig(instanceID string) (config.InstanceConfig, e
 	return config.LoadInstanceConfig(m.instanceDir(instanceID))
 }
 
-// GetHistory returns recent messages from the active session of a persistent instance.
+// GetHistory returns recent messages from the web session of a persistent instance.
+// For session-specific history, use GetSessionHistory directly.
 func (m *Manager) GetHistory(ctx context.Context, instanceID string, limit int) ([]HistoryMessage, error) {
 	m.mu.RLock()
 	inst, ok := m.instances[instanceID]
 	var sessionID string
 	var persistent bool
 	if ok {
-		sessionID = inst.activeSession
 		persistent = inst.info.Mode.IsPersistent()
+		// Prefer the web session, fall back to any session.
+		if sid, found := inst.channelIndex[channelWeb]; found {
+			sessionID = sid
+		} else {
+			for sid := range inst.sessions {
+				sessionID = sid
+				break
+			}
+		}
 	}
 	m.mu.RUnlock()
 	if !ok {
@@ -150,35 +159,11 @@ func (m *Manager) GetHistory(ctx context.Context, instanceID string, limit int) 
 		return nil, nil
 	}
 
-	if m.pdb == nil {
-		return nil, nil
-	}
-	if sessionID == "" {
+	if m.pdb == nil || sessionID == "" {
 		return nil, nil
 	}
 
-	msgs, err := m.pdb.RecentMessages(ctx, sessionID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("reading history: %w", err)
-	}
-
-	result := make([]HistoryMessage, 0, len(msgs))
-	for _, msg := range msgs {
-		if msg.Role == roleUser || msg.Role == roleAssistant || msg.Role == roleTool {
-			rawJSON := msg.RawJSON
-			if msg.Role == roleAssistant && rawJSON != "" {
-				rawJSON = inference.InjectStatusMessages(rawJSON)
-			}
-			result = append(result, HistoryMessage{
-				Role:      msg.Role,
-				Content:   msg.Content,
-				RawJSON:   rawJSON,
-				IsMeta:    msg.Meta,
-				Timestamp: msg.CreatedAt.Format(time.RFC3339),
-			})
-		}
-	}
-	return result, nil
+	return m.GetSessionHistory(ctx, sessionID, limit)
 }
 
 // GetSessionHistory returns recent messages from a specific session (for history browsing).
@@ -229,12 +214,32 @@ func (m *Manager) InstanceByAgentName(name string) (id string, running bool) {
 	return id, false
 }
 
-// ActiveSessionID returns the active session ID for an instance.
+// ActiveSessionID returns a session ID for an instance, preferring the web session.
+//
+// Deprecated: callers should track session IDs explicitly via bindings.
 func (m *Manager) ActiveSessionID(instanceID string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	inst, ok := m.instances[instanceID]
+	if !ok {
+		return ""
+	}
+	if sid, found := inst.channelIndex[channelWeb]; found {
+		return sid
+	}
+	// Fall back to any session.
+	for sid := range inst.sessions {
+		return sid
+	}
+	return ""
+}
+
+// SessionIDForChannel returns the session ID bound to a specific channel key.
+func (m *Manager) SessionIDForChannel(instanceID, channelKey string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if inst, ok := m.instances[instanceID]; ok {
-		return inst.activeSession
+		return inst.channelIndex[channelKey]
 	}
 	return ""
 }

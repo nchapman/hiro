@@ -37,7 +37,7 @@ func toolResponseText(resp fantasy.ToolResponse) string {
 
 func TestAddMemory_Basic(t *testing.T) {
 	dir := t.TempDir()
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 
 	resp := runMemoryTool(t, tools, "AddMemory", `{"content":"User prefers dark mode"}`)
 	text := toolResponseText(resp)
@@ -63,7 +63,7 @@ func TestAddMemory_AppendsToExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	runMemoryTool(t, tools, "AddMemory", `{"content":"New memory"}`)
 
 	content, err := config.ReadMemoryFile(dir)
@@ -84,7 +84,7 @@ func TestAddMemory_AppendsToExisting(t *testing.T) {
 
 func TestAddMemory_StripsNewlines(t *testing.T) {
 	dir := t.TempDir()
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 
 	runMemoryTool(t, tools, "AddMemory", `{"content":"Line one\nLine two\r\nLine three"}`)
 
@@ -100,7 +100,7 @@ func TestAddMemory_StripsNewlines(t *testing.T) {
 
 func TestAddMemory_EmptyContent(t *testing.T) {
 	dir := t.TempDir()
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 
 	resp := runMemoryTool(t, tools, "AddMemory", `{"content":"  "}`)
 	if !resp.IsError {
@@ -120,7 +120,7 @@ func TestAddMemory_EvictsOldest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	runMemoryTool(t, tools, "AddMemory", `{"content":"newest entry"}`)
 
 	content, err := config.ReadMemoryFile(dir)
@@ -147,7 +147,7 @@ func TestForgetMemory_Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	resp := runMemoryTool(t, tools, "ForgetMemory", `{"match":"dark mode"}`)
 	text := toolResponseText(resp)
 	if !strings.Contains(text, "Forgot 1") {
@@ -172,7 +172,7 @@ func TestForgetMemory_CaseInsensitive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	resp := runMemoryTool(t, tools, "ForgetMemory", `{"match":"postgresql"}`)
 	if resp.IsError {
 		t.Errorf("unexpected error: %s", toolResponseText(resp))
@@ -193,7 +193,7 @@ func TestForgetMemory_NoMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	resp := runMemoryTool(t, tools, "ForgetMemory", `{"match":"nonexistent"}`)
 	if !resp.IsError {
 		t.Error("expected error when no memories match")
@@ -202,7 +202,7 @@ func TestForgetMemory_NoMatch(t *testing.T) {
 
 func TestForgetMemory_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 
 	resp := runMemoryTool(t, tools, "ForgetMemory", `{"match":"anything"}`)
 	if resp.IsError {
@@ -220,7 +220,7 @@ func TestForgetMemory_AllRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	resp := runMemoryTool(t, tools, "ForgetMemory", `{"match":"VPN"}`)
 	text := toolResponseText(resp)
 	if !strings.Contains(text, "Forgot 2") {
@@ -242,7 +242,7 @@ func TestForgetMemory_DoesNotMatchDateStamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 	resp := runMemoryTool(t, tools, "ForgetMemory", `{"match":"2026"}`)
 	if !resp.IsError {
 		t.Error("matching against date stamp should not remove entries")
@@ -251,7 +251,7 @@ func TestForgetMemory_DoesNotMatchDateStamp(t *testing.T) {
 
 func TestAddMemory_HasDateStamp(t *testing.T) {
 	dir := t.TempDir()
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 
 	runMemoryTool(t, tools, "AddMemory", `{"content":"test memory"}`)
 
@@ -275,7 +275,7 @@ func TestParseMemoryEntries_SkipsBlankLines(t *testing.T) {
 
 func TestMemoryFile_Permissions(t *testing.T) {
 	dir := t.TempDir()
-	tools := buildMemoryTools(dir)
+	tools := buildMemoryTools(dir, nil)
 
 	runMemoryTool(t, tools, "AddMemory", `{"content":"secret preference"}`)
 

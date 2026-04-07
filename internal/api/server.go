@@ -327,10 +327,24 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no instance manager", http.StatusServiceUnavailable)
 		return
 	}
-	id := r.PathValue("id")
-	msgs, err := s.manager.GetSessionHistory(r.Context(), id, maxHistoryMessages)
+	sessionID := r.PathValue("id")
+
+	// Validate the session exists and belongs to a known instance.
+	if s.pdb != nil {
+		sess, err := s.pdb.GetSession(r.Context(), sessionID)
+		if err != nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		if _, ok := s.manager.GetInstance(sess.InstanceID); !ok {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	msgs, err := s.manager.GetSessionHistory(r.Context(), sessionID, maxHistoryMessages)
 	if err != nil {
-		s.logger.Error("failed to read session history", "id", id, "error", err)
+		s.logger.Error("failed to read session history", "id", sessionID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -402,7 +416,11 @@ func (s *Server) handleClearInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	newSessionID, err := s.manager.NewSession(id)
+	channelKey := r.URL.Query().Get("channel")
+	if channelKey == "" {
+		channelKey = "web"
+	}
+	newSessionID, err := s.manager.NewSessionForChannel(id, channelKey)
 	if err != nil {
 		if errors.Is(err, agent.ErrInstanceNotFound) {
 			http.Error(w, "instance not found", http.StatusNotFound)

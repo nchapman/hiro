@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -22,14 +23,18 @@ var forgetMemoryDescription string
 // oldest entries (top of the file) are evicted to make room.
 const maxMemoryEntries = 100
 
-func buildMemoryTools(instanceDir string) []Tool {
+func buildMemoryTools(instanceDir string, mu *sync.Mutex) []Tool {
 	return wrapAll([]fantasy.AgentTool{
 		fantasy.NewAgentTool("AddMemory",
 			addMemoryDescription,
 			func(ctx context.Context, input struct {
 				Content string `json:"content" description:"The memory to save. A single concise line — no newlines."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-				return handleAddMemory(instanceDir, input.Content)
+				if mu != nil {
+					mu.Lock()
+					defer mu.Unlock()
+				}
+				return handleAddMemory(instanceDir, input.Content), nil
 			},
 		),
 
@@ -38,16 +43,20 @@ func buildMemoryTools(instanceDir string) []Tool {
 			func(ctx context.Context, input struct {
 				Match string `json:"match" description:"Substring to match against existing memories (case-insensitive)."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-				return handleForgetMemory(instanceDir, input.Match)
+				if mu != nil {
+					mu.Lock()
+					defer mu.Unlock()
+				}
+				return handleForgetMemory(instanceDir, input.Match), nil
 			},
 		),
 	})
 }
 
-func handleAddMemory(instanceDir, rawContent string) (fantasy.ToolResponse, error) {
+func handleAddMemory(instanceDir, rawContent string) fantasy.ToolResponse {
 	content := strings.TrimSpace(rawContent)
 	if content == "" {
-		return fantasy.NewTextErrorResponse("content cannot be empty"), nil
+		return fantasy.NewTextErrorResponse("content cannot be empty")
 	}
 	// Strip any newlines — one memory, one line.
 	content = strings.ReplaceAll(content, "\n", " ")
@@ -55,7 +64,7 @@ func handleAddMemory(instanceDir, rawContent string) (fantasy.ToolResponse, erro
 
 	existing, err := config.ReadMemoryFile(instanceDir)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to read memory: %v", err)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to read memory: %v", err))
 	}
 
 	entries := parseMemoryEntries(existing)
@@ -71,26 +80,26 @@ func handleAddMemory(instanceDir, rawContent string) (fantasy.ToolResponse, erro
 	}
 
 	if err := config.WriteMemoryFile(instanceDir, strings.Join(entries, "\n")+"\n"); err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to write memory: %v", err)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to write memory: %v", err))
 	}
 
-	return fantasy.NewTextResponse(fmt.Sprintf("Memory saved. %d/%d entries.", len(entries), maxMemoryEntries)), nil
+	return fantasy.NewTextResponse(fmt.Sprintf("Memory saved. %d/%d entries.", len(entries), maxMemoryEntries))
 }
 
-func handleForgetMemory(instanceDir, rawMatch string) (fantasy.ToolResponse, error) {
+func handleForgetMemory(instanceDir, rawMatch string) fantasy.ToolResponse {
 	match := strings.TrimSpace(rawMatch)
 	if match == "" {
-		return fantasy.NewTextErrorResponse("match cannot be empty"), nil
+		return fantasy.NewTextErrorResponse("match cannot be empty")
 	}
 
 	existing, err := config.ReadMemoryFile(instanceDir)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to read memory: %v", err)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to read memory: %v", err))
 	}
 
 	entries := parseMemoryEntries(existing)
 	if len(entries) == 0 {
-		return fantasy.NewTextResponse("No memories to forget."), nil
+		return fantasy.NewTextResponse("No memories to forget.")
 	}
 
 	matchLower := strings.ToLower(match)
@@ -104,7 +113,7 @@ func handleForgetMemory(instanceDir, rawMatch string) (fantasy.ToolResponse, err
 	}
 
 	if len(removed) == 0 {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("no memories matched %q", match)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("no memories matched %q", match))
 	}
 
 	content := ""
@@ -113,10 +122,10 @@ func handleForgetMemory(instanceDir, rawMatch string) (fantasy.ToolResponse, err
 	}
 
 	if err := config.WriteMemoryFile(instanceDir, content); err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to write memory: %v", err)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to write memory: %v", err))
 	}
 
-	return fantasy.NewTextResponse(fmt.Sprintf("Forgot %d memory(s). %d remaining.", len(removed), len(kept))), nil
+	return fantasy.NewTextResponse(fmt.Sprintf("Forgot %d memory(s). %d remaining.", len(removed), len(kept)))
 }
 
 // entryContent strips the trailing " [YYYY-MM-DD]" date stamp from a memory

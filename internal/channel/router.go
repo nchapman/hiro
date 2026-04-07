@@ -156,26 +156,53 @@ func (r *Router) bindingsForInstance(instanceID string) []*Binding {
 	return result
 }
 
+// bindingsForSession returns bindings targeting the given instance+session.
+// Returns only exact session matches — session-targeted notifications should
+// not fan out to other channels. The caller (processNotification) already
+// uses bindingsForInstance when n.SessionID is empty.
+func (r *Router) bindingsForSession(instanceID, sessionID string) []*Binding {
+	r.bindMu.RLock()
+	snapshot := make([]*Binding, 0, len(r.bindings))
+	for _, b := range r.bindings {
+		snapshot = append(snapshot, b)
+	}
+	r.bindMu.RUnlock()
+
+	var result []*Binding
+	for _, b := range snapshot {
+		if b.ResolveInstanceID(r.manager) == instanceID && b.SessionID == sessionID {
+			result = append(result, b)
+		}
+	}
+
+	if len(result) == 0 {
+		r.logger.Debug("no session-matched bindings for notification",
+			"instance_id", instanceID, "session_id", sessionID)
+	}
+	return result
+}
+
 // Dispatch handles an inbound message: intercepts slash commands,
-// resolves the binding, and calls Manager.SendMessage.
+// resolves the binding, and calls Manager.SendMessageToSession.
 func (r *Router) Dispatch(ctx context.Context, msg InboundMessage) error {
 	// Slash command interception.
 	if strings.HasPrefix(msg.Text, "/") {
 		return r.handleSlashCommand(ctx, msg)
 	}
 
-	// Route to Manager.
+	// Route to Manager using the per-channel session.
 	var response string
 	var err error
 	if len(msg.Files) > 0 {
-		response, err = r.manager.SendMessageWithFiles(ctx, msg.InstanceID, msg.Text, msg.Files, msg.OnEvent)
+		response, err = r.manager.SendMessageToSessionWithFiles(ctx, msg.InstanceID, msg.SessionID, msg.Text, msg.Files, msg.OnEvent)
 	} else {
-		response, err = r.manager.SendMessage(ctx, msg.InstanceID, msg.Text, msg.OnEvent)
+		response, err = r.manager.SendMessageToSession(ctx, msg.InstanceID, msg.SessionID, msg.Text, msg.OnEvent)
 	}
 
 	if err != nil {
 		r.logger.Warn("message dispatch failed",
 			"instance_id", msg.InstanceID,
+			"session_id", msg.SessionID,
 			"channel", msg.ChannelName,
 			"error", err,
 		)
@@ -185,7 +212,7 @@ func (r *Router) Dispatch(ctx context.Context, msg InboundMessage) error {
 
 	return msg.OnDone(TurnResult{
 		Response: response,
-		Usage:    r.usage.BuildUsageInfo(ctx, msg.InstanceID),
+		Usage:    r.usage.BuildUsageInfo(ctx, msg.InstanceID, msg.SessionID),
 	})
 }
 
@@ -231,22 +258,46 @@ func (r *Router) handleSlashCommand(ctx context.Context, msg InboundMessage) err
 	return msg.OnDone(TurnResult{})
 }
 
-// handleClearCommand processes the /clear slash command.
+// handleClearCommand processes the /clear slash command. Only the channel
+// that issued the command gets a new session — other channels are unaffected.
 func (r *Router) handleClearCommand(_ context.Context, msg InboundMessage) error {
-	// Emit clear event (web channel uses this to reset the UI).
+	channelKey := msg.ChannelKey
+	if channelKey == "" {
+		channelKey = channelKeyWeb // fallback for legacy callers
+	}
+
+	// Emit clear event first (web channel uses this to reset the UI).
 	_ = msg.OnEvent(ipc.ChatEvent{Type: "clear"})
 	_ = msg.OnDone(TurnResult{})
 
-	// NewSession runs in the background with a detached context so it
-	// completes even if the caller disconnects. Errors are logged only —
-	// OnDone has already been called so sending events would violate the
-	// turn protocol.
+	// NewSessionForChannel runs in the background with a detached context so it
+	// completes even if the caller disconnects. After creating the new session,
+	// update the binding and notify web clients of the new session ID.
 	go func() {
-		if _, err := r.manager.NewSession(msg.InstanceID); err != nil {
+		newSessionID, err := r.manager.NewSessionForChannel(msg.InstanceID, channelKey)
+		if err != nil {
 			r.logger.Warn("failed to create new session after /clear",
 				"instance_id", msg.InstanceID,
+				"channel_key", channelKey,
 				"error", err,
 			)
+			return
+		}
+
+		// Update the binding with the new session ID.
+		r.bindMu.Lock()
+		for _, b := range r.bindings {
+			if b.Target == msg.InstanceID && b.ConversationKey == msg.ConversationKey {
+				b.SessionID = newSessionID
+			}
+		}
+		r.bindMu.Unlock()
+
+		// Send session event to web clients so the browser can fetch
+		// session-specific history. Non-web channels (Telegram, Slack)
+		// re-resolve via EnsureSession on the next inbound message.
+		if msg.ChannelName == channelKeyWeb {
+			_ = msg.OnEvent(ipc.ChatEvent{Type: "session", Content: newSessionID})
 		}
 	}()
 	return nil
@@ -324,27 +375,17 @@ func (r *Router) runNotificationPump(ctx context.Context, instanceID string) {
 
 // drainAndDeliver processes all pending notifications for an instance,
 // triggering a meta inference turn for each and fanning out the result
-// to all bound channels.
+// to all bound channels. Notifications with a SessionID are routed only
+// to bindings for that session; notifications without one fan out to all.
 func (r *Router) drainAndDeliver(ctx context.Context, instanceID string) {
 	q := r.manager.InstanceNotifications(instanceID)
 	if q == nil {
 		return
 	}
 
-	activeSession := r.manager.ActiveSessionID(instanceID)
 	notifications := q.Drain()
 
 	for _, n := range notifications {
-		if n.SessionID != "" && n.SessionID != activeSession {
-			r.logger.Info("discarding stale notification",
-				"instance_id", instanceID,
-				"source", n.Source,
-				"notification_session", n.SessionID,
-				"active_session", activeSession,
-			)
-			continue
-		}
-
 		if stop := r.processNotification(ctx, instanceID, n); stop {
 			return
 		}
@@ -353,12 +394,20 @@ func (r *Router) drainAndDeliver(ctx context.Context, instanceID string) {
 
 // processNotification runs a single meta inference turn for a notification
 // and fans out the result. Returns true if draining should stop (terminal error).
-func (r *Router) processNotification(ctx context.Context, instanceID string, n inference.Notification) bool {
-	bindings := r.bindingsForInstance(instanceID)
+func (r *Router) processNotification(ctx context.Context, instanceID string, n inference.Notification) bool { //nolint:funlen // notification routing logic is inherently multi-step
+	// If the notification targets a specific session, route only to bindings
+	// for that session. Otherwise fan out to all bindings.
+	var bindings []*Binding
+	if n.SessionID != "" {
+		bindings = r.bindingsForSession(instanceID, n.SessionID)
+	} else {
+		bindings = r.bindingsForInstance(instanceID)
+	}
 	if len(bindings) == 0 {
-		r.logger.Debug("no bindings for instance, skipping notification",
+		r.logger.Debug("no bindings for notification, skipping",
 			"instance_id", instanceID,
 			"source", n.Source,
+			"session_id", n.SessionID,
 		)
 		return false
 	}
@@ -367,6 +416,7 @@ func (r *Router) processNotification(ctx context.Context, instanceID string, n i
 		"instance_id", instanceID,
 		"source", n.Source,
 		"content_length", len(n.Content),
+		"session_id", n.SessionID,
 		"binding_count", len(bindings),
 	)
 
@@ -379,7 +429,15 @@ func (r *Router) processNotification(ctx context.Context, instanceID string, n i
 		return nil
 	}
 
-	response, turnErr := r.manager.SendMetaMessage(ctx, instanceID, n.Content, onEvent)
+	// Use session-routed meta message when available, otherwise fall back
+	// to the auto-routing SendMetaMessage.
+	var response string
+	var turnErr error
+	if n.SessionID != "" {
+		response, turnErr = r.manager.SendMetaMessageToSession(ctx, instanceID, n.SessionID, n.Content, onEvent)
+	} else {
+		response, turnErr = r.manager.SendMetaMessage(ctx, instanceID, n.Content, onEvent)
+	}
 	if turnErr != nil {
 		r.logger.Warn("notification turn failed",
 			"instance_id", instanceID,
@@ -389,7 +447,7 @@ func (r *Router) processNotification(ctx context.Context, instanceID string, n i
 
 	result := TurnResult{
 		Response: response,
-		Usage:    r.usage.BuildUsageInfo(ctx, instanceID),
+		Usage:    r.usage.BuildUsageInfo(ctx, instanceID, n.SessionID),
 	}
 	r.fanOut(ctx, bindings, events, result)
 

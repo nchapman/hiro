@@ -7,12 +7,12 @@ import (
 
 func TestCallerIDRoundtrip(t *testing.T) {
 	ctx := context.Background()
-	if got := callerIDFromContext(ctx); got != "" {
+	if got := CallerIDFromContext(ctx); got != "" {
 		t.Errorf("empty context should return empty caller ID, got %q", got)
 	}
 
 	ctx = ContextWithCallerID(ctx, "session-123")
-	if got := callerIDFromContext(ctx); got != "session-123" {
+	if got := CallerIDFromContext(ctx); got != "session-123" {
 		t.Errorf("got %q, want session-123", got)
 	}
 }

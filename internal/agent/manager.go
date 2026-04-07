@@ -50,21 +50,32 @@ type WorkerHandle struct {
 // OS processes. Tests inject alternatives that return fake workers.
 type WorkerFactory func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error)
 
+// sessionSlot holds the per-session worker, loop, and handle. Each channel
+// (web, telegram, agent, etc.) gets its own slot on the instance.
+type sessionSlot struct {
+	mu        sync.Mutex // serializes Chat calls on this session
+	sessionID string
+	channel   string          // compound key: "web", "tg:12345", "agent:<parentID>", "trigger:<subID>"
+	worker    ipc.AgentWorker // worker process for tool execution
+	handle    *WorkerHandle
+	loop      *inference.Loop // inference loop (runs in control plane)
+	lastUsed  time.Time       // for idle timeout
+}
+
 // instance tracks a live agent instance within the manager.
 //
-// Lock ordering: m.mu → inst.mu (no reverse path exists in the codebase).
-// m.mu protects the instances and children maps; inst.mu serializes calls
-// through the worker (SendMessage, UpdateConfig) and protects mutable
-// per-instance state (handle, loop, status).
+// Lock ordering: m.mu → inst.mu → slot.mu (no reverse path exists).
+// m.mu protects the instances and children maps; inst.mu protects the
+// sessions/channelIndex maps and instance-level state; slot.mu serializes
+// Chat calls on individual sessions.
 type instance struct {
-	mu             sync.Mutex // serializes calls through the worker
+	mu             sync.Mutex // protects sessions, channelIndex, and instance-level state
 	info           InstanceInfo
-	agentName      string // agent definition name (immutable, for config loading)
-	activeSession  string // current session ID
-	worker         ipc.AgentWorker
-	handle         *WorkerHandle
-	loop           *inference.Loop              // inference loop (runs in control plane)
-	notifications  *inference.NotificationQueue // instance-level; survives loop recreation
+	agentName      string                       // agent definition name (immutable, for config loading)
+	sessions       map[string]*sessionSlot      // sessionID → slot
+	channelIndex   map[string]string            // compound channel key → sessionID
+	notifications  *inference.NotificationQueue // instance-level; survives session recreation
+	memoryMu       *sync.Mutex                  // protects concurrent memory.md read-modify-write across sessions
 	effectiveTools map[string]bool              // built-in tools this instance is allowed; nil = unrestricted
 	allowLayers    [][]toolrules.Rule           // per-source allow rules for call-time enforcement
 	denyRules      []toolrules.Rule             // merged deny rules from all sources
@@ -72,6 +83,42 @@ type instance struct {
 	gid            uint32                       // isolated GID
 	groups         []uint32                     // supplementary groups only (not primary GID); used for inheritance checks
 	nodeID         ipc.NodeID                   // which node this instance runs on ("home" for local)
+}
+
+// slotByChannel returns the session slot for a compound channel key, or nil.
+// Must be called with inst.mu held.
+func (inst *instance) slotByChannel(channel string) *sessionSlot {
+	if sid, ok := inst.channelIndex[channel]; ok {
+		return inst.sessions[sid]
+	}
+	return nil
+}
+
+// addSlot registers a session slot in the instance maps.
+// Must be called with inst.mu held.
+func (inst *instance) addSlot(slot *sessionSlot) {
+	inst.sessions[slot.sessionID] = slot
+	inst.channelIndex[slot.channel] = slot.sessionID
+}
+
+// removeSlot removes a session slot from the instance maps.
+// Must be called with inst.mu held.
+func (inst *instance) removeSlot(sessionID string) {
+	if slot, ok := inst.sessions[sessionID]; ok {
+		delete(inst.channelIndex, slot.channel)
+		delete(inst.sessions, sessionID)
+	}
+}
+
+// anySlot returns an arbitrary live session slot, or nil if none exist.
+// Must be called with inst.mu held.
+func (inst *instance) anySlot() *sessionSlot {
+	for _, slot := range inst.sessions {
+		if slot.loop != nil {
+			return slot
+		}
+	}
+	return nil
 }
 
 // Manager supervises agent instance lifecycles on a single node.

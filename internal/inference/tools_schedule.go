@@ -109,7 +109,7 @@ func handleScheduleRecurring(ctx context.Context, pdb *platformdb.DB, schedulerC
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid cron expression %q: %v", schedule, err)), nil
 	}
 
-	callerID := callerIDFromContext(ctx)
+	callerID := CallerIDFromContext(ctx)
 	if callerID == "" {
 		return fantasy.NewTextErrorResponse("no caller instance context"), nil
 	}
@@ -156,7 +156,7 @@ func handleScheduleOnce(ctx context.Context, pdb *platformdb.DB, schedulerCb Sch
 		return fantasy.NewTextErrorResponse("message is required"), nil
 	}
 
-	callerID := callerIDFromContext(ctx)
+	callerID := CallerIDFromContext(ctx)
 	if callerID == "" {
 		return fantasy.NewTextErrorResponse("no caller instance context"), nil
 	}
@@ -231,7 +231,7 @@ func handleCancelSchedule(ctx context.Context, pdb *platformdb.DB, schedulerCb S
 		return fantasy.NewTextErrorResponse("name is required"), nil
 	}
 
-	callerID := callerIDFromContext(ctx)
+	callerID := CallerIDFromContext(ctx)
 	if callerID == "" {
 		return fantasy.NewTextErrorResponse("no caller instance context"), nil
 	}
@@ -257,7 +257,7 @@ func handleCancelSchedule(ctx context.Context, pdb *platformdb.DB, schedulerCb S
 }
 
 func handleListSchedules(ctx context.Context, pdb *platformdb.DB) (fantasy.ToolResponse, error) {
-	callerID := callerIDFromContext(ctx)
+	callerID := CallerIDFromContext(ctx)
 	if callerID == "" {
 		return fantasy.NewTextErrorResponse("no caller instance context"), nil
 	}

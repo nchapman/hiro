@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -280,7 +281,7 @@ func TestGetHistory_Ephemeral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load agent dir: %v", err)
 	}
-	id, _ := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", cfg, "", config.ModeEphemeral, "", "", "", "")
+	id, _ := mgr.startInstance(t.Context(), "eph-test-id", "eph-sess-id", "web", cfg, "", config.ModeEphemeral, "", "", "", "")
 
 	msgs, err := mgr.GetHistory(t.Context(), id, 10)
 	if err != nil {
@@ -834,7 +835,7 @@ Has disk skills.`)
 
 func TestRegisterInstanceInDB_NilPDB(t *testing.T) {
 	mgr, _ := setupTestManager(t)
-	err := mgr.registerInstanceInDB(t.Context(), "id", "sess", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "")
+	err := mgr.registerInstanceInDB(t.Context(), "id", "sess", "", "", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "")
 	if err != nil {
 		t.Fatalf("should succeed with nil PDB: %v", err)
 	}
@@ -846,7 +847,7 @@ func TestRegisterInstanceInDB_WithPDB(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
 
-	err := mgr.registerInstanceInDB(t.Context(), "inst-1", "sess-1", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "home")
+	err := mgr.registerInstanceInDB(t.Context(), "inst-1", "sess-1", "", "", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "home")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -861,7 +862,7 @@ func TestRegisterInstanceInDB_WithPDB(t *testing.T) {
 	}
 
 	// Duplicate should not fail (errors.Is(err, ErrDuplicate) is handled).
-	err = mgr.registerInstanceInDB(t.Context(), "inst-1", "sess-1", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "home")
+	err = mgr.registerInstanceInDB(t.Context(), "inst-1", "sess-1", "", "", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "home")
 	if err != nil {
 		t.Fatalf("duplicate registration should not fail: %v", err)
 	}
@@ -1605,9 +1606,9 @@ func TestBuildInstance(t *testing.T) {
 		Done:   done,
 	}
 	cfg := config.AgentConfig{Name: "test", Description: "desc"}
-	inst := buildInstance("inst-1", "sess-1", cfg, config.ModePersistent, "parent-1", "home",
+	inst := buildInstance("inst-1", "sess-1", "web", cfg, config.ModePersistent, "parent-1", "home",
 		"anthropic/model", "Display", "Display Desc",
-		handle, nil, nil, map[string]bool{"Bash": true}, nil, nil, 10000, 10000, []uint32{10001})
+		handle, nil, nil, &sync.Mutex{}, map[string]bool{"Bash": true}, nil, nil, 10000, 10000, []uint32{10001})
 
 	if inst.info.ID != "inst-1" {
 		t.Errorf("ID = %q, want inst-1", inst.info.ID)
@@ -1642,9 +1643,9 @@ func TestBuildInstance_FallbackNames(t *testing.T) {
 		Done:   done,
 	}
 	cfg := config.AgentConfig{Name: "agent-name", Description: "agent-desc"}
-	inst := buildInstance("inst-2", "sess-2", cfg, config.ModeEphemeral, "", "home",
+	inst := buildInstance("inst-2", "sess-2", "web", cfg, config.ModeEphemeral, "", "home",
 		"model", "", "", // empty display name/desc
-		handle, nil, nil, nil, nil, nil, 0, 0, nil)
+		handle, nil, nil, nil, nil, nil, nil, 0, 0, nil)
 
 	if inst.info.Name != "agent-name" {
 		t.Errorf("Name = %q, want agent-name (fallback)", inst.info.Name)
@@ -1985,9 +1986,9 @@ func TestCreateInferenceLoop_EmptyProvider(t *testing.T) {
 	}
 }
 
-// --- detachWorker ---
+// --- detachAllSlots ---
 
-func TestDetachWorker(t *testing.T) {
+func TestDetachAllSlots(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 	done := make(chan struct{})
 	w := &testWorker{done: done}
@@ -1998,20 +1999,30 @@ func TestDetachWorker(t *testing.T) {
 		Done:   done,
 	}
 	inst := &instance{
-		worker: w,
-		handle: handle,
-		loop:   nil,
-		info:   InstanceInfo{Status: InstanceStatusRunning},
+		sessions: map[string]*sessionSlot{
+			"sess-1": {
+				sessionID: "sess-1",
+				channel:   "web",
+				worker:    w,
+				handle:    handle,
+			},
+		},
+		channelIndex: map[string]string{"web": "sess-1"},
+		info:         InstanceInfo{Status: InstanceStatusRunning},
 	}
 
-	h := mgr.detachWorker(inst, InstanceStatusStopped)
-	if h != handle {
+	handles := mgr.detachAllSlots(inst, InstanceStatusStopped)
+	if len(handles) != 1 {
+		t.Fatalf("expected 1 handle, got %d", len(handles))
+	}
+	if handles[0] != handle {
 		t.Error("should return the captured handle")
 	}
-	if inst.worker != nil {
+	slot := inst.sessions["sess-1"]
+	if slot.worker != nil {
 		t.Error("worker should be nil after detach")
 	}
-	if inst.handle != nil {
+	if slot.handle != nil {
 		t.Error("handle should be nil after detach")
 	}
 	if inst.info.Status != InstanceStatusStopped {
@@ -2019,13 +2030,15 @@ func TestDetachWorker(t *testing.T) {
 	}
 }
 
-func TestDetachWorker_NoStatusChange(t *testing.T) {
+func TestDetachAllSlots_NoStatusChange(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 	inst := &instance{
-		info: InstanceInfo{Status: InstanceStatusRunning},
+		sessions:     make(map[string]*sessionSlot),
+		channelIndex: make(map[string]string),
+		info:         InstanceInfo{Status: InstanceStatusRunning},
 	}
 
-	mgr.detachWorker(inst, "") // empty status = no change
+	mgr.detachAllSlots(inst, "") // empty status = no change
 	if inst.info.Status != InstanceStatusRunning {
 		t.Errorf("status should remain running, got %q", inst.info.Status)
 	}
@@ -2066,4 +2079,225 @@ func TestReregisterStopped(t *testing.T) {
 	if !found2 {
 		t.Error("instance should be in parent's children list")
 	}
+}
+
+// --- splitChannelKey / makeChannelKey ---
+
+func TestSplitChannelKey(t *testing.T) {
+	tests := []struct {
+		key      string
+		wantType string
+		wantID   string
+	}{
+		{"web", "web", ""},
+		{"tg:12345", "tg", "12345"},
+		{"slack:C1:thread", "slack", "C1:thread"},
+		{"", "", ""},
+	}
+	for _, tt := range tests {
+		gotType, gotID := splitChannelKey(tt.key)
+		if gotType != tt.wantType || gotID != tt.wantID {
+			t.Errorf("splitChannelKey(%q) = (%q, %q), want (%q, %q)",
+				tt.key, gotType, gotID, tt.wantType, tt.wantID)
+		}
+	}
+}
+
+func TestMakeChannelKey(t *testing.T) {
+	tests := []struct {
+		channelType string
+		channelID   string
+		want        string
+	}{
+		{"web", "", "web"},
+		{"tg", "12345", "tg:12345"},
+		{"slack", "C1", "slack:C1"},
+		{"", "", ""},
+	}
+	for _, tt := range tests {
+		got := makeChannelKey(tt.channelType, tt.channelID)
+		if got != tt.want {
+			t.Errorf("makeChannelKey(%q, %q) = %q, want %q",
+				tt.channelType, tt.channelID, got, tt.want)
+		}
+	}
+}
+
+func TestMakeChannelKey_RoundTrip(t *testing.T) {
+	pairs := []struct {
+		channelType string
+		channelID   string
+	}{
+		{"web", ""},
+		{"tg", "12345"},
+		{"slack", "C1:thread"},
+		{"agent", "some-uuid"},
+	}
+	for _, p := range pairs {
+		key := makeChannelKey(p.channelType, p.channelID)
+		gotType, gotID := splitChannelKey(key)
+		if gotType != p.channelType || gotID != p.channelID {
+			t.Errorf("round-trip failed for (%q, %q): makeChannelKey=%q, split=(%q, %q)",
+				p.channelType, p.channelID, key, gotType, gotID)
+		}
+	}
+}
+
+// --- EnsureSession ---
+
+func TestEnsureSession_Idempotent(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	sess1, err := mgr.EnsureSession(t.Context(), id, "tg:42")
+	if err != nil {
+		t.Fatalf("first EnsureSession: %v", err)
+	}
+	if sess1 == "" {
+		t.Fatal("expected non-empty session ID")
+	}
+
+	sess2, err := mgr.EnsureSession(t.Context(), id, "tg:42")
+	if err != nil {
+		t.Fatalf("second EnsureSession: %v", err)
+	}
+	if sess1 != sess2 {
+		t.Errorf("idempotency violated: first=%q second=%q", sess1, sess2)
+	}
+}
+
+func TestEnsureSession_DifferentChannels(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	webSess, err := mgr.EnsureSession(t.Context(), id, "web")
+	if err != nil {
+		t.Fatalf("web EnsureSession: %v", err)
+	}
+
+	tgSess, err := mgr.EnsureSession(t.Context(), id, "tg:123")
+	if err != nil {
+		t.Fatalf("tg EnsureSession: %v", err)
+	}
+
+	if webSess == tgSess {
+		t.Errorf("expected distinct sessions for different channels, both got %q", webSess)
+	}
+}
+
+func TestEnsureSession_StoppedInstance(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	mgr.StopInstance(id)
+
+	_, err = mgr.EnsureSession(t.Context(), id, "web")
+	if err == nil {
+		t.Fatal("expected error for stopped instance")
+	}
+	if !errors.Is(err, ErrInstanceStopped) {
+		t.Errorf("expected ErrInstanceStopped, got %v", err)
+	}
+}
+
+func TestEnsureSession_NotFound(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	_, err := mgr.EnsureSession(t.Context(), "nonexistent-id", "web")
+	if err == nil {
+		t.Fatal("expected error for nonexistent instance")
+	}
+	if !errors.Is(err, ErrInstanceNotFound) {
+		t.Errorf("expected ErrInstanceNotFound, got %v", err)
+	}
+}
+
+func TestEnsureSession_MaxSessions(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// The initial CreateInstance already created one session via the "web" channel.
+	// Count how many sessions already exist so we know how many more to add.
+	inst := mgr.getInstance(id)
+	inst.mu.Lock()
+	existingCount := len(inst.sessions)
+	inst.mu.Unlock()
+
+	// Fill remaining slots up to the limit.
+	for i := existingCount; i < maxSessionsPerInstance; i++ {
+		channelKey := fmt.Sprintf("tg:%d", i)
+		_, err := mgr.EnsureSession(t.Context(), id, channelKey)
+		if err != nil {
+			t.Fatalf("EnsureSession(%q) at slot %d: %v", channelKey, i, err)
+		}
+	}
+
+	// One more beyond the limit should fail.
+	_, err = mgr.EnsureSession(t.Context(), id, "tg:overflow")
+	if err == nil {
+		t.Fatal("expected error when exceeding maxSessionsPerInstance")
+	}
+}
+
+// --- instanceBySession concurrency ---
+
+func TestInstanceBySession_ConcurrentSafe(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Grab the initial session ID so readers have something real to look up.
+	knownSess := mgr.ActiveSessionID(id)
+
+	const numReaders = 10
+	var wg sync.WaitGroup
+
+	// Readers: call instanceBySession concurrently.
+	for range numReaders {
+		wg.Go(func() {
+			for range 50 {
+				_ = mgr.instanceBySession(knownSess)
+				_ = mgr.instanceBySession("nonexistent-session")
+			}
+		})
+	}
+
+	// Writer: add and (indirectly) query sessions while readers run.
+	wg.Go(func() {
+		for i := range 5 {
+			channelKey := fmt.Sprintf("tg:concurrent-%d", i)
+			sess, addErr := mgr.EnsureSession(t.Context(), id, channelKey)
+			if addErr != nil {
+				// May fail if maxSessionsPerInstance is reached — that's fine.
+				return
+			}
+			_ = mgr.instanceBySession(sess)
+		}
+	})
+
+	wg.Wait()
+	// No panic = success.
 }

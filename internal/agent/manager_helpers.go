@@ -17,49 +17,83 @@ import (
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
 )
 
-// SendMessage sends a message to a running instance and streams the response.
-// onEvent is called for each streaming event; it may be nil. Calls are serialized
-// per instance to prevent conversation corruption.
+// channelWeb is the default channel key for web UI and direct API calls.
+const channelWeb = "web"
+
+// SendMessage sends a message to a running instance, auto-resolving the session
+// from the caller context. For management tool messages (parent→child), the
+// session is keyed by the caller's instance ID. onEvent is called for each
+// streaming event; it may be nil.
 func (m *Manager) SendMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	return m.SendMessageWithFiles(ctx, instanceID, message, nil, onEvent)
 }
 
-// SendMessageWithFiles is like SendMessage but includes file attachments
-// (images, PDFs, text documents) passed to the inference loop as fantasy.FileParts.
+// SendMessageWithFiles is like SendMessage but includes file attachments.
 func (m *Manager) SendMessageWithFiles(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
-	inst, ctx, err := m.acquireInstance(ctx, instanceID)
+	// Determine the channel key from the caller context.
+	callerID := inference.CallerIDFromContext(ctx)
+	channelKey := channelWeb // default for direct calls (e.g. operator bootstrap)
+	if callerID != "" {
+		channelKey = "agent:" + callerID
+	}
+
+	sessionID, err := m.EnsureSession(ctx, instanceID, channelKey)
 	if err != nil {
 		return "", err
 	}
-	defer inst.mu.Unlock()
+	return m.SendMessageToSessionWithFiles(ctx, instanceID, sessionID, message, files, onEvent)
+}
 
-	if inst.loop != nil {
-		return inst.loop.Chat(ctx, message, files, onEvent)
+// SendMessageToSession sends a message to a specific session on a running instance.
+func (m *Manager) SendMessageToSession(ctx context.Context, instanceID, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessageToSessionWithFiles(ctx, instanceID, sessionID, message, nil, onEvent)
+}
+
+// SendMessageToSessionWithFiles sends a message with file attachments to a specific session.
+func (m *Manager) SendMessageToSessionWithFiles(ctx context.Context, instanceID, sessionID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	slot, ctx, err := m.acquireSlot(ctx, instanceID, sessionID)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("instance %q has no inference loop", instanceID)
+	defer slot.mu.Unlock()
+
+	slot.lastUsed = time.Now()
+	return slot.loop.Chat(ctx, message, files, onEvent)
 }
 
 // SendMetaMessage runs an inference turn triggered by a notification (not a
 // user message). The prompt is stored as a meta message — visible to the model
-// but hidden from the user's transcript. Uses the same per-instance lock as
-// SendMessage to prevent concurrent Chat calls.
+// but hidden from the user's transcript.
 func (m *Manager) SendMetaMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
-	inst, ctx, err := m.acquireInstance(ctx, instanceID)
+	// Meta messages use the caller context to determine the session.
+	callerID := inference.CallerIDFromContext(ctx)
+	channelKey := channelWeb
+	if callerID != "" {
+		channelKey = "agent:" + callerID
+	}
+	sessionID, err := m.EnsureSession(ctx, instanceID, channelKey)
 	if err != nil {
 		return "", err
 	}
-	defer inst.mu.Unlock()
-
-	if inst.loop != nil {
-		return inst.loop.ChatMeta(ctx, message, onEvent)
-	}
-	return "", fmt.Errorf("instance %q has no inference loop", instanceID)
+	return m.SendMetaMessageToSession(ctx, instanceID, sessionID, message, onEvent)
 }
 
-// acquireInstance performs cycle detection, finds the instance, acquires its
-// lock, and validates it is running with an inference loop. Returns the locked
-// instance and an updated context with call chain info. The caller must unlock.
-func (m *Manager) acquireInstance(ctx context.Context, instanceID string) (*instance, context.Context, error) {
+// SendMetaMessageToSession runs a meta inference turn on a specific session.
+func (m *Manager) SendMetaMessageToSession(ctx context.Context, instanceID, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	slot, ctx, err := m.acquireSlot(ctx, instanceID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	defer slot.mu.Unlock()
+
+	slot.lastUsed = time.Now()
+	return slot.loop.ChatMeta(ctx, message, onEvent)
+}
+
+// acquireSlot performs cycle detection, finds the instance and session slot,
+// acquires the slot lock, and validates it has a live loop. Returns the locked
+// slot and an updated context with call chain info. The caller must unlock slot.mu.
+func (m *Manager) acquireSlot(ctx context.Context, instanceID, sessionID string) (*sessionSlot, context.Context, error) {
 	if inference.IsInCallChain(ctx, instanceID) {
 		return nil, ctx, fmt.Errorf("circular message dependency: instance %s is already awaiting a response in this call chain", instanceID)
 	}
@@ -70,16 +104,27 @@ func (m *Manager) acquireInstance(ctx context.Context, instanceID string) (*inst
 	}
 
 	inst.mu.Lock()
-
 	if inst.info.Status == InstanceStatusStopped {
 		inst.mu.Unlock()
 		return nil, ctx, fmt.Errorf("instance %q: %w", instanceID, ErrInstanceStopped)
+	}
+	slot := inst.sessions[sessionID]
+	inst.mu.Unlock()
+
+	if slot == nil {
+		return nil, ctx, fmt.Errorf("session %q not found on instance %q", sessionID, instanceID)
+	}
+
+	slot.mu.Lock()
+	if slot.loop == nil {
+		slot.mu.Unlock()
+		return nil, ctx, fmt.Errorf("session %q has no inference loop (idle-stopped?)", sessionID)
 	}
 
 	ctx = inference.ContextWithCallChain(ctx, instanceID)
 	ctx = inference.ContextWithCallerID(ctx, instanceID)
 
-	return inst, ctx, nil
+	return slot, ctx, nil
 }
 
 // InstanceNotifications returns the notification queue for an instance.
@@ -238,13 +283,38 @@ func (m *Manager) setInstanceStatus(id, status string) {
 // Returns nil if no match is found.
 func (m *Manager) instanceBySession(sessionID string) *instance {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	snapshot := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
-		if inst.activeSession == sessionID {
+		snapshot = append(snapshot, inst)
+	}
+	m.mu.RUnlock()
+
+	for _, inst := range snapshot {
+		inst.mu.Lock()
+		_, ok := inst.sessions[sessionID]
+		inst.mu.Unlock()
+		if ok {
 			return inst
 		}
 	}
 	return nil
+}
+
+// splitChannelKey splits a compound channel key (e.g. "tg:12345") into
+// channel type and channel ID. Keys without a colon return (key, "").
+func splitChannelKey(key string) (channelType, channelID string) {
+	if ct, ci, ok := strings.Cut(key, ":"); ok {
+		return ct, ci
+	}
+	return key, ""
+}
+
+// makeChannelKey builds a compound channel key from type and ID.
+func makeChannelKey(channelType, channelID string) string {
+	if channelID == "" {
+		return channelType
+	}
+	return channelType + ":" + channelID
 }
 
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

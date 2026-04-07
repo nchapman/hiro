@@ -23,24 +23,25 @@ import (
 // --- Mocks ---
 
 type mockManager struct {
-	mu             sync.Mutex
-	sendMessageFn  func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
-	sendFilesFn    func(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error)
-	sendMetaFn     func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
-	newSessionFn   func(instanceID string) (string, error)
-	updateConfigFn func(ctx context.Context, instanceID, model string, re *string) error
-	notifications  map[string]*inference.NotificationQueue
-	activeSessions map[string]string
-	instances      map[string]agent.InstanceInfo
-	agentInstances map[string]string // agentName → instanceID
+	mu              sync.Mutex
+	sendMessageFn   func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	sendToSessionFn func(ctx context.Context, instanceID, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	sendFilesFn     func(ctx context.Context, instanceID, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error)
+	sendMetaFn      func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	newSessionFn    func(instanceID, channelKey string) (string, error)
+	updateConfigFn  func(ctx context.Context, instanceID, model string, re *string) error
+	notifications   map[string]*inference.NotificationQueue
+	channelSessions map[string]string // "instanceID:channelKey" → sessionID
+	instances       map[string]agent.InstanceInfo
+	agentInstances  map[string]string // agentName → instanceID
 }
 
 func newMockManager() *mockManager {
 	return &mockManager{
-		notifications:  make(map[string]*inference.NotificationQueue),
-		activeSessions: make(map[string]string),
-		instances:      make(map[string]agent.InstanceInfo),
-		agentInstances: make(map[string]string),
+		notifications:   make(map[string]*inference.NotificationQueue),
+		channelSessions: make(map[string]string),
+		instances:       make(map[string]agent.InstanceInfo),
+		agentInstances:  make(map[string]string),
 	}
 }
 
@@ -58,6 +59,23 @@ func (m *mockManager) SendMessageWithFiles(ctx context.Context, instanceID, mess
 	return "response", nil
 }
 
+func (m *mockManager) SendMessageToSession(ctx context.Context, instanceID, sessionID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if m.sendToSessionFn != nil {
+		return m.sendToSessionFn(ctx, instanceID, sessionID, message, onEvent)
+	}
+	if m.sendMessageFn != nil {
+		return m.sendMessageFn(ctx, instanceID, message, onEvent)
+	}
+	return "response", nil
+}
+
+func (m *mockManager) SendMessageToSessionWithFiles(ctx context.Context, instanceID, _, message string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if m.sendFilesFn != nil {
+		return m.sendFilesFn(ctx, instanceID, message, files, onEvent)
+	}
+	return "response", nil
+}
+
 func (m *mockManager) SendMetaMessage(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
 	if m.sendMetaFn != nil {
 		return m.sendMetaFn(ctx, instanceID, message, onEvent)
@@ -65,9 +83,26 @@ func (m *mockManager) SendMetaMessage(ctx context.Context, instanceID, message s
 	return "meta-response", nil
 }
 
-func (m *mockManager) NewSession(instanceID string) (string, error) {
+func (m *mockManager) SendMetaMessageToSession(ctx context.Context, instanceID, _, message string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	if m.sendMetaFn != nil {
+		return m.sendMetaFn(ctx, instanceID, message, onEvent)
+	}
+	return "meta-response", nil
+}
+
+func (m *mockManager) EnsureSession(_ context.Context, instanceID, channelKey string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := instanceID + ":" + channelKey
+	if sid, ok := m.channelSessions[key]; ok {
+		return sid, nil
+	}
+	return "session-" + channelKey, nil
+}
+
+func (m *mockManager) NewSessionForChannel(instanceID, channelKey string) (string, error) {
 	if m.newSessionFn != nil {
-		return m.newSessionFn(instanceID)
+		return m.newSessionFn(instanceID, channelKey)
 	}
 	return "new-session-id", nil
 }
@@ -85,10 +120,10 @@ func (m *mockManager) InstanceNotifications(instanceID string) *inference.Notifi
 	return m.notifications[instanceID]
 }
 
-func (m *mockManager) ActiveSessionID(instanceID string) string {
+func (m *mockManager) SessionIDForChannel(instanceID, channelKey string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.activeSessions[instanceID]
+	return m.channelSessions[instanceID+":"+channelKey]
 }
 
 func (m *mockManager) GetInstance(instanceID string) (agent.InstanceInfo, bool) {
@@ -252,7 +287,7 @@ func TestSlashCommand_Clear(t *testing.T) {
 
 	var clearCalled atomic.Bool
 	mgr := newMockManager()
-	mgr.newSessionFn = func(string) (string, error) {
+	mgr.newSessionFn = func(string, string) (string, error) {
 		clearCalled.Store(true)
 		return "new-session", nil
 	}
@@ -543,7 +578,7 @@ func TestNotificationPump_DeliverToBindings(t *testing.T) {
 
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
-	mgr.activeSessions["inst-1"] = "session-1"
+	mgr.channelSessions["inst-1:web"] = "session-1"
 	q := inference.NewNotificationQueue(slog.Default())
 	mgr.notifications["inst-1"] = q
 
@@ -598,34 +633,42 @@ func TestNotificationPump_DeliverToBindings(t *testing.T) {
 	}
 }
 
-func TestNotificationPump_StaleSessionDiscarded(t *testing.T) {
+func TestNotificationPump_SessionScopedRouting(t *testing.T) {
 	t.Parallel()
 
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
-	mgr.activeSessions["inst-1"] = "session-2"
 	q := inference.NewNotificationQueue(slog.Default())
 	mgr.notifications["inst-1"] = q
 
-	var metaCalled atomic.Bool
-	mgr.sendMetaFn = func(context.Context, string, string, func(ipc.ChatEvent) error) (string, error) {
-		metaCalled.Store(true)
-		return "", nil
+	var delivered atomic.Int32
+	ch := &mockChannel{
+		name: "test",
+		deliverFn: func(_ context.Context, key string, _ []ipc.ChatEvent, _ TurnResult) error {
+			delivered.Add(1)
+			return nil
+		},
 	}
 
 	r := testRouter(t, mgr)
-	ch := &mockChannel{name: "test"}
 	r.Register(ch)
-	r.Bind("key-1", "test", "inst-1")
+
+	// Binding for session-2 (e.g. web) — should NOT receive session-1 notifications.
+	b := r.Bind("key-web", "test", "inst-1")
+	b.SessionID = "session-2"
+
+	// Binding for session-1 (e.g. telegram) — should receive session-1 notifications.
+	b2 := r.Bind("key-tg", "test", "inst-1")
+	b2.SessionID = "session-1"
 
 	r.StartNotificationPump(t.Context(), "inst-1")
 
-	// Push a notification scoped to a different session — should be discarded.
-	q.Push(inference.Notification{Content: "stale", Source: "test", SessionID: "session-1"})
+	// Push a notification scoped to session-1.
+	q.Push(inference.Notification{Content: "hello", Source: "test", SessionID: "session-1"})
 
 	time.Sleep(100 * time.Millisecond)
-	if metaCalled.Load() {
-		t.Error("SendMetaMessage should not be called for stale session notifications")
+	if got := delivered.Load(); got != 1 {
+		t.Errorf("expected 1 delivery (to session-1 binding), got %d", got)
 	}
 }
 
@@ -799,7 +842,7 @@ func TestUsageQuerier_NilPDB(t *testing.T) {
 	t.Parallel()
 
 	q := &UsageQuerier{PDB: nil}
-	result := q.BuildUsageInfo(context.Background(), "inst-1")
+	result := q.BuildUsageInfo(context.Background(), "inst-1", "")
 	if result != nil {
 		t.Errorf("expected nil for nil PDB, got %+v", result)
 	}
@@ -809,7 +852,7 @@ func TestUsageQuerier_Nil(t *testing.T) {
 	t.Parallel()
 
 	var q *UsageQuerier
-	result := q.BuildUsageInfo(context.Background(), "inst-1")
+	result := q.BuildUsageInfo(context.Background(), "inst-1", "")
 	if result != nil {
 		t.Errorf("expected nil for nil querier, got %+v", result)
 	}
@@ -826,10 +869,10 @@ func TestUsageQuerier_WithDB(t *testing.T) {
 
 	mgr := newMockManager()
 	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1", Model: "test-model"}
-	mgr.activeSessions["inst-1"] = "session-1"
+	mgr.channelSessions["inst-1:web"] = "session-1"
 
 	q := &UsageQuerier{PDB: pdb, Manager: mgr}
-	result := q.BuildUsageInfo(context.Background(), "inst-1")
+	result := q.BuildUsageInfo(context.Background(), "inst-1", "")
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -855,7 +898,7 @@ func TestUsageQuerier_NoManager(t *testing.T) {
 
 	// No manager — should still return a result with zero values.
 	q := &UsageQuerier{PDB: pdb, Manager: nil}
-	result := q.BuildUsageInfo(context.Background(), "inst-1")
+	result := q.BuildUsageInfo(context.Background(), "inst-1", "")
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -957,5 +1000,128 @@ func TestBind_ReturnsBinding(t *testing.T) {
 	}
 	if b.Target != "inst-1" {
 		t.Errorf("target = %q", b.Target)
+	}
+}
+
+func TestNotificationPump_EmptySessionID_FansOut(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	q := inference.NewNotificationQueue(slog.Default())
+	mgr.notifications["inst-1"] = q
+
+	r := testRouter(t, mgr)
+
+	var deliveryCount atomic.Int32
+	ch := &mockChannel{
+		name: "test",
+		deliverFn: func(_ context.Context, _ string, _ []ipc.ChatEvent, _ TurnResult) error {
+			deliveryCount.Add(1)
+			return nil
+		},
+	}
+	r.Register(ch)
+
+	// Two bindings with different session IDs — both should receive a notification
+	// with an empty SessionID because bindingsForInstance fans out to all bindings.
+	b1 := r.Bind("key-web", "test", "inst-1")
+	b1.SessionID = "session-a"
+	b2 := r.Bind("key-tg", "test", "inst-1")
+	b2.SessionID = "session-b"
+
+	r.StartNotificationPump(t.Context(), "inst-1")
+
+	// Push a notification with no session scope — should fan out to all bindings.
+	q.Push(inference.Notification{Content: "broadcast", Source: "schedule"})
+
+	deadline := time.After(2 * time.Second)
+	for deliveryCount.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out: only %d of 2 deliveries completed", deliveryCount.Load())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if got := deliveryCount.Load(); got != 2 {
+		t.Errorf("delivery count = %d, want 2 (fan-out to all bindings)", got)
+	}
+}
+
+func TestNotificationPump_SessionScopedNoMatch_Dropped(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	q := inference.NewNotificationQueue(slog.Default())
+	mgr.notifications["inst-1"] = q
+
+	var metaCalled atomic.Bool
+	mgr.sendMetaFn = func(context.Context, string, string, func(ipc.ChatEvent) error) (string, error) {
+		metaCalled.Store(true)
+		return "", nil
+	}
+
+	r := testRouter(t, mgr)
+
+	var delivered atomic.Int32
+	ch := &mockChannel{
+		name: "test",
+		deliverFn: func(_ context.Context, _ string, _ []ipc.ChatEvent, _ TurnResult) error {
+			delivered.Add(1)
+			return nil
+		},
+	}
+	r.Register(ch)
+
+	// Only a binding for "session-known" exists.
+	b := r.Bind("key-web", "test", "inst-1")
+	b.SessionID = "session-known"
+
+	r.StartNotificationPump(t.Context(), "inst-1")
+
+	// Push notification scoped to a session that has no binding — should be dropped.
+	q.Push(inference.Notification{Content: "orphan", Source: "schedule", SessionID: "unknown-session"})
+
+	time.Sleep(100 * time.Millisecond)
+
+	if metaCalled.Load() {
+		t.Error("meta turn should not run when no bindings match the session")
+	}
+	if delivered.Load() != 0 {
+		t.Errorf("expected 0 deliveries, got %d", delivered.Load())
+	}
+}
+
+func TestDispatch_SessionIDPassedThrough(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	var capturedSessionID string
+	mgr.sendToSessionFn = func(_ context.Context, _, sessionID, _ string, _ func(ipc.ChatEvent) error) (string, error) {
+		capturedSessionID = sessionID
+		return "response", nil
+	}
+
+	r := testRouter(t, mgr)
+
+	msg := InboundMessage{
+		ConversationKey: "test:1",
+		InstanceID:      "inst-1",
+		SessionID:       "session-abc",
+		ChannelName:     "test",
+		Text:            "hello",
+		OnEvent:         func(ipc.ChatEvent) error { return nil },
+		OnDone:          func(TurnResult) error { return nil },
+	}
+
+	if err := r.Dispatch(context.Background(), msg); err != nil {
+		t.Fatal(err)
+	}
+
+	if capturedSessionID != "session-abc" {
+		t.Errorf("sessionID passed to SendMessageToSession = %q, want %q", capturedSessionID, "session-abc")
 	}
 }

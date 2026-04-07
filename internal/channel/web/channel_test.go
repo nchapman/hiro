@@ -52,11 +52,22 @@ func (m *mockManager) SendMessageWithFiles(ctx context.Context, instanceID, msg 
 	return m.SendMessage(ctx, instanceID, msg, onEvent)
 }
 
+func (m *mockManager) SendMessageToSession(ctx context.Context, instanceID, _, msg string, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessage(ctx, instanceID, msg, onEvent)
+}
+func (m *mockManager) SendMessageToSessionWithFiles(ctx context.Context, instanceID, _, msg string, files []fantasy.FilePart, onEvent func(ipc.ChatEvent) error) (string, error) {
+	return m.SendMessageWithFiles(ctx, instanceID, msg, files, onEvent)
+}
 func (m *mockManager) SendMetaMessage(context.Context, string, string, func(ipc.ChatEvent) error) (string, error) {
 	return "", nil
 }
-
-func (m *mockManager) NewSession(string) (string, error) { return "new", nil }
+func (m *mockManager) SendMetaMessageToSession(_ context.Context, _, _, _ string, _ func(ipc.ChatEvent) error) (string, error) {
+	return "", nil
+}
+func (m *mockManager) EnsureSession(_ context.Context, _, _ string) (string, error) {
+	return "test-session", nil
+}
+func (m *mockManager) NewSessionForChannel(string, string) (string, error) { return "new", nil }
 
 func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, model string, re *string, _, _ []string) error {
 	if m.updateConfigFn != nil {
@@ -66,7 +77,7 @@ func (m *mockManager) UpdateInstanceConfig(ctx context.Context, instanceID, mode
 }
 
 func (m *mockManager) InstanceNotifications(string) *inference.NotificationQueue { return nil }
-func (m *mockManager) ActiveSessionID(string) string                             { return "" }
+func (m *mockManager) SessionIDForChannel(string, string) string                 { return "" }
 
 func (m *mockManager) GetInstance(id string) (agent.InstanceInfo, bool) {
 	info, ok := m.instances[id]
@@ -132,6 +143,16 @@ func readMessage(t *testing.T, conn *ws.Conn) ChatMessage {
 	return msg
 }
 
+// consumeSessionEvent reads and discards the initial "session" event sent
+// on every new WebSocket connection.
+func consumeSessionEvent(t *testing.T, conn *ws.Conn) {
+	t.Helper()
+	msg := readMessage(t, conn)
+	if msg.Type != "session" {
+		t.Fatalf("expected initial session event, got %q", msg.Type)
+	}
+}
+
 // --- WebSocket Integration Tests ---
 
 func TestHandleConn_MessageAndResponse(t *testing.T) {
@@ -147,6 +168,8 @@ func TestHandleConn_MessageAndResponse(t *testing.T) {
 	srv, _ := setupWebChannel(t, mgr)
 	conn := dialWS(t, srv)
 	defer conn.Close(ws.StatusNormalClosure, "")
+
+	consumeSessionEvent(t, conn)
 
 	// Send a message.
 	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "message", Content: "hello"})
@@ -174,6 +197,7 @@ func TestHandleConn_SlashClear(t *testing.T) {
 	conn := dialWS(t, srv)
 	defer conn.Close(ws.StatusNormalClosure, "")
 
+	consumeSessionEvent(t, conn)
 	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "message", Content: "/clear"})
 
 	// Should get clear + done.
@@ -205,6 +229,7 @@ func TestHandleConn_ConfigMessage(t *testing.T) {
 	conn := dialWS(t, srv)
 	defer conn.Close(ws.StatusNormalClosure, "")
 
+	consumeSessionEvent(t, conn)
 	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "config", Model: "claude-4"})
 
 	// Should get system + done.
@@ -234,8 +259,7 @@ func TestDeliver_StreamsEventsToWebSocket(t *testing.T) {
 	conn := dialWS(t, srv)
 	defer conn.Close(ws.StatusNormalClosure, "")
 
-	// Wait for HandleConn to register the connection.
-	time.Sleep(50 * time.Millisecond)
+	consumeSessionEvent(t, conn)
 
 	events := []ipc.ChatEvent{
 		{Type: "delta", Content: "notification text"},

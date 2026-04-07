@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/nchapman/hiro/internal/platform/fsperm"
 
@@ -49,10 +51,18 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 		return "", fmt.Errorf("loading agent %q: %w", name, err)
 	}
 
+	// Determine initial channel key: ephemeral instances get an agent channel
+	// keyed by the parent; persistent instances default to channelWeb (the operator
+	// bootstrap case). Channels will create their own sessions via EnsureSession.
+	channelKey := channelWeb
+	if parentInstanceID != "" {
+		channelKey = "agent:" + parentInstanceID
+	}
+
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("creating instance", "instance_id", instanceID, "agent", name, "mode", mode)
-	id, err2 := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, agentMode, nodeID, displayName, displayDesc, personaBody)
+	id, err2 := m.startInstance(ctx, instanceID, sessionID, channelKey, cfg, parentInstanceID, agentMode, nodeID, displayName, displayDesc, personaBody)
 	if err2 != nil {
 		m.logger.Error("instance creation failed", "instance_id", instanceID, "agent", name, "error", err2)
 	}
@@ -123,10 +133,14 @@ func (m *Manager) SpawnEphemeral(ctx context.Context, agentName, prompt, parentI
 		return "", fmt.Errorf("loading agent %q: %w", agentName, err)
 	}
 
+	channelKey := channelWeb
+	if parentInstanceID != "" {
+		channelKey = "agent:" + parentInstanceID
+	}
 	instanceID := uuid.Must(uuid.NewV7()).String()
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("spawning ephemeral", "instance_id", instanceID, "agent", agentName)
-	instID, err := m.startInstance(ctx, instanceID, sessionID, cfg, parentInstanceID, config.ModeEphemeral, nodeID, "", "", "")
+	instID, err := m.startInstance(ctx, instanceID, sessionID, channelKey, cfg, parentInstanceID, config.ModeEphemeral, nodeID, "", "", "")
 	if err != nil {
 		return "", err
 	}
@@ -299,7 +313,7 @@ func createSessionDirs(sessDir string) error {
 }
 
 // registerInstanceInDB creates instance and session records in the platform database.
-func (m *Manager) registerInstanceInDB(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID) error {
+func (m *Manager) registerInstanceInDB(ctx context.Context, instanceID, sessionID, channelType, channelID string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID) error {
 	if m.pdb == nil {
 		return nil
 	}
@@ -314,10 +328,12 @@ func (m *Manager) registerInstanceInDB(ctx context.Context, instanceID, sessionI
 	}
 	// Note: session parent_id is left empty — lineage is tracked via instances.parent_id.
 	if err := m.pdb.CreateSession(ctx, platformdb.Session{
-		ID:         sessionID,
-		InstanceID: instanceID,
-		AgentName:  cfg.Name,
-		Mode:       string(mode),
+		ID:          sessionID,
+		InstanceID:  instanceID,
+		AgentName:   cfg.Name,
+		Mode:        string(mode),
+		ChannelType: channelType,
+		ChannelID:   channelID,
 	}); err != nil && !errors.Is(err, platformdb.ErrDuplicate) {
 		return fmt.Errorf("creating session in db: %w", err)
 	}
@@ -438,7 +454,7 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 	return instDir, sessDir, dirIsNew, nil
 }
 
-func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) {
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, channelKey string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) { //nolint:funlen // 41 statements, one over limit from channelKey param
 	instDir, sessDir, dirIsNew, err := m.prepareInstanceDirs(instanceID, sessionID, mode, displayName, displayDesc, personaBody, cfg.AllowedTools, cfg.DisallowedTools)
 	if err != nil {
 		return "", err
@@ -446,7 +462,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	if nodeID == "" {
 		nodeID = ipc.HomeNodeID
 	}
-	if err := m.registerInstanceInDB(ctx, instanceID, sessionID, cfg, mode, parentID, nodeID); err != nil {
+	chType, chID := splitChannelKey(channelKey)
+	if err := m.registerInstanceInDB(ctx, instanceID, sessionID, chType, chID, cfg, mode, parentID, nodeID); err != nil {
 		return "", err
 	}
 	// Instance config is the source of truth for tool declarations.
@@ -486,7 +503,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 	notifications := inference.NewNotificationQueue(
 		m.logger.With("component", "notifications", "instance_id", instanceID),
 	)
-	loopCfg := m.buildLoopConfig(instanceID, sessionID, cfg, mode, instDir, sessDir, handle.Worker, allowedTools, allowLayers, denyRules, hasSkills, modelSpec, notifications)
+	memoryMu := &sync.Mutex{}
+	loopCfg := m.buildLoopConfig(instanceID, sessionID, cfg, mode, instDir, sessDir, handle.Worker, allowedTools, allowLayers, denyRules, hasSkills, modelSpec, notifications, memoryMu)
 	loop, err := m.createInferenceLoop(spawnCtx, &loopCfg, modelSpec, apiKey, baseURL)
 	if err != nil {
 		handle.Kill()
@@ -494,7 +512,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID strin
 		return "", err
 	}
 
-	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, effectiveTools, allowLayers, denyRules, uid, gid, supplementaryGroups))
+	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, channelKey, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, memoryMu, effectiveTools, allowLayers, denyRules, uid, gid, supplementaryGroups))
 	return instanceID, nil
 }
 
@@ -528,8 +546,17 @@ func makeCleanup(sessDir, instDir string, dirIsNew bool, pool *uidpool.Pool, ins
 }
 
 // buildInstance creates an instance struct with all resolved fields.
-func buildInstance(instanceID, sessionID string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID, model, displayName, displayDesc string, handle *WorkerHandle, loop *inference.Loop, notifications *inference.NotificationQueue, effectiveTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, uid, gid uint32, groups []uint32) *instance {
-	return &instance{
+// The initial session slot is created from the provided handle/loop.
+func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID, model, displayName, displayDesc string, handle *WorkerHandle, loop *inference.Loop, notifications *inference.NotificationQueue, memoryMu *sync.Mutex, effectiveTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, uid, gid uint32, groups []uint32) *instance {
+	slot := &sessionSlot{
+		sessionID: sessionID,
+		channel:   channelKey,
+		worker:    handle.Worker,
+		handle:    handle,
+		loop:      loop,
+		lastUsed:  time.Now(),
+	}
+	inst := &instance{
 		info: InstanceInfo{
 			ID:          instanceID,
 			Name:        coalesce(displayName, cfg.Name),
@@ -541,11 +568,10 @@ func buildInstance(instanceID, sessionID string, cfg config.AgentConfig, mode co
 			NodeID:      nodeID,
 		},
 		agentName:      cfg.Name,
-		activeSession:  sessionID,
-		worker:         handle.Worker,
-		handle:         handle,
-		loop:           loop,
+		sessions:       map[string]*sessionSlot{sessionID: slot},
+		channelIndex:   map[string]string{channelKey: sessionID},
 		notifications:  notifications,
+		memoryMu:       memoryMu,
 		effectiveTools: effectiveTools,
 		allowLayers:    allowLayers,
 		denyRules:      denyRules,
@@ -554,6 +580,7 @@ func buildInstance(instanceID, sessionID string, cfg config.AgentConfig, mode co
 		groups:         groups,
 		nodeID:         nodeID,
 	}
+	return inst
 }
 
 // coalesce returns override if non-empty, otherwise fallback.
@@ -565,7 +592,7 @@ func coalesce(override, fallback string) string {
 }
 
 // buildLoopConfig constructs the inference.LoopConfig struct from instance parameters.
-func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.AgentConfig, mode config.AgentMode, instDir, sessDir string, executor ipc.AgentWorker, allowedTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, hasSkills bool, modelSpec models.ModelSpec, notifications *inference.NotificationQueue) inference.LoopConfig {
+func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.AgentConfig, mode config.AgentMode, instDir, sessDir string, executor ipc.AgentWorker, allowedTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, hasSkills bool, modelSpec models.ModelSpec, notifications *inference.NotificationQueue, memoryMu *sync.Mutex) inference.LoopConfig {
 	return inference.LoopConfig{
 		InstanceID:     instanceID,
 		SessionID:      sessionID,
@@ -573,6 +600,7 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 		Mode:           mode,
 		WorkingDir:     m.opts.WorkingDir,
 		InstanceDir:    instDir,
+		MemoryMu:       memoryMu,
 		SessionDir:     sessDir,
 		AgentDefDir:    m.agentDefDir(cfg.Name),
 		SharedSkillDir: m.sharedSkillsDir(),
@@ -604,7 +632,7 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 }
 
 // registerAndStartInstance adds the instance to the manager's registry and starts
-// its background watchers (death-watcher and job completion).
+// background watchers for all session slots.
 func (m *Manager) registerAndStartInstance(ctx context.Context, inst *instance) {
 	instanceID := inst.info.ID
 	parentID := inst.info.ParentID
@@ -616,16 +644,19 @@ func (m *Manager) registerAndStartInstance(ctx context.Context, inst *instance) 
 	}
 	m.mu.Unlock()
 
-	// Start death-watcher goroutine for unexpected process exits.
-	go m.watchWorker(instanceID, inst.handle)
+	// Start watchers for each initial session slot.
+	for _, slot := range inst.sessions {
+		go m.watchSlotWorker(instanceID, slot.sessionID, slot.handle)
+		go m.watchSlotJobCompletions(ctx, slot.worker, inst.notifications, slot.sessionID)
+	}
 
-	// Start background job completion watcher to push notifications
-	// when background bash tasks finish on this worker.
-	go m.watchJobCompletions(ctx, inst.worker, inst.notifications)
-
+	sessionIDs := make([]string, 0, len(inst.sessions))
+	for sid := range inst.sessions {
+		sessionIDs = append(sessionIDs, sid)
+	}
 	m.logger.Info("instance started",
 		"id", instanceID,
-		"session", inst.activeSession,
+		"sessions", sessionIDs,
 		"name", inst.agentName,
 		"mode", inst.info.Mode,
 		"parent", parentID,

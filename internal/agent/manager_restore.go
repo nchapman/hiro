@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -102,8 +103,11 @@ func (m *Manager) registerStoppedInstances(stopped []restoreEntry) int {
 				Model:       m.resolveModelString(e.cfg.Model),
 				NodeID:      e.dbInst.NodeID,
 			},
-			agentName: e.cfg.Name,
-			nodeID:    e.dbInst.NodeID,
+			agentName:    e.cfg.Name,
+			sessions:     make(map[string]*sessionSlot),
+			channelIndex: make(map[string]string),
+			memoryMu:     &sync.Mutex{},
+			nodeID:       e.dbInst.NodeID,
 		}
 		m.mu.Lock()
 		m.instances[e.dbInst.ID] = inst
@@ -142,11 +146,11 @@ func (m *Manager) restoreRunningInstance(ctx context.Context, e *restoreEntry) b
 	}
 
 	// Resume the latest session if one exists, otherwise create a new one.
-	sessionID := m.resolveSessionForRestore(ctx, e.dbInst.ID, e.dbInst.AgentName)
+	sessionID, channelKey := m.resolveSessionForRestore(ctx, e.dbInst.ID, e.dbInst.AgentName)
 
 	// Pass empty display name/desc — startInstance reads persona.md for existing instances.
 	// Use the persisted node_id so instances restart on their original node.
-	_, err := m.startInstance(ctx, e.dbInst.ID, sessionID, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "", "")
+	_, err := m.startInstance(ctx, e.dbInst.ID, sessionID, channelKey, e.cfg, e.dbInst.ParentID, e.mode, e.dbInst.NodeID, "", "", "")
 	if err != nil {
 		m.logger.Warn("failed to restore instance",
 			"id", e.dbInst.ID, "agent", e.dbInst.AgentName, "error", err)
@@ -159,21 +163,26 @@ func (m *Manager) restoreRunningInstance(ctx context.Context, e *restoreEntry) b
 }
 
 // resolveSessionForRestore finds the latest session for an instance or creates a new ID.
-func (m *Manager) resolveSessionForRestore(ctx context.Context, instanceID, agentName string) string {
+// Returns the session ID and channel key.
+func (m *Manager) resolveSessionForRestore(ctx context.Context, instanceID, agentName string) (string, string) {
 	sess, ok, err := m.pdb.LatestSessionByInstance(ctx, instanceID)
 	if err != nil {
 		m.logger.Warn("failed to query latest session, creating new one",
 			"instance", instanceID, "error", err)
 	}
 	if ok {
+		channelKey := makeChannelKey(sess.ChannelType, sess.ChannelID)
+		if channelKey == "" {
+			channelKey = channelWeb // legacy sessions without channel info
+		}
 		m.logger.Info("resuming existing session",
-			"instance", instanceID, "session", sess.ID, "agent", agentName)
-		return sess.ID
+			"instance", instanceID, "session", sess.ID, "channel", channelKey, "agent", agentName)
+		return sess.ID, channelKey
 	}
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	m.logger.Info("creating new session (no previous session found)",
 		"instance", instanceID, "session", sessionID, "agent", agentName)
-	return sessionID
+	return sessionID, channelWeb
 }
 
 // restoreInstanceConfig restores per-instance config (model override, reasoning effort)

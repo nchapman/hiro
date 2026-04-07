@@ -238,7 +238,7 @@ func (c *Channel) handleEventCallback(ctx context.Context, body []byte) {
 }
 
 // dispatchMessage resolves the instance and dispatches a Slack message through the Router.
-func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) {
+func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) { //nolint:funlen // session setup adds necessary error handling
 	// Thread routing: if the message is in a thread, use the thread_ts.
 	// If it is a top-level message, use the message's own ts as the thread
 	// root (bot will reply in a new thread).
@@ -259,6 +259,23 @@ func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) {
 		return
 	}
 
+	// Ensure a per-thread session exists for this Slack conversation.
+	channelKey := "slack:" + evt.Channel
+	if threadTS != "" {
+		channelKey += ":" + threadTS
+	}
+	sessionID, err := c.router.Manager().EnsureSession(ctx, instanceID, channelKey)
+	if err != nil {
+		c.logger.Warn("failed to ensure slack session",
+			"channel", evt.Channel,
+			"instance_id", instanceID,
+			"error", err,
+		)
+		_ = c.postMessage(ctx, evt.Channel, threadTS, "Agent is temporarily unavailable. Please try again later.")
+		return
+	}
+	b.SessionID = sessionID
+
 	// Ensure notifications for this instance are pumped to all channels.
 	c.router.EnsureNotificationPump(instanceID)
 
@@ -274,18 +291,19 @@ func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) {
 		return c.postMessage(ctx, evt.Channel, threadTS, resp)
 	}
 
-	err := c.router.Dispatch(ctx, channel.InboundMessage{
+	if dispErr := c.router.Dispatch(ctx, channel.InboundMessage{
 		ConversationKey: conversationKey,
 		InstanceID:      instanceID,
+		SessionID:       sessionID,
 		ChannelName:     "slack",
+		ChannelKey:      channelKey,
 		Text:            evt.Text,
 		OnEvent:         onEvent,
 		OnDone:          onDone,
-	})
-	if err != nil {
+	}); dispErr != nil {
 		c.logger.Warn("dispatch failed",
 			"channel", evt.Channel,
-			"error", err,
+			"error", dispErr,
 		)
 	}
 }

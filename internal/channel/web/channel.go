@@ -79,6 +79,7 @@ type wsConn struct {
 	conn       *websocket.Conn
 	ctx        context.Context
 	instanceID string
+	sessionID  string // per-channel session for this connection
 }
 
 // New creates a new web Channel.
@@ -153,22 +154,43 @@ func (c *Channel) Deliver(ctx context.Context, conversationKey string, events []
 func (c *Channel) HandleConn(ctx context.Context, conn *websocket.Conn, instanceID, conversationKey string) {
 	conn.SetReadLimit(wsReadLimit)
 
+	// Ensure a per-channel session exists for this web connection.
+	sessionID, err := c.manager.EnsureSession(ctx, instanceID, "web")
+	if err != nil {
+		c.logger.Warn("failed to ensure web session",
+			"instance_id", instanceID,
+			"error", err,
+		)
+		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "Failed to create session: " + err.Error()})
+	}
+
 	wc := &wsConn{
 		conn:       conn,
 		ctx:        ctx,
 		instanceID: instanceID,
+		sessionID:  sessionID,
 	}
 
 	c.mu.Lock()
 	c.conns[conversationKey] = wc
 	c.mu.Unlock()
 
-	c.router.Bind(conversationKey, "web", instanceID)
+	b := c.router.Bind(conversationKey, "web", instanceID)
+	b.SessionID = sessionID
 
 	// Ensure a notification pump is running for this instance. Uses the
 	// Router's app context (not the WebSocket context) so the pump survives
 	// this connection closing. Idempotent — no-op if already running.
 	c.router.EnsureNotificationPump(instanceID)
+
+	// Send the session ID to the browser so it can fetch session-specific
+	// history and usage.
+	if sessionID != "" {
+		_ = wsjson.Write(ctx, conn, ChatMessage{
+			Type:    "session",
+			Content: sessionID,
+		})
+	}
 
 	defer func() {
 		c.mu.Lock()
@@ -179,6 +201,7 @@ func (c *Channel) HandleConn(ctx context.Context, conn *websocket.Conn, instance
 
 	c.logger.Info("chat connected",
 		"instance_id", instanceID,
+		"session_id", sessionID,
 		"conversation_key", conversationKey,
 	)
 
@@ -246,14 +269,25 @@ func (c *Channel) handleUserMessage(ctx context.Context, conn *websocket.Conn, i
 		return nil //nolint:nilerr // error reported to client; don't break connection
 	}
 
+	// Look up the session ID from the wsConn.
+	c.mu.RLock()
+	wc := c.conns[conversationKey]
+	var sessionID string
+	if wc != nil {
+		sessionID = wc.sessionID
+	}
+	c.mu.RUnlock()
+
 	// Build the inbound message and dispatch through the Router.
 	inbound := channel.InboundMessage{
 		ConversationKey: conversationKey,
 		InstanceID:      instanceID,
+		SessionID:       sessionID,
 		ChannelName:     "web",
+		ChannelKey:      "web",
 		Text:            msg.Content,
 		Files:           files,
-		OnEvent:         c.makeOnEvent(ctx, conn),
+		OnEvent:         c.makeOnEvent(ctx, conn, conversationKey),
 		OnDone:          c.makeOnDone(ctx, conn),
 	}
 
@@ -275,9 +309,19 @@ func (c *Channel) handleConfigMessage(ctx context.Context, conn *websocket.Conn,
 }
 
 // makeOnEvent builds a streaming callback that writes inference events to
-// the WebSocket as JSON.
-func (c *Channel) makeOnEvent(ctx context.Context, conn *websocket.Conn) func(ipc.ChatEvent) error {
+// the WebSocket as JSON. It also intercepts "session" events to update the
+// wsConn's sessionID when a new session is created (e.g. after /clear).
+func (c *Channel) makeOnEvent(ctx context.Context, conn *websocket.Conn, conversationKey string) func(ipc.ChatEvent) error {
 	return func(evt ipc.ChatEvent) error {
+		// Update the wsConn's session ID when the server sends a new session event.
+		if evt.Type == "session" && evt.Content != "" {
+			c.mu.Lock()
+			if wc, ok := c.conns[conversationKey]; ok {
+				wc.sessionID = evt.Content
+			}
+			c.mu.Unlock()
+		}
+
 		wireMsg := chatEventToMessage(evt)
 		b, err := json.Marshal(wireMsg)
 		if err != nil {
