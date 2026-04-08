@@ -165,7 +165,7 @@ Each worker spawns in its own network namespace (`CLONE_NEWNET`). The control pl
 - **Per-agent `/30` subnets** prevent all cross-agent layer-2 attacks by architecture.
 
 **Cons:**
-- Requires `CAP_NET_ADMIN` on the container (see [CAP_NET_ADMIN Risk Assessment](#cap_net_admin-risk-assessment))
+- Requires `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` on the container (see [Container Privilege Requirements](#container-privilege-requirements))
 - ~5-10ms added to worker spawn time for veth setup (negligible)
 - New dependency: `vishvananda/netlink` (same library Docker uses)
 - IP-based filtering allows access to any service that shares an IP with an allowed domain (shared hosting/CDN). Low risk — attacker can't control which IP a legitimate domain resolves to.
@@ -248,13 +248,19 @@ Current:
 New:
 1. Acquire UID from pool
 2. Chown instance directory
-3. Fork `hiro agent` with `SysProcAttr.Credential` **+ `Cloneflags: CLONE_NEWNET`**
-4. **Create veth pair, move worker end into new netns, configure addresses/routes/nftables**
-5. Worker starts gRPC, writes "ready"
+3. Fork `hiro agent` with `SysProcAttr.Credential` **+ `Cloneflags: CLONE_NEWNET | CLONE_NEWNS`**
+4. **Create veth pair (temp peer name in host ns, rename to eth0 after moving into agent ns), configure addresses/routes/nftables**
+5. **Bind-mount per-agent `/etc/resolv.conf` and `/etc/hosts` into agent's mount namespace via `nsenter`**
+6. **Register agent with DNS forwarder, start per-agent listener on gateway IP**
+7. Worker starts gRPC, writes "ready"
 
 **Race condition analysis:** `CLONE_NEWNET` creates the worker in an empty network namespace — no interfaces, no routes, no connectivity. The worker has zero network access between fork (step 3) and veth setup (step 4). nftables rules are configured as part of step 4, before any traffic can flow. There is no window of unrestricted access.
 
-**Error handling:** If veth setup fails after the worker is forked, the worker process must be killed and any partial veth state cleaned up. The existing `WorkerHandle.Close` pattern should be extended to handle this. If the worker exits before veth setup completes, the namespace is destroyed with the process — veth creation targeting a dead namespace must be handled gracefully.
+**Error handling:** If veth setup fails after the worker is forked, the worker process must be killed and any partial veth state cleaned up. The `WorkerHandle.Close` closure calls `NetIso.Teardown()` which is idempotent. If the worker exits before veth setup completes, the namespace is destroyed with the process — veth creation targeting a dead namespace returns an error that propagates to the caller.
+
+**Implementation note — veth peer naming:** The veth peer cannot be created with the name `eth0` in the host namespace (conflicts with the container's own `eth0`). Instead, a temporary name (`hp-{sessPrefix}`) is used in the host namespace. After moving the peer into the agent's network namespace, it is renamed to `eth0` via `netlink.LinkSetName`.
+
+**Implementation note — mount namespace switching:** Go's multi-threaded runtime prevents using `setns(fd, CLONE_NEWNS)` directly — the kernel requires all threads in the process to be in the same mount namespace for `setns` to succeed, but Go's goroutine scheduler runs on multiple OS threads. The implementation uses `nsenter --mount --target {pid} mount --bind ...` as a subprocess instead, which is single-threaded and works correctly.
 
 ### nftables Rules
 
@@ -391,7 +397,7 @@ A child agent can never have broader network access than its parent.
     ::1       localhost
 ```
 
-These are bind-mounted into the agent's mount namespace. The spawn must use `CLONE_NEWNS` (in addition to `CLONE_NEWNET`) to give each agent a private mount namespace where these files can be overridden without affecting other agents or the control plane.
+These are bind-mounted into the agent's mount namespace via `nsenter --mount --target {pid} mount --bind`. The spawn uses `CLONE_NEWNS` (in addition to `CLONE_NEWNET`) to give each agent a private mount namespace where these files can be overridden without affecting other agents or the control plane. The `nsenter` approach is necessary because Go's multi-threaded runtime prevents direct `setns(CLONE_NEWNS)` — the kernel requires all threads to share the same mount namespace for `setns` to succeed. The source files are written to a temp directory that persists for the lifetime of the agent process (bind mounts reference the source inodes).
 
 **Additional mitigations:**
 - Block mDNS (UDP port 5353 to `224.0.0.251`) in the per-agent nftables chain
@@ -420,21 +426,45 @@ Alongside network namespaces, workers should get additional seccomp hardening. T
 - Tighten beyond Docker defaults: block `io_uring_*`, additional kernel-level attack surface reduction
 - Applied via `security_opt: seccomp:seccomp-profile.json` in docker-compose
 
-### CAP_NET_ADMIN Risk Assessment
+### Container Privilege Requirements
 
-Adding `CAP_NET_ADMIN` to the container is necessary for creating network namespaces and veth pairs. The risk is bounded but should be understood:
+The original design anticipated needing only `CAP_NET_ADMIN`. Implementation and testing revealed that `CAP_SYS_ADMIN` is also required — `CLONE_NEWNET` and `CLONE_NEWNS` are gated on `CAP_SYS_ADMIN` by the kernel, not `CAP_NET_ADMIN`.
 
-**What CAP_NET_ADMIN grants (to root in the container):**
-- Create/delete network namespaces and veth pairs
+| Requirement | Why | Docker Config |
+|---|---|---|
+| `CAP_NET_ADMIN` | nftables rules, veth pairs | `cap_add: [NET_ADMIN]` |
+| `CAP_SYS_ADMIN` | `CLONE_NEWNET`, `CLONE_NEWNS` for per-agent namespaces | `cap_add: [SYS_ADMIN]` |
+| `net.ipv4.ip_forward=1` | Route traffic between agent veths and container's external interface | `sysctls: [net.ipv4.ip_forward=1]` |
+| `nsenter` binary | Mount namespace entry (Go's multi-threaded runtime prevents `setns(CLONE_NEWNS)`) | Installed via `iproute2` package |
+
+**What was NOT needed:**
+- No `--privileged` flag — the two explicit capabilities + sysctl are sufficient
+- No custom seccomp profile modifications
+- Integration tests (`make test-netiso`) use a Docker Compose file (`docker-compose.test-netiso.yml`) with the exact same privileges as production — no `--privileged`, no special treatment
+
+**The `net.ipv4.ip_forward` sysctl** is per-container-namespace (does not affect the host). It is read-only at runtime in non-privileged containers, so it must be set at container creation time via `docker-compose.yml`. The code gracefully handles this — if the write fails, it checks whether forwarding is already enabled.
+
+#### Capability Risk Assessment
+
+**CAP_NET_ADMIN grants (to root in the container):**
 - Modify nftables rules (including the isolation rules this design depends on)
-- Configure tunnels (GRE, IPIP, WireGuard kernel module if present)
+- Configure network interfaces, routes, tunnels
 - Set socket options like `SO_BINDTODEVICE`
 
-**What agents (non-root) can do with CAP_NET_ADMIN:** Nothing. The capability is only available to the root process. Agents run as UIDs 10000-10063 without capabilities.
+**CAP_SYS_ADMIN grants (to root in the container):**
+- Create network and mount namespaces (`CLONE_NEWNET`, `CLONE_NEWNS`)
+- Mount/unmount filesystems (bind mounts for per-agent resolv.conf/hosts)
+- Various other system administration operations
 
-**The actual risk:** If an agent achieves control-plane code execution (via a bug in gRPC handling, tool dispatching, or DNS parsing), it inherits `CAP_NET_ADMIN`. This means a control-plane compromise now has wider network manipulation capability than without the capability.
+This is a meaningful increase in container privileges. `CAP_SYS_ADMIN` is the broadest Linux capability — it covers mount operations, namespace creation, device management, and many other syscalls. Docker's default seccomp profile mitigates the most dangerous operations (e.g., `kexec_load`, `reboot`), but `CAP_SYS_ADMIN` is still a significant grant.
 
-**Assessment:** Accept permanently. Control-plane compromise is already game-over for the container regardless of `CAP_NET_ADMIN` — root inside the container can do almost anything. The marginal risk of adding this capability is small compared to the security improvement from per-agent network isolation. Document in the threat model.
+**What agents (non-root) can do with these capabilities:** Nothing. Both capabilities are held only by the root control plane process. When workers are forked with `SysProcAttr.Credential` setting a non-root UID, all capabilities are dropped. Agent processes have zero capabilities.
+
+**The actual risk:** If an agent achieves control-plane code execution (via a bug in gRPC handling, tool dispatching, or DNS parsing), it inherits both capabilities. `CAP_SYS_ADMIN` in particular would allow the attacker to mount host filesystems (if device nodes are available), manipulate cgroups, and potentially escalate further within the container.
+
+**Assessment:** Accept, with mitigation plan. Control-plane compromise is already near-game-over for the container regardless of capabilities — root inside Docker can do significant damage even without `CAP_SYS_ADMIN`. The marginal risk increase is real but bounded by Docker's seccomp profile and the outer container boundary. The security improvement from per-agent network isolation (preventing data exfiltration, lateral movement, and C2 communication by untrusted agents) substantially outweighs the marginal increase in control-plane compromise severity.
+
+**Planned mitigation:** A custom seccomp profile (`seccomp-profile.json`) should be added to restrict `CAP_SYS_ADMIN`-gated syscalls to only those actually needed: `clone` (with namespace flags), `mount` (bind mounts only), and `unshare`. This narrows the capability's effective scope without removing it. Tracked as follow-up work alongside the seccomp hardening described in [seccomp Hardening](#seccomp-hardening-planned-not-yet-implemented).
 
 ### Known Limitations
 
@@ -497,6 +527,36 @@ The shift from Option 4 to Option 7 eliminated three high-severity findings from
 - **R1-03 (non-HTTP ports):** Fully resolved. SSH, git://, and any TCP protocol work identically to HTTPS.
 
 The remaining findings (R2-01 through R2-10) are implementation correctness requirements, not architectural concerns.
+
+## Implementation Notes
+
+Discoveries and deviations from the original design, documented during implementation.
+
+### Privilege Escalation from Design
+
+The original design stated "Requires `CAP_NET_ADMIN` on the container" as the sole privilege requirement. This was incorrect — `CLONE_NEWNET` and `CLONE_NEWNS` are gated on `CAP_SYS_ADMIN`, not `CAP_NET_ADMIN`. The full production privilege set is `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` + `net.ipv4.ip_forward=1` sysctl. See [Container Privilege Requirements](#container-privilege-requirements) for the risk assessment.
+
+Additional implementation discoveries:
+
+1. **`net.ipv4.ip_forward=1` sysctl.** Cannot be set at runtime in a non-privileged container — `/proc/sys/net/ipv4/ip_forward` is read-only. Must be declared in `docker-compose.yml` via `sysctls: [net.ipv4.ip_forward=1]`. The code handles this gracefully (checks if already enabled before failing).
+
+2. **`nsenter` for bind mounts.** The design assumed the control plane could enter the agent's mount namespace via `setns(fd, CLONE_NEWNS)`. Go's runtime uses multiple OS threads for goroutine scheduling, and the kernel requires all threads in a process to share the same mount namespace for `setns(CLONE_NEWNS)` to succeed. `runtime.LockOSThread()` locks one goroutine but cannot prevent other goroutines from running on other threads. Solution: shell out to `nsenter --mount --target {pid} mount --bind`, which is a single-threaded process.
+
+3. **Veth peer naming.** The design implied creating the peer as `eth0` directly. This fails because the peer is initially created in the host namespace (where `eth0` already exists). Solution: create with a temporary name (`hp-{prefix}`), move into agent namespace, then rename to `eth0`.
+
+4. **Integration test privileges.** Tests use `docker-compose.test-netiso.yml` with the exact same capabilities and sysctls as production — no `--privileged`, no special treatment. This ensures the tests validate the actual production security boundary.
+
+### DNS Upstream Detection
+
+The design hardcoded Docker's embedded DNS at `127.0.0.11:53`. This works in Docker Compose but not in standalone `docker run` (where the container gets the host's DNS configuration). The implementation reads `/etc/resolv.conf` to find the system nameserver, which works in both environments.
+
+### nftables Rule Handle Lifecycle
+
+The `google/nftables` library's `AddRule` returns a rule object, but the kernel-assigned handle is not populated until after `Flush()` — and even then, it isn't backfilled into the Go object. Teardown cannot use `DelRule` with the original object. Solution: `GetRules` from the kernel, find the jump rule by matching the verdict chain name, then `DelRule` with the kernel-provided handle.
+
+### Package Structure
+
+All Linux-specific code (netlink, nftables, namespace operations) is gated with `//go:build linux`. Non-Linux platforms get stubs where `Probe()` returns an error and `New()` is unavailable. The `NetIso` struct itself is defined per-platform (not shared) to avoid unused-field lint errors. Cross-platform code (domain matching, IP filtering, types) has no build tags.
 
 ## References
 

@@ -11,6 +11,9 @@ services:
     init: true
     cap_add:
       - NET_ADMIN
+      - SYS_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     networks:
       - leader-net
     ports:
@@ -35,6 +38,9 @@ services:
     init: true
     cap_add:
       - NET_ADMIN
+      - SYS_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     networks:
       - worker-net  # separate network — no direct path to leader
     depends_on:

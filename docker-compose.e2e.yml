@@ -4,6 +4,9 @@ services:
     build: .
     cap_add:
       - NET_ADMIN
+      - SYS_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     ports:
       - "0:8080" # random host port to avoid conflicts
     environment:

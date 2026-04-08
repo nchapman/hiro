@@ -22,8 +22,11 @@ test-isolation:
 	docker run --rm --init --cap-add NET_ADMIN hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
 
 test-netiso:
-	docker build --target test -t hiro-test .
-	docker run --rm --init --privileged hiro-test go test ./internal/netiso/... -tags=netiso -v -count=1
+	docker compose -f docker-compose.test-netiso.yml build test
+	docker compose -f docker-compose.test-netiso.yml run --rm test; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test-netiso.yml down; \
+	exit $$EXIT
 
 test-online:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
