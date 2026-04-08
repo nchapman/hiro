@@ -26,6 +26,9 @@ const (
 	// slackAPIURL is the base URL for Slack Web API.
 	slackAPIURL = "https://slack.com/api"
 
+	// maxMessageLen is Slack's maximum message length for chat.postMessage.
+	maxMessageLen = 40000
+
 	// maxRequestBody is the maximum size of an incoming Slack event (1 MB).
 	maxRequestBody = 1 << 20
 
@@ -125,7 +128,7 @@ func (c *Channel) Deliver(ctx context.Context, conversationKey string, events []
 		return nil
 	}
 
-	return c.postMessage(ctx, channelID, threadTS, text)
+	return c.postLong(ctx, channelID, threadTS, text)
 }
 
 // --- HTTP Handlers ---
@@ -288,7 +291,7 @@ func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) { //nolin
 		if resp == "" {
 			return nil
 		}
-		return c.postMessage(ctx, evt.Channel, threadTS, resp)
+		return c.postLong(ctx, evt.Channel, threadTS, resp)
 	}
 
 	if dispErr := c.router.Dispatch(ctx, channel.InboundMessage{
@@ -352,6 +355,16 @@ func (c *Channel) postMessage(ctx context.Context, channelID, threadTS, text str
 	}
 	if !result.OK {
 		return fmt.Errorf("chat.postMessage: %s", result.Error)
+	}
+	return nil
+}
+
+// postLong sends a potentially long message, splitting into chunks if needed.
+func (c *Channel) postLong(ctx context.Context, channelID, threadTS, text string) error {
+	for _, chunk := range channel.SplitMessage(text, maxMessageLen) {
+		if err := c.postMessage(ctx, channelID, threadTS, chunk); err != nil {
+			return err
+		}
 	}
 	return nil
 }

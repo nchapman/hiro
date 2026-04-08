@@ -164,7 +164,7 @@ func TestSplitMessage(t *testing.T) {
 
 	t.Run("short message", func(t *testing.T) {
 		t.Parallel()
-		chunks := splitMessage("hello", 100)
+		chunks := channel.SplitMessage("hello", 100)
 		if len(chunks) != 1 || chunks[0] != "hello" {
 			t.Errorf("got %v", chunks)
 		}
@@ -173,7 +173,7 @@ func TestSplitMessage(t *testing.T) {
 	t.Run("exact limit", func(t *testing.T) {
 		t.Parallel()
 		text := strings.Repeat("a", 100)
-		chunks := splitMessage(text, 100)
+		chunks := channel.SplitMessage(text, 100)
 		if len(chunks) != 1 {
 			t.Errorf("got %d chunks, want 1", len(chunks))
 		}
@@ -182,7 +182,7 @@ func TestSplitMessage(t *testing.T) {
 	t.Run("split at newline", func(t *testing.T) {
 		t.Parallel()
 		text := strings.Repeat("a", 50) + "\n" + strings.Repeat("b", 50)
-		chunks := splitMessage(text, 60)
+		chunks := channel.SplitMessage(text, 60)
 		if len(chunks) != 2 {
 			t.Fatalf("got %d chunks, want 2", len(chunks))
 		}
@@ -197,7 +197,7 @@ func TestSplitMessage(t *testing.T) {
 	t.Run("no newline split", func(t *testing.T) {
 		t.Parallel()
 		text := strings.Repeat("a", 150)
-		chunks := splitMessage(text, 100)
+		chunks := channel.SplitMessage(text, 100)
 		if len(chunks) != 2 {
 			t.Fatalf("got %d chunks, want 2", len(chunks))
 		}
@@ -211,7 +211,7 @@ func TestSplitMessage(t *testing.T) {
 
 	t.Run("empty string", func(t *testing.T) {
 		t.Parallel()
-		chunks := splitMessage("", 100)
+		chunks := channel.SplitMessage("", 100)
 		if len(chunks) != 1 || chunks[0] != "" {
 			t.Errorf("got %v", chunks)
 		}

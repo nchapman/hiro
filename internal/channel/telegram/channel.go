@@ -445,8 +445,7 @@ func (c *Channel) typingLoop(ctx context.Context, chatID int64) context.CancelFu
 
 // sendLong sends a potentially long message, splitting into chunks if needed.
 func (c *Channel) sendLong(ctx context.Context, chatID int64, text string) error {
-	chunks := splitMessage(text, maxMessageLen)
-	for _, chunk := range chunks {
+	for _, chunk := range channel.SplitMessage(text, maxMessageLen) {
 		if err := c.sendMessage(ctx, chatID, chunk); err != nil {
 			return err
 		}
@@ -531,30 +530,4 @@ func parseChatID(key string) (int64, error) {
 		return 0, fmt.Errorf("invalid telegram conversation key: %q", key)
 	}
 	return strconv.ParseInt(key[3:], 10, 64)
-}
-
-// splitMessage splits text into chunks of at most maxLen characters,
-// preferring to split at newlines.
-func splitMessage(text string, maxLen int) []string {
-	if len(text) <= maxLen {
-		return []string{text}
-	}
-
-	var chunks []string
-	for text != "" {
-		if len(text) <= maxLen {
-			chunks = append(chunks, text)
-			break
-		}
-
-		// Try to split at a newline within the limit.
-		cut := maxLen
-		if idx := strings.LastIndex(text[:maxLen], "\n"); idx > 0 {
-			cut = idx + 1 // include the newline
-		}
-
-		chunks = append(chunks, text[:cut])
-		text = text[cut:]
-	}
-	return chunks
 }

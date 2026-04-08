@@ -16,6 +16,33 @@ const (
 // clearConfirmation is the message sent to users when a session is cleared.
 const clearConfirmation = "Session cleared."
 
+// SplitMessage splits text into chunks of at most maxLen characters,
+// preferring to split at newlines. Used by non-streaming channels
+// (Telegram, Slack) to respect platform message length limits.
+func SplitMessage(text string, maxLen int) []string {
+	if len(text) <= maxLen {
+		return []string{text}
+	}
+
+	var chunks []string
+	for text != "" {
+		if len(text) <= maxLen {
+			chunks = append(chunks, text)
+			break
+		}
+
+		// Try to split at a newline within the limit.
+		cut := maxLen
+		if idx := strings.LastIndex(text[:maxLen], "\n"); idx > 0 {
+			cut = idx + 1 // include the newline
+		}
+
+		chunks = append(chunks, text[:cut])
+		text = text[cut:]
+	}
+	return chunks
+}
+
 // FormatEvents extracts text content from inference events for delivery
 // to non-streaming channels (Telegram, Slack). Only delta and error events
 // produce output; tool calls, reasoning, and other event types are ignored.
