@@ -408,6 +408,10 @@ How dynamic context (memories, todos, secrets, skills, agent listings) is inject
 
 How agents schedule recurring and one-time tasks. Covers the subscription data model (SQLite with JSON trigger column), the min-heap priority queue scheduler, triggered sessions (isolated inference turns with Notify for surfacing results), cron and one-shot trigger types, lifecycle integration (pause on stop, resume on start), concurrency model (lock ordering, overlap guards, WaitGroup), and the server timezone setting. Also describes the future trigger type extensibility (webhooks, file watches).
 
+### [`docs/network-isolation.md`](docs/network-isolation.md) — Network Isolation
+
+Per-agent network isolation design. Each agent spawns in its own network namespace (`CLONE_NEWNET` + veth pair). A DNS forwarder resolves allowed domains and dynamically populates nftables IP sets — filtering is purely at the IP layer, protocol-agnostic (HTTPS, SSH, git all work). Covers requirements, six rejected alternatives, the DNS-driven firewall design, agent configuration (`network.egress`), policy inheritance, spawn protocol changes, and two rounds of security review findings. Not yet implemented.
+
 ### [`docs/map.md`](docs/map.md) — Codebase Map
 
 Comprehensive map of every package, file, and capability with LOC counts. Includes the capability review checklist (44 reviewable units), hotspot analysis (files over 500 LOC), and a full quality findings log (structural fixes, correctness fixes, security fixes, concurrency fixes, testing gaps — most resolved). Use this for planning work and understanding where things live.

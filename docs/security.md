@@ -154,7 +154,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 - Read and write files in the shared workspace (`/hiro/workspace/`, mode `2775`).
 - Read agent definitions (`agents/`).
 - Spawn ephemeral child agents (with equal or fewer capabilities).
-- Make outbound network requests (not restricted by default — use Docker network policies if needed).
+- Make outbound network requests (not restricted by default — see [`docs/network-isolation.md`](network-isolation.md) for the planned per-agent network policy design).
 
 ### What agents CANNOT do
 
@@ -174,7 +174,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### Limitations
 
-- **No network isolation between agents.** Agents share the container's network namespace. An agent with `Bash` could connect to another agent's gRPC socket by enumerating `/tmp/hiro-agent-*.sock` — the path format is known but the UUID (session ID) suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations.
+- **No network isolation between agents (planned).** Agents share the container's network namespace. An agent with `Bash` could connect to another agent's gRPC socket by enumerating `/tmp/hiro-agent-*.sock` — the path format is known but the UUID (session ID) suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations. See [`docs/network-isolation.md`](network-isolation.md) for the planned design: per-agent network namespaces with DNS-driven firewall rules.
 - **Shared workspace is collaborative.** Any agent can read or modify files in `/hiro/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
 - **No syscall filtering.** Agents are not confined by seccomp, AppArmor, or similar mechanisms beyond what Docker applies by default.
