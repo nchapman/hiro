@@ -16,7 +16,8 @@ services:
     init: true
     cap_add:
       - NET_ADMIN
-      - SYS_ADMIN
+    security_opt:
+      - seccomp=seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
@@ -34,7 +35,8 @@ services:
     init: true
     cap_add:
       - NET_ADMIN
-      - SYS_ADMIN
+    security_opt:
+      - seccomp=seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
@@ -50,7 +52,8 @@ services:
     init: true
     cap_add:
       - NET_ADMIN
-      - SYS_ADMIN
+    security_opt:
+      - seccomp=seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:

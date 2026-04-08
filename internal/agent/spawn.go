@@ -42,38 +42,47 @@ func prepareSocketDir(cfg ipc.SpawnConfig) (socketPath string, socketDir string,
 	return socketDir + "/a.sock", socketDir, nil
 }
 
-// configureIsolation sets up UID isolation credentials and environment on the command.
-// When network egress policy is set, the worker is also placed in its own
-// network and mount namespaces (CLONE_NEWNET + CLONE_NEWNS) on Linux.
+// configureIsolation sets up UID isolation on the command. When network egress
+// policy is set, the worker spawns in its own user, network, and mount namespaces
+// (CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS) with UID/GID mappings instead of
+// Credential-based UID drop. Without network isolation, standard Credential-based
+// UID drop is used.
 func configureIsolation(cmd *exec.Cmd, cfg ipc.SpawnConfig) {
-	groups := cfg.Groups
-	if len(groups) == 0 {
-		groups = []uint32{cfg.GID}
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+
+	if cfg.NetworkEgress != nil {
+		// CLONE_NEWUSER: UID drop happens via namespace mapping (UID 0 inside
+		// maps to agent UID outside). Credential must NOT be set — the child
+		// is UID 0 inside its userns and setuid(agentUID) would fail.
+		setNetworkCloneflags(cmd, cfg.UID, cfg.GID)
+	} else {
+		// No network isolation: drop UID via Credential.
+		groups := cfg.Groups
+		if len(groups) == 0 {
+			groups = []uint32{cfg.GID}
+		}
+		cmd.SysProcAttr.Credential = &syscall.Credential{
 			Uid:    cfg.UID,
 			Gid:    cfg.GID,
 			Groups: groups,
-		},
-	}
-	if cfg.NetworkEgress != nil {
-		setNetworkCloneflags(cmd)
+		}
 	}
 	cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
 }
 
-// waitForReady waits for the agent process to signal readiness on stdout,
-// or returns an error if the process exits early or times out.
-// On success, callers must consume waitCh to reap the process.
-func waitForReady(cmd *exec.Cmd, stdoutPipe *bufio.Scanner, stderrBuf *bytes.Buffer, waitCh <-chan error) error {
-	type readyResult struct{ err error }
+// waitForLine waits for a specific line on the scanner, or returns an error if
+// the process exits early, times out, or sends an unexpected line.
+func waitForLine(expected string, cmd *exec.Cmd, scanner *bufio.Scanner, stderrBuf *bytes.Buffer, waitCh <-chan error) error {
+	type readyResult struct {
+		line string
+		err  error
+	}
 	readyCh := make(chan readyResult, 1)
 	go func() {
-		if stdoutPipe.Scan() {
-			readyCh <- readyResult{}
+		if scanner.Scan() {
+			readyCh <- readyResult{line: scanner.Text()}
 		} else {
-			readyCh <- readyResult{err: fmt.Errorf("agent process closed stdout without signaling ready")}
+			readyCh <- readyResult{err: fmt.Errorf("agent process closed stdout without signaling %s", expected)}
 		}
 	}()
 
@@ -84,23 +93,64 @@ func waitForReady(cmd *exec.Cmd, stdoutPipe *bufio.Scanner, stderrBuf *bytes.Buf
 			<-waitCh
 			return fmt.Errorf("%w; stderr: %s", r.err, stderrBuf.String())
 		}
+		if r.line != expected {
+			_ = cmd.Process.Kill()
+			<-waitCh
+			return fmt.Errorf("expected %q, got %q; stderr: %s", expected, r.line, stderrBuf.String())
+		}
 		return nil
 	case waitErr := <-waitCh:
-		return fmt.Errorf("agent process exited during startup: %w; stderr: %s", waitErr, stderrBuf.String())
+		return fmt.Errorf("agent process exited during startup (waiting for %s): %w; stderr: %s", expected, waitErr, stderrBuf.String())
 	case <-time.After(spawnTimeout):
 		_ = cmd.Process.Kill()
 		<-waitCh
-		return fmt.Errorf("agent process startup timed out after %s; stderr: %s", spawnTimeout, stderrBuf.String())
+		return fmt.Errorf("agent process startup timed out after %s (waiting for %s); stderr: %s", spawnTimeout, expected, stderrBuf.String())
 	}
 }
 
-// startAgentProcess prepares, starts, and writes config to an agent process.
-// Returns the command, stderr buffer, and wait channel. The process is running
-// and has received its config, but readiness has not been confirmed.
-func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*exec.Cmd, *bytes.Buffer, <-chan error, error) {
+// agentProcess holds the pieces returned by startAgentProcess for the
+// two-phase handshake protocol.
+type agentProcess struct {
+	cmd        *exec.Cmd
+	scanner    *bufio.Scanner
+	stderrBuf  *bytes.Buffer
+	waitCh     <-chan error
+	vethReadyW *os.File // parent→child pipe; close to signal veth ready (nil if no netiso)
+}
+
+// setupVethPipe creates a pipe for the veth-ready signal if network isolation
+// is active. The read end goes to the child as FD 3 via ExtraFiles. Returns
+// the write end (parent closes it to signal the child), or nil if no pipe needed.
+func setupVethPipe(cmd *exec.Cmd, cfg ipc.SpawnConfig) (*os.File, error) {
+	if cfg.NetworkEgress == nil || cfg.UID == 0 {
+		return nil, nil
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating veth-ready pipe: %w", err)
+	}
+	cmd.ExtraFiles = []*os.File{r} // child FD 3
+	return w, nil
+}
+
+// closeIfNotNil closes the file if it's not nil.
+func closeIfNotNil(f *os.File) {
+	if f != nil {
+		f.Close()
+	}
+}
+
+// startAgentProcess prepares and starts an agent process, writes its config,
+// and returns the pieces needed for the handshake protocol. Does NOT wait for
+// readiness — the caller handles the ns-ready/ready handshake.
+//
+// If network isolation is active, an extra pipe is created (vethReadyW) whose
+// read end is passed to the child as FD 3. The parent closes vethReadyW after
+// completing host-side network setup to signal the child to self-configure.
+func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*agentProcess, error) {
 	self, err := os.Executable()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("resolving executable: %w", err)
+		return nil, fmt.Errorf("resolving executable: %w", err)
 	}
 
 	cmd := exec.CommandContext(ctx, self, "agent") //nolint:gosec // self is our own binary path from os.Executable
@@ -108,36 +158,52 @@ func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*exec.Cmd, *by
 		configureIsolation(cmd, cfg)
 	}
 
+	vethReadyW, err := setupVethPipe(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating stdin pipe: %w", err)
+		closeIfNotNil(vethReadyW)
+		return nil, fmt.Errorf("creating stdin pipe: %w", err)
 	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating stdout pipe: %w", err)
+		closeIfNotNil(vethReadyW)
+		return nil, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		return nil, nil, nil, fmt.Errorf("starting agent process: %w", err)
+		closeIfNotNil(vethReadyW)
+		return nil, fmt.Errorf("starting agent process: %w", err)
+	}
+
+	// Close the pipe read end in the parent — the child inherited it.
+	if len(cmd.ExtraFiles) > 0 {
+		cmd.ExtraFiles[0].Close()
 	}
 
 	if err := json.NewEncoder(stdinPipe).Encode(cfg); err != nil {
 		_ = cmd.Process.Kill()
-		return nil, nil, nil, fmt.Errorf("writing spawn config: %w", err)
+		closeIfNotNil(vethReadyW)
+		return nil, fmt.Errorf("writing spawn config: %w", err)
 	}
 	stdinPipe.Close()
 
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
 
-	if err := waitForReady(cmd, bufio.NewScanner(stdoutPipe), &stderrBuf, waitCh); err != nil {
-		return nil, nil, nil, err
-	}
-
-	return cmd, &stderrBuf, waitCh, nil
+	return &agentProcess{
+		cmd:        cmd,
+		scanner:    bufio.NewScanner(stdoutPipe),
+		stderrBuf:  &stderrBuf,
+		waitCh:     waitCh,
+		vethReadyW: vethReadyW,
+	}, nil
 }
 
 // newWorkerFactory creates a WorkerFactory that spawns agent processes with
@@ -155,36 +221,77 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 }
 
 // spawnWorkerProcess is the core spawn logic shared by all worker factories.
-// The agent process reads a SpawnConfig from stdin, starts a gRPC AgentWorker
-// server on a Unix socket, and writes "ready" to stdout when it's listening.
-func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.NetIso) (*WorkerHandle, error) { //nolint:funlen // network isolation adds 15 lines to the core spawn path
-	// Create a private socket directory so the socket is inaccessible to other
-	// agent UIDs from the moment it's created (no TOCTOU window). Short path
-	// to stay under the 104-byte Unix socket limit.
+//
+// When network isolation is active, the spawn uses a two-phase handshake:
+//  1. Child forks in CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS, reads config
+//  2. Child writes "ns-ready" (namespaces up, awaiting veth)
+//  3. Parent does host-side setup: veth pair, nftables, DNS
+//  4. Parent closes veth-ready pipe (signals child)
+//  5. Child self-configures: rename eth0, IP, routes, bind mounts, seccomp
+//  6. Child writes "ready" (gRPC server listening)
+//
+// Without network isolation, the child writes "ready" directly after startup.
+func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.NetIso) (*WorkerHandle, error) { //nolint:funlen // network isolation handshake adds complexity to the core spawn path
 	socketPath, socketDir, err := prepareSocketDir(cfg)
 	if err != nil {
 		return nil, err
 	}
 	cfg.AgentSocket = socketPath
 
-	cmd, _, waitCh, err := startAgentProcess(ctx, cfg)
+	needsNetIso := ni != nil && cfg.NetworkEgress != nil && cfg.UID != 0
+
+	// Populate network self-configuration fields before starting the child,
+	// so they're available in the SpawnConfig written to stdin.
+	if needsNetIso {
+		agent := netiso.AgentNetwork{
+			AgentID:   cfg.UID - uidpool.DefaultBaseUID,
+			SessionID: cfg.SessionID,
+		}
+		cfg.AgentIP = agent.AgentIP().String()
+		cfg.GatewayIP = agent.GatewayIP().String()
+		cfg.SubnetBits = 30
+		cfg.PeerName = netiso.PeerName(agent.SessionPrefix())
+	}
+
+	proc, err := startAgentProcess(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// Between cmd.Start() and gRPC connect, the worker is alive but has zero
-	// network if CLONE_NEWNET was set. Set up veth + nftables now.
-	if ni != nil && cfg.NetworkEgress != nil && cfg.UID != 0 {
-		if err := ni.Setup(ctx, netiso.AgentNetwork{
+	if needsNetIso {
+		// Phase 1: Wait for child to signal namespaces are up.
+		if err := waitForLine("ns-ready", proc.cmd, proc.scanner, proc.stderrBuf, proc.waitCh); err != nil {
+			if proc.vethReadyW != nil {
+				proc.vethReadyW.Close()
+			}
+			return nil, err
+		}
+
+		// Phase 2: Host-side network setup (veth, nftables, DNS).
+		if setupErr := ni.Setup(ctx, netiso.AgentNetwork{
 			AgentID:   cfg.UID - uidpool.DefaultBaseUID,
 			SessionID: cfg.SessionID,
-			PID:       cmd.Process.Pid,
+			PID:       proc.cmd.Process.Pid,
 			Egress:    cfg.NetworkEgress,
-		}); err != nil {
-			_ = cmd.Process.Kill()
-			<-waitCh
-			return nil, fmt.Errorf("setting up network isolation: %w", err)
+		}); setupErr != nil {
+			proc.vethReadyW.Close()
+			_ = proc.cmd.Process.Kill()
+			<-proc.waitCh
+			return nil, fmt.Errorf("setting up network isolation: %w", setupErr)
 		}
+
+		// Phase 3: Signal child to self-configure.
+		// The child's SpawnConfig already has PeerName, AgentIP, GatewayIP,
+		// SubnetBits populated. Closing this pipe unblocks the child's read.
+		proc.vethReadyW.Close()
+	}
+
+	// Wait for the final "ready" signal (gRPC server listening).
+	if err := waitForLine("ready", proc.cmd, proc.scanner, proc.stderrBuf, proc.waitCh); err != nil {
+		if needsNetIso {
+			_ = ni.Teardown(cfg.SessionID)
+		}
+		return nil, err
 	}
 
 	// Connect gRPC client to the agent's worker socket.
@@ -192,11 +299,11 @@ func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.Net
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		if ni != nil && cfg.NetworkEgress != nil {
+		if needsNetIso {
 			_ = ni.Teardown(cfg.SessionID)
 		}
-		_ = cmd.Process.Kill()
-		<-waitCh
+		_ = proc.cmd.Process.Kill()
+		<-proc.waitCh
 		return nil, fmt.Errorf("connecting to agent worker: %w", err)
 	}
 
@@ -205,18 +312,18 @@ func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.Net
 	// Death-watcher: closes done when the process exits.
 	done := make(chan struct{})
 	go func() {
-		<-waitCh
+		<-proc.waitCh
 		close(done)
 	}()
 
 	return &WorkerHandle{
 		Worker: worker,
 		Kill: func() {
-			_ = cmd.Process.Kill()
+			_ = proc.cmd.Process.Kill()
 		},
 		Close: func() {
 			conn.Close()
-			if ni != nil && cfg.NetworkEgress != nil {
+			if needsNetIso {
 				_ = ni.Teardown(cfg.SessionID)
 			}
 			_ = os.Remove(socketPath) // best-effort cleanup

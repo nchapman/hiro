@@ -39,7 +39,6 @@ func agentCmd(t *testing.T, uid, gid uint32, sessionDir string, command string, 
 func ipcSpawnConfig(sessionDir string) ipc.SpawnConfig {
 	return ipc.SpawnConfig{
 		SessionDir: sessionDir,
-		APIKey:     "test-key",
 		UID:        uidpool.DefaultBaseUID,
 	}
 }

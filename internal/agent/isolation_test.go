@@ -25,12 +25,12 @@ type isolationWorker struct {
 }
 
 // isolationWorkerFactory captures SpawnConfig for inspection.
-func isolationWorkerFactory(response string) (WorkerFactory, *[]*isolationWorker) {
+func isolationWorkerFactory() (WorkerFactory, *[]*isolationWorker) {
 	var workers []*isolationWorker
 	factory := func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
 		done := make(chan struct{})
 		w := &isolationWorker{
-			testWorker: testWorker{response: response, done: done},
+			testWorker: testWorker{done: done},
 			spawnCfg:   cfg,
 		}
 		workers = append(workers, w)
@@ -60,7 +60,7 @@ func setupIsolationManager(t *testing.T) (*Manager, string, *[]*isolationWorker)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	pool := uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
-	factory, workers := isolationWorkerFactory("hello")
+	factory, workers := isolationWorkerFactory()
 
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
@@ -173,7 +173,7 @@ func TestIsolation_PoolExhaustion(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	// Create a tiny pool (size 2) to test exhaustion
 	pool := uidpool.New(uidpool.DefaultBaseUID, uint32(gid), 2)
-	factory, _ := isolationWorkerFactory("hello")
+	factory, _ := isolationWorkerFactory()
 
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,

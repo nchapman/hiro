@@ -34,8 +34,31 @@ func TestNewAndClose(t *testing.T) {
 	}
 }
 
-// TestSetupAndTeardown spawns a real process in a network namespace,
+// spawnNamespaced starts a process in its own user, network, and mount namespaces
+// using CLONE_NEWUSER (matching the production spawn model). The UID mapping maps
+// root inside to the current UID outside.
+func spawnNamespaced(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET | syscall.CLONE_NEWNS,
+		UidMappings: []syscall.SysProcIDMap{
+			{ContainerID: 0, HostID: os.Getuid(), Size: 1},
+		},
+		GidMappings: []syscall.SysProcIDMap{
+			{ContainerID: 0, HostID: os.Getgid(), Size: 1},
+		},
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start namespaced process: %v", err)
+	}
+	return cmd
+}
+
+// TestSetupAndTeardown spawns a real process in a user+network namespace,
 // verifies veth creation and nftables rules, then tears down.
+// Agent-side configuration (eth0, bind mounts) is NOT verified here —
+// that's the child's responsibility in the production spawn protocol.
 func TestSetupAndTeardown(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	ni, err := New(logger)
@@ -44,15 +67,7 @@ func TestSetupAndTeardown(t *testing.T) {
 	}
 	defer ni.Close()
 
-	// Spawn a process in a new network namespace.
-	// Use 'sleep' as a long-running process we can inspect.
-	cmd := exec.Command("sleep", "60")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS,
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start sleep process: %v", err)
-	}
+	cmd := spawnNamespaced(t)
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -65,13 +80,14 @@ func TestSetupAndTeardown(t *testing.T) {
 		Egress:    []string{"github.com", "*.npmjs.org"},
 	}
 
-	// Setup network isolation.
+	// Setup network isolation (host side only).
 	if err := ni.Setup(context.Background(), agent); err != nil {
 		t.Fatalf("Setup() failed: %v", err)
 	}
+	peerName := PeerName(agent.SessionPrefix())
+	t.Logf("peer name: %s", peerName)
 
 	// Verify host-side veth exists.
-	hostIF := "hiro-test-sess-"
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		t.Fatalf("listing interfaces: %v", err)
@@ -84,29 +100,14 @@ func TestSetupAndTeardown(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("host-side veth starting with %q not found", hostIF)
+		t.Error("host-side veth not found")
 	}
 
-	// Verify agent-side has eth0 by running 'ip addr' in the namespace.
-	nsExec := exec.Command("nsenter", "--net", fmt.Sprintf("--target=%d", cmd.Process.Pid),
-		"ip", "addr", "show", "eth0")
-	out, err := nsExec.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to check eth0 in agent ns: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "10.0.0.2") {
-		t.Errorf("agent eth0 does not have expected IP 10.0.0.2:\n%s", out)
-	}
-
-	// Verify agent's resolv.conf points to gateway.
-	nsExec = exec.Command("nsenter", "--net", "--mount", fmt.Sprintf("--target=%d", cmd.Process.Pid),
-		"cat", "/etc/resolv.conf")
-	out, err = nsExec.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to read resolv.conf in agent ns: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "10.0.0.1") {
-		t.Errorf("agent resolv.conf does not point to gateway 10.0.0.1:\n%s", out)
+	// Verify the veth peer was moved into the child's namespace.
+	// The peer should NOT be visible in the host namespace.
+	_, err = net.InterfaceByName(peerName)
+	if err == nil {
+		t.Errorf("peer %s should have been moved to child ns, but is still in host ns", peerName)
 	}
 
 	// Verify nftables rules exist.
@@ -115,7 +116,6 @@ func TestSetupAndTeardown(t *testing.T) {
 		t.Fatalf("failed to list nftables: %v\n%s", err, nftOut)
 	}
 	nftStr := string(nftOut)
-	// Session prefix is truncated to 12 chars.
 	if !strings.Contains(nftStr, agent.SessionPrefix()) {
 		t.Errorf("nftables does not contain agent chain/set (prefix %s):\n%s", agent.SessionPrefix(), nftStr)
 	}
@@ -137,7 +137,6 @@ func TestSetupAndTeardown(t *testing.T) {
 	// Verify nftables rules are cleaned up.
 	nftOut, err = exec.Command("nft", "list", "table", "inet", "hiro").CombinedOutput()
 	if err != nil {
-		// Table might be gone entirely after close — that's fine.
 		t.Logf("nftables table gone after teardown (expected): %v", err)
 	} else if strings.Contains(string(nftOut), agent.SessionPrefix()+"_ips") {
 		t.Errorf("nftables still contains agent set after teardown:\n%s", nftOut)
@@ -154,14 +153,7 @@ func TestDNSForwarder(t *testing.T) {
 	}
 	defer ni.Close()
 
-	// Spawn a process in a new network namespace.
-	cmd := exec.Command("sleep", "60")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS,
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start sleep process: %v", err)
-	}
+	cmd := spawnNamespaced(t)
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -182,14 +174,13 @@ func TestDNSForwarder(t *testing.T) {
 	// Give DNS server a moment to start listening.
 	time.Sleep(200 * time.Millisecond)
 
-	// Test DNS directly from the test process (not via nsenter) by querying
-	// the DNS forwarder on the gateway IP. This works because the gateway IP
-	// is on the host-side veth, reachable from the host namespace.
+	// Test DNS directly from the test process by querying the DNS forwarder
+	// on the gateway IP (reachable from host namespace via host-side veth).
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: 5 * time.Second}
-			return d.DialContext(ctx, "udp", "10.0.1.1:53")
+			return d.DialContext(ctx, "udp", fmt.Sprintf("%s:53", agent.GatewayIP()))
 		},
 	}
 

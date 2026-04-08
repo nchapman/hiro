@@ -8,7 +8,8 @@ services:
     init: true
     cap_add:
       - NET_ADMIN  # nftables rules, veth pairs
-      - SYS_ADMIN  # CLONE_NEWNET, CLONE_NEWNS for per-agent namespaces
+    security_opt:
+      - seccomp=seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
     sysctls:
       - net.ipv4.ip_forward=1
     command: ["go", "test", "./internal/netiso/...", "-tags=netiso", "-v", "-count=1"]

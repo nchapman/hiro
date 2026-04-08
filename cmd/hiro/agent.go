@@ -34,10 +34,46 @@ const (
 // runAgent is the entry point for an agent worker process.
 // Workers are thin tool-execution sandboxes: they receive ExecuteTool
 // RPCs from the control plane and execute tools under an isolated UID.
+//
+// When network isolation is active (PeerName set in config), the startup
+// follows a two-phase handshake:
+//  1. Signal "ns-ready" (namespaces up, awaiting veth from parent)
+//  2. Wait for veth-ready signal (FD 3 closed by parent)
+//  3. Self-configure network (interfaces, routes, bind mounts)
+//  4. Install seccomp-BPF filter (blocks namespace creation, mounts)
+//  5. Signal "ready" (gRPC server listening)
+//
+// All UID-isolated agents (not just network-isolated) get the seccomp filter
+// to prevent namespace creation, mount manipulation, etc.
 func runAgent() error {
 	var cfg ipc.SpawnConfig
 	if err := json.NewDecoder(os.Stdin).Decode(&cfg); err != nil {
 		return fmt.Errorf("reading spawn config: %w", err)
+	}
+
+	// Network isolation handshake: self-configure inside user namespace.
+	if cfg.PeerName != "" {
+		// Signal that namespaces are up and we're ready for the veth peer.
+		fmt.Fprintln(os.Stdout, "ns-ready")
+
+		// Block until parent has created veth and moved peer into our netns.
+		waitForVethReady()
+
+		// Self-configure: rename peer to eth0, set IP/route, bind-mount DNS.
+		if err := selfConfigureNetwork(cfg); err != nil {
+			return fmt.Errorf("self-configuring network: %w", err)
+		}
+	}
+
+	// Install seccomp-BPF filter for ALL agent workers, not just
+	// network-isolated ones. This prevents agents from creating user
+	// namespaces, mounting filesystems, or entering other namespaces.
+	// Must run AFTER self-configuration (which needs mount/network) but
+	// BEFORE any agent code.
+	if cfg.UID != 0 {
+		if err := installSeccomp(); err != nil {
+			return fmt.Errorf("installing seccomp filter: %w", err)
+		}
 	}
 
 	if err := configureAgentSecurity(cfg); err != nil {
@@ -89,8 +125,21 @@ func configureAgentSecurity(cfg ipc.SpawnConfig) error {
 	}
 
 	syscall.Umask(umaskCollaborative)
-	if uint32(os.Getuid()) != cfg.UID { //nolint:gosec // UID fits uint32 on all supported platforms
-		return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
+
+	// With CLONE_NEWUSER, os.Getuid() returns 0 inside the user namespace
+	// (mapped to the agent UID outside). Without CLONE_NEWUSER (no network
+	// isolation), the process runs directly as the agent UID.
+	actualUID := uint32(os.Getuid()) //nolint:gosec // UID fits uint32 on all supported platforms
+	if cfg.PeerName != "" {
+		// Network isolation active: child is UID 0 inside its user namespace.
+		if actualUID != 0 {
+			return fmt.Errorf("expected to run as UID 0 inside user namespace, but running as UID %d", actualUID)
+		}
+	} else {
+		// No network isolation: child runs directly as the agent UID.
+		if actualUID != cfg.UID {
+			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, actualUID)
+		}
 	}
 
 	// Confine file tools to the platform root — prevents reading/writing

@@ -165,7 +165,7 @@ Each worker spawns in its own network namespace (`CLONE_NEWNET`). The control pl
 - **Per-agent `/30` subnets** prevent all cross-agent layer-2 attacks by architecture.
 
 **Cons:**
-- Requires `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` on the container (see [Container Privilege Requirements](#container-privilege-requirements))
+- Requires `CAP_NET_ADMIN` + custom seccomp profile on the container (see [Container Privilege Requirements](#container-privilege-requirements))
 - ~5-10ms added to worker spawn time for veth setup (negligible)
 - New dependency: `vishvananda/netlink` (same library Docker uses)
 - IP-based filtering allows access to any service that shares an IP with an allowed domain (shared hosting/CDN). Low risk — attacker can't control which IP a legitimate domain resolves to.
@@ -178,7 +178,7 @@ Each worker spawns in its own network namespace (`CLONE_NEWNET`). The control pl
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ Docker Container (CAP_NET_ADMIN)                                 │
+│ Docker Container (CAP_NET_ADMIN + seccomp: allow CLONE_NEWUSER)   │
 │                                                                  │
 │  Control Plane (root, host network namespace)                    │
 │  ├── HTTP API, WebSocket, LLM calls                             │
@@ -248,19 +248,25 @@ Current:
 New:
 1. Acquire UID from pool
 2. Chown instance directory
-3. Fork `hiro agent` with `SysProcAttr.Credential` **+ `Cloneflags: CLONE_NEWNET | CLONE_NEWNS`**
-4. **Create veth pair (temp peer name in host ns, rename to eth0 after moving into agent ns), configure addresses/routes/nftables**
-5. **Bind-mount per-agent `/etc/resolv.conf` and `/etc/hosts` into agent's mount namespace via `nsenter`**
-6. **Register agent with DNS forwarder, start per-agent listener on gateway IP**
-7. Worker starts gRPC, writes "ready"
+3. Fork `hiro agent` with `SysProcAttr.Credential` **+ `Cloneflags: CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`** and UID/GID mapping (maps UID 0 inside → agent UID outside, e.g., `0 10000 1`)
+4. **Control plane: create veth pair (temp peer name `hp-{prefix}` in host ns), move peer into child's network namespace, configure host-side address and nftables rules**
+5. **Control plane: signal child that veth is ready**
+6. **Child (inside its user namespace, where it has full capabilities): configure eth0 address, default route, loopback, bind-mount per-agent `/etc/resolv.conf` and `/etc/hosts`**
+7. **Child: install per-worker seccomp-BPF filter (blocks `unshare`, `mount`, `chroot`, `pivot_root`) + set `PR_SET_NO_NEW_PRIVS`, then signal ready**
+8. **Control plane: register agent with DNS forwarder, start per-agent listener on gateway IP**
+9. Worker starts gRPC, writes "ready"
 
-**Race condition analysis:** `CLONE_NEWNET` creates the worker in an empty network namespace — no interfaces, no routes, no connectivity. The worker has zero network access between fork (step 3) and veth setup (step 4). nftables rules are configured as part of step 4, before any traffic can flow. There is no window of unrestricted access.
+**Why CLONE_NEWUSER:** The kernel gates `CLONE_NEWNET` and `CLONE_NEWNS` on `CAP_SYS_ADMIN` — the broadest Linux capability. By wrapping namespace creation in a user namespace (`CLONE_NEWUSER`), the child process gets full capabilities *within* its own user namespace without the container needing `CAP_SYS_ADMIN`. The container only needs `CAP_NET_ADMIN` (for veth creation and nftables management from the host namespace) plus a custom seccomp profile that allows `CLONE_NEWUSER` (blocked by Docker's default seccomp). See [Container Privilege Requirements](#container-privilege-requirements).
 
-**Error handling:** If veth setup fails after the worker is forked, the worker process must be killed and any partial veth state cleaned up. The `WorkerHandle.Close` closure calls `NetIso.Teardown()` which is idempotent. If the worker exits before veth setup completes, the namespace is destroyed with the process — veth creation targeting a dead namespace returns an error that propagates to the caller.
+**UID mapping:** The child's user namespace maps UID 0 inside → agent UID outside (e.g., `0 10000 1` in `uid_map`). This gives the child full capabilities within its namespace for configuring interfaces and bind mounts, while the host sees the process as the non-root agent UID. Go's `SysProcAttr.UidMappings`/`GidMappings` writes these mappings between `clone()` and `exec()`, so the child starts with the correct mapping already in place.
 
-**Implementation note — veth peer naming:** The veth peer cannot be created with the name `eth0` in the host namespace (conflicts with the container's own `eth0`). Instead, a temporary name (`hp-{sessPrefix}`) is used in the host namespace. After moving the peer into the agent's network namespace, it is renamed to `eth0` via `netlink.LinkSetName`.
+**Self-configuration model:** The parent cannot configure interfaces inside the child's network namespace — `nsenter --net` enters the netns but not the userns, so operations fail with EPERM. Instead, the child configures itself from inside its user namespace where it has full capabilities. The parent's role is limited to: (a) creating the veth pair in the host namespace, (b) moving the peer into the child's netns, and (c) managing nftables rules. This is actually a cleaner separation of concerns than the original design where the parent entered the child's namespaces.
 
-**Implementation note — mount namespace switching:** Go's multi-threaded runtime prevents using `setns(fd, CLONE_NEWNS)` directly — the kernel requires all threads in the process to be in the same mount namespace for `setns` to succeed, but Go's goroutine scheduler runs on multiple OS threads. The implementation uses `nsenter --mount --target {pid} mount --bind ...` as a subprocess instead, which is single-threaded and works correctly.
+**Race condition analysis:** `CLONE_NEWNET` creates the worker in an empty network namespace — no interfaces, no routes, no connectivity. The worker has zero network access between fork (step 3) and veth setup (steps 4-6). nftables rules are configured in step 4, before the child brings up its interface. There is no window of unrestricted access.
+
+**Error handling:** If veth setup or child self-configuration fails, the worker process must be killed and any partial veth state cleaned up. The `WorkerHandle.Close` closure calls `NetIso.Teardown()` which is idempotent. If the worker exits before setup completes, the namespace is destroyed with the process — veth creation targeting a dead namespace returns an error that propagates to the caller.
+
+**Implementation note — veth peer naming:** The veth peer cannot be created with the name `eth0` in the host namespace (conflicts with the container's own `eth0`). Instead, a temporary name (`hp-{sessPrefix}`) is used. After the parent moves the peer into the child's netns, the child renames it to `eth0`.
 
 ### nftables Rules
 
@@ -397,7 +403,7 @@ A child agent can never have broader network access than its parent.
     ::1       localhost
 ```
 
-These are bind-mounted into the agent's mount namespace via `nsenter --mount --target {pid} mount --bind`. The spawn uses `CLONE_NEWNS` (in addition to `CLONE_NEWNET`) to give each agent a private mount namespace where these files can be overridden without affecting other agents or the control plane. The `nsenter` approach is necessary because Go's multi-threaded runtime prevents direct `setns(CLONE_NEWNS)` — the kernel requires all threads to share the same mount namespace for `setns` to succeed. The source files are written to a temp directory that persists for the lifetime of the agent process (bind mounts reference the source inodes).
+The child process bind-mounts these from inside its own user+mount namespace (where it has `CAP_SYS_ADMIN` scoped to the namespace). The spawn uses `CLONE_NEWNS` (in addition to `CLONE_NEWUSER` and `CLONE_NEWNET`) to give each agent a private mount namespace where these files can be overridden without affecting other agents or the control plane. The source files are written by the control plane to a temp directory; the child reads and bind-mounts them during its self-configuration phase (step 6 of spawn).
 
 **Additional mitigations:**
 - Block mDNS (UDP port 5353 to `224.0.0.251`) in the per-agent nftables chain
@@ -413,36 +419,64 @@ These are bind-mounted into the agent's mount namespace via `nsenter --mount --t
 
 This preserves the isolation boundary: the control plane never makes HTTP requests on behalf of agents.
 
-### seccomp Hardening (Planned, Not Yet Implemented)
+### Per-Worker seccomp (Required)
 
-Alongside network namespaces, workers should get additional seccomp hardening. This is complementary work, tracked separately from network isolation.
+Per-worker seccomp-BPF is **mandatory** for the `CLONE_NEWUSER` approach — not optional hardening. The container-wide seccomp profile allows `CLONE_NEWUSER`, `unshare`, and `mount` so the control plane can create namespaces and the child can self-configure. Without a per-worker filter, agents inherit these permissions and can create their own user namespaces, gaining `CAP_SYS_ADMIN` within them — the exact kernel attack surface Docker blocks `CLONE_NEWUSER` to prevent.
 
-**Per-worker (to be applied in `runAgent()`):**
-- `PR_SET_NO_NEW_PRIVS` — prevents setuid escalation, inherited by all child processes. This is the single highest-value change (~3 lines of Go).
-- Block dangerous syscalls: `ptrace`, `mount`, `umount`, `kexec_load`, `reboot`, `swapon`, `keyctl`
-- **Defense-in-depth:** Block `socket(AF_INET)` and `socket(AF_INET6)` as a backstop. If an agent escapes its network namespace via a kernel exploit, seccomp prevents it from creating new IP sockets. This is redundant with namespace isolation in the normal case, but provides a second barrier for the escalation case.
+**Critical finding from prototyping:** `PR_SET_NO_NEW_PRIVS` does NOT block `CLONE_NEWUSER`. The kernel allows unprivileged user namespace creation regardless of the no-new-privs flag. Only seccomp-BPF can block it.
 
-**Container-wide (Docker seccomp profile JSON):**
-- Tighten beyond Docker defaults: block `io_uring_*`, additional kernel-level attack surface reduction
-- Applied via `security_opt: seccomp:seccomp-profile.json` in docker-compose
+**Per-worker seccomp-BPF filter (applied in `runAgent()` before any agent code):**
+
+The filter blocks these syscalls with `SECCOMP_RET_ERRNO(EPERM)`:
+- `unshare` — prevents creating new namespaces (blocks `CLONE_NEWUSER` escalation)
+- `mount`, `umount` — prevents filesystem manipulation
+- `chroot`, `pivot_root` — prevents root filesystem escapes
+- `ptrace` — prevents debugging other processes
+- `kexec_load`, `reboot`, `swapon`, `keyctl` — misc dangerous syscalls
+
+All other syscalls are allowed (`SECCOMP_RET_ALLOW`). The filter is installed after `PR_SET_NO_NEW_PRIVS` (required by the kernel before installing seccomp-BPF) and before `exec` of the worker binary.
+
+**Defense-in-depth (optional, not yet planned):** Block `socket(AF_INET)` and `socket(AF_INET6)` as a backstop. If an agent escapes its network namespace via a kernel exploit, seccomp prevents it from creating new IP sockets. This is redundant with namespace isolation in the normal case, but provides a second barrier.
+
+A prototype (`proto/netiso-userns/drop_privs.c`) validates this approach: a small C program installs the seccomp-BPF filter then execs the command. The prototype's test 7 demonstrates the full lifecycle — child creates namespaces, self-configures interfaces and bind mounts, then the seccomp filter is installed. After that, the agent can use the network and read/write files but cannot `unshare`, `mount`, or `chroot`.
+
+**Container-wide seccomp profile (Docker):**
+- **Required for network isolation:** Custom profile extending Docker defaults to allow `clone` (with `CLONE_NEWUSER`), `unshare`, and `setns` — needed for the control plane to create user namespaces
+- Remove `io_uring_*` (persistent source of kernel CVEs)
+- Remove `chroot`, `pivot_root` (not needed at the container level)
+- Applied via `security_opt: [seccomp=seccomp.json]` in docker-compose
 
 ### Container Privilege Requirements
 
-The original design anticipated needing only `CAP_NET_ADMIN`. Implementation and testing revealed that `CAP_SYS_ADMIN` is also required — `CLONE_NEWNET` and `CLONE_NEWNS` are gated on `CAP_SYS_ADMIN` by the kernel, not `CAP_NET_ADMIN`.
+The original design anticipated needing only `CAP_NET_ADMIN`. The initial implementation used `CAP_SYS_ADMIN` because `CLONE_NEWNET` and `CLONE_NEWNS` are gated on it by the kernel. However, prototyping revealed that `CLONE_NEWUSER` (user namespaces) eliminates the need for `CAP_SYS_ADMIN` entirely — the child process creates its own network and mount namespaces from within a user namespace where it has full capabilities.
 
 | Requirement | Why | Docker Config |
 |---|---|---|
-| `CAP_NET_ADMIN` | nftables rules, veth pairs | `cap_add: [NET_ADMIN]` |
-| `CAP_SYS_ADMIN` | `CLONE_NEWNET`, `CLONE_NEWNS` for per-agent namespaces | `cap_add: [SYS_ADMIN]` |
+| `CAP_NET_ADMIN` | nftables rules, veth pair creation/movement in host namespace | `cap_add: [NET_ADMIN]` |
+| Custom seccomp profile | Allow `CLONE_NEWUSER` (blocked by Docker's default seccomp) | `security_opt: [seccomp=seccomp.json]` |
 | `net.ipv4.ip_forward=1` | Route traffic between agent veths and container's external interface | `sysctls: [net.ipv4.ip_forward=1]` |
-| `nsenter` binary | Mount namespace entry (Go's multi-threaded runtime prevents `setns(CLONE_NEWNS)`) | Installed via `iproute2` package |
 
 **What was NOT needed:**
-- No `--privileged` flag — the two explicit capabilities + sysctl are sufficient
-- No custom seccomp profile modifications
-- Integration tests (`make test-netiso`) use a Docker Compose file (`docker-compose.test-netiso.yml`) with the exact same privileges as production — no `--privileged`, no special treatment
+- **No `CAP_SYS_ADMIN`** — `CLONE_NEWUSER` wraps `CLONE_NEWNET` + `CLONE_NEWNS`, giving the child full capabilities within its own user namespace without granting `CAP_SYS_ADMIN` to the container
+- No `--privileged` flag
+- Integration tests (`make test-netiso`) use a Docker Compose file (`docker-compose.test-netiso.yml`) with the exact same privileges as production
+
+**The custom seccomp profile** extends Docker's default to allow three additional syscalls: `clone` (with `CLONE_NEWUSER` flag), `unshare`, and `setns`. Docker's default blocks `CLONE_NEWUSER` because unprivileged user namespaces have historically been a source of kernel privilege escalation bugs. The profile is minimal — it does not open `CAP_SYS_ADMIN`-gated operations.
 
 **The `net.ipv4.ip_forward` sysctl** is per-container-namespace (does not affect the host). It is read-only at runtime in non-privileged containers, so it must be set at container creation time via `docker-compose.yml`. The code gracefully handles this — if the write fails, it checks whether forwarding is already enabled.
+
+#### Why CLONE_NEWUSER Over CAP_SYS_ADMIN
+
+The initial implementation used `CAP_SYS_ADMIN` to create namespaces from the control plane. This worked but granted the broadest Linux capability to the container — mount operations, cgroup manipulation, device management, and much more. A shell script prototype (`proto/netiso-userns/`) validated the alternative approach:
+
+1. **Child creates its own namespaces** via `CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS` — no `CAP_SYS_ADMIN` needed
+2. **Parent creates/moves veth** with `CAP_NET_ADMIN` — this works across the user namespace boundary
+3. **Child self-configures** interfaces, routes, and bind mounts from inside its user namespace (where it has full capabilities)
+4. **Parent manages nftables** in the host namespace with `CAP_NET_ADMIN`
+
+The tradeoff is a custom seccomp profile (allowing `CLONE_NEWUSER`) instead of `CAP_SYS_ADMIN`. This is a strictly better security posture: `CLONE_NEWUSER` gives the child capabilities only within its own namespace (which the container already controls), while `CAP_SYS_ADMIN` gives the container capabilities over the entire system namespace.
+
+**Seccomp risk note:** Unprivileged user namespaces (`CLONE_NEWUSER`) have historically been a vector for kernel privilege escalation (the child gets `CAP_SYS_ADMIN` *within* its user namespace, which can be used to exercise kernel code paths normally restricted to privileged users). The container-wide seccomp profile allows `CLONE_NEWUSER` for the control plane, but the **per-worker seccomp-BPF filter** (see [Per-Worker seccomp](#per-worker-seccomp-required)) blocks agents from creating their own user namespaces. This is critical: `PR_SET_NO_NEW_PRIVS` alone does NOT prevent `CLONE_NEWUSER` — only seccomp-BPF can block it. The combination of per-worker seccomp + non-root agent UIDs + Docker's outer seccomp profile provides defense-in-depth. The risk is materially lower than granting `CAP_SYS_ADMIN` to the container directly.
 
 #### Capability Risk Assessment
 
@@ -451,20 +485,11 @@ The original design anticipated needing only `CAP_NET_ADMIN`. Implementation and
 - Configure network interfaces, routes, tunnels
 - Set socket options like `SO_BINDTODEVICE`
 
-**CAP_SYS_ADMIN grants (to root in the container):**
-- Create network and mount namespaces (`CLONE_NEWNET`, `CLONE_NEWNS`)
-- Mount/unmount filesystems (bind mounts for per-agent resolv.conf/hosts)
-- Various other system administration operations
+This is the only Linux capability added beyond Docker's defaults. It is well-scoped to network administration — no filesystem, mount, or namespace operations.
 
-This is a meaningful increase in container privileges. `CAP_SYS_ADMIN` is the broadest Linux capability — it covers mount operations, namespace creation, device management, and many other syscalls. Docker's default seccomp profile mitigates the most dangerous operations (e.g., `kexec_load`, `reboot`), but `CAP_SYS_ADMIN` is still a significant grant.
+**What agents can do with these capabilities:** Agent workers run as non-root UIDs in the host namespace with zero capabilities there. Within their user namespace, agents initially have full capabilities for self-configuration (step 6 of spawn), but the per-worker seccomp-BPF filter (step 7) blocks the dangerous operations (`unshare`, `mount`, `chroot`, `pivot_root`) before any agent code runs. After seccomp is installed, agents cannot create new namespaces, mount filesystems, or perform any operation that would leverage their in-namespace capabilities for escalation.
 
-**What agents (non-root) can do with these capabilities:** Nothing. Both capabilities are held only by the root control plane process. When workers are forked with `SysProcAttr.Credential` setting a non-root UID, all capabilities are dropped. Agent processes have zero capabilities.
-
-**The actual risk:** If an agent achieves control-plane code execution (via a bug in gRPC handling, tool dispatching, or DNS parsing), it inherits both capabilities. `CAP_SYS_ADMIN` in particular would allow the attacker to mount host filesystems (if device nodes are available), manipulate cgroups, and potentially escalate further within the container.
-
-**Assessment:** Accept, with mitigation plan. Control-plane compromise is already near-game-over for the container regardless of capabilities — root inside Docker can do significant damage even without `CAP_SYS_ADMIN`. The marginal risk increase is real but bounded by Docker's seccomp profile and the outer container boundary. The security improvement from per-agent network isolation (preventing data exfiltration, lateral movement, and C2 communication by untrusted agents) substantially outweighs the marginal increase in control-plane compromise severity.
-
-**Planned mitigation:** A custom seccomp profile (`seccomp-profile.json`) should be added to restrict `CAP_SYS_ADMIN`-gated syscalls to only those actually needed: `clone` (with namespace flags), `mount` (bind mounts only), and `unshare`. This narrows the capability's effective scope without removing it. Tracked as follow-up work alongside the seccomp hardening described in [seccomp Hardening](#seccomp-hardening-planned-not-yet-implemented).
+**The actual risk:** If an agent achieves control-plane code execution (via a bug in gRPC handling, tool dispatching, or DNS parsing), it inherits `CAP_NET_ADMIN` and could modify nftables rules or network configuration. This is a meaningful but bounded risk — it cannot mount host filesystems, manipulate cgroups, or perform the broader set of operations that `CAP_SYS_ADMIN` would have enabled.
 
 ### Known Limitations
 
@@ -532,19 +557,27 @@ The remaining findings (R2-01 through R2-10) are implementation correctness requ
 
 Discoveries and deviations from the original design, documented during implementation.
 
-### Privilege Escalation from Design
+### Privilege Model Evolution
 
-The original design stated "Requires `CAP_NET_ADMIN` on the container" as the sole privilege requirement. This was incorrect — `CLONE_NEWNET` and `CLONE_NEWNS` are gated on `CAP_SYS_ADMIN`, not `CAP_NET_ADMIN`. The full production privilege set is `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` + `net.ipv4.ip_forward=1` sysctl. See [Container Privilege Requirements](#container-privilege-requirements) for the risk assessment.
+The original design stated "Requires `CAP_NET_ADMIN` on the container" as the sole privilege requirement. The initial implementation discovered that `CLONE_NEWNET` and `CLONE_NEWNS` are gated on `CAP_SYS_ADMIN`, not `CAP_NET_ADMIN`, and used `CAP_SYS_ADMIN` as a workaround.
 
-Additional implementation discoveries:
+A subsequent prototype (`proto/netiso-userns/`) validated that `CLONE_NEWUSER` eliminates the `CAP_SYS_ADMIN` requirement entirely. The final privilege set is `CAP_NET_ADMIN` + custom seccomp (allowing `CLONE_NEWUSER`) + `net.ipv4.ip_forward=1` sysctl. See [Container Privilege Requirements](#container-privilege-requirements).
+
+The key architectural change: the control plane no longer enters the child's namespaces to configure them. Instead, the child creates its own `NEWUSER | NEWNET | NEWNS` namespaces and self-configures (interfaces, routes, bind mounts) from inside its user namespace where it has full capabilities. The control plane only operates in the host namespace: creating veth pairs, moving peers into the child's netns, and managing nftables rules.
+
+### Implementation Discoveries
 
 1. **`net.ipv4.ip_forward=1` sysctl.** Cannot be set at runtime in a non-privileged container — `/proc/sys/net/ipv4/ip_forward` is read-only. Must be declared in `docker-compose.yml` via `sysctls: [net.ipv4.ip_forward=1]`. The code handles this gracefully (checks if already enabled before failing).
 
-2. **`nsenter` for bind mounts.** The design assumed the control plane could enter the agent's mount namespace via `setns(fd, CLONE_NEWNS)`. Go's runtime uses multiple OS threads for goroutine scheduling, and the kernel requires all threads in a process to share the same mount namespace for `setns(CLONE_NEWNS)` to succeed. `runtime.LockOSThread()` locks one goroutine but cannot prevent other goroutines from running on other threads. Solution: shell out to `nsenter --mount --target {pid} mount --bind`, which is a single-threaded process.
+2. **Child self-configuration via user namespace.** The parent cannot `nsenter --net` into the child's network namespace to configure interfaces — entering the netns without also entering the userns means the parent lacks capabilities within the child's namespace (EPERM). The child must configure its own interfaces, routes, and bind mounts. This is enforced by a handshake protocol: parent creates veth and signals, child configures and signals back.
 
-3. **Veth peer naming.** The design implied creating the peer as `eth0` directly. This fails because the peer is initially created in the host namespace (where `eth0` already exists). Solution: create with a temporary name (`hp-{prefix}`), move into agent namespace, then rename to `eth0`.
+3. **UID mapping for user namespaces.** `CLONE_NEWUSER` without explicit UID/GID mapping results in the child having zero capabilities (mapped to `nobody`). The child needs a mapping (e.g., `0 10000 1` — UID 0 inside maps to agent UID 10000 outside) to get full capabilities within its namespace. In Go, this is set via `SysProcAttr.UidMappings`/`GidMappings`, which writes `uid_map`/`gid_map` between `clone()` and `exec()`. Shell's `unshare --map-root-user` maps `0→0` (caller's UID); the prototype validated that the kernel accepts non-root outer UIDs via direct `uid_map` writes.
 
-4. **Integration test privileges.** Tests use `docker-compose.test-netiso.yml` with the exact same capabilities and sysctls as production — no `--privileged`, no special treatment. This ensures the tests validate the actual production security boundary.
+4. **`PR_SET_NO_NEW_PRIVS` does NOT block `CLONE_NEWUSER`.** This was initially assumed to be sufficient for preventing agents from creating user namespaces. Prototyping proved otherwise — the kernel allows `unshare(CLONE_NEWUSER)` regardless of the no-new-privs flag. Per-worker seccomp-BPF is the only mechanism that reliably blocks it. The prototype's `drop_privs.c` validates this: a BPF filter that returns `SECCOMP_RET_ERRNO(EPERM)` for `unshare` successfully blocks namespace creation while allowing all normal operations.
+
+5. **Veth peer naming.** The design implied creating the peer as `eth0` directly. This fails because the peer is initially created in the host namespace (where `eth0` already exists). Solution: create with a temporary name (`hp-{prefix}`), move into agent namespace; child renames to `eth0`.
+
+6. **Integration test privileges.** Tests use `docker-compose.test-netiso.yml` with the exact same capabilities, seccomp profile, and sysctls as production — no `--privileged`, no special treatment. This ensures the tests validate the actual production security boundary.
 
 ### DNS Upstream Detection
 

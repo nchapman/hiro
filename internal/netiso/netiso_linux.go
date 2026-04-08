@@ -65,42 +65,41 @@ func New(logger *slog.Logger) (*NetIso, error) {
 	}, nil
 }
 
-// Setup creates a network namespace, veth pair, nftables rules, and DNS
-// listener for an agent. Must be called after the worker process is forked
-// (with CLONE_NEWNET) but before it signals readiness.
+// Setup creates a veth pair (host-side only), configures nftables rules, and
+// starts a DNS listener for an agent. Must be called after the worker process
+// is forked (with CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS) but before the
+// child self-configures its namespace. The child handles agent-side interface
+// configuration and bind mounts from inside its user namespace.
+//
+// The veth peer name is deterministic (PeerName(sessionPrefix)) and should be
+// pre-computed by the caller for the child's SpawnConfig.
 func (n *NetIso) Setup(ctx context.Context, agent AgentNetwork) error {
 	impl := n.impl
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
 	prefix := agent.SessionPrefix()
-	impl.logger.Info("setting up network isolation",
+	impl.logger.Info("setting up network isolation (host side)",
 		"agent_id", agent.AgentID,
 		"session", prefix,
 		"pid", agent.PID,
 		"egress", agent.Egress,
 	)
 
-	// 1. Create veth pair and configure networking.
-	hostIF, err := setupVeth(agent)
+	// 1. Create veth pair and configure host side.
+	hostIF, _, err := setupVeth(agent)
 	if err != nil {
 		return fmt.Errorf("veth setup: %w", err)
 	}
 
-	// 2. Bind-mount per-agent /etc/resolv.conf and /etc/hosts.
-	if err := setupMounts(agent); err != nil {
-		cleanupVeth(hostIF)
-		return fmt.Errorf("mount setup: %w", err)
-	}
-
-	// 3. Configure nftables rules.
+	// 2. Configure nftables rules.
 	isWildcard := len(agent.Egress) == 1 && agent.Egress[0] == "*"
 	if err := impl.fw.setupAgent(agent, isWildcard); err != nil {
 		cleanupVeth(hostIF)
 		return fmt.Errorf("nftables setup: %w", err)
 	}
 
-	// 4. Register with DNS forwarder and start listener.
+	// 3. Register with DNS forwarder and start listener.
 	if err := impl.dns.RegisterAgent(agent); err != nil {
 		impl.fw.teardownAgent(agent.SessionPrefix())
 		cleanupVeth(hostIF)
@@ -112,7 +111,7 @@ func (n *NetIso) Setup(ctx context.Context, agent AgentNetwork) error {
 		hostIF:  hostIF,
 	}
 
-	impl.logger.Info("network isolation ready",
+	impl.logger.Info("network isolation host side ready",
 		"agent_id", agent.AgentID,
 		"gateway", agent.GatewayIP(),
 		"agent_ip", agent.AgentIP(),

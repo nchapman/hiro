@@ -69,6 +69,19 @@ func (a AgentNetwork) SessionPrefix() string {
 	return s
 }
 
+// maxIFNameLen is the maximum length of a Linux network interface name.
+const maxIFNameLen = 15
+
+// PeerName returns the temporary veth peer name for an agent, used in the host
+// namespace before the child renames it to eth0. Must match the naming in setupVeth.
+func PeerName(sessionPrefix string) string {
+	name := "hp-" + sessionPrefix
+	if len(name) > maxIFNameLen {
+		name = name[:maxIFNameLen]
+	}
+	return name
+}
+
 // NetIso manages per-agent network isolation. It creates veth pairs,
 // configures nftables rules, and runs a DNS forwarder.
 // Only available on Linux with CAP_NET_ADMIN.

@@ -44,4 +44,11 @@ type SpawnConfig struct {
 	GID            uint32          `json:"gid,omitempty"`
 	Groups         []uint32        `json:"groups,omitempty"`
 	NetworkEgress  []string        `json:"network_egress,omitempty"` // allowed egress domains; nil = no network
+
+	// Network self-configuration fields (populated by parent, consumed by child
+	// inside its user namespace for interface/mount setup).
+	PeerName   string `json:"peer_name,omitempty"`
+	AgentIP    string `json:"agent_ip,omitempty"`
+	GatewayIP  string `json:"gateway_ip,omitempty"`
+	SubnetBits int    `json:"subnet_bits,omitempty"`
 }
