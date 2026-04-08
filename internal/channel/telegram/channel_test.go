@@ -63,6 +63,9 @@ func mockTelegramAPI(t *testing.T, getUpdatesFn func(offset int64) []update, sen
 			}
 			writeJSON(w, map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
 
+		case "sendChatAction":
+			writeJSON(w, map[string]any{"ok": true})
+
 		default:
 			http.Error(w, "unknown method: "+method, http.StatusNotFound)
 		}
@@ -687,5 +690,205 @@ func TestHandleUpdate_UnresolvableInstance(t *testing.T) {
 
 	if sentText != "Agent is not available." {
 		t.Errorf("expected unavailable message, got %q", sentText)
+	}
+}
+
+func TestHandleUpdate_StripsBotMention(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	mgr.agentInstances["operator"] = "inst-1"
+
+	var capturedMsg string
+	mgr.sendMessageFn = func(_ context.Context, _, msg string, onEvent func(ipc.ChatEvent) error) (string, error) {
+		capturedMsg = msg
+		if onEvent != nil {
+			_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "ok"})
+		}
+		return "ok", nil
+	}
+
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, nil)
+	defer srv.Close()
+
+	router := testRouter(t, mgr)
+	ch := New(Config{Token: "test-token", Instance: "operator", BaseURL: srv.URL}, router, slog.Default())
+	router.Register(ch)
+
+	// /clear@botname should be stripped to /clear
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "/clear@mybot"},
+	})
+
+	// /clear goes through the Router's slash handler, not sendMessageFn.
+	// Verify it didn't reach the LLM.
+	if capturedMsg != "" {
+		t.Errorf("slash command should not be sent to LLM, got %q", capturedMsg)
+	}
+}
+
+func TestHandleUpdate_StripsBotMentionWithArgs(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	mgr.agentInstances["operator"] = "inst-1"
+
+	var capturedMsg string
+	mgr.sendMessageFn = func(_ context.Context, _, msg string, onEvent func(ipc.ChatEvent) error) (string, error) {
+		capturedMsg = msg
+		if onEvent != nil {
+			_ = onEvent(ipc.ChatEvent{Type: "delta", Content: "ok"})
+		}
+		return "ok", nil
+	}
+
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, nil)
+	defer srv.Close()
+
+	router := testRouter(t, mgr)
+	ch := New(Config{Token: "test-token", Instance: "operator", BaseURL: srv.URL}, router, slog.Default())
+	router.Register(ch)
+
+	// Non-slash message with @ should pass through unchanged.
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "hello @someone"},
+	})
+
+	if capturedMsg != "hello @someone" {
+		t.Errorf("non-command @ should not be stripped, got %q", capturedMsg)
+	}
+}
+
+func TestHandleUpdate_Start(t *testing.T) {
+	t.Parallel()
+
+	var sentText string
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, func(_ int64, text string) error {
+		sentText = text
+		return nil
+	})
+	defer srv.Close()
+
+	mgr := newMockManager()
+	router := testRouter(t, mgr)
+	ch := New(Config{Token: "test-token", Instance: "operator", BaseURL: srv.URL}, router, slog.Default())
+	router.Register(ch)
+
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "/start"},
+	})
+
+	if !strings.Contains(sentText, "Hello") {
+		t.Errorf("expected greeting for /start, got %q", sentText)
+	}
+}
+
+func TestHandleUpdate_StartWithBotMention(t *testing.T) {
+	t.Parallel()
+
+	var sentText string
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, func(_ int64, text string) error {
+		sentText = text
+		return nil
+	})
+	defer srv.Close()
+
+	mgr := newMockManager()
+	router := testRouter(t, mgr)
+	ch := New(Config{Token: "test-token", Instance: "operator", BaseURL: srv.URL}, router, slog.Default())
+	router.Register(ch)
+
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "/start@mybot"},
+	})
+
+	if !strings.Contains(sentText, "Hello") {
+		t.Errorf("expected greeting for /start@bot, got %q", sentText)
+	}
+}
+
+func TestTypingIndicator(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	mgr.agentInstances["operator"] = "inst-1"
+
+	var typingCount atomic.Int32
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, nil)
+	// Replace the server to also track sendChatAction calls.
+	srv.Close()
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.SplitN(r.URL.Path, "/", 3)
+		if len(parts) < 3 {
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		method := parts[2]
+		switch method {
+		case "sendChatAction":
+			typingCount.Add(1)
+			writeJSON(w, map[string]any{"ok": true})
+		case "sendMessage":
+			writeJSON(w, map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
+		default:
+			writeJSON(w, map[string]any{"ok": true})
+		}
+	}))
+	defer srv.Close()
+
+	router := testRouter(t, mgr)
+	ch := New(Config{Token: "test-token", Instance: "operator", BaseURL: srv.URL}, router, slog.Default())
+	router.Register(ch)
+
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "hello"},
+	})
+
+	if n := typingCount.Load(); n == 0 {
+		t.Error("expected at least one typing indicator")
+	}
+}
+
+func TestStripBotMention(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input, want string
+	}{
+		{"/clear", "/clear"},
+		{"/clear@mybot", "/clear"},
+		{"/clear@mybot arg1 arg2", "/clear arg1 arg2"},
+		{"/start@BotName", "/start"},
+		{"hello", "hello"},
+		{"hello @someone", "hello @someone"},
+		{"/", "/"},
+		{"/@bot", "/"},
+	}
+	for _, tt := range tests {
+		got := stripBotMention(tt.input)
+		if got != tt.want {
+			t.Errorf("stripBotMention(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestFormatEvents_SystemEvent(t *testing.T) {
+	t.Parallel()
+
+	events := []ipc.ChatEvent{
+		{Type: "system", Content: "Session cleared."},
+	}
+
+	text := channel.FormatEvents(events)
+	if text != "Session cleared." {
+		t.Errorf("text = %q, want %q", text, "Session cleared.")
 	}
 }

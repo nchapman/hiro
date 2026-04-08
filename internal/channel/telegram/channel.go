@@ -41,6 +41,10 @@ const (
 
 	// apiResponseLimit is the maximum response body size from Telegram API (1 MB).
 	apiResponseLimit = 1 << 20
+
+	// typingInterval is how often to re-send the "typing" action.
+	// Telegram shows the indicator for ~5 seconds, so we refresh every 4.
+	typingInterval = 4 * time.Second
 )
 
 // Channel is the Telegram messaging channel.
@@ -180,38 +184,16 @@ func (c *Channel) handleUpdate(ctx context.Context, u update) {
 		return
 	}
 
-	// Access check: approve/block/pending.
-	if ac := c.router.AccessChecker(); ac != nil {
-		senderKey := conversationKeyFor(msg.Chat.ID)
-		displayName := msg.Chat.Title
-		if displayName == "" {
-			displayName = msg.From.FirstName
-			if msg.From.Username != "" {
-				displayName += " (@" + msg.From.Username + ")"
-			}
-		}
-		const sampleLen = 100
-		sample := msg.Text
-		if len(sample) > sampleLen {
-			sample = sample[:sampleLen]
-		}
+	if !c.checkAccess(ctx, msg) {
+		return
+	}
 
-		result := ac.CheckAccess(c.instance, senderKey, displayName, sample)
-		switch result {
-		case channel.AccessDeny:
-			c.logger.Debug("blocked message from blocked sender",
-				"chat_id", msg.Chat.ID,
-				"user", msg.From.Username,
-			)
-			return
-		case channel.AccessPending:
-			c.logger.Info("sender pending approval",
-				"chat_id", msg.Chat.ID,
-				"user", msg.From.Username,
-			)
-			_ = c.sendMessage(ctx, msg.Chat.ID, "Your message is awaiting approval.")
-			return
-		}
+	text := stripBotMention(msg.Text)
+
+	// /start is Telegram-specific — greet the user instead of passing it to the router.
+	if text == "/start" {
+		_ = c.sendMessage(ctx, msg.Chat.ID, "Hello! Send me a message to get started.")
+		return
 	}
 
 	conversationKey := conversationKeyFor(msg.Chat.ID)
@@ -220,10 +202,68 @@ func (c *Channel) handleUpdate(ctx context.Context, u update) {
 	c.logger.Info("received message",
 		"chat_id", msg.Chat.ID,
 		"user", msg.From.Username,
-		"text_length", len(msg.Text),
+		"text_length", len(text),
 	)
 
-	c.dispatchMessage(ctx, msg.Chat.ID, conversationKey, b, msg.Text, strconv.FormatInt(msg.Chat.ID, 10))
+	c.dispatchMessage(ctx, msg.Chat.ID, conversationKey, b, text, strconv.FormatInt(msg.Chat.ID, 10))
+}
+
+// checkAccess runs the sender approval check. Returns true if the message
+// should be processed, false if it was blocked or is pending approval.
+func (c *Channel) checkAccess(ctx context.Context, msg *message) bool {
+	ac := c.router.AccessChecker()
+	if ac == nil {
+		return true
+	}
+
+	senderKey := conversationKeyFor(msg.Chat.ID)
+	displayName := msg.Chat.Title
+	if displayName == "" {
+		displayName = msg.From.FirstName
+		if msg.From.Username != "" {
+			displayName += " (@" + msg.From.Username + ")"
+		}
+	}
+	const sampleLen = 100
+	sample := msg.Text
+	if len(sample) > sampleLen {
+		sample = sample[:sampleLen]
+	}
+
+	result := ac.CheckAccess(c.instance, senderKey, displayName, sample)
+	switch result {
+	case channel.AccessDeny:
+		c.logger.Debug("blocked message from blocked sender",
+			"chat_id", msg.Chat.ID,
+			"user", msg.From.Username,
+		)
+		return false
+	case channel.AccessPending:
+		c.logger.Info("sender pending approval",
+			"chat_id", msg.Chat.ID,
+			"user", msg.From.Username,
+		)
+		_ = c.sendMessage(ctx, msg.Chat.ID, "Your message is awaiting approval.")
+		return false
+	}
+	return true
+}
+
+// stripBotMention removes the @botname suffix from Telegram bot commands.
+// For example, "/clear@mybot arg" becomes "/clear arg".
+func stripBotMention(text string) string {
+	if !strings.HasPrefix(text, "/") {
+		return text
+	}
+	if sp := strings.IndexByte(text, ' '); sp > 0 {
+		cmd := text[:sp]
+		if at := strings.IndexByte(cmd, '@'); at > 0 {
+			return cmd[:at] + text[sp:]
+		}
+	} else if at := strings.IndexByte(text, '@'); at > 0 {
+		return text[:at]
+	}
+	return text
 }
 
 // dispatchMessage resolves the instance and dispatches a message through the Router.
@@ -252,13 +292,17 @@ func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversatio
 	// Ensure notifications for this instance are pumped to all channels.
 	c.router.EnsureNotificationPump(instanceID)
 
+	// Show typing indicator while the agent is working.
+	stopTyping := c.typingLoop(ctx, chatID)
+
 	// Build buffering callbacks.
 	var buf strings.Builder
 	onEvent := channel.MakeBufferingOnEvent(&buf)
 	onDone := func(_ channel.TurnResult) error {
+		stopTyping()
 		resp := buf.String()
 		if resp == "" {
-			resp = "(no response)"
+			return nil
 		}
 		return c.sendLong(ctx, chatID, resp)
 	}
@@ -344,6 +388,39 @@ func (c *Channel) retrySendPlain(ctx context.Context, params map[string]any, des
 		return fmt.Errorf("sendMessage: %s", result.Desc)
 	}
 	return nil
+}
+
+// sendChatAction sends a chat action indicator (e.g. "typing") to a chat.
+func (c *Channel) sendChatAction(ctx context.Context, chatID int64, action string) {
+	params := map[string]any{
+		"chat_id": chatID,
+		"action":  action,
+	}
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	// Best-effort — don't fail the message flow if typing fails.
+	_ = c.apiCall(ctx, "sendChatAction", params, &result)
+}
+
+// typingLoop sends "typing" indicators every typingInterval until the
+// returned cancel function is called.
+func (c *Channel) typingLoop(ctx context.Context, chatID int64) context.CancelFunc {
+	ctx, cancel := context.WithCancel(ctx)
+	c.sendChatAction(ctx, chatID, "typing")
+	go func() {
+		ticker := time.NewTicker(typingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				c.sendChatAction(ctx, chatID, "typing")
+			}
+		}
+	}()
+	return cancel
 }
 
 // sendLong sends a potentially long message, splitting into chunks if needed.

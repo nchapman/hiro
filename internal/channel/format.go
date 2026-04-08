@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	eventTypeDelta = "delta"
-	eventTypeError = "error"
+	eventTypeDelta  = "delta"
+	eventTypeError  = "error"
+	eventTypeSystem = "system"
 )
 
 // FormatEvents extracts text content from inference events for delivery
@@ -36,6 +37,11 @@ func MakeBufferingOnEvent(buf *strings.Builder) func(ipc.ChatEvent) error {
 func appendEvent(buf *strings.Builder, evt ipc.ChatEvent) {
 	switch evt.Type {
 	case eventTypeDelta:
+		buf.WriteString(evt.Content)
+	case eventTypeSystem:
+		if buf.Len() > 0 {
+			buf.WriteString("\n\n")
+		}
 		buf.WriteString(evt.Content)
 	case eventTypeError:
 		if buf.Len() > 0 {
