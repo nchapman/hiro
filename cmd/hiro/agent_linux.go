@@ -130,6 +130,10 @@ func waitForVethReady() {
 //   - setns — prevents entering other agents' namespaces
 //   - mount — prevents filesystem manipulation
 //   - umount2 — prevents unmounting controlled bind mounts (e.g. /etc/resolv.conf)
+//   - ptrace — prevents inspecting/injecting code into other processes
+//   - chroot — prevents filesystem root manipulation
+//   - pivot_root — prevents filesystem root manipulation
+//   - kexec_load — prevents loading a new kernel
 func installSeccomp() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -186,6 +190,10 @@ func buildSeccompFilter() []unix.SockFilter {
 	sysSetns := uint32(unix.SYS_SETNS)
 	sysMount := uint32(unix.SYS_MOUNT)
 	sysUmount2 := uint32(unix.SYS_UMOUNT2)
+	sysPtrace := uint32(unix.SYS_PTRACE)
+	sysChroot := uint32(unix.SYS_CHROOT)
+	sysPivotRoot := uint32(unix.SYS_PIVOT_ROOT)
+	sysKexecLoad := uint32(unix.SYS_KEXEC_LOAD)
 
 	ret := func(val uint32) unix.SockFilter {
 		return unix.SockFilter{Code: bpfRet | bpfK, K: val}
@@ -203,8 +211,8 @@ func buildSeccompFilter() []unix.SockFilter {
 		// [3] Load syscall number.
 		{Code: bpfLdW, K: offsetNr},
 
-		// [4] clone → jump to flag inspection at [16].
-		bpfJeq(sysClone, 11, 0),
+		// [4] clone → jump to flag inspection at [24].
+		bpfJeq(sysClone, 19, 0),
 
 		// [5] Block clone3 unconditionally.
 		bpfJeq(sysClone3, 0, 1),
@@ -226,25 +234,41 @@ func buildSeccompFilter() []unix.SockFilter {
 		bpfJeq(sysUmount2, 0, 1),
 		deny,
 
-		// [15] Allow (syscall didn't match any blocked one, and not clone).
+		// [15] Block ptrace — prevents inspecting/injecting other processes.
+		bpfJeq(sysPtrace, 0, 1),
+		deny,
+
+		// [17] Block chroot — prevents filesystem root manipulation.
+		bpfJeq(sysChroot, 0, 1),
+		deny,
+
+		// [19] Block pivot_root — prevents filesystem root manipulation.
+		bpfJeq(sysPivotRoot, 0, 1),
+		deny,
+
+		// [21] Block kexec_load — prevents loading a new kernel.
+		bpfJeq(sysKexecLoad, 0, 1),
+		deny,
+
+		// [23] Allow (syscall didn't match any blocked one, and not clone).
 		allow,
 
 		// --- clone(2) flag inspection ---
-		// [16] Load clone flags (arg[0], low 32 bits).
+		// [24] Load clone flags (arg[0], low 32 bits).
 		{Code: bpfLdW, K: offsetArgs},
 
-		// [17] Mask with CLONE_NEWUSER, check if set.
+		// [25] Mask with CLONE_NEWUSER, check if set.
 		{Code: bpfAluAnd | bpfK, K: syscall.CLONE_NEWUSER},
 		bpfJeq(syscall.CLONE_NEWUSER, 0, 1),
 		deny,
 
-		// [20] Reload flags for CLONE_NEWNET check.
+		// [28] Reload flags for CLONE_NEWNET check.
 		{Code: bpfLdW, K: offsetArgs},
 		{Code: bpfAluAnd | bpfK, K: syscall.CLONE_NEWNET},
 		bpfJeq(syscall.CLONE_NEWNET, 0, 1),
 		deny,
 
-		// [24] clone without dangerous flags → allow (normal fork/threads).
+		// [32] clone without dangerous flags → allow (normal fork/threads).
 		allow,
 	}
 }

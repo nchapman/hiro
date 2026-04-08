@@ -20,6 +20,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/ipc/grpcipc"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"google.golang.org/grpc"
 )
 
@@ -222,6 +223,10 @@ func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJo
 	if err != nil {
 		return nil, nil, fmt.Errorf("listening on %s: %w", socketPath, err)
 	}
+	// Restrict socket permissions so only the owning UID can connect.
+	// Defense in depth: the socket directory is already 0700, but an
+	// explicit chmod prevents cross-agent access if dir perms ever loosen.
+	os.Chmod(socketPath, fsperm.FilePrivate) //nolint:errcheck // defense in depth: socket dir is 0700, so failure here is non-fatal
 	cleanup := func() { os.Remove(socketPath) }
 
 	srv := grpc.NewServer()

@@ -104,6 +104,12 @@ func (m *Manager) intersectParentRules(parentID string, effective map[string]boo
 	parent, ok := m.instances[parentID]
 	m.mu.RUnlock()
 	if !ok || parent.effectiveTools == nil {
+		// Parent specified but not found or has no tools — fail closed.
+		// The child cannot exceed the parent's permissions, and an absent
+		// parent means we cannot verify what those permissions were.
+		for t := range effective {
+			delete(effective, t)
+		}
 		return allowLayers, denyRules
 	}
 	for t := range effective {
@@ -169,7 +175,7 @@ func (m *Manager) computeEffectiveEgress(cfg config.AgentConfig, parentID string
 	parent, ok := m.instances[parentID]
 	m.mu.RUnlock()
 	if !ok {
-		return cfg.NetworkEgress // parent not found — use as-is (same as tool behavior)
+		return nil // parent not found — fail closed (no network access)
 	}
 	if parent.effectiveEgress == nil {
 		return nil // parent has no network — child can't either

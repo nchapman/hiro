@@ -252,7 +252,7 @@ New:
 4. **Control plane: create veth pair (temp peer name `hp-{prefix}` in host ns), move peer into child's network namespace, configure host-side address and nftables rules**
 5. **Control plane: signal child that veth is ready**
 6. **Child (inside its user namespace, where it has full capabilities): configure eth0 address, default route, loopback, bind-mount per-agent `/etc/resolv.conf` and `/etc/hosts`**
-7. **Child: install per-worker seccomp-BPF filter (blocks `unshare`, `mount`, `chroot`, `pivot_root`) + set `PR_SET_NO_NEW_PRIVS`, then signal ready**
+7. **Child: install per-worker seccomp-BPF filter (blocks namespace, mount, ptrace, and kernel-load syscalls — see [Per-Worker seccomp](#per-worker-seccomp-required) for full list) + set `PR_SET_NO_NEW_PRIVS`, then signal ready**
 8. **Control plane: register agent with DNS forwarder, start per-agent listener on gateway IP**
 9. Worker starts gRPC, writes "ready"
 
@@ -428,13 +428,16 @@ Per-worker seccomp-BPF is **mandatory** for the `CLONE_NEWUSER` approach — not
 **Per-worker seccomp-BPF filter (applied in `runAgent()` before any agent code):**
 
 The filter blocks these syscalls with `SECCOMP_RET_ERRNO(EPERM)`:
-- `unshare` — prevents creating new namespaces (blocks `CLONE_NEWUSER` escalation)
-- `mount`, `umount` — prevents filesystem manipulation
+- `clone(CLONE_NEWUSER)`, `clone(CLONE_NEWNET)` — BPF flag inspection prevents namespace creation
+- `clone3` — blocked unconditionally (Go runtime uses clone, not clone3)
+- `unshare` — prevents creating new namespaces via the other path
+- `setns` — prevents entering other agents' namespaces
+- `mount`, `umount2` — prevents filesystem manipulation
+- `ptrace` — prevents inspecting/injecting code into other processes
 - `chroot`, `pivot_root` — prevents root filesystem escapes
-- `ptrace` — prevents debugging other processes
-- `kexec_load`, `reboot`, `swapon`, `keyctl` — misc dangerous syscalls
+- `kexec_load` — prevents loading a new kernel
 
-All other syscalls are allowed (`SECCOMP_RET_ALLOW`). The filter is installed after `PR_SET_NO_NEW_PRIVS` (required by the kernel before installing seccomp-BPF) and before `exec` of the worker binary.
+All other syscalls are allowed (`SECCOMP_RET_ALLOW`). The filter validates the architecture first (rejects x32/compat ABI bypasses). It is installed with `SECCOMP_FILTER_FLAG_TSYNC` to synchronize across all Go runtime threads. Installed after `PR_SET_NO_NEW_PRIVS` (required by the kernel) and after network self-configuration (which needs mount/clone) but before any agent code runs. Note: the seccomp filter is applied to ALL UID-isolated workers, not just network-isolated ones.
 
 **Defense-in-depth (optional, not yet planned):** Block `socket(AF_INET)` and `socket(AF_INET6)` as a backstop. If an agent escapes its network namespace via a kernel exploit, seccomp prevents it from creating new IP sockets. This is redundant with namespace isolation in the normal case, but provides a second barrier.
 

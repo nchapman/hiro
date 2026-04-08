@@ -53,6 +53,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req setupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -270,6 +271,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req struct {
 		Type   string `json:"type"`
 		APIKey string `json:"api_key"`
@@ -318,6 +320,7 @@ func (s *Server) handleValidateSwarm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req struct {
 		SwarmCode string `json:"swarm_code"`
 	}

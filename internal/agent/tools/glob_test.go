@@ -142,6 +142,38 @@ func TestGlob_NonexistentPath(t *testing.T) {
 	}
 }
 
+func TestGlob_PathTraversal_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+	SetAllowedRoots([]string{dir})
+
+	tool := NewGlobTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": "*", "path": "../../../etc"}`)
+	if !isErr {
+		t.Fatal("expected error for path traversal")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
+func TestGlob_AbsolutePathOutsideRoot_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+	SetAllowedRoots([]string{dir})
+
+	tool := NewGlobTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": "*", "path": "/etc"}`)
+	if !isErr {
+		t.Fatal("expected error for absolute path outside root")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
 func TestGlob_PrefixedDoublestarPattern(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755)

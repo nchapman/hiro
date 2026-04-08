@@ -352,22 +352,26 @@ func (m *Manager) acquireUIDAndChown(instanceID, instDir string) (uint32, uint32
 	}
 	// Transfer ownership of the instance dir (and all contents) to the agent user.
 	// config.yaml is skipped — it stays root-owned so the agent cannot read it.
-	if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if config.IsInstanceConfigFile(path, instDir) {
-			return nil // keep root-owned
-		}
-		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
-	}); err != nil {
-		if os.IsPermission(err) {
-			m.logger.Warn("cannot chown instance dir (not root); file isolation degraded",
-				"instance", instanceID, "uid", uid)
-		} else {
+	//
+	// Chown requires root. In production (Docker), the control plane is always
+	// root. In test-local, we're not root but still create a pool for testing
+	// UID assignment — skip chown and proceed with the assigned UID.
+	if os.Getuid() == 0 {
+		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if config.IsInstanceConfigFile(path, instDir) {
+				return nil // keep root-owned
+			}
+			return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
+		}); err != nil {
 			m.uidPool.Release(instanceID)
 			return 0, 0, fmt.Errorf("chowning instance dir: %w", err)
 		}
+	} else {
+		m.logger.Warn("not root; skipping chown — instance dir owned by process user, not agent UID (test-local only)",
+			"instance", instanceID, "uid", uid)
 	}
 	return uid, gid, nil
 }

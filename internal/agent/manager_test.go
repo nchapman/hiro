@@ -1599,6 +1599,68 @@ Child.`)
 	}
 }
 
+func TestComputeEffectiveTools_ParentNotFound_FailClosed(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "child", `---
+name: child
+allowed_tools: [Bash, Read, Write, Grep]
+---
+Child.`)
+
+	// Parent ID that doesn't exist in the registry — should fail closed.
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("child"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, "nonexistent-parent-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// All tools should be stripped — parent not found means deny all.
+	if len(effective) != 0 {
+		t.Errorf("expected empty effective tools when parent not found, got %v", effective)
+	}
+}
+
+func TestComputeEffectiveTools_ParentNilEffectiveTools_FailClosed(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "child", `---
+name: child
+allowed_tools: [Bash, Read]
+---
+Child.`)
+
+	// Parent exists in registry but has nil effective tools.
+	parentID := "parent-nil-tools"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{
+		effectiveTools: nil,
+	}
+	mgr.mu.Unlock()
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("child"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(effective) != 0 {
+		t.Errorf("expected empty effective tools when parent has nil tools, got %v", effective)
+	}
+}
+
+func TestComputeEffectiveEgress_ParentNotFound_FailClosed(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	cfg := config.AgentConfig{
+		NetworkEgress: []string{"github.com", "*.github.com"},
+	}
+
+	// Parent ID that doesn't exist — should return nil (no network).
+	egress := mgr.computeEffectiveEgress(cfg, "nonexistent-parent-id")
+	if egress != nil {
+		t.Errorf("expected nil egress when parent not found, got %v", egress)
+	}
+}
+
 func TestComputeEffectiveTools_ParseError(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "bad", `---

@@ -59,8 +59,9 @@ func newDNSForwarder(fw *firewall, logger *slog.Logger) *DNSForwarder {
 }
 
 // detectUpstreamDNS finds a working upstream DNS resolver.
-// Reads /etc/resolv.conf nameservers — in Docker Compose this is 127.0.0.11,
-// in docker run it's the host's DNS. Falls back to Docker's embedded DNS.
+// Prefers Docker's embedded DNS (127.0.0.11) which is always at a loopback
+// address. Skips agent-subnet addresses (10.0.x.x) to avoid routing through
+// an agent's own gateway. Falls back to Docker's embedded DNS.
 func detectUpstreamDNS() string {
 	data, err := os.ReadFile("/etc/resolv.conf")
 	if err == nil {
@@ -68,7 +69,13 @@ func detectUpstreamDNS() string {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "nameserver ") {
 				ns := strings.TrimSpace(strings.TrimPrefix(line, "nameserver"))
-				if ns != "" && !strings.HasPrefix(ns, "10.0.") {
+				ip := net.ParseIP(ns)
+				if ip == nil {
+					continue
+				}
+				// Prefer loopback (Docker's embedded DNS is 127.0.0.11).
+				// Skip private addresses that may be container gateway IPs.
+				if ip.IsLoopback() {
 					return ns + ":53"
 				}
 			}
@@ -213,7 +220,7 @@ func (d *DNSForwarder) handleQuery(w dns.ResponseWriter, r *dns.Msg, agentID uin
 
 	// Only process A/AAAA queries for IP set population.
 	if q.Qtype == dns.TypeA || q.Qtype == dns.TypeAAAA {
-		ips, minTTL := extractIPs(resp)
+		ips, minTTL := extractIPs(resp, ad.egress)
 		publicIPs := filterPrivateIPs(ips)
 
 		if len(publicIPs) > 0 {
@@ -246,12 +253,29 @@ func (d *DNSForwarder) handleQuery(w dns.ResponseWriter, r *dns.Msg, agentID uin
 	w.WriteMsg(resp) //nolint:errcheck
 }
 
-// extractIPs collects all A/AAAA record IPs from a DNS response.
-// CNAME depth is tracked for diagnostics but does not prevent IP collection —
-// terminal A/AAAA records are always collected from the full answer section.
-func extractIPs(resp *dns.Msg) (ips []net.IP, minTTL uint32) {
+// extractIPs collects all A/AAAA record IPs from a DNS response, validating
+// CNAME targets against the egress allowlist. If a CNAME points to a domain
+// outside the allowlist, the entire response is rejected (no IPs returned)
+// to prevent allowlist bypass via CNAME redirection.
+func extractIPs(resp *dns.Msg, egress []string) (ips []net.IP, minTTL uint32) {
 	minTTL = 3600 // default 1h
+	wildcard := len(egress) == 1 && egress[0] == "*"
 
+	// First pass: validate all CNAME targets against the allowlist.
+	// A CNAME chain that exits the allowed domain set could redirect
+	// traffic to attacker-controlled IPs.
+	if !wildcard {
+		for _, rr := range resp.Answer {
+			if cname, ok := rr.(*dns.CNAME); ok {
+				target := strings.TrimSuffix(cname.Target, ".")
+				if !MatchDomain(target, egress) {
+					return nil, 0 // CNAME target outside allowlist — reject
+				}
+			}
+		}
+	}
+
+	// Second pass: collect IPs (all CNAME targets validated above).
 	for _, rr := range resp.Answer {
 		switch v := rr.(type) {
 		case *dns.A:
@@ -264,9 +288,6 @@ func extractIPs(resp *dns.Msg) (ips []net.IP, minTTL uint32) {
 			if v.Hdr.Ttl < minTTL {
 				minTTL = v.Hdr.Ttl
 			}
-		case *dns.CNAME:
-			// CNAME chain traversal — terminal A/AAAA records are collected above.
-			_ = v
 		}
 	}
 	return ips, minTTL

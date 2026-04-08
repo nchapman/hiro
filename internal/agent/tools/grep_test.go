@@ -739,6 +739,38 @@ func TestAppendPatternAndPath(t *testing.T) {
 	}
 }
 
+func TestGrep_PathTraversal_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+	SetAllowedRoots([]string{dir})
+
+	tool := NewGrepTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": ".*", "path": "../../../etc"}`)
+	if !isErr {
+		t.Fatal("expected error for path traversal")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
+func TestGrep_AbsolutePathOutsideRoot_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+	SetAllowedRoots([]string{dir})
+
+	tool := NewGrepTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": ".*", "path": "/etc"}`)
+	if !isErr {
+		t.Fatal("expected error for absolute path outside root")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
 func TestBuildRgBaseArgs(t *testing.T) {
 	params := GrepParams{
 		Multiline:  true,

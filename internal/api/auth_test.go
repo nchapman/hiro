@@ -323,6 +323,34 @@ func TestChangePassword_TooShort(t *testing.T) {
 	}
 }
 
+func TestLogin_OversizedBody_Rejected(t *testing.T) {
+	srv, _ := newAuthTestServer(t)
+
+	// Send a body larger than maxJSONBodySize (1 MB).
+	oversized := bytes.Repeat([]byte("x"), maxJSONBodySize+1)
+	req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewReader(oversized))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 for oversized body", rec.Code)
+	}
+}
+
+func TestChangePassword_OversizedBody_Rejected(t *testing.T) {
+	srv, _ := newAuthTestServer(t)
+
+	oversized := bytes.Repeat([]byte("x"), maxJSONBodySize+1)
+	req := authedRequest(t, srv, "POST", "/api/auth/password", oversized)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 for oversized body", rec.Code)
+	}
+}
+
 func TestChangePassword_WrongCurrent(t *testing.T) {
 	srv, _ := newAuthTestServer(t)
 

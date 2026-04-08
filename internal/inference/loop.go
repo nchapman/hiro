@@ -865,10 +865,14 @@ func (l *Loop) buildLocalTools(cfg *LoopConfig) []Tool {
 	}
 
 	if cfg.HostManager != nil {
+		// SpawnInstance is a structural tool (always injected), so build it unconditionally.
 		localTools = append(localTools,
-			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger),
-			buildCreatePersistentInstanceTool(cfg.HostManager, l.logger))
-		localTools = append(localTools, buildOperatorTools(cfg.HostManager, l.logger)...)
+			buildSpawnTool(cfg.HostManager, l.notifications, cfg.SessionID, l.logger))
+
+		// Management tools are security-sensitive — only build them if the
+		// agent explicitly declares them in allowed_tools. This prevents a
+		// filtering bypass from accidentally exposing management capabilities.
+		localTools = append(localTools, gatedManagementTools(cfg, l.logger)...)
 	}
 
 	// Schedule tools (persistent only).
@@ -907,4 +911,25 @@ func (l *Loop) buildLocalTools(cfg *LoopConfig) []Tool {
 	}
 
 	return localTools
+}
+
+// gatedManagementTools builds management tools only for agents that explicitly
+// declare them in allowed_tools. Returns nil if no management tools are declared.
+func gatedManagementTools(cfg *LoopConfig, logger *slog.Logger) []Tool {
+	// AllowedTools is nil only in tests (unrestricted mode). Management tools
+	// require explicit declaration regardless — they are never auto-injected.
+	if cfg.AllowedTools == nil {
+		return nil
+	}
+	var result []Tool
+	cpit := buildCreatePersistentInstanceTool(cfg.HostManager, logger)
+	if cfg.AllowedTools[cpit.Info().Name] {
+		result = append(result, cpit)
+	}
+	for _, t := range buildOperatorTools(cfg.HostManager, logger) {
+		if cfg.AllowedTools[t.Info().Name] {
+			result = append(result, t)
+		}
+	}
+	return result
 }
