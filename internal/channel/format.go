@@ -10,7 +10,11 @@ const (
 	eventTypeDelta  = "delta"
 	eventTypeError  = "error"
 	eventTypeSystem = "system"
+	eventTypeClear  = "clear"
 )
+
+// clearConfirmation is the message sent to users when a session is cleared.
+const clearConfirmation = "Session cleared."
 
 // FormatEvents extracts text content from inference events for delivery
 // to non-streaming channels (Telegram, Slack). Only delta and error events
@@ -33,7 +37,10 @@ func MakeBufferingOnEvent(buf *strings.Builder) func(ipc.ChatEvent) error {
 	}
 }
 
-// appendEvent writes the content of a delta or error event to the buffer.
+// appendEvent writes the content of a recognized event to the buffer.
+// Handles delta (streaming text), system (slash command responses),
+// clear (session reset confirmation), and error events. All other event
+// types (tool_call, reasoning, etc.) are silently ignored.
 func appendEvent(buf *strings.Builder, evt ipc.ChatEvent) {
 	switch evt.Type {
 	case eventTypeDelta:
@@ -43,6 +50,11 @@ func appendEvent(buf *strings.Builder, evt ipc.ChatEvent) {
 			buf.WriteString("\n\n")
 		}
 		buf.WriteString(evt.Content)
+	case eventTypeClear:
+		if buf.Len() > 0 {
+			buf.WriteString("\n\n")
+		}
+		buf.WriteString(clearConfirmation)
 	case eventTypeError:
 		if buf.Len() > 0 {
 			buf.WriteString("\n\n")

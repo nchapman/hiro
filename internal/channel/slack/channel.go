@@ -286,7 +286,7 @@ func (c *Channel) dispatchMessage(ctx context.Context, evt slackEvent) { //nolin
 	onDone := func(_ channel.TurnResult) error {
 		resp := buf.String()
 		if resp == "" {
-			resp = "(no response)"
+			return nil
 		}
 		return c.postMessage(ctx, evt.Channel, threadTS, resp)
 	}

@@ -924,7 +924,20 @@ func TestFormatEvents_SystemEvent(t *testing.T) {
 	t.Parallel()
 
 	events := []ipc.ChatEvent{
-		{Type: "system", Content: "Session cleared."},
+		{Type: "system", Content: "ok: /help"},
+	}
+
+	text := channel.FormatEvents(events)
+	if text != "ok: /help" {
+		t.Errorf("text = %q, want %q", text, "ok: /help")
+	}
+}
+
+func TestFormatEvents_ClearEvent(t *testing.T) {
+	t.Parallel()
+
+	events := []ipc.ChatEvent{
+		{Type: "clear"},
 	}
 
 	text := channel.FormatEvents(events)

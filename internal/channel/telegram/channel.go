@@ -316,14 +316,7 @@ func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversatio
 
 	// Build buffering callbacks.
 	var buf strings.Builder
-	bufferEvent := channel.MakeBufferingOnEvent(&buf)
-	onEvent := func(evt ipc.ChatEvent) error {
-		if evt.Type == "clear" {
-			buf.WriteString("Session cleared.")
-			return nil
-		}
-		return bufferEvent(evt)
-	}
+	onEvent := channel.MakeBufferingOnEvent(&buf)
 	onDone := func(_ channel.TurnResult) error {
 		stopTyping()
 		resp := buf.String()
