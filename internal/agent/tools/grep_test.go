@@ -510,7 +510,7 @@ func TestGrepWithRegex_Fallback(t *testing.T) {
 
 	ctx := context.Background()
 
-	matches, err := grepWithRegex(ctx, "func hello", dir, "")
+	matches, err := grepWithRegex(ctx, "func hello", dir, "", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestGrepWithRegex_Fallback(t *testing.T) {
 		t.Errorf("expected a.go, got %s", matches[0].path)
 	}
 
-	matches, err = grepWithRegex(ctx, "hello", dir, "*.go")
+	matches, err = grepWithRegex(ctx, "hello", dir, "*.go", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestGrepWithRegex_Fallback(t *testing.T) {
 		}
 	}
 
-	_, err = grepWithRegex(ctx, "[invalid", dir, "")
+	_, err = grepWithRegex(ctx, "[invalid", dir, "", false, false)
 	if err == nil {
 		t.Error("expected error for invalid regex")
 	}

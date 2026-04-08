@@ -216,8 +216,32 @@ func relativizeContentLine(line, searchPath, workingDir string) string {
 	return line
 }
 
+// groupMatchLinesByFile takes match lines in "file:content" format and groups
+// them with file headers for display, matching rg's grouped output style.
+func groupMatchLinesByFile(matchLines []string) []string {
+	var lines []string
+	currentFile := ""
+	for _, line := range matchLines {
+		colonIdx := strings.Index(line, ":")
+		if colonIdx > 0 {
+			file := line[:colonIdx]
+			if file != currentFile {
+				if currentFile != "" {
+					lines = append(lines, "")
+				}
+				currentFile = file
+				lines = append(lines, file+":")
+			}
+			lines = append(lines, "  "+line[colonIdx+1:])
+		} else {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 func grepContentFallback(ctx context.Context, pattern, searchPath, workingDir string, params GrepParams) (fantasy.ToolResponse, error) {
-	matches, err := grepWithRegex(ctx, pattern, searchPath, params.Glob)
+	matches, err := grepWithRegex(ctx, pattern, searchPath, params.Glob, params.CaseInsens, params.Multiline)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 	}
@@ -237,33 +261,28 @@ func grepContentFallback(ctx context.Context, pattern, searchPath, workingDir st
 		return matches[i].lineNum < matches[j].lineNum
 	})
 
-	var lines []string
+	// Build one line per match (matching rg's output format for consistent
+	// offset/head_limit pagination between rg and Go fallback).
 	showNums := showLineNumbers(params)
-	currentFile := ""
-	for _, m := range matches {
+	matchLines := make([]string, len(matches))
+	for i, m := range matches {
 		relPath := relativizePath(m.path, workingDir)
-		if currentFile != relPath {
-			if currentFile != "" {
-				lines = append(lines, "")
-			}
-			currentFile = relPath
-			lines = append(lines, relPath+":")
-		}
 		text := m.lineText
 		if len(text) > maxGrepLineWidth {
 			text = text[:maxGrepLineWidth] + "..."
 		}
 		if showNums {
-			lines = append(lines, fmt.Sprintf("  %d: %s", m.lineNum, text))
+			matchLines[i] = fmt.Sprintf("%s:%d: %s", relPath, m.lineNum, text)
 		} else {
-			lines = append(lines, fmt.Sprintf("  %s", text))
+			matchLines[i] = fmt.Sprintf("%s: %s", relPath, text)
 		}
 	}
 
 	limit := effectiveHeadLimit(params)
-	sliced, truncated := applyPagination(lines, params.Offset, limit)
+	sliced, truncated := applyPagination(matchLines, params.Offset, limit)
 
-	result := strings.Join(sliced, "\n")
+	lines := groupMatchLinesByFile(sliced)
+	result := strings.Join(lines, "\n")
 	if truncated {
 		result += fmt.Sprintf("\n\n(Results truncated at %d lines. Use head_limit and offset for pagination.)", limit)
 	}
@@ -302,7 +321,7 @@ func grepFilesWithMatches(ctx context.Context, pattern, searchPath, workingDir s
 }
 
 func grepFilesWithMatchesFallback(ctx context.Context, pattern, searchPath, workingDir string, params GrepParams) (fantasy.ToolResponse, error) {
-	matches, err := grepWithRegex(ctx, pattern, searchPath, params.Glob)
+	matches, err := grepWithRegex(ctx, pattern, searchPath, params.Glob, params.CaseInsens, params.Multiline)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 	}
@@ -366,7 +385,7 @@ func grepCount(ctx context.Context, pattern, searchPath, workingDir string, para
 }
 
 func grepCountFallback(ctx context.Context, pattern, searchPath, workingDir string, params GrepParams) (fantasy.ToolResponse, error) {
-	matches, err := grepWithRegex(ctx, pattern, searchPath, params.Glob)
+	matches, err := grepWithRegex(ctx, pattern, searchPath, params.Glob, params.CaseInsens, params.Multiline)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 	}
@@ -564,8 +583,16 @@ type grepMatch struct {
 }
 
 // compileGrepPatterns compiles the search pattern and optional include glob filter.
-func compileGrepPatterns(pattern, include string) (*regexp.Regexp, *regexp.Regexp, error) {
-	re, err := regexp.Compile(pattern)
+func compileGrepPatterns(pattern, include string, caseInsensitive, multiline bool) (*regexp.Regexp, *regexp.Regexp, error) {
+	// Build regex prefix flags matching ripgrep behavior.
+	var prefix string
+	if caseInsensitive {
+		prefix += "(?i)"
+	}
+	if multiline {
+		prefix += "(?s)" // dot matches newlines
+	}
+	re, err := regexp.Compile(prefix + pattern)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
@@ -579,8 +606,8 @@ func compileGrepPatterns(pattern, include string) (*regexp.Regexp, *regexp.Regex
 	return re, includeRe, nil
 }
 
-func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
-	re, includeRe, err := compileGrepPatterns(pattern, include)
+func grepWithRegex(ctx context.Context, pattern, rootPath, include string, caseInsensitive, multiline bool) ([]grepMatch, error) {
+	re, includeRe, err := compileGrepPatterns(pattern, include, caseInsensitive, multiline)
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +652,12 @@ func grepWithRegex(ctx context.Context, pattern, rootPath, include string) ([]gr
 			return nil //nolint:nilerr // skip entries with unreadable metadata
 		}
 
-		fileMatches := searchTextFile(path, re, info.ModTime().UnixNano())
+		var fileMatches []grepMatch
+		if multiline {
+			fileMatches = searchTextFileMultiline(path, re, info.ModTime().UnixNano())
+		} else {
+			fileMatches = searchTextFile(path, re, info.ModTime().UnixNano())
+		}
 		matches = append(matches, fileMatches...)
 		if len(matches) >= maxGrepResults*2 {
 			return filepath.SkipAll
@@ -683,6 +715,58 @@ func searchTextFile(path string, re *regexp.Regexp, modTime int64) []grepMatch {
 				break
 			}
 		}
+	}
+	return matches
+}
+
+// searchTextFileMultiline reads the entire file into memory and applies the
+// regex across newlines. Used when multiline mode is enabled so patterns like
+// "start.*end" can match across lines. Falls back to line-by-line search if
+// the file is too large.
+func searchTextFileMultiline(path string, re *regexp.Regexp, modTime int64) []grepMatch {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	if info.Size() > maxMultilineFileSize {
+		return searchTextFile(path, re, modTime) // too large, fall back
+	}
+
+	data, err := os.ReadFile(path) //nolint:gosec // path from WalkDir within working directory
+	if err != nil {
+		return nil
+	}
+
+	// Binary detection
+	end := min(len(data), binaryDetectBufSize)
+	if slices.Contains(data[:end], 0) {
+		return nil
+	}
+
+	content := string(data)
+	locs := re.FindAllStringIndex(content, maxMatchesPerFile)
+	if len(locs) == 0 {
+		return nil
+	}
+
+	var matches []grepMatch
+	for _, loc := range locs {
+		// Compute line number from byte offset.
+		lineNum := strings.Count(content[:loc[0]], "\n") + 1
+		// Extract the line containing the match start.
+		lineStart := strings.LastIndex(content[:loc[0]], "\n") + 1
+		lineEnd := strings.Index(content[loc[0]:], "\n")
+		if lineEnd < 0 {
+			lineEnd = len(content) - loc[0]
+		}
+		lineText := content[lineStart : loc[0]+lineEnd]
+		matches = append(matches, grepMatch{
+			path:     path,
+			modTime:  modTime,
+			lineNum:  lineNum,
+			charNum:  loc[0] - lineStart + 1,
+			lineText: lineText,
+		})
 	}
 	return matches
 }

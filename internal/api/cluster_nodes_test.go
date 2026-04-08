@@ -288,9 +288,17 @@ func TestClusterAPI_RevokeDisconnectsBeforeSave(t *testing.T) {
 	// Get auth token before making config dir unwritable.
 	token := loginAndGetToken(t, srv)
 
-	// Make the config path unwritable to force a save failure.
-	os.Chmod(filepath.Dir(cp.Path()), 0o400)
-	t.Cleanup(func() { os.Chmod(filepath.Dir(cp.Path()), 0o700) })
+	// Force a save failure by replacing the config directory with a regular
+	// file. os.MkdirAll will fail when it finds a file where a directory is
+	// expected. chmod-based approaches don't work in Docker (root ignores
+	// permission bits).
+	configDir := filepath.Dir(cp.Path())
+	os.RemoveAll(configDir)
+	os.WriteFile(configDir, []byte("block"), 0o644) //nolint:errcheck // test setup
+	t.Cleanup(func() {
+		os.Remove(configDir)
+		os.MkdirAll(configDir, 0o700) //nolint:errcheck // test cleanup
+	})
 
 	req := httptest.NewRequest("DELETE", "/api/cluster/approved/node-save-fail", nil)
 	req.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})
