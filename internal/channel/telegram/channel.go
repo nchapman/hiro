@@ -110,6 +110,7 @@ func (c *Channel) Trusted() bool { return false }
 // botCommands are registered with Telegram so users can discover them via the menu.
 var botCommands = []map[string]string{
 	{"command": "clear", "description": "Start a new conversation"},
+	{"command": "help", "description": "Show available commands"},
 	{"command": "start", "description": "Get started"},
 }
 

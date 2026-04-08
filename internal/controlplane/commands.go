@@ -151,16 +151,16 @@ func (cp *ControlPlane) handleCluster(verb string) (string, error) {
 	}
 }
 
-// handleHelp returns a list of all slash commands. Note: /clear is handled by
-// the WebSocket layer (chat.go), not by HandleCommand. Update this text if
+// handleHelp returns a list of all slash commands. /clear is handled by
+// the Router (router.go), not by HandleCommand. Update this text if
 // commands are added to either location.
 func (cp *ControlPlane) handleHelp() (string, error) {
 	return `Available commands:
 
-/help                              Show this help
-/clear                             Start a new session
-/secrets list                      List secret names
-/secrets set NAME=VALUE            Set a secret
-/secrets rm NAME                   Remove a secret
-/cluster                           Show cluster status`, nil
+/help                    Show this help
+/clear                   Start a new conversation
+/secrets list            List secret names (web only)
+/secrets set NAME=VALUE  Set a secret (web only)
+/secrets rm NAME         Remove a secret (web only)
+/cluster                 Show cluster status (web only)`, nil
 }
