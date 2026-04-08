@@ -107,11 +107,30 @@ func (c *Channel) Name() string { return c.name }
 // Trusted returns false — external channels cannot run sensitive commands.
 func (c *Channel) Trusted() bool { return false }
 
+// botCommands are registered with Telegram so users can discover them via the menu.
+var botCommands = []map[string]string{
+	{"command": "clear", "description": "Start a new conversation"},
+	{"command": "start", "description": "Get started"},
+}
+
 // Start begins the long-poll loop for receiving Telegram updates.
 func (c *Channel) Start(ctx context.Context) error {
 	c.logger.Info("starting telegram channel", "instance", c.instance)
+	c.registerCommands(ctx)
 	go c.pollLoop(ctx)
 	return nil
+}
+
+// registerCommands sets the bot's command menu via Telegram's setMyCommands API.
+func (c *Channel) registerCommands(ctx context.Context) {
+	params := map[string]any{"commands": botCommands}
+	var result struct {
+		OK   bool   `json:"ok"`
+		Desc string `json:"description"`
+	}
+	if err := c.apiCall(ctx, "setMyCommands", params, &result); err != nil {
+		c.logger.Warn("failed to register bot commands", "error", err)
+	}
 }
 
 // Stop gracefully shuts down the channel.
@@ -297,7 +316,14 @@ func (c *Channel) dispatchMessage(ctx context.Context, chatID int64, conversatio
 
 	// Build buffering callbacks.
 	var buf strings.Builder
-	onEvent := channel.MakeBufferingOnEvent(&buf)
+	bufferEvent := channel.MakeBufferingOnEvent(&buf)
+	onEvent := func(evt ipc.ChatEvent) error {
+		if evt.Type == "clear" {
+			buf.WriteString("Session cleared.")
+			return nil
+		}
+		return bufferEvent(evt)
+	}
 	onDone := func(_ channel.TurnResult) error {
 		stopTyping()
 		resp := buf.String()

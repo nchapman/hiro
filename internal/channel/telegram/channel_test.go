@@ -66,6 +66,9 @@ func mockTelegramAPI(t *testing.T, getUpdatesFn func(offset int64) []update, sen
 		case "sendChatAction":
 			writeJSON(w, map[string]any{"ok": true})
 
+		case "setMyCommands":
+			writeJSON(w, map[string]any{"ok": true})
+
 		default:
 			http.Error(w, "unknown method: "+method, http.StatusNotFound)
 		}
@@ -854,6 +857,43 @@ func TestTypingIndicator(t *testing.T) {
 
 	if n := typingCount.Load(); n == 0 {
 		t.Error("expected at least one typing indicator")
+	}
+}
+
+func TestHandleUpdate_ClearConfirmation(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.instances["inst-1"] = agent.InstanceInfo{ID: "inst-1"}
+	mgr.agentInstances["operator"] = "inst-1"
+
+	var sentText string
+	var mu sync.Mutex
+	srv := mockTelegramAPI(t, func(int64) []update { return nil }, func(_ int64, text string) error {
+		mu.Lock()
+		sentText = text
+		mu.Unlock()
+		return nil
+	})
+	defer srv.Close()
+
+	router := testRouter(t, mgr)
+	ch := New(Config{Token: "test-token", Instance: "operator", BaseURL: srv.URL}, router, slog.Default())
+	router.Register(ch)
+
+	ch.handleUpdate(t.Context(), update{
+		UpdateID: 1,
+		Message:  &message{Chat: chat{ID: 42}, From: user{Username: "test"}, Text: "/clear"},
+	})
+
+	// Give the async /clear goroutine time to complete.
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	got := sentText
+	mu.Unlock()
+	if got != "Session cleared." {
+		t.Errorf("expected clear confirmation, got %q", got)
 	}
 }
 
