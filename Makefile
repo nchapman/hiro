@@ -11,21 +11,29 @@ build: web
 	go build -o $(BINARY) ./cmd/hiro
 
 test:
-	docker build --target test -t hiro-test .
-	docker run --rm --init hiro-test
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
 
 test-local:
 	go test -race ./... -v -count=1
 
 test-isolation:
-	docker build --target test -t hiro-test .
-	docker run --rm --init --cap-add NET_ADMIN hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test \
+		go test ./internal/agent/... -tags=isolation -v -count=1; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
 
 test-netiso:
-	docker compose -f docker-compose.test-netiso.yml build test
-	docker compose -f docker-compose.test-netiso.yml run --rm test; \
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test \
+		go test ./internal/netiso/... -tags=netiso -v -count=1; \
 	EXIT=$$?; \
-	docker compose -f docker-compose.test-netiso.yml down; \
+	docker compose -f docker-compose.test.yml down; \
 	exit $$EXIT
 
 test-online:
@@ -98,8 +106,12 @@ lint:
 	golangci-lint run ./...
 
 check:
-	docker build --target test -t hiro-test .
-	docker run --rm --init hiro-test sh -c "go test -race ./... -v -count=1 && go vet ./..."
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test \
+		sh -c "go test -race ./... -v -count=1 && go vet ./..."; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
 
 clean:
 	rm -f $(BINARY)

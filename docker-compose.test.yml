@@ -1,5 +1,5 @@
-# Network isolation integration tests — run with: make test-netiso
-# Uses the EXACT same privileges as production (no --privileged).
+# Unified test runner — matches production security settings.
+# Used by: make test, make test-isolation, make test-netiso, make check
 services:
   test:
     build:
@@ -12,4 +12,4 @@ services:
       - seccomp=seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
     sysctls:
       - net.ipv4.ip_forward=1
-    command: ["go", "test", "./internal/netiso/...", "-tags=netiso", "-v", "-count=1"]
+    command: ["go", "test", "-race", "./...", "-v", "-count=1"]

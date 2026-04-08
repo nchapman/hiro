@@ -161,9 +161,10 @@ func TestIsolation_HomeIsSessionDir(t *testing.T) {
 	}
 }
 
-// TestIsolation_MiseDataDirGroupWritable verifies that agent users can
-// write to the mise data directory (needed for runtime tool installs).
-func TestIsolation_MiseDataDirGroupWritable(t *testing.T) {
+// TestIsolation_MiseDataDirReadOnly verifies that agent users can read
+// but NOT write to the shared mise data directory. Root owns everything —
+// agents cannot inject malicious shims or replace binaries.
+func TestIsolation_MiseDataDirReadOnly(t *testing.T) {
 	uid, gid := requireIsolation(t)
 	sessDir := agentSessionDir(t, uid, gid)
 
@@ -172,22 +173,24 @@ func TestIsolation_MiseDataDirGroupWritable(t *testing.T) {
 		t.Skip("MISE_DATA_DIR not set")
 	}
 
-	// Try to create and remove a file in the mise data dir as the agent user.
+	// Agent should NOT be able to write to the shared mise directory.
 	testFile := miseDir + "/test-write-permission"
-	cmd := agentCmd(t, uid, gid, sessDir, "sh", "-c",
-		`touch "$1" && echo ok && rm "$1"`, "--", testFile)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("agent user cannot write to MISE_DATA_DIR: %v\n%s", err, output)
+	cmd := agentCmd(t, uid, gid, sessDir, "touch", testFile)
+	if err := cmd.Run(); err == nil {
+		os.Remove(testFile)
+		t.Fatal("agent user should not be able to write to MISE_DATA_DIR")
 	}
-	if !strings.Contains(string(output), "ok") {
-		t.Fatalf("unexpected output: %s", output)
+
+	// Agent should be able to read mise binaries.
+	cmd = agentCmd(t, uid, gid, sessDir, "ls", miseDir)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("agent user cannot read MISE_DATA_DIR: %v", err)
 	}
 }
 
-// TestIsolation_MiseInstallGlobal verifies that an agent user can install
-// a new tool globally via mise and use it immediately through shims.
-func TestIsolation_MiseInstallGlobal(t *testing.T) {
+// TestIsolation_MiseGlobalReadOnly verifies that agent users cannot install
+// tools globally (shared /opt/mise is root-owned and read-only to agents).
+func TestIsolation_MiseGlobalReadOnly(t *testing.T) {
 	uid, gid := requireIsolation(t)
 	sessDir := agentSessionDir(t, uid, gid)
 
@@ -195,22 +198,21 @@ func TestIsolation_MiseInstallGlobal(t *testing.T) {
 		t.Skip("MISE_DATA_DIR not set")
 	}
 
-	// "mise use -g" installs and registers globally — shim works immediately.
-	// This mutates the shared /opt/mise global config, which is fine because
-	// isolation tests run in ephemeral Docker containers.
+	// "mise use -g" should fail because agents can't write to /opt/mise.
 	cmd := agentCmd(t, uid, gid, sessDir, "sh", "-c",
-		"mise use -g jq@latest && jq --version")
+		"mise use -g jq@latest 2>&1")
 	cmd.Dir = sessDir
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("agent failed to install tool globally: %v\n%s", err, output)
+	if err == nil {
+		t.Fatalf("agent should not be able to install tools globally, but succeeded: %s", output)
 	}
-	t.Logf("output: %s", strings.TrimSpace(string(output)))
+	t.Logf("global install correctly denied: %s", strings.TrimSpace(string(output)))
 }
 
-// TestIsolation_MiseInstallLocal verifies that an agent user can install
-// a tool locally in a project directory via mise and use it through shims.
-func TestIsolation_MiseInstallLocal(t *testing.T) {
+// TestIsolation_MisePreinstalledToolsWork verifies that pre-installed mise
+// tools (node, python) are usable by agent users via shims, even though
+// agents can't install new tools globally.
+func TestIsolation_MisePreinstalledToolsWork(t *testing.T) {
 	uid, gid := requireIsolation(t)
 	sessDir := agentSessionDir(t, uid, gid)
 
@@ -218,25 +220,18 @@ func TestIsolation_MiseInstallLocal(t *testing.T) {
 		t.Skip("MISE_DATA_DIR not set")
 	}
 
-	// "mise use" (no -g) creates a local mise.toml in the working directory.
-	// The shim resolves the tool when run from that directory.
-	projectDir := sessDir + "/project"
-	cmd := agentCmd(t, uid, gid, sessDir, "sh", "-c",
-		"mkdir -p "+projectDir+" && cd "+projectDir+" && mise use jq@latest && jq --version")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("agent failed to install tool locally: %v\n%s", err, output)
-	}
-	t.Logf("output: %s", strings.TrimSpace(string(output)))
-
-	// Verify local config was created in the project directory.
-	cmd2 := agentCmd(t, uid, gid, sessDir, "cat", projectDir+"/mise.toml")
-	config, err := cmd2.CombinedOutput()
-	if err != nil {
-		t.Fatalf("local mise.toml not created: %v\n%s", err, config)
-	}
-	if !strings.Contains(string(config), "jq") {
-		t.Errorf("mise.toml doesn't mention jq: %s", config)
+	for _, tool := range []struct{ name, check string }{
+		{"node", "node --version"},
+		{"python", "python3 --version"},
+	} {
+		t.Run(tool.name, func(t *testing.T) {
+			cmd := agentCmd(t, uid, gid, sessDir, "sh", "-c", tool.check)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("pre-installed %s not usable by agent: %v\n%s", tool.name, err, output)
+			}
+			t.Logf("%s: %s", tool.name, strings.TrimSpace(string(output)))
+		})
 	}
 }
 
