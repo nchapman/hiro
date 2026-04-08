@@ -20,6 +20,26 @@ import (
 	"github.com/nchapman/hiro/internal/toolrules"
 )
 
+// fakeLanguageModel satisfies fantasy.LanguageModel for tests that pass a
+// non-nil LM to pushToolsAndModel. Methods are never called because test
+// instances have no live inference loops.
+type fakeLanguageModel struct{}
+
+func (f *fakeLanguageModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return nil, errors.New("fake")
+}
+func (f *fakeLanguageModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	return nil, errors.New("fake")
+}
+func (f *fakeLanguageModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, errors.New("fake")
+}
+func (f *fakeLanguageModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, errors.New("fake")
+}
+func (f *fakeLanguageModel) Provider() string { return "fake" }
+func (f *fakeLanguageModel) Model() string    { return "fake" }
+
 // --- tool_executor.go ---
 
 type fakeTool struct {
@@ -2300,4 +2320,178 @@ func TestInstanceBySession_ConcurrentSafe(t *testing.T) {
 
 	wg.Wait()
 	// No panic = success.
+}
+
+// --- concurrency regression tests ---
+
+// TestDetachAllSlots_RaceWithAcquireSlot exercises the fix where detachAllSlots
+// acquires slot.mu before nil'ing slot fields. Without the fix, the race
+// detector flags concurrent reads in acquireSlot.
+func TestDetachAllSlots_RaceWithAcquireSlot(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Create a few extra sessions to increase contention surface.
+	for i := range 3 {
+		if _, err := mgr.EnsureSession(t.Context(), id, fmt.Sprintf("tg:%d", i)); err != nil {
+			t.Fatalf("EnsureSession: %v", err)
+		}
+	}
+
+	inst := mgr.getInstance(id)
+	// Snapshot session IDs for acquireSlot calls.
+	inst.mu.Lock()
+	var sessionIDs []string
+	for sid := range inst.sessions {
+		sessionIDs = append(sessionIDs, sid)
+	}
+	inst.mu.Unlock()
+
+	var wg sync.WaitGroup
+
+	// Readers: call acquireSlot concurrently.
+	for _, sid := range sessionIDs {
+		wg.Go(func() {
+			for range 50 {
+				slot, _, err := mgr.acquireSlot(t.Context(), id, sid)
+				if err == nil {
+					slot.mu.Unlock()
+				}
+			}
+		})
+	}
+
+	// Writer: detach all slots concurrently with readers.
+	wg.Go(func() {
+		time.Sleep(time.Millisecond) // let readers start
+		mgr.detachAllSlots(inst, InstanceStatusStopped)
+	})
+
+	wg.Wait()
+	// Success = no race detector findings and no panics.
+}
+
+// TestEnsureSession_ConcurrentSameChannel verifies that concurrent
+// EnsureSession calls for the same channel key return the same session ID
+// and don't race on slot field reads.
+func TestEnsureSession_ConcurrentSameChannel(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	const goroutines = 10
+	results := make([]string, goroutines)
+	errs := make([]error, goroutines)
+
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Go(func() {
+			results[i], errs[i] = mgr.EnsureSession(t.Context(), id, "tg:same")
+		})
+	}
+	wg.Wait()
+
+	// All should succeed and return the same session ID.
+	var expected string
+	for i := range goroutines {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: %v", i, errs[i])
+		}
+		if expected == "" {
+			expected = results[i]
+		} else if results[i] != expected {
+			t.Errorf("goroutine %d: session=%q, want %q", i, results[i], expected)
+		}
+	}
+}
+
+// TestConfigGen_PreventsStalePush verifies that pushConfigToInstance discards
+// a pre-created language model when configGen has been bumped by a concurrent
+// config update between the two lock acquisitions.
+func TestConfigGen_PreventsStalePush(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "test-agent", testAgentMD)
+
+	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	inst := mgr.getInstance(id)
+
+	// Record the model before the push.
+	inst.mu.Lock()
+	modelBefore := inst.info.Model
+	inst.mu.Unlock()
+
+	// pushToolsAndModel is the function that applies model changes and bumps
+	// configGen. Call it with a non-nil LM and a model that differs from current.
+	// It should apply the model and bump configGen.
+	cfg, loadErr := config.LoadAgentDir(mgr.agentDefDir("test-agent"))
+	if loadErr != nil {
+		t.Fatalf("load agent: %v", loadErr)
+	}
+	pc := &configPushContext{
+		cfg:       cfg,
+		model:     "new-provider/new-model",
+		modelSpec: models.ModelSpec{Provider: "new-provider", Model: "new-model"},
+	}
+
+	inst.mu.Lock()
+	genBefore := inst.configGen
+	// Pass a non-nil (but fake) LM — pushToolsAndModel only passes it through
+	// to loop.UpdateModel, and test instances have no live loops.
+	mgr.pushToolsAndModel(inst, id, "", inst.info.Mode, pc, &fakeLanguageModel{})
+	genAfter := inst.configGen
+	appliedModel := inst.info.Model
+	inst.mu.Unlock()
+
+	if genAfter <= genBefore {
+		t.Errorf("configGen not incremented: before=%d after=%d", genBefore, genAfter)
+	}
+	if appliedModel == modelBefore {
+		t.Error("model should have been updated by pushToolsAndModel")
+	}
+	if appliedModel != "new-provider/new-model" {
+		t.Errorf("model = %q, want %q", appliedModel, "new-provider/new-model")
+	}
+
+	// Now simulate the stale-push scenario: snapshot gen, bump it (simulating
+	// a concurrent UpdateInstanceConfig), then call pushToolsAndModel with
+	// a different model. The re-check in pushConfigToInstance (configGen != gen)
+	// would discard the LM, so pushToolsAndModel receives lm=nil. Verify that
+	// passing nil LM does NOT change the model.
+	inst.mu.Lock()
+	genSnapshot := inst.configGen
+	inst.configGen++ // simulate concurrent update
+	pc2 := &configPushContext{
+		cfg:       cfg,
+		model:     "stale-provider/stale-model",
+		modelSpec: models.ModelSpec{Provider: "stale-provider", Model: "stale-model"},
+	}
+	// This is what pushConfigToInstance does when configGen != gen: passes nil LM.
+	mgr.pushToolsAndModel(inst, id, "", inst.info.Mode, pc2, nil)
+	modelAfterStale := inst.info.Model
+	genFinal := inst.configGen
+	inst.mu.Unlock()
+
+	if modelAfterStale == "stale-provider/stale-model" {
+		t.Error("stale model should NOT have been applied when LM is nil")
+	}
+	if modelAfterStale != "new-provider/new-model" {
+		t.Errorf("model should still be %q, got %q", "new-provider/new-model", modelAfterStale)
+	}
+	// configGen should still advance (tool rules may have changed).
+	if genFinal <= genSnapshot+1 {
+		t.Errorf("configGen should have advanced past simulated bump: snapshot=%d final=%d", genSnapshot, genFinal)
+	}
 }

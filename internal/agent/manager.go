@@ -79,6 +79,7 @@ type instance struct {
 	effectiveTools map[string]bool              // built-in tools this instance is allowed; nil = unrestricted
 	allowLayers    [][]toolrules.Rule           // per-source allow rules for call-time enforcement
 	denyRules      []toolrules.Rule             // merged deny rules from all sources
+	configGen      uint64                       // incremented on each model/tool config change under inst.mu
 	uid            uint32                       // isolated UID (0 = no isolation)
 	gid            uint32                       // isolated GID
 	groups         []uint32                     // supplementary groups only (not primary GID); used for inheritance checks
@@ -114,7 +115,10 @@ func (inst *instance) removeSlot(sessionID string) {
 // Must be called with inst.mu held.
 func (inst *instance) anySlot() *sessionSlot {
 	for _, slot := range inst.sessions {
-		if slot.loop != nil {
+		slot.mu.Lock()
+		live := slot.loop != nil
+		slot.mu.Unlock()
+		if live {
 			return slot
 		}
 	}

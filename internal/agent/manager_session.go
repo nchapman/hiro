@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hiro/internal/config"
@@ -39,6 +40,22 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		return fmt.Errorf("instance %q not found", instanceID)
 	}
 
+	// Create the language model outside the lock to avoid blocking other
+	// operations on the instance during the (potentially slow) API call.
+	var lm fantasy.LanguageModel
+	var modelSpec models.ModelSpec
+	if model != "" {
+		spec, apiKey, baseURL, err := m.resolveModelSpec(model)
+		if err != nil {
+			return err
+		}
+		lm, err = provider.CreateLanguageModel(ctx, provider.Type(spec.Provider), apiKey, baseURL, spec.Model)
+		if err != nil {
+			return fmt.Errorf("creating language model %q: %w", model, err)
+		}
+		modelSpec = spec
+	}
+
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
 
@@ -49,25 +66,16 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 		return fmt.Errorf("instance %q has no active sessions", instanceID)
 	}
 
-	if model != "" && model != inst.info.Model {
-		spec, apiKey, baseURL, err := m.resolveModelSpec(model)
-		if err != nil {
-			return err
-		}
-
-		lm, err := provider.CreateLanguageModel(ctx, provider.Type(spec.Provider), apiKey, baseURL, spec.Model)
-		if err != nil {
-			return fmt.Errorf("creating language model %q: %w", model, err)
-		}
+	if lm != nil && modelSpec.String() != inst.info.Model {
 		// Update model on all active session loops.
 		for _, slot := range inst.sessions {
 			slot.mu.Lock()
 			if slot.loop != nil {
-				slot.loop.UpdateModel(lm, spec.String(), spec.Provider)
+				slot.loop.UpdateModel(lm, modelSpec.String(), modelSpec.Provider)
 			}
 			slot.mu.Unlock()
 		}
-		inst.info.Model = spec.String()
+		inst.info.Model = modelSpec.String()
 	}
 
 	if reasoningEffort != nil {
@@ -88,6 +96,8 @@ func (m *Manager) UpdateInstanceConfig(ctx context.Context, instanceID, model st
 			return err
 		}
 	}
+
+	inst.configGen++
 
 	// Persist config to filesystem.
 	newModel := inst.info.Model
@@ -235,10 +245,14 @@ func (m *Manager) EnsureSession(ctx context.Context, instanceID, channelKey stri
 	// Check if a slot already exists for this channel.
 	if sid, ok := inst.channelIndex[channelKey]; ok {
 		slot := inst.sessions[sid]
-		if slot != nil && (slot.loop != nil || slot.worker != nil) {
-			slot.lastUsed = time.Now()
-			inst.mu.Unlock()
-			return sid, nil
+		if slot != nil {
+			slot.mu.Lock()
+			alive := slot.loop != nil || slot.worker != nil
+			slot.mu.Unlock()
+			if alive {
+				inst.mu.Unlock()
+				return sid, nil
+			}
 		}
 		// Slot exists but is idle-stopped (no worker/loop) — need to re-spawn.
 		// Remove it so we can create a fresh one below.
@@ -464,11 +478,13 @@ func (m *Manager) detachChannelSlot(inst *instance, channelKey string) (oldHandl
 	if oldSlot == nil {
 		return nil, ""
 	}
+	oldSlot.mu.Lock()
 	oldHandle = oldSlot.handle
 	oldSessionID = oldSlot.sessionID
 	oldSlot.handle = nil // prevent watchSlotWorker from treating exit as unexpected
 	oldSlot.worker = nil
 	oldSlot.loop = nil
+	oldSlot.mu.Unlock()
 	inst.removeSlot(oldSessionID)
 	return oldHandle, oldSessionID
 }
@@ -700,6 +716,28 @@ func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.
 		return // removed between snapshot and push
 	}
 
+	// Pre-create the language model outside the lock so we don't block
+	// the instance for the duration of the (potentially slow) API call.
+	// Snapshot the config generation to detect concurrent updates.
+	var lm fantasy.LanguageModel
+	inst.mu.Lock()
+	needModelSwitch := pc.model != inst.info.Model
+	gen := inst.configGen
+	inst.mu.Unlock()
+
+	if needModelSwitch {
+		const modelSwitchTimeout = 10 * time.Second
+		pushCtx, pushCancel := context.WithTimeout(context.Background(), modelSwitchTimeout)
+		var lmErr error
+		lm, lmErr = provider.CreateLanguageModel(pushCtx, provider.Type(pc.modelSpec.Provider), pc.apiKey, pc.baseURL, pc.modelSpec.Model)
+		pushCancel()
+		if lmErr != nil {
+			m.logger.Warn("failed to create language model for config push",
+				"agent", pc.cfg.Name, "model", pc.model, "error", lmErr)
+			lm = nil
+		}
+	}
+
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
 
@@ -707,8 +745,14 @@ func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.
 		return
 	}
 
+	// If a concurrent config update landed while we were creating the model,
+	// discard our model — the other update's model is already applied.
+	if lm != nil && inst.configGen != gen {
+		lm = nil
+	}
+
 	if len(inst.sessions) > 0 {
-		m.pushToolsAndModel(inst, instanceID, parentID, mode, pc)
+		m.pushToolsAndModel(inst, instanceID, parentID, mode, pc, lm)
 	}
 
 	inst.info.Description = pc.cfg.Description
@@ -717,8 +761,9 @@ func (m *Manager) pushConfigToInstance(instanceID, parentID string, mode config.
 }
 
 // pushToolsAndModel updates tool rules and model on an instance's inference loop.
-// Caller must hold inst.mu.
-func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string, mode config.AgentMode, pc *configPushContext) {
+// Caller must hold inst.mu. If lm is non-nil and the model still needs switching,
+// it is applied to all session loops.
+func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string, mode config.AgentMode, pc *configPushContext, lm fantasy.LanguageModel) {
 	// Instance config is the source of truth for tool declarations.
 	// Agent.md changes to tools don't flow to existing instances.
 	cfg := pc.cfg
@@ -741,27 +786,19 @@ func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string,
 		}
 	}
 
-	// Model switch.
-	if pc.model == inst.info.Model {
-		return
-	}
-	const modelSwitchTimeout = 10 * time.Second
-	pushCtx, pushCancel := context.WithTimeout(context.Background(), modelSwitchTimeout)
-	lm, lmErr := provider.CreateLanguageModel(pushCtx, provider.Type(pc.modelSpec.Provider), pc.apiKey, pc.baseURL, pc.modelSpec.Model)
-	pushCancel()
-	if lmErr != nil {
-		m.logger.Warn("failed to create language model for config push",
-			"agent", pc.cfg.Name, "model", pc.model, "error", lmErr)
-		return
-	}
-	for _, slot := range inst.sessions {
-		slot.mu.Lock()
-		if slot.loop != nil {
-			slot.loop.UpdateModel(lm, pc.model, pc.modelSpec.Provider)
+	// Model switch — re-check under lock since another push may have applied it.
+	if lm != nil && pc.model != inst.info.Model {
+		for _, slot := range inst.sessions {
+			slot.mu.Lock()
+			if slot.loop != nil {
+				slot.loop.UpdateModel(lm, pc.model, pc.modelSpec.Provider)
+			}
+			slot.mu.Unlock()
 		}
-		slot.mu.Unlock()
+		inst.info.Model = pc.model
 	}
-	inst.info.Model = pc.model
+
+	inst.configGen++
 }
 
 // PushConfigUpdateAll recomputes and pushes config to all running instances.

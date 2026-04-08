@@ -162,6 +162,8 @@ func (c *Channel) HandleConn(ctx context.Context, conn *websocket.Conn, instance
 			"error", err,
 		)
 		_ = wsjson.Write(ctx, conn, ChatMessage{Type: "error", Content: "Failed to create session: " + err.Error()})
+		conn.Close(websocket.StatusInternalError, "session creation failed")
+		return
 	}
 
 	wc := &wsConn{

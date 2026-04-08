@@ -25,10 +25,11 @@ import (
 // --- Mock Manager for web channel tests ---
 
 type mockManager struct {
-	sendMessageFn  func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
-	updateConfigFn func(ctx context.Context, instanceID, model string, re *string) error
-	instances      map[string]agent.InstanceInfo
-	agentInstances map[string]string
+	sendMessageFn   func(ctx context.Context, instanceID, message string, onEvent func(ipc.ChatEvent) error) (string, error)
+	updateConfigFn  func(ctx context.Context, instanceID, model string, re *string) error
+	ensureSessionFn func(ctx context.Context, instanceID, channelKey string) (string, error)
+	instances       map[string]agent.InstanceInfo
+	agentInstances  map[string]string
 }
 
 func newMockManager() *mockManager {
@@ -64,7 +65,10 @@ func (m *mockManager) SendMetaMessage(context.Context, string, string, func(ipc.
 func (m *mockManager) SendMetaMessageToSession(_ context.Context, _, _, _ string, _ func(ipc.ChatEvent) error) (string, error) {
 	return "", nil
 }
-func (m *mockManager) EnsureSession(_ context.Context, _, _ string) (string, error) {
+func (m *mockManager) EnsureSession(ctx context.Context, instanceID, channelKey string) (string, error) {
+	if m.ensureSessionFn != nil {
+		return m.ensureSessionFn(ctx, instanceID, channelKey)
+	}
 	return "test-session", nil
 }
 func (m *mockManager) NewSessionForChannel(string, string) (string, error) { return "new", nil }
@@ -532,5 +536,70 @@ func TestProcessAttachments_OversizedDecoded(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestHandleConn_EnsureSessionFailure verifies that when EnsureSession fails,
+// the connection is closed with an error and no binding is created.
+func TestHandleConn_EnsureSessionFailure(t *testing.T) {
+	t.Parallel()
+
+	mgr := newMockManager()
+	mgr.ensureSessionFn = func(context.Context, string, string) (string, error) {
+		return "", errors.New("instance stopped")
+	}
+
+	router := channel.NewRouter(t.Context(), mgr, &mockCmdHandler{}, nil, slog.Default())
+	wc := New(router, mgr, slog.Default())
+	router.Register(wc)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := ws.Accept(w, r, nil)
+		if err != nil {
+			t.Logf("ws accept error: %v", err)
+			return
+		}
+		defer conn.Close(ws.StatusNormalClosure, "")
+		wc.HandleConn(r.Context(), conn, "inst-1", "web:fail-test")
+	}))
+	t.Cleanup(srv.Close)
+
+	url := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, resp, err := ws.Dial(t.Context(), url, nil)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	// Should receive an error message then the connection should close.
+	var msg ChatMessage
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
+		t.Fatalf("read error message: %v", err)
+	}
+	if msg.Type != "error" {
+		t.Errorf("expected error message type, got %q", msg.Type)
+	}
+	if !strings.Contains(msg.Content, "instance stopped") {
+		t.Errorf("error content = %q, want substring 'instance stopped'", msg.Content)
+	}
+
+	// Next read should fail because the server closed the connection.
+	var next ChatMessage
+	readCtx, readCancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer readCancel()
+	if err := wsjson.Read(readCtx, conn, &next); err == nil {
+		t.Errorf("expected connection closed error, but read succeeded: %+v", next)
+	}
+
+	// Verify no binding was created for this connection.
+	wc.mu.Lock()
+	_, bound := wc.conns["web:fail-test"]
+	wc.mu.Unlock()
+	if bound {
+		t.Error("connection should not be bound after EnsureSession failure")
 	}
 }

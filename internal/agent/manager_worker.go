@@ -46,12 +46,14 @@ func (m *Manager) detachAllSlots(inst *instance, status InstanceStatus) []*Worke
 	inst.mu.Lock()
 	var handles []*WorkerHandle
 	for _, slot := range inst.sessions {
+		slot.mu.Lock()
 		if slot.handle != nil {
 			handles = append(handles, slot.handle)
 		}
 		slot.worker = nil
 		slot.handle = nil
 		slot.loop = nil
+		slot.mu.Unlock()
 	}
 	if status != "" {
 		inst.info.Status = status
@@ -132,7 +134,14 @@ func (m *Manager) watchSlotWorker(instanceID, sessionID string, handle *WorkerHa
 	// Check under inst.mu whether this exit was intentional.
 	inst.mu.Lock()
 	slot := inst.sessions[sessionID]
-	stale := inst.info.Status == InstanceStatusStopped || slot == nil || slot.handle != handle
+	var stale bool
+	if inst.info.Status == InstanceStatusStopped || slot == nil {
+		stale = true
+	} else {
+		slot.mu.Lock()
+		stale = slot.handle != handle
+		slot.mu.Unlock()
+	}
 	if !stale && slot != nil {
 		// Unexpected exit — remove this slot.
 		inst.removeSlot(sessionID)
