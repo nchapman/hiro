@@ -1,0 +1,13 @@
+# Prototype: test CLONE_NEWUSER approach with minimal privileges
+# Run: docker compose up --build
+services:
+  test:
+    build: .
+    init: true
+    cap_add:
+      - NET_ADMIN       # veth + nftables
+      # NOTE: no SYS_ADMIN! That's the whole point.
+    security_opt:
+      - seccomp=seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
+    sysctls:
+      - net.ipv4.ip_forward=1
