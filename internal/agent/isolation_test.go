@@ -64,7 +64,7 @@ func setupIsolationManager(t *testing.T) (*Manager, string, *[]*isolationWorker)
 
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil)
+	}, nil, logger, factory, pool, nil, nil)
 
 	return mgr, dir, workers
 }
@@ -177,7 +177,7 @@ func TestIsolation_PoolExhaustion(t *testing.T) {
 
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil)
+	}, nil, logger, factory, pool, nil, nil)
 
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 

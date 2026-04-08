@@ -5,6 +5,8 @@ services:
   leader:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     ports:
       - "0:8080"  # HTTP API (random host port)
       - "0:8081"  # Cluster gRPC (random host port)
@@ -24,6 +26,8 @@ services:
   worker:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     depends_on:
       leader:
         condition: service_healthy

@@ -14,6 +14,8 @@ services:
   node1:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8081:8081"
@@ -27,6 +29,8 @@ services:
   node2:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     ports:
       - "127.0.0.1:8082:8080"
     environment:
@@ -38,6 +42,8 @@ services:
   node3:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     ports:
       - "127.0.0.1:8084:8080"
     environment:

@@ -293,7 +293,7 @@ func (m *Manager) createSessionSlot(ctx context.Context, inst *instance, instanc
 	if err != nil {
 		return "", err
 	}
-	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups)
+	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups, inst.effectiveEgress)
 	spawnCtx := ctx
 	if inst.info.Mode.IsPersistent() {
 		spawnCtx = m.ctx
@@ -443,7 +443,7 @@ func (m *Manager) NewSessionForChannel(instanceID, channelKey string) (string, e
 	if err != nil {
 		return "", err
 	}
-	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups)
+	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups, inst.effectiveEgress)
 
 	// Shut down old worker concurrently while spawning the new one.
 	shutdownDone := m.shutdownOldWorkerAsync(oldHandle)

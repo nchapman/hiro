@@ -151,6 +151,53 @@ When searching, use multiple sources and cross-reference.`
 	}
 }
 
+func TestLoadAgentDir_NetworkEgress(t *testing.T) {
+	dir := t.TempDir()
+	agentMD := `---
+name: net-agent
+network:
+  egress:
+    - "github.com"
+    - "*.npmjs.org"
+    - "pypi.org"
+---
+
+Agent with network access.`
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644)
+
+	cfg, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.NetworkEgress) != 3 {
+		t.Fatalf("expected 3 egress entries, got %d: %v", len(cfg.NetworkEgress), cfg.NetworkEgress)
+	}
+	if cfg.NetworkEgress[0] != "github.com" {
+		t.Errorf("egress[0] = %q, want github.com", cfg.NetworkEgress[0])
+	}
+	if cfg.NetworkEgress[1] != "*.npmjs.org" {
+		t.Errorf("egress[1] = %q, want *.npmjs.org", cfg.NetworkEgress[1])
+	}
+}
+
+func TestLoadAgentDir_NoNetworkEgress(t *testing.T) {
+	dir := t.TempDir()
+	agentMD := `---
+name: offline-agent
+---
+
+Agent without network access.`
+	os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644)
+
+	cfg, err := LoadAgentDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.NetworkEgress != nil {
+		t.Errorf("expected nil NetworkEgress, got %v", cfg.NetworkEgress)
+	}
+}
+
 func TestLoadAgentDir_MissingName(t *testing.T) {
 	dir := t.TempDir()
 	agentMD := `---
@@ -345,6 +392,43 @@ func TestFrontmatter_StringMap(t *testing.T) {
 	fm2 := Frontmatter{"metadata": "not a map"}
 	if fm2.StringMap("metadata") != nil {
 		t.Error("expected nil for non-map value")
+	}
+}
+
+func TestFrontmatter_Sub(t *testing.T) {
+	fm := Frontmatter{
+		"network": map[string]any{
+			"egress": []any{"github.com", "*.npmjs.org"},
+		},
+	}
+	sub := fm.Sub("network")
+	if sub == nil {
+		t.Fatal("expected non-nil sub for 'network'")
+	}
+	egress := sub.StringSlice("egress")
+	if len(egress) != 2 || egress[0] != "github.com" || egress[1] != "*.npmjs.org" {
+		t.Errorf("got %v", egress)
+	}
+
+	// Missing key.
+	if fm.Sub("missing") != nil {
+		t.Error("expected nil for missing key")
+	}
+
+	// Wrong type.
+	fm2 := Frontmatter{"network": "not a map"}
+	if fm2.Sub("network") != nil {
+		t.Error("expected nil for non-map value")
+	}
+
+	// Nil frontmatter.
+	var nilFM Frontmatter
+	if nilFM.Sub("network") != nil {
+		t.Error("expected nil from nil frontmatter")
+	}
+	// Sub of nil should return nil StringSlice.
+	if nilFM.Sub("network").StringSlice("egress") != nil {
+		t.Error("expected nil StringSlice from nil Sub")
 	}
 }
 

@@ -174,7 +174,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 ### Limitations
 
-- **No network isolation between agents (planned).** Agents share the container's network namespace. An agent with `Bash` could connect to another agent's gRPC socket by enumerating `/tmp/hiro-agent-*.sock` — the path format is known but the UUID (session ID) suffix is not predictable. Even if a socket is found, protocol-level authorization (caller ID and descendant checks) blocks unauthorized operations. See [`docs/network-isolation.md`](network-isolation.md) for the planned design: per-agent network namespaces with DNS-driven firewall rules.
+- **Network isolation is domain-level, not IP-level.** Per-agent network namespaces with DNS-driven nftables rules isolate agents. Agents can only reach domains declared in their `network.egress` policy (default: no network). However, if an allowed domain shares an IP with a blocked domain (CDN co-hosting), the agent can reach both. See [`docs/network-isolation.md`](network-isolation.md) for the full design. Requires `CAP_NET_ADMIN` on the container.
 - **Shared workspace is collaborative.** Any agent can read or modify files in `/hiro/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
 - **No syscall filtering.** Agents are not confined by seccomp, AppArmor, or similar mechanisms beyond what Docker applies by default.

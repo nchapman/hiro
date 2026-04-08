@@ -24,6 +24,9 @@ FROM go-base AS test
 # Stub web UI so go:embed is satisfied without building the frontend.
 RUN mkdir -p web/ui/dist && echo '<!doctype html>' > web/ui/dist/index.html
 
+# Network isolation tests need nftables and iproute2.
+RUN apt-get update && apt-get install -y --no-install-recommends nftables iproute2 && rm -rf /var/lib/apt/lists/*
+
 # Create agent user pool and groups for isolation tests.
 RUN groupadd -g 10000 hiro-agents \
     && groupadd -g 10001 hiro-operators \
@@ -68,7 +71,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     # terminal multiplexer (persistent sessions across disconnects)
     tmux \
     # networking
-    dnsutils iputils-ping net-tools netcat-openbsd socat \
+    dnsutils iputils-ping net-tools netcat-openbsd socat iproute2 nftables \
     # system
     sudo locales \
     && locale-gen en_US.UTF-8 \

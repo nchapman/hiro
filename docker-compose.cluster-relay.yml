@@ -9,6 +9,8 @@ services:
   leader:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     networks:
       - leader-net
     ports:
@@ -31,6 +33,8 @@ services:
   worker:
     build: .
     init: true
+    cap_add:
+      - NET_ADMIN
     networks:
       - worker-net  # separate network — no direct path to leader
     depends_on:

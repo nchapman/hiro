@@ -25,6 +25,7 @@ make web                 # Build web UI only (cd web/ui && npm install && npm ru
 make test                # Run tests in Docker (builds test container)
 make test-local          # Run tests locally (no Docker, uses mock workers)
 make test-isolation      # Run UID isolation tests in Docker (requires user pool)
+make test-netiso         # Run network isolation tests in Docker (requires CAP_NET_ADMIN)
 make test-online         # E2E tests against real LLM in Docker (requires HIRO_API_KEY)
 make test-cluster        # Cluster e2e tests: leader + worker topology (requires HIRO_API_KEY)
 make test-cluster-relay  # Cluster e2e tests via relay server (requires HIRO_API_KEY)
@@ -205,6 +206,7 @@ See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, 
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
+- **`internal/netiso`** — Per-agent network isolation via Linux network namespaces, veth pairs, nftables IP sets, and a DNS forwarder. Linux-only (`//go:build linux`); stubs on other platforms. Agents declare `network.egress` in frontmatter; the DNS forwarder resolves allowed domains and populates nftables sets at the IP layer (protocol-agnostic). Requires `CAP_NET_ADMIN`.
 - **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes. Resource limits centralized in `limits.go`.
 - **`internal/controlplane`** — Operator-level config (secrets, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/cluster` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, persona/memory/todos persistence.

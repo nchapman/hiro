@@ -14,7 +14,9 @@ import (
 
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/ipc/grpcipc"
+	"github.com/nchapman/hiro/internal/netiso"
 	"github.com/nchapman/hiro/internal/platform/fsperm"
+	"github.com/nchapman/hiro/internal/uidpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -41,6 +43,8 @@ func prepareSocketDir(cfg ipc.SpawnConfig) (socketPath string, socketDir string,
 }
 
 // configureIsolation sets up UID isolation credentials and environment on the command.
+// When network egress policy is set, the worker is also placed in its own
+// network and mount namespaces (CLONE_NEWNET + CLONE_NEWNS) on Linux.
 func configureIsolation(cmd *exec.Cmd, cfg ipc.SpawnConfig) {
 	groups := cfg.Groups
 	if len(groups) == 0 {
@@ -52,6 +56,9 @@ func configureIsolation(cmd *exec.Cmd, cfg ipc.SpawnConfig) {
 			Gid:    cfg.GID,
 			Groups: groups,
 		},
+	}
+	if cfg.NetworkEgress != nil {
+		setNetworkCloneflags(cmd)
 	}
 	cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
 }
@@ -133,10 +140,24 @@ func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*exec.Cmd, *by
 	return cmd, &stderrBuf, waitCh, nil
 }
 
-// defaultWorkerFactory spawns an agent as an OS process using the same binary.
+// newWorkerFactory creates a WorkerFactory that spawns agent processes with
+// optional network isolation. If ni is nil, no network isolation is applied.
+func newWorkerFactory(ni *netiso.NetIso) WorkerFactory {
+	return func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+		return spawnWorkerProcess(ctx, cfg, ni)
+	}
+}
+
+// defaultWorkerFactory spawns an agent as an OS process using the same binary,
+// without network isolation. Used when NetIso is not available.
+func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+	return spawnWorkerProcess(ctx, cfg, nil)
+}
+
+// spawnWorkerProcess is the core spawn logic shared by all worker factories.
 // The agent process reads a SpawnConfig from stdin, starts a gRPC AgentWorker
 // server on a Unix socket, and writes "ready" to stdout when it's listening.
-func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
+func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.NetIso) (*WorkerHandle, error) { //nolint:funlen // network isolation adds 15 lines to the core spawn path
 	// Create a private socket directory so the socket is inaccessible to other
 	// agent UIDs from the moment it's created (no TOCTOU window). Short path
 	// to stay under the 104-byte Unix socket limit.
@@ -151,11 +172,29 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		return nil, err
 	}
 
+	// Between cmd.Start() and gRPC connect, the worker is alive but has zero
+	// network if CLONE_NEWNET was set. Set up veth + nftables now.
+	if ni != nil && cfg.NetworkEgress != nil && cfg.UID != 0 {
+		if err := ni.Setup(ctx, netiso.AgentNetwork{
+			AgentID:   cfg.UID - uidpool.DefaultBaseUID,
+			SessionID: cfg.SessionID,
+			PID:       cmd.Process.Pid,
+			Egress:    cfg.NetworkEgress,
+		}); err != nil {
+			_ = cmd.Process.Kill()
+			<-waitCh
+			return nil, fmt.Errorf("setting up network isolation: %w", err)
+		}
+	}
+
 	// Connect gRPC client to the agent's worker socket.
 	conn, err := grpc.NewClient("unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
+		if ni != nil && cfg.NetworkEgress != nil {
+			_ = ni.Teardown(cfg.SessionID)
+		}
 		_ = cmd.Process.Kill()
 		<-waitCh
 		return nil, fmt.Errorf("connecting to agent worker: %w", err)
@@ -177,6 +216,9 @@ func defaultWorkerFactory(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHand
 		},
 		Close: func() {
 			conn.Close()
+			if ni != nil && cfg.NetworkEgress != nil {
+				_ = ni.Teardown(cfg.SessionID)
+			}
 			_ = os.Remove(socketPath) // best-effort cleanup
 			_ = os.Remove(socketDir)  // best-effort cleanup
 		},

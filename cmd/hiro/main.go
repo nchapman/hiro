@@ -24,6 +24,7 @@ import (
 	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
+	"github.com/nchapman/hiro/internal/netiso"
 	"github.com/nchapman/hiro/internal/platform"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/platform/loghandler"
@@ -422,9 +423,11 @@ func (a *app) startManager() error {
 		return err
 	}
 
+	ni := initNetIso(a.logger)
+
 	a.mgr = agent.NewManager(a.ctx, a.rootDir, agent.Options{
 		WorkingDir: a.absRootDir,
-	}, a.cp, a.logger, nil, pool, a.pdb)
+	}, a.cp, a.logger, nil, pool, a.pdb, ni)
 	if a.clusterSvc != nil {
 		a.mgr.SetClusterService(a.clusterSvc)
 	}
@@ -625,6 +628,22 @@ func detectUIDPool(logger *slog.Logger) (*uidpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+// initNetIso probes for CAP_NET_ADMIN and creates a NetIso instance.
+// Returns nil if network isolation is not available (e.g. outside Docker).
+func initNetIso(logger *slog.Logger) *netiso.NetIso {
+	if err := netiso.Probe(); err != nil {
+		logger.Info("network isolation disabled", "reason", err)
+		return nil
+	}
+	ni, err := netiso.New(logger)
+	if err != nil {
+		logger.Warn("failed to initialize network isolation", "error", err)
+		return nil
+	}
+	logger.Info("network isolation enabled")
+	return ni
 }
 
 func envOr(key, fallback string) string {

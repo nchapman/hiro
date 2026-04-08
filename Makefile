@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation test-netiso test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
 
 # Auto-load .env variables. Command-line overrides (make VAR=x) take precedence.
 # Variables are NOT exported globally — only test targets pass what they need.
@@ -19,7 +19,11 @@ test-local:
 
 test-isolation:
 	docker build --target test -t hiro-test .
-	docker run --rm --init hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
+	docker run --rm --init --cap-add NET_ADMIN hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
+
+test-netiso:
+	docker build --target test -t hiro-test .
+	docker run --rm --init --privileged hiro-test go test ./internal/netiso/... -tags=netiso -v -count=1
 
 test-online:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi

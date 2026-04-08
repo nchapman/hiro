@@ -98,6 +98,23 @@ func (f Frontmatter) Int(key string) int {
 	return 0
 }
 
+// Sub returns a nested Frontmatter map, or nil if missing/wrong type.
+// YAML v3 unmarshals nested maps as either Frontmatter or map[string]any.
+func (f Frontmatter) Sub(key string) Frontmatter {
+	v, ok := f[key]
+	if !ok {
+		return nil
+	}
+	switch tv := v.(type) {
+	case Frontmatter:
+		return tv
+	case map[string]any:
+		return Frontmatter(tv)
+	default:
+		return nil
+	}
+}
+
 // StringMap returns a frontmatter value as a map[string]string, or nil if missing/wrong type.
 func (f Frontmatter) StringMap(key string) map[string]string {
 	v, ok := f[key]
@@ -216,6 +233,7 @@ type AgentConfig struct {
 	Model           string   // from frontmatter "model"; per-agent model override
 	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
 	Groups          []string // from frontmatter "groups"; supplementary Unix groups for the worker process
+	NetworkEgress   []string // from frontmatter "network.egress"; allowed egress domains (nil = no network, default-deny)
 	Prompt          string   // the markdown body — the agent's operating instructions
 	Skills          []SkillConfig
 }
@@ -287,6 +305,7 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		Model:           parsed.Frontmatter.String("model"),
 		MaxTurns:        parsed.Frontmatter.Int("max_turns"),
 		Groups:          parsed.Frontmatter.StringSlice("groups"),
+		NetworkEgress:   parsed.Frontmatter.Sub("network").StringSlice("egress"),
 		Prompt:          parsed.Body,
 	}
 

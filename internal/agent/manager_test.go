@@ -76,7 +76,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello from agent"), nil, nil)
+	}, nil, logger, testWorkerFactory("hello from agent"), nil, nil, nil)
 	return mgr, dir
 }
 
@@ -745,7 +745,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -756,7 +756,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -781,7 +781,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -793,7 +793,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	// Create a new manager and restore.
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -834,14 +834,14 @@ Child.`)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	parentID, _ := mgr1.CreateInstance(ctx, "parent-agent", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "child-agent", parentID, "persistent", "", "", "", "")
 	mgr1.StopInstance(childID)
 	mgr1.StopInstance(parentID)
 	mgr1.Shutdown()
 
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -885,7 +885,7 @@ Worker that also wants hiro-operators.`)
 	pool1 := uidpool.New(10000, 10000, 64)
 	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
 
 	parentID, _ := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "worker", parentID, "persistent", "", "", "", "")
@@ -897,7 +897,7 @@ Worker that also wants hiro-operators.`)
 	pool2 := uidpool.New(10000, 10000, 64)
 	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -941,7 +941,7 @@ Wants escalation.`)
 	pool1 := uidpool.New(10000, 10000, 64)
 	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
 
 	parentID, _ := mgr1.CreateInstance(ctx, "unpriv", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "wants-groups", parentID, "persistent", "", "", "", "")
@@ -953,7 +953,7 @@ Wants escalation.`)
 	pool2 := uidpool.New(10000, 10000, 64)
 	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -990,7 +990,7 @@ Operator.`)
 	pool1 := uidpool.New(10000, 10000, 64)
 	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
 	mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	mgr1.Shutdown()
 
@@ -998,7 +998,7 @@ Operator.`)
 	pool2 := uidpool.New(10000, 10000, 64)
 	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestManager_Restore_EphemeralCleaned(t *testing.T) {
 		Mode:      "ephemeral",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1057,7 +1057,7 @@ func TestManager_Restore_MissingAgentDefSkipped(t *testing.T) {
 		Mode:      "persistent",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1084,7 +1084,7 @@ func TestManager_Restore_MissingInstanceDirCleaned(t *testing.T) {
 		Status:    "running",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1147,7 +1147,7 @@ func setupTestManagerWithPool(t *testing.T, pool *uidpool.Pool) (*Manager, strin
 	factory, configs := capturingWorkerFactory("hello")
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil)
+	}, nil, logger, factory, pool, nil, nil)
 	return mgr, dir, configs
 }
 
@@ -1246,7 +1246,7 @@ func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, failingWorkerFactory(), pool, nil)
+	}, nil, logger, failingWorkerFactory(), pool, nil, nil)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
@@ -1318,7 +1318,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory1, pool, pdb)
+	}, nil, logger, factory1, pool, pdb, nil)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1334,7 +1334,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory2, pool2, pdb)
+	}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1535,7 +1535,7 @@ func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, cp, logger, testWorkerFactory("ok"), nil, nil)
+	}, cp, logger, testWorkerFactory("ok"), nil, nil, nil)
 	return mgr, dir
 }
 
@@ -1683,7 +1683,7 @@ Operator.`)
 
 	// Start persistent instance, shut down
 	pdb := openTestPDB(t, dir)
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	id, err := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -1691,7 +1691,7 @@ Operator.`)
 	mgr1.Shutdown()
 
 	// Restore — persistent mode should survive
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
