@@ -294,7 +294,7 @@ func TestAccessChecker(t *testing.T) {
 		}
 		return nil
 	}, func(chatID int64, text string) error {
-		if text == "Your message is awaiting approval from the operator." {
+		if text == "Your message is awaiting approval." {
 			pendingReplies.Add(1)
 		} else {
 			sentMessages.Add(1)

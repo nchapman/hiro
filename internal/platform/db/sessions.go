@@ -359,3 +359,36 @@ func (d *DB) SessionBySubscription(ctx context.Context, subscriptionID string) (
 	}
 	return s, true, nil
 }
+
+// SessionMessageCounts returns the number of non-meta messages for each of
+// the given session IDs. Sessions with zero messages are omitted from the map.
+func (d *DB) SessionMessageCounts(ctx context.Context, sessionIDs []string) (map[string]int, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]any, len(sessionIDs))
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholders are "?" literals, not user input — values are parameterized via args
+		"SELECT session_id, COUNT(*) FROM messages WHERE session_id IN (%s) AND meta = 0 GROUP BY session_id",
+		strings.Join(placeholders, ","),
+	)
+	rows, err := d.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting session messages: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[string]int, len(sessionIDs))
+	for rows.Next() {
+		var sid string
+		var count int
+		if err := rows.Scan(&sid, &count); err != nil {
+			return nil, err
+		}
+		counts[sid] = count
+	}
+	return counts, rows.Err()
+}

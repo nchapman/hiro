@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nchapman/hiro/internal/agent"
 	"github.com/nchapman/hiro/internal/channel"
@@ -182,6 +183,7 @@ func (s *Server) instanceRoutes() {
 	s.mux.HandleFunc("POST /api/instances/{id}/channel-access/{senderKey}/block", s.requireAuth(s.handleBlockChannelSender))
 	s.mux.HandleFunc("DELETE /api/instances/{id}/channel-access/{senderKey}", s.requireAuth(s.handleDismissChannelSender))
 	s.mux.HandleFunc("GET /api/channel-access/pending", s.requireAuth(s.handleGlobalPendingChannelAccess))
+	s.mux.HandleFunc("GET /api/instances/{id}/sessions", s.requireAuth(s.handleListSessions))
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleSessionMessages))
 	s.mux.HandleFunc("GET /api/models", s.requireAuth(s.handleListModels))
 	s.mux.HandleFunc("GET /api/provider-types", s.requireAuth(s.handleListProviderTypes))
@@ -320,6 +322,70 @@ func (s *Server) handleInstanceMessages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	instanceID := r.PathValue("id")
+
+	// Validate instance exists.
+	if s.hasManager() {
+		if _, ok := s.manager.GetInstance(instanceID); !ok {
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	if s.pdb == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	sessions, err := s.pdb.ListSessionsByInstance(r.Context(), instanceID)
+	if err != nil {
+		s.logger.Error("failed to list sessions", "instance_id", instanceID, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Batch-fetch message counts.
+	ids := make([]string, len(sessions))
+	for i, sess := range sessions {
+		ids[i] = sess.ID
+	}
+	counts, err := s.pdb.SessionMessageCounts(r.Context(), ids)
+	if err != nil {
+		s.logger.Error("failed to count session messages", "error", err)
+		// Non-fatal — return sessions without counts.
+		counts = nil
+	}
+
+	type sessionResponse struct {
+		ID           string  `json:"id"`
+		ChannelType  string  `json:"channel_type"`
+		ChannelID    string  `json:"channel_id,omitempty"`
+		Status       string  `json:"status"`
+		CreatedAt    string  `json:"created_at"`
+		StoppedAt    *string `json:"stopped_at,omitempty"`
+		MessageCount int     `json:"message_count"`
+	}
+
+	result := make([]sessionResponse, 0, len(sessions))
+	for _, sess := range sessions {
+		resp := sessionResponse{
+			ID:           sess.ID,
+			ChannelType:  sess.ChannelType,
+			ChannelID:    sess.ChannelID,
+			Status:       sess.Status,
+			CreatedAt:    sess.CreatedAt.UTC().Format(time.RFC3339),
+			MessageCount: counts[sess.ID],
+		}
+		if sess.StoppedAt != nil {
+			t := sess.StoppedAt.UTC().Format(time.RFC3339)
+			resp.StoppedAt = &t
+		}
+		result = append(result, resp)
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {

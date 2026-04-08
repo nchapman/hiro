@@ -188,5 +188,4 @@ export {
   PromptInput,
   PromptInputTextarea,
   PromptInputActions,
-  usePromptInput,
 }

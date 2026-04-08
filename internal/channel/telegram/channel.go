@@ -209,7 +209,7 @@ func (c *Channel) handleUpdate(ctx context.Context, u update) {
 				"chat_id", msg.Chat.ID,
 				"user", msg.From.Username,
 			)
-			_ = c.sendMessage(ctx, msg.Chat.ID, "Your message is awaiting approval from the operator.")
+			_ = c.sendMessage(ctx, msg.Chat.ID, "Your message is awaiting approval.")
 			return
 		}
 	}

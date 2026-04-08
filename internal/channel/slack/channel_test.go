@@ -514,7 +514,7 @@ func TestAccessChecker(t *testing.T) {
 	var dispatchCount atomic.Int32
 	var pendingReplies atomic.Int32
 	slackAPI := mockSlackAPI(t, func(ch, text, ts string) error {
-		if text == "Your message is awaiting approval from the operator." {
+		if text == "Your message is awaiting approval." {
 			pendingReplies.Add(1)
 		} else {
 			dispatchCount.Add(1)

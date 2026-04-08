@@ -222,7 +222,7 @@ func (c *Channel) handleEventCallback(ctx context.Context, body []byte) {
 			if threadTS == "" {
 				threadTS = evt.TS
 			}
-			_ = c.postMessage(ctx, evt.Channel, threadTS, "Your message is awaiting approval from the operator.")
+			_ = c.postMessage(ctx, evt.Channel, threadTS, "Your message is awaiting approval.")
 			return
 		}
 	}

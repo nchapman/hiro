@@ -37,7 +37,7 @@ import {
   User02Icon,
 } from "@hugeicons/core-free-icons"
 import { formatTokenCount } from "@/lib/format"
-import { parseModelSpec, formatModelSpec } from "@/pages/settings/DefaultModelCard"
+import { parseModelSpec, formatModelSpec } from "@/lib/model-utils"
 import type { ModelInfo } from "@/lib/chat-types"
 
 interface InstanceConfigModalProps {

@@ -157,11 +157,11 @@ function activityFromPath(pathname: string): Activity {
   return "chat"
 }
 
-/** Parse the chat session ID from the URL, matching /chat/:sessionId and /chat/:sessionId/config. */
+/** Parse the chat session ID from the URL, matching /chat/:sessionId and sub-routes. */
 function sessionIdFromPath(pathname: string): string | undefined {
   const exact = matchPath("/chat/:sessionId", pathname)
   if (exact) return exact.params.sessionId
-  const nested = matchPath("/chat/:sessionId/config", pathname)
+  const nested = matchPath("/chat/:sessionId/:sub", pathname)
   return nested?.params.sessionId
 }
 

@@ -9,6 +9,7 @@ import {
   PlayIcon,
   Delete01Icon,
   Settings01Icon,
+  Clock01Icon,
 } from "@hugeicons/core-free-icons"
 import {
   DropdownMenu,
@@ -34,12 +35,13 @@ import type { ModelInfo, ToolCall, Message, MessageAttachment } from "@/lib/chat
 import type { ChatAttachment } from "@/hooks/use-websocket"
 import { mergeHistoryMessages } from "@/lib/chat-parser"
 import { statusDotColor } from "@/lib/session-utils"
-import { parseModelSpec, formatModelSpec } from "@/pages/settings/DefaultModelCard"
+import { parseModelSpec, formatModelSpec } from "@/lib/model-utils"
 import ModelSelector from "@/pages/chat/ModelSelector"
 import TokenCounter from "@/pages/chat/TokenCounter"
 import { AssistantMessage, UserMessage } from "@/pages/chat/ChatMessages"
 import ChatInputArea from "@/pages/chat/ChatInput"
 import InstanceConfigModal from "@/pages/chat/InstanceConfigModal"
+import SessionsModal from "@/pages/chat/SessionsModal"
 
 // --- Session cache ---
 
@@ -77,24 +79,30 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const [reasoningEffort, setReasoningEffort] = useState("")
   // Per-channel session ID received from the WebSocket "session" event.
   // Used for fetching session-specific history and usage.
-  const [channelSessionId, setChannelSessionId] = useState<string | null>(null)
+  const [, setChannelSessionId] = useState<string | null>(null)
   const streamingMsgId = useRef<string | null>(null)
   const sessionGeneration = useRef(0)
   const chatContainerRef = useRef<ChatContainerHandle>(null)
   const prevSessionIdRef = useRef<string | null>(null)
   const sessionCache = useRef(new Map<string, SessionCacheEntry>())
-  // Refs that mirror state so the session-change effect can read latest values.
+  // Refs that mirror state so the session-change effect can read latest values
+  // without re-triggering the effect.
   const messagesRef = useRef<Message[]>(messages)
   messagesRef.current = messages
   const usageRef = useRef<UsageInfo | null>(usage)
   usageRef.current = usage
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+  const onSessionsChangedRef = useRef(onSessionsChanged)
+  onSessionsChangedRef.current = onSessionsChanged
   const pendingScrollTop = useRef(0)
 
   // Capture scroll position synchronously before React updates the DOM.
   useLayoutEffect(() => {
+    const container = chatContainerRef.current
     return () => {
       pendingScrollTop.current =
-        chatContainerRef.current?.scrollElement?.scrollTop ?? 0
+        container?.scrollElement?.scrollTop ?? 0
     }
   }, [session?.id])
 
@@ -104,6 +112,11 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   const setConfigOpen = useCallback((open: boolean) => {
     if (!session) return
     nav(open ? `/chat/${session.id}/config` : `/chat/${session.id}`, { replace: true })
+  }, [session, nav])
+  const sessionsOpen = useMemo(() => session ? location.pathname === `/chat/${session.id}/sessions` : false, [location.pathname, session])
+  const setSessionsOpen = useCallback((open: boolean) => {
+    if (!session) return
+    nav(open ? `/chat/${session.id}/sessions` : `/chat/${session.id}`, { replace: true })
   }, [session, nav])
   const isStopped = session?.status === "stopped"
   const isRoot = session ? !session.mode || !session.parent_id : false
@@ -191,6 +204,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
   // Load message history when agent changes — with per-session caching.
   useEffect(() => {
     const gen = ++sessionGeneration.current
+    const currentSession = sessionRef.current
 
     setOnMessage(() => {}) // clear stale handler immediately
     setChannelSessionId(null)
@@ -207,15 +221,15 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         scrollTop: pendingScrollTop.current,
       })
     }
-    prevSessionIdRef.current = session?.id ?? null
+    prevSessionIdRef.current = currentSession?.id ?? null
 
-    if (!session) {
+    if (!currentSession) {
       setMessages([])
       return
     }
 
     // Check cache for instant restore.
-    const cached = sessionCache.current.get(session.id)
+    const cached = sessionCache.current.get(currentSession.id)
     if (cached) {
       setMessages(cached.messages)
       setUsage(cached.usage)
@@ -369,8 +383,8 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           setChannelSessionId(null)
           streamingMsgId.current = null
           setStreaming(false)
-          if (session?.id) sessionCache.current.delete(session.id)
-          onSessionsChanged()
+          if (sessionRef.current?.id) sessionCache.current.delete(sessionRef.current.id)
+          onSessionsChangedRef.current()
           break
         case "error":
           streamingMsgId.current = null
@@ -480,6 +494,13 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         </div>
         <div className="flex items-center gap-2">
           {usage && usage.event_count > 0 && <TokenCounter usage={usage} />}
+          <button
+            onClick={() => setSessionsOpen(true)}
+            title="View sessions"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground"
+          >
+            <HugeiconsIcon icon={Clock01Icon} className="h-4 w-4" />
+          </button>
           <button
             onClick={() => setConfigOpen(true)}
             title="Instance settings"
@@ -621,6 +642,13 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         onOpenChange={setConfigOpen}
         models={models}
         onConfigChanged={onSessionsChanged}
+      />
+
+      <SessionsModal
+        instanceId={session.id}
+        instanceName={session.name}
+        open={sessionsOpen}
+        onOpenChange={setSessionsOpen}
       />
     </div>
   )
