@@ -437,7 +437,7 @@ All other syscalls are allowed (`SECCOMP_RET_ALLOW`). The filter validates the a
 
 **Defense-in-depth (optional, not yet planned):** Block `socket(AF_INET)` and `socket(AF_INET6)` as a backstop. If an agent escapes its network namespace via a kernel exploit, seccomp prevents it from creating new IP sockets. This is redundant with namespace isolation in the normal case, but provides a second barrier.
 
-A prototype (`proto/netiso-userns/drop_privs.c`) validates this approach: a small C program installs the seccomp-BPF filter then execs the command. The prototype's test 7 demonstrates the full lifecycle — child creates namespaces, self-configures interfaces and bind mounts, then the seccomp filter is installed. After that, the agent can use the network and read/write files but cannot `unshare`, `mount`, or `chroot`.
+A prototype (since removed) validated this approach: a small C program installs the seccomp-BPF filter then execs the command, demonstrating the full lifecycle — child creates namespaces, self-configures interfaces and bind mounts, then the seccomp filter is installed. After that, the agent can use the network and read/write files but cannot `unshare`, `mount`, or `chroot`. The production implementation lives in `cmd/hiro/agent_linux.go` (`installSeccomp`, `buildSeccompFilter`).
 
 **Container-wide seccomp profile (Docker):**
 - **Required for network isolation:** Custom profile extending Docker defaults to allow `clone` (with `CLONE_NEWUSER`), `unshare`, and `setns` — needed for the control plane to create user namespaces
@@ -466,7 +466,7 @@ The original design anticipated needing only `CAP_NET_ADMIN`. The initial implem
 
 #### Why CLONE_NEWUSER Over CAP_SYS_ADMIN
 
-The initial implementation used `CAP_SYS_ADMIN` to create namespaces from the control plane. This worked but granted the broadest Linux capability to the container — mount operations, cgroup manipulation, device management, and much more. A shell script prototype (`proto/netiso-userns/`) validated the alternative approach:
+The initial implementation used `CAP_SYS_ADMIN` to create namespaces from the control plane. This worked but granted the broadest Linux capability to the container — mount operations, cgroup manipulation, device management, and much more. A shell script prototype (since removed) validated the alternative approach:
 
 1. **Child creates its own namespaces** via `CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS` — no `CAP_SYS_ADMIN` needed
 2. **Parent creates/moves veth** with `CAP_NET_ADMIN` — this works across the user namespace boundary
@@ -560,7 +560,7 @@ Discoveries and deviations from the original design, documented during implement
 
 The original design stated "Requires `CAP_NET_ADMIN` on the container" as the sole privilege requirement. The initial implementation discovered that `CLONE_NEWNET` and `CLONE_NEWNS` are gated on `CAP_SYS_ADMIN`, not `CAP_NET_ADMIN`, and used `CAP_SYS_ADMIN` as a workaround.
 
-A subsequent prototype (`proto/netiso-userns/`) validated that `CLONE_NEWUSER` eliminates the `CAP_SYS_ADMIN` requirement entirely. The final privilege set is `CAP_NET_ADMIN` + custom seccomp (allowing `CLONE_NEWUSER`) + `net.ipv4.ip_forward=1` sysctl. See [Container Privilege Requirements](#container-privilege-requirements).
+A subsequent prototype (since removed) validated that `CLONE_NEWUSER` eliminates the `CAP_SYS_ADMIN` requirement entirely. The final privilege set is `CAP_NET_ADMIN` + custom seccomp (allowing `CLONE_NEWUSER`) + `net.ipv4.ip_forward=1` sysctl. See [Container Privilege Requirements](#container-privilege-requirements).
 
 The key architectural change: the control plane no longer enters the child's namespaces to configure them. Instead, the child creates its own `NEWUSER | NEWNET | NEWNS` namespaces and self-configures (interfaces, routes, bind mounts) from inside its user namespace where it has full capabilities. The control plane only operates in the host namespace: creating veth pairs, moving peers into the child's netns, and managing nftables rules.
 
