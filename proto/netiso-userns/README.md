@@ -65,8 +65,8 @@ sysctls:
 
 ## Prototype vs production
 
-This prototype validates the kernel primitives using shell scripts and small C programs. The production Go implementation will differ in:
+This prototype validates the kernel primitives using shell scripts and small C programs. The production Go implementation (`internal/netiso/`) differs in:
 
-- **Seccomp timing**: Production installs the BPF filter via `SysProcAttr` before exec (parent installs for child). The prototype uses `exec(drop_privs)` which models the effect but not the timing.
-- **UID mapping**: Production uses `SysProcAttr.UidMappings` to map `0 → 10000` between `clone()` and `exec()`. The prototype uses `--map-root-user` (maps `0 → 0`) for most tests, with Test 2 verifying the kernel accepts the production mapping.
-- **DNS forwarder**: Not part of this prototype. The DNS-to-nftables flow is validated in design only.
+- **Seccomp timing**: Production installs the BPF filter in `runAgent()` after network self-configuration but before gRPC starts. The prototype uses `exec(drop_privs)` which models the effect but not the timing.
+- **UID mapping**: Production uses `SysProcAttr.UidMappings` to map `0 → agent UID` between `clone()` and `exec()`. The prototype uses `--map-root-user` (maps `0 → 0`) for most tests, with Test 2 verifying the kernel accepts non-root mappings.
+- **DNS forwarder**: Production implements the full DNS-to-nftables flow in `internal/netiso/dns.go`. The prototype validates kernel primitives only.

@@ -16,6 +16,8 @@ docker compose -f docker-compose.dev.yml up --build -d
 
 Running locally creates runtime directories (`agents/`, `db/`, `instances/`, etc.) in the repo root and conflicts with Docker port bindings.
 
+Docker containers require `CAP_NET_ADMIN`, a custom seccomp profile (`seccomp.json`), and `net.ipv4.ip_forward=1` for network isolation. These are configured in all `docker-compose*.yml` files.
+
 ## Build & Dev Commands
 
 ```bash
@@ -110,10 +112,11 @@ Control Plane Process (hiro)
 Agent Worker Process (hiro agent)
 ├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
 ├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
-└── Runs under isolated UID for security
+├── Runs under isolated UID for security
+└── Optional: network namespace + seccomp-BPF (when network.egress is declared)
 ```
 
-**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-agent-{session-id}.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
+**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`. When network isolation is enabled (`network.egress` in agent frontmatter), the worker additionally spawns in its own user/network/mount namespaces (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`), self-configures its network interface and DNS, then installs a per-worker seccomp-BPF filter before starting gRPC.
 
 **Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. The `config/` directory is `0700` root-owned, unreadable by agents.
 
@@ -412,7 +415,7 @@ How agents schedule recurring and one-time tasks. Covers the subscription data m
 
 ### [`docs/network-isolation.md`](docs/network-isolation.md) — Network Isolation
 
-Per-agent network isolation design. Each agent spawns in its own network namespace (`CLONE_NEWNET` + veth pair). A DNS forwarder resolves allowed domains and dynamically populates nftables IP sets — filtering is purely at the IP layer, protocol-agnostic (HTTPS, SSH, git all work). Covers requirements, six rejected alternatives, the DNS-driven firewall design, agent configuration (`network.egress`), policy inheritance, spawn protocol changes, and two rounds of security review findings. Not yet implemented.
+Per-agent network isolation design and implementation. Each agent spawns in its own network namespace (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS` + veth pair). A DNS forwarder resolves allowed domains and dynamically populates nftables IP sets — filtering is purely at the IP layer, protocol-agnostic (HTTPS, SSH, git all work). Covers requirements, six rejected alternatives, the DNS-driven firewall design, agent configuration (`network.egress`), policy inheritance, spawn protocol changes, per-worker seccomp-BPF, and two rounds of security review findings.
 
 ### [`docs/map.md`](docs/map.md) — Codebase Map
 
