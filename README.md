@@ -5,7 +5,7 @@ A distributed AI agent platform. A single binary serves an HTTP API, WebSocket c
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/setup.sh | sh
 cd hiro
 docker compose up -d
 ```
@@ -28,10 +28,16 @@ These are pre-configured in the compose file.
 
 ### Updating
 
+Run setup again to check for updated files, then pull the latest image:
+
 ```bash
+curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/setup.sh | sh
+cd hiro
 docker compose pull
 docker compose up -d
 ```
+
+The setup script prompts before replacing any files you may have customized.
 
 ## Configuration
 
