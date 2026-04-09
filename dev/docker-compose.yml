@@ -1,6 +1,6 @@
 # Dev cluster — boot fresh nodes for interactive testing.
 #
-#   docker compose -f docker-compose.dev.yml up --build
+#   docker compose -f dev/docker-compose.yml up --build
 #
 # Then onboard each node through the web UI:
 #   - Node 1 (leader): http://localhost:8080
@@ -12,12 +12,12 @@
 # then approve them from node1's settings page.
 services:
   node1:
-    build: .
+    build: ..
     init: true
     cap_add:
       - NET_ADMIN
     security_opt:
-      - seccomp=seccomp.json
+      - seccomp=../seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
@@ -31,12 +31,12 @@ services:
       - node1:/hiro
 
   node2:
-    build: .
+    build: ..
     init: true
     cap_add:
       - NET_ADMIN
     security_opt:
-      - seccomp=seccomp.json
+      - seccomp=../seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
@@ -48,12 +48,12 @@ services:
       - node2:/hiro
 
   node3:
-    build: .
+    build: ..
     init: true
     cap_add:
       - NET_ADMIN
     security_opt:
-      - seccomp=seccomp.json
+      - seccomp=../seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:

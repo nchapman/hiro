@@ -1,11 +1,11 @@
-# E2E test overlay — run with: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up hiro-e2e
+# E2E test — run with: make test-online
 services:
   hiro-e2e:
-    build: .
+    build: ..
     cap_add:
       - NET_ADMIN
     security_opt:
-      - seccomp=seccomp.json
+      - seccomp=../seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
@@ -15,7 +15,7 @@ services:
       - HIRO_ROOT=/hiro
     volumes:
       - e2e-hiro:/hiro
-    init: true # clean up zombie agent processes
+    init: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 30s

@@ -1,43 +1,47 @@
 # Hiro
 
-A distributed AI agent platform. A single Go binary serves an HTTP API, WebSocket chat, and a React dashboard. Agents are defined as markdown files and run agentic loops that can spawn and manage child agents.
+A distributed AI agent platform. A single binary serves an HTTP API, WebSocket chat, and a React dashboard. Agents are defined as markdown files and run agentic loops that can spawn and manage child agents.
 
 ## Quick Start
 
-Hiro runs exclusively in Docker.
-
 ```bash
-docker compose up --build -d
+curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/install.sh | sh
+cd hiro
+docker compose up -d
 ```
 
-Open `http://localhost:8080` to complete setup — you'll configure a password and LLM provider through the onboarding flow. Configuration is stored in `config/config.yaml` inside the platform root.
+Open [http://localhost:8080](http://localhost:8080) to complete setup — you'll configure a password and LLM provider through the onboarding flow.
 
-Agent state is stored in a Docker volume — it survives container restarts but `docker compose down -v` will destroy it. The port is bound to localhost only; use a reverse proxy to expose it remotely.
+Agent state lives in a Docker volume and survives container restarts. The port is bound to localhost only; use a reverse proxy to expose it remotely.
+
+> **Warning:** `docker compose down -v` destroys all agent state (history, memory, todos).
 
 ### Docker Requirements
 
-The container requires capabilities beyond Docker's defaults for per-agent security isolation:
+The container requires extra capabilities for per-agent security isolation:
 
-```yaml
-cap_add:
-  - NET_ADMIN               # veth pairs + nftables rules for network isolation
-security_opt:
-  - seccomp=seccomp.json     # allow CLONE_NEWUSER for namespace creation
-sysctls:
-  - net.ipv4.ip_forward=1    # route traffic between agent network namespaces
+- `CAP_NET_ADMIN` — veth pairs and nftables rules for network isolation
+- Custom seccomp profile — allows `CLONE_NEWUSER` for namespace creation (does not use `--privileged`)
+- `net.ipv4.ip_forward=1` — routes traffic between agent network namespaces
+
+These are pre-configured in the compose file.
+
+### Updating
+
+```bash
+docker compose pull
+docker compose up -d
 ```
-
-These are pre-configured in all `docker-compose*.yml` files. The custom seccomp profile (`seccomp.json`) extends Docker's default — it does not grant `CAP_SYS_ADMIN` or use `--privileged`.
 
 ## Configuration
 
-On first launch, Hiro starts in setup mode. The dashboard walks you through choosing an LLM provider, entering an API key, and setting an admin password. This is stored in `config/config.yaml` at the platform root — no environment variables needed for normal operation.
+On first launch, Hiro starts in setup mode. The dashboard walks you through choosing an LLM provider, entering an API key, and setting an admin password. Configuration is stored in `config/config.yaml` inside the container — no environment variables needed for normal operation.
 
-Provider configuration can be updated later through the dashboard settings page.
+Provider settings can be updated later through the dashboard settings page.
 
 ### Environment Variables
 
-These are optional overrides, not required for normal use:
+Optional overrides — not required for normal use:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -74,7 +78,7 @@ network:
 Your system prompt goes here.
 ```
 
-Agent mode (persistent or ephemeral) is a runtime property specified by the caller at instance creation time, not part of the definition. Persistent instances get memory, todos, and history search. Ephemeral instances run a single task and clean up.
+Agent mode (persistent or ephemeral) is a runtime property specified by the caller, not part of the definition. Persistent instances get memory, todos, and history search. Ephemeral instances run a single task and clean up.
 
 Agents can create new agent and skill definitions at runtime using their file tools — no restart needed.
 
@@ -97,38 +101,22 @@ Hiro uses defense-in-depth to run untrusted LLM-driven agents:
 
 See [docs/security.md](docs/security.md) for the full threat model.
 
-### Network Isolation
-
-Agents declare allowed egress domains in their frontmatter. Each agent spawns in its own Linux network namespace with a dedicated veth pair. A DNS forwarder in the control plane resolves allowed domains and dynamically populates per-agent nftables IP sets — filtering is at the IP layer, so HTTPS, SSH, git, and any other protocol work transparently.
-
-Agents without `network.egress` have no outbound connectivity (default-deny). Agents with specific domains are confined to those domains. Agents with `egress: ["*"]` have unrestricted access, constrained by parent inheritance.
-
-See [docs/network-isolation.md](docs/network-isolation.md) for the full design.
-
-## Platform Root
-
-On first boot, Hiro initializes the platform root with a default operator agent:
-
-```
-/hiro/
-  agents/       # Agent definitions (operator-writable)
-  skills/       # Shared skills (operator-writable)
-  instances/    # Per-agent durable state (memory, persona, sessions)
-  workspace/    # Shared collaborative space for agent work
-  db/           # Unified SQLite database
-  config/       # Operator config + secrets (root-only)
-```
-
 ## Development
+
+Building from source requires Go 1.26+ and Node.js 24+.
 
 ```bash
 make build           # Build web UI + Go binary
 make test            # Run tests in Docker
 make test-local      # Run tests locally (mock workers, no Docker)
-make test-isolation  # Run UID isolation tests in Docker
-make test-netiso     # Run network isolation tests in Docker
 make lint            # Run golangci-lint
 make check           # Tests + go vet (in Docker)
+```
+
+To run a development cluster:
+
+```bash
+docker compose -f dev/docker-compose.yml up --build
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture, package descriptions, and all available make targets.

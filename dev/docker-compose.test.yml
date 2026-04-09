@@ -3,13 +3,13 @@
 services:
   test:
     build:
-      context: .
+      context: ..
       target: test
     init: true
     cap_add:
       - NET_ADMIN  # nftables rules, veth pairs
     security_opt:
-      - seccomp=seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
+      - seccomp=../seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
     sysctls:
       - net.ipv4.ip_forward=1
     command: ["go", "test", "-race", "./...", "-v", "-count=1"]

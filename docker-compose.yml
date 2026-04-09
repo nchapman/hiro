@@ -1,7 +1,6 @@
 services:
   hiro:
-    build: .
-    image: hiro:latest
+    image: ghcr.io/nchapman/hiro:latest
     restart: unless-stopped
     init: true
     cap_add:
@@ -12,8 +11,6 @@ services:
       - net.ipv4.ip_forward=1
     ports:
       - "127.0.0.1:8080:8080"
-    env_file:
-      - .env
     volumes:
       - hiro:/hiro
     environment:

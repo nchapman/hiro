@@ -11,12 +11,12 @@ Hiro is a distributed AI agent platform written in Go. A single binary serves an
 **NEVER run `./hiro` directly.** This app only runs in Docker. To test changes, rebuild and start Docker:
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build -d
+docker compose -f dev/docker-compose.yml up --build -d
 ```
 
 Running locally creates runtime directories (`agents/`, `db/`, `instances/`, etc.) in the repo root and conflicts with Docker port bindings.
 
-Docker containers require `CAP_NET_ADMIN`, a custom seccomp profile (`seccomp.json`), and `net.ipv4.ip_forward=1` for network isolation. These are configured in all `docker-compose*.yml` files.
+Docker containers require `CAP_NET_ADMIN`, a custom seccomp profile (`seccomp.json`), and `net.ipv4.ip_forward=1` for network isolation. These are configured in `docker-compose.yml` and all `dev/docker-compose*.yml` files.
 
 ## Build & Dev Commands
 

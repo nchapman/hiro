@@ -7,12 +7,12 @@
 # to relay. All gRPC traffic flows through the relay with mTLS end-to-end.
 services:
   leader:
-    build: .
+    build: ..
     init: true
     cap_add:
       - NET_ADMIN
     security_opt:
-      - seccomp=seccomp.json
+      - seccomp=../seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     networks:
@@ -27,7 +27,7 @@ services:
       - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
     volumes:
       - leader-hiro:/hiro
-      - ./tests/e2e_cluster/leader-config/config.yaml:/hiro/config/config.yaml
+      - ../tests/e2e_cluster/leader-config/config.yaml:/hiro/config/config.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 5s
@@ -35,12 +35,12 @@ services:
       start_period: 5s
 
   worker:
-    build: .
+    build: ..
     init: true
     cap_add:
       - NET_ADMIN
     security_opt:
-      - seccomp=seccomp.json
+      - seccomp=../seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     networks:
