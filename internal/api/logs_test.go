@@ -127,12 +127,13 @@ func TestLogs_StrictAuth_DuringSetup(t *testing.T) {
 	// Clear the password to simulate setup-not-complete state.
 	cp.SetPasswordHash("")
 
-	// Unauthenticated request to log endpoint should get 503, not 200.
+	// Unauthenticated request to log endpoint should get 401 (auth checked
+	// before setup state to avoid leaking setup status).
 	req := httptest.NewRequest("GET", "/api/logs", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Errorf("status=%d during setup, want 503", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status=%d during setup, want 401", rec.Code)
 	}
 }

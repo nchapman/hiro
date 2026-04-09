@@ -39,19 +39,25 @@ func TestIsSameOrigin(t *testing.T) {
 
 func TestIsLoopbackOrigin(t *testing.T) {
 	tests := []struct {
-		name   string
-		origin string
-		host   string
-		want   bool
+		name       string
+		origin     string
+		host       string
+		remoteAddr string
+		want       bool
 	}{
-		{"localhost with port", "http://localhost:8080", "localhost:8080", true},
-		{"127.0.0.1 with port", "http://127.0.0.1:8080", "127.0.0.1:8080", true},
-		{"::1 with port", "http://[::1]:8080", "[::1]:8080", true},
-		{"localhost no port", "http://localhost", "localhost", true},
-		{"external domain same-origin", "http://evil.local:8080", "evil.local:8080", false},
-		{"DNS rebinding attack", "http://attacker.com", "attacker.com", false},
-		{"no origin (non-browser)", "", "localhost:8080", true},
-		{"cross-origin", "http://evil.com", "localhost:8080", false},
+		// Browser requests (Origin present): check Host is loopback.
+		{"localhost with port", "http://localhost:8080", "localhost:8080", "", true},
+		{"127.0.0.1 with port", "http://127.0.0.1:8080", "127.0.0.1:8080", "", true},
+		{"::1 with port", "http://[::1]:8080", "[::1]:8080", "", true},
+		{"localhost no port", "http://localhost", "localhost", "", true},
+		{"external domain same-origin", "http://evil.local:8080", "evil.local:8080", "", false},
+		{"DNS rebinding attack", "http://attacker.com", "attacker.com", "", false},
+		{"cross-origin", "http://evil.com", "localhost:8080", "", false},
+
+		// Non-browser requests (no Origin): check RemoteAddr is loopback.
+		{"no origin, loopback remote", "", "localhost:8080", "127.0.0.1:1234", true},
+		{"no origin, remote IP", "", "localhost:8080", "192.168.1.1:1234", false},
+		{"no origin, ::1 remote", "", "localhost:8080", "[::1]:1234", true},
 	}
 
 	for _, tt := range tests {
@@ -61,6 +67,9 @@ func TestIsLoopbackOrigin(t *testing.T) {
 				req.Header.Set("Origin", tt.origin)
 			}
 			req.Host = tt.host
+			if tt.remoteAddr != "" {
+				req.RemoteAddr = tt.remoteAddr
+			}
 
 			if got := isLoopbackOrigin(req); got != tt.want {
 				t.Errorf("isLoopbackOrigin() = %v, want %v", got, tt.want)

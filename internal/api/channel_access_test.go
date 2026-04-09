@@ -12,9 +12,9 @@ import (
 )
 
 // newChannelAccessTestServer creates a test server with an access checker wired in.
-func newChannelAccessTestServer(t *testing.T) (*Server, string) {
+func newChannelAccessTestServer(t *testing.T) (*Server, string, string) {
 	t.Helper()
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	if err != nil {
@@ -29,7 +29,7 @@ func newChannelAccessTestServer(t *testing.T) (*Server, string) {
 	ac := channel.NewConfigAccessChecker(mgr, srv.logger)
 	srv.accessChecker = ac
 
-	return srv, instID
+	return srv, instID, token
 }
 
 // seedSender writes a sender entry directly to the instance config.
@@ -50,10 +50,10 @@ func seedSender(t *testing.T, srv *Server, instID, key string, status config.Cha
 }
 
 func TestListChannelAccess_Empty(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/instances/"+instID+"/channel-access", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("GET", "/api/instances/"+instID+"/channel-access", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -67,13 +67,13 @@ func TestListChannelAccess_Empty(t *testing.T) {
 }
 
 func TestListChannelAccess_WithSenders(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 
 	seedSender(t, srv, instID, "tg:12345", config.ChannelAccessPending)
 	seedSender(t, srv, instID, "slack:C999", config.ChannelAccessApproved)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/instances/"+instID+"/channel-access", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("GET", "/api/instances/"+instID+"/channel-access", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200", rec.Code)
@@ -87,11 +87,11 @@ func TestListChannelAccess_WithSenders(t *testing.T) {
 }
 
 func TestApproveChannelSender(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 	seedSender(t, srv, instID, "tg:12345", config.ChannelAccessPending)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/instances/"+instID+"/channel-access/tg%3A12345/approve", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("POST", "/api/instances/"+instID+"/channel-access/tg%3A12345/approve", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -107,11 +107,11 @@ func TestApproveChannelSender(t *testing.T) {
 }
 
 func TestBlockChannelSender(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 	seedSender(t, srv, instID, "tg:12345", config.ChannelAccessPending)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/instances/"+instID+"/channel-access/tg%3A12345/block", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("POST", "/api/instances/"+instID+"/channel-access/tg%3A12345/block", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -126,11 +126,11 @@ func TestBlockChannelSender(t *testing.T) {
 }
 
 func TestDismissChannelSender(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 	seedSender(t, srv, instID, "tg:12345", config.ChannelAccessPending)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("DELETE", "/api/instances/"+instID+"/channel-access/tg%3A12345", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("DELETE", "/api/instances/"+instID+"/channel-access/tg%3A12345", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -145,10 +145,10 @@ func TestDismissChannelSender(t *testing.T) {
 }
 
 func TestDismissChannelSender_NotFound(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("DELETE", "/api/instances/"+instID+"/channel-access/tg%3A99999", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("DELETE", "/api/instances/"+instID+"/channel-access/tg%3A99999", nil), token))
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404; body=%s", rec.Code, rec.Body.String())
@@ -156,10 +156,10 @@ func TestDismissChannelSender_NotFound(t *testing.T) {
 }
 
 func TestApproveChannelSender_NotFound(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/instances/"+instID+"/channel-access/tg%3A99999/approve", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("POST", "/api/instances/"+instID+"/channel-access/tg%3A99999/approve", nil), token))
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404; body=%s", rec.Code, rec.Body.String())
@@ -167,10 +167,10 @@ func TestApproveChannelSender_NotFound(t *testing.T) {
 }
 
 func TestGlobalPendingChannelAccess_Empty(t *testing.T) {
-	srv, _ := newChannelAccessTestServer(t)
+	srv, _, token := newChannelAccessTestServer(t)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/channel-access/pending", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("GET", "/api/channel-access/pending", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200", rec.Code)
@@ -187,13 +187,13 @@ func TestGlobalPendingChannelAccess_Empty(t *testing.T) {
 }
 
 func TestGlobalPendingChannelAccess_WithPending(t *testing.T) {
-	srv, instID := newChannelAccessTestServer(t)
+	srv, instID, token := newChannelAccessTestServer(t)
 	seedSender(t, srv, instID, "tg:111", config.ChannelAccessPending)
 	seedSender(t, srv, instID, "tg:222", config.ChannelAccessApproved) // not pending
 	seedSender(t, srv, instID, "slack:C333", config.ChannelAccessPending)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/channel-access/pending", nil))
+	srv.ServeHTTP(rec, withAuth(httptest.NewRequest("GET", "/api/channel-access/pending", nil), token))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200", rec.Code)
@@ -218,7 +218,7 @@ func TestApproveChannelSender_NoManager(t *testing.T) {
 	srv := newTestServer()
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/instances/x/channel-access/tg%3A1/approve", nil))
+	srv.handleApproveChannelSender(rec, httptest.NewRequest("POST", "/api/instances/x/channel-access/tg%3A1/approve", nil))
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d, want 503", rec.Code)

@@ -33,6 +33,31 @@ func sessionCookieName(r *http.Request) string {
 
 const sessionCookieBase = "hiro_session"
 
+// isTLS reports whether the request was served over TLS, either directly
+// or via a trusted reverse proxy (X-Forwarded-Proto). The proxy header is
+// only trusted when the direct peer is a loopback or private address,
+// matching the trust model used by clientIP for rate limiting.
+//
+// If a non-proxy private-network host sends X-Forwarded-Proto: https on a
+// plain HTTP connection, the Secure flag will be set on the cookie and the
+// browser will refuse to send it back over HTTP — an availability issue,
+// not a security issue.
+func isTLS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	// Only trust X-Forwarded-Proto from a local reverse proxy.
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+		return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	}
+	return false
+}
+
 // setSessionCookie writes a session token cookie to the response.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
@@ -40,6 +65,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isTLS(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   sessionCookieMaxAge,
 	})
@@ -52,6 +78,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isTLS(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
@@ -293,17 +320,11 @@ func clientIP(r *http.Request) string {
 }
 
 // requireAuth is middleware that enforces authentication.
-// During setup (no password set), requests are passed through unauthenticated
-// so the setup UI can function.
+// Returns 401 for unauthenticated requests, including during setup.
+// Setup-specific routes (e.g. /api/setup/*) handle their own access control.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth if no password is set (setup not complete)
-		if s.cp == nil || s.cp.NeedsSetup() {
-			next(w, r)
-			return
-		}
-
-		if !s.isAuthenticated(r) {
+		if s.cp == nil || !s.isAuthenticated(r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -312,18 +333,23 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireStrictAuth is middleware that enforces authentication even during setup.
-// Use this for endpoints that should never be accessible without authentication
-// (e.g., logs which may contain sensitive operational data).
+// requireStrictAuth is middleware that enforces authentication and rejects
+// requests during setup. Use for endpoints that should never be accessible
+// before setup is complete (e.g., logs, cluster management).
+//
+// In practice the NeedsSetup branch is unreachable for authenticated users
+// because a reset clears the password hash, which rotates the token signer
+// secret and invalidates all sessions. The check is kept as defense-in-depth.
 func (s *Server) requireStrictAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cp == nil || s.cp.NeedsSetup() {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "setup not complete"})
+		// Check auth first to avoid leaking setup state to unauthenticated clients.
+		if s.cp == nil || !s.isAuthenticated(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 
-		if !s.isAuthenticated(r) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		if s.cp.NeedsSetup() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "setup not complete"})
 			return
 		}
 

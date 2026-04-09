@@ -40,6 +40,7 @@ func TestSetup_Success(t *testing.T) {
 	})
 	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -80,6 +81,7 @@ func TestSetup_Leader(t *testing.T) {
 	})
 	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -117,6 +119,7 @@ func TestSetup_ShortPassword(t *testing.T) {
 	})
 	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -134,6 +137,7 @@ func TestSetup_MissingFields(t *testing.T) {
 	})
 	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 

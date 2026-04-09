@@ -12,7 +12,7 @@ import (
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Enforce auth on WebSocket upgrade (browser sends cookies automatically).
-	if s.cp != nil && !s.cp.NeedsSetup() && !s.isAuthenticated(r) {
+	if s.cp == nil || !s.isAuthenticated(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

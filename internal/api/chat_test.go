@@ -52,7 +52,7 @@ func TestResolveChatInstance_WithInstanceIDParam(t *testing.T) {
 	}
 }
 
-func TestHandleChat_NoManager_Returns503(t *testing.T) {
+func TestHandleChat_NoCP_Returns401(t *testing.T) {
 	t.Parallel()
 
 	s := newTestServer()
@@ -60,8 +60,8 @@ func TestHandleChat_NoManager_Returns503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleChat(rec, req)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -74,5 +74,20 @@ func TestHandleChat_AuthRequired_NoCookie_Returns401(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleChat_Authenticated_NoManager_Returns503(t *testing.T) {
+	srv, _ := newAuthTestServer(t)
+	token := loginAndGetToken(t, srv)
+
+	req := httptest.NewRequest("GET", "/ws/chat", nil)
+	req.AddCookie(&http.Cookie{Name: "hiro_session", Value: token})
+	rec := httptest.NewRecorder()
+	srv.handleChat(rec, req)
+
+	// Auth passes but no manager is configured — expect 503.
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }

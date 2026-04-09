@@ -216,6 +216,10 @@ func (s *Server) handleSharedFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prevent any active content from executing in shared file responses.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
 	// Force download for types that could contain active content (XSS via SVG/HTML).
 	ext := strings.ToLower(filepath.Ext(filepath.Base(absPath)))
 	if ext == ".svg" || ext == ".html" || ext == ".htm" {

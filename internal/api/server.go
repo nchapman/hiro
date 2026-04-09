@@ -147,8 +147,23 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 	s.mux.HandleFunc("POST /api/setup/test-provider", s.handleTestProvider)
 	s.mux.HandleFunc("POST /api/setup/validate-swarm", s.handleValidateSwarm)
-	s.mux.HandleFunc("GET /api/setup/provider-types", s.handleListProviderTypes)
-	s.mux.HandleFunc("GET /api/setup/models", s.handleListModels)
+	s.mux.HandleFunc("GET /api/setup/provider-types", s.setupOnly(s.handleListProviderTypes))
+	s.mux.HandleFunc("GET /api/setup/models", s.setupOnly(s.handleListModels))
+}
+
+// setupOnly wraps a handler so it is only accessible during setup from loopback.
+func (s *Server) setupOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cp != nil && !s.cp.NeedsSetup() {
+			http.Error(w, "setup already complete", http.StatusConflict)
+			return
+		}
+		if !isLoopbackOrigin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) settingsRoutes() {
@@ -552,22 +567,27 @@ func isSameOrigin(r *http.Request) bool {
 	return originHost == host
 }
 
-// isLoopbackOrigin hardens setup endpoints against DNS rebinding attacks.
-// If an Origin header is present (browser request), it must match the Host
-// header AND the host must be a loopback address. Without an Origin header
-// (non-browser clients like curl), the request is allowed since DNS
-// rebinding requires a browser.
+// isLoopbackOrigin hardens setup endpoints against DNS rebinding and remote
+// access. If an Origin header is present (browser request), it must match the
+// Host header AND the host must be a loopback address. Without an Origin
+// header (non-browser clients like curl), the request's RemoteAddr must be
+// loopback to prevent remote first-run takeover.
 func isLoopbackOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		// No Origin → not a browser cross-origin request → no DNS rebinding risk.
-		return true
+		// No Origin → not a browser request. Verify the remote IP is loopback
+		// to prevent non-browser remote clients from reaching setup endpoints.
+		return isLoopbackRemote(r)
 	}
 	if !isSameOrigin(r) {
 		return false
 	}
 	// Browser request with matching Origin/Host — verify the host is loopback.
-	host := r.Host
+	return isLoopbackHost(r.Host)
+}
+
+// isLoopbackHost checks whether a host (with optional port) is a loopback address.
+func isLoopbackHost(host string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
@@ -576,6 +596,18 @@ func isLoopbackOrigin(r *http.Request) bool {
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return true
+	}
+	return false
+}
+
+// isLoopbackRemote checks whether the request's remote address is loopback.
+func isLoopbackRemote(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
 	}
 	return false
 }

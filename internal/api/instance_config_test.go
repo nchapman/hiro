@@ -10,9 +10,9 @@ import (
 )
 
 func TestGetInstanceConfig_NotFound(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/instances/nonexistent/config", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances/nonexistent/config", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -26,7 +26,7 @@ func TestGetInstanceConfig_NoManager(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/api/instances/test/config", nil)
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	srv.handleGetInstanceConfig(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d, want 503", rec.Code)
@@ -34,14 +34,14 @@ func TestGetInstanceConfig_NoManager(t *testing.T) {
 }
 
 func TestGetInstanceConfig_ReturnsConfig(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	id, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/instances/"+id+"/config", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances/"+id+"/config", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -70,7 +70,7 @@ func TestPutInstanceConfig_NoManager(t *testing.T) {
 	req := httptest.NewRequest("PUT", "/api/instances/test/config", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	srv.handlePutInstanceConfig(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d, want 503", rec.Code)
@@ -78,10 +78,10 @@ func TestPutInstanceConfig_NoManager(t *testing.T) {
 }
 
 func TestPutInstanceConfig_NotFound(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
 	body := `{"model": "test"}`
-	req := httptest.NewRequest("PUT", "/api/instances/nonexistent/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/nonexistent/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -92,11 +92,11 @@ func TestPutInstanceConfig_NotFound(t *testing.T) {
 }
 
 func TestPutInstanceConfig_InvalidJSON(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 
-	req := httptest.NewRequest("PUT", "/api/instances/"+id+"/config", bytes.NewBufferString("{bad"))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+id+"/config", bytes.NewBufferString("{bad")), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -107,7 +107,7 @@ func TestPutInstanceConfig_InvalidJSON(t *testing.T) {
 }
 
 func TestPutInstanceConfig_StoppedInstance(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	// Create and stop an instance (needs a parent so it can be stopped).
 	parentID, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
@@ -124,7 +124,7 @@ func TestPutInstanceConfig_StoppedInstance(t *testing.T) {
 
 	// Update config on the stopped instance.
 	body := `{"model": "anthropic/claude-sonnet-4-20250514", "reasoning_effort": "high"}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -134,7 +134,7 @@ func TestPutInstanceConfig_StoppedInstance(t *testing.T) {
 	}
 
 	// Verify config was persisted.
-	getReq := httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil)
+	getReq := withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
 
@@ -149,7 +149,7 @@ func TestPutInstanceConfig_StoppedInstance(t *testing.T) {
 }
 
 func TestPutInstanceConfig_StoppedToolRules(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	childID, _ := mgr.CreateInstance(context.Background(), agentName, parentID, "persistent", "", "", "", "")
@@ -157,7 +157,7 @@ func TestPutInstanceConfig_StoppedToolRules(t *testing.T) {
 
 	// Set valid tool rules on the stopped instance.
 	body := `{"allowed_tools": ["Bash", "Read", "Bash(curl *)"], "disallowed_tools": ["Bash(rm *)"]}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -167,7 +167,7 @@ func TestPutInstanceConfig_StoppedToolRules(t *testing.T) {
 	}
 
 	// Verify tool rules were persisted.
-	getReq := httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil)
+	getReq := withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
 
@@ -201,7 +201,7 @@ func TestMaskToken(t *testing.T) {
 }
 
 func TestPutInstanceConfig_Persona(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	childID, _ := mgr.CreateInstance(context.Background(), agentName, parentID, "persistent", "", "", "", "")
@@ -209,7 +209,7 @@ func TestPutInstanceConfig_Persona(t *testing.T) {
 
 	// Set persona fields.
 	body := `{"persona_name": "Alice", "persona_description": "Research assistant", "persona_body": "Be thorough."}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -219,7 +219,7 @@ func TestPutInstanceConfig_Persona(t *testing.T) {
 	}
 
 	// Verify persona was persisted via GET.
-	getReq := httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil)
+	getReq := withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
 
@@ -237,7 +237,7 @@ func TestPutInstanceConfig_Persona(t *testing.T) {
 
 	// Partial update — only change name, body should be preserved.
 	body2 := `{"persona_name": "Bob"}`
-	req2 := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body2))
+	req2 := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body2)), token)
 	req2.Header.Set("Content-Type", "application/json")
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, req2)
@@ -247,7 +247,7 @@ func TestPutInstanceConfig_Persona(t *testing.T) {
 	}
 
 	getRec2 := httptest.NewRecorder()
-	srv.ServeHTTP(getRec2, httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil))
+	srv.ServeHTTP(getRec2, withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token))
 	var resp2 instanceConfigResponse
 	json.NewDecoder(getRec2.Body).Decode(&resp2)
 	if resp2.PersonaName != "Bob" {
@@ -259,14 +259,14 @@ func TestPutInstanceConfig_Persona(t *testing.T) {
 }
 
 func TestPutInstanceConfig_Memory(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	childID, _ := mgr.CreateInstance(context.Background(), agentName, parentID, "persistent", "", "", "", "")
 	mgr.StopInstance(childID)
 
 	body := `{"memory": "User prefers Go over Python."}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -276,7 +276,7 @@ func TestPutInstanceConfig_Memory(t *testing.T) {
 	}
 
 	getRec := httptest.NewRecorder()
-	srv.ServeHTTP(getRec, httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil))
+	srv.ServeHTTP(getRec, withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token))
 	var resp instanceConfigResponse
 	json.NewDecoder(getRec.Body).Decode(&resp)
 	if resp.Memory != "User prefers Go over Python." {
@@ -285,7 +285,7 @@ func TestPutInstanceConfig_Memory(t *testing.T) {
 }
 
 func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	childID, _ := mgr.CreateInstance(context.Background(), agentName, parentID, "persistent", "", "", "", "")
@@ -293,7 +293,7 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 
 	// Add Telegram channel.
 	body := `{"telegram": {"bot_token": "123456:AAHfoobar"}}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -304,7 +304,7 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 
 	// GET should return masked token.
 	getRec := httptest.NewRecorder()
-	srv.ServeHTTP(getRec, httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil))
+	srv.ServeHTTP(getRec, withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token))
 	var resp instanceConfigResponse
 	json.NewDecoder(getRec.Body).Decode(&resp)
 	if resp.Telegram == nil {
@@ -316,7 +316,7 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 
 	// Remove Telegram channel (empty bot_token).
 	body2 := `{"telegram": {"bot_token": ""}}`
-	req2 := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body2))
+	req2 := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body2)), token)
 	req2.Header.Set("Content-Type", "application/json")
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, req2)
@@ -326,7 +326,7 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 	}
 
 	getRec2 := httptest.NewRecorder()
-	srv.ServeHTTP(getRec2, httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil))
+	srv.ServeHTTP(getRec2, withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token))
 	var resp2 instanceConfigResponse
 	json.NewDecoder(getRec2.Body).Decode(&resp2)
 	if resp2.Telegram != nil {
@@ -335,7 +335,7 @@ func TestPutInstanceConfig_TelegramChannel(t *testing.T) {
 }
 
 func TestPutInstanceConfig_SlackChannel(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	childID, _ := mgr.CreateInstance(context.Background(), agentName, parentID, "persistent", "", "", "", "")
@@ -343,7 +343,7 @@ func TestPutInstanceConfig_SlackChannel(t *testing.T) {
 
 	// Add Slack channel.
 	body := `{"slack": {"bot_token": "xoxb-test-token", "signing_secret": "secret123"}}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -353,7 +353,7 @@ func TestPutInstanceConfig_SlackChannel(t *testing.T) {
 	}
 
 	getRec := httptest.NewRecorder()
-	srv.ServeHTTP(getRec, httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil))
+	srv.ServeHTTP(getRec, withAuth(httptest.NewRequest("GET", "/api/instances/"+childID+"/config", nil), token))
 	var resp instanceConfigResponse
 	json.NewDecoder(getRec.Body).Decode(&resp)
 	if resp.Slack == nil {
@@ -368,7 +368,7 @@ func TestPutInstanceConfig_SlackChannel(t *testing.T) {
 }
 
 func TestPutInstanceConfig_InvalidToolRules(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	parentID, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	childID, _ := mgr.CreateInstance(context.Background(), agentName, parentID, "persistent", "", "", "", "")
@@ -376,7 +376,7 @@ func TestPutInstanceConfig_InvalidToolRules(t *testing.T) {
 
 	// Invalid tool rule syntax (unclosed paren).
 	body := `{"allowed_tools": ["Bash("]}`
-	req := httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body))
+	req := withAuth(httptest.NewRequest("PUT", "/api/instances/"+childID+"/config", bytes.NewBufferString(body)), token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)

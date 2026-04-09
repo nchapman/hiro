@@ -49,14 +49,14 @@ func TestUnmatchedAPIReturns404(t *testing.T) {
 }
 
 func TestHandleClearInstance(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	id, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	req := httptest.NewRequest("POST", "/api/instances/"+id+"/clear", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/instances/"+id+"/clear", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -74,14 +74,14 @@ func TestHandleClearInstance(t *testing.T) {
 }
 
 func TestHandleClearInstance_WithChannel(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	id, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	req := httptest.NewRequest("POST", "/api/instances/"+id+"/clear?channel=web", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/instances/"+id+"/clear?channel=web", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -97,9 +97,9 @@ func TestHandleClearInstance_WithChannel(t *testing.T) {
 }
 
 func TestHandleClearInstance_NotFound(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/instances/nonexistent/clear", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/instances/nonexistent/clear", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -109,9 +109,9 @@ func TestHandleClearInstance_NotFound(t *testing.T) {
 }
 
 func TestHandleSessionMessages_NotFound(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/sessions/nonexistent/messages", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/sessions/nonexistent/messages", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -121,7 +121,7 @@ func TestHandleSessionMessages_NotFound(t *testing.T) {
 }
 
 func TestHandleInstanceUsage_SessionOwnership(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	// Create two instances — inst2 is a child of inst1 so both have DB rows.
 	inst1ID, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
@@ -147,7 +147,7 @@ func TestHandleInstanceUsage_SessionOwnership(t *testing.T) {
 	}
 
 	// Query inst1's usage with a session_id that belongs to inst2 — should be 404.
-	req := httptest.NewRequest("GET", "/api/instances/"+inst1ID+"/usage?session_id=session-for-inst2", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances/"+inst1ID+"/usage?session_id=session-for-inst2", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 

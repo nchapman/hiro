@@ -12,21 +12,25 @@ import (
 )
 
 // newFilesTestServer creates a test server with rootDir set to a temp directory.
-// Returns the server and the root path. The caller does NOT need to clean up —
-// t.TempDir() handles that.
-func newFilesTestServer(t *testing.T) (*Server, string) {
+// Returns the server, the root path, and a session token for authenticated requests.
+// The caller does NOT need to clean up — t.TempDir() handles that.
+func newFilesTestServer(t *testing.T) (*Server, string, string) {
 	t.Helper()
 	root := t.TempDir()
-	srv := NewServer(slog.Default(), nil, nil, nil, root)
-	return srv, root
+	// Put the control plane config in a separate directory so it doesn't
+	// appear in file tree listings of root.
+	cpDir := t.TempDir()
+	cp, token := testAuthCP(t, cpDir)
+	srv := NewServer(slog.Default(), nil, cp, nil, root)
+	return srv, root, token
 }
 
 // --- Tree listing ---
 
 func TestFilesTree_EmptyRoot(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/files/tree", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -43,13 +47,13 @@ func TestFilesTree_EmptyRoot(t *testing.T) {
 }
 
 func TestFilesTree_ListsFilesAndDirs(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	// Create a directory and a file.
 	os.Mkdir(filepath.Join(root, "mydir"), 0o755)
 	os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi"), 0o644)
 
-	req := httptest.NewRequest("GET", "/api/files/tree", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -72,12 +76,12 @@ func TestFilesTree_ListsFilesAndDirs(t *testing.T) {
 }
 
 func TestFilesTree_SkipsHiddenFiles(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, ".env"), []byte("SECRET=x"), 0o644)
 	os.WriteFile(filepath.Join(root, "visible.txt"), []byte("ok"), 0o644)
 
-	req := httptest.NewRequest("GET", "/api/files/tree", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -93,13 +97,13 @@ func TestFilesTree_SkipsHiddenFiles(t *testing.T) {
 }
 
 func TestFilesTree_Subdirectory(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	sub := filepath.Join(root, "sub")
 	os.Mkdir(sub, 0o755)
 	os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("deep"), 0o644)
 
-	req := httptest.NewRequest("GET", "/api/files/tree?path=sub", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree?path=sub", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -118,9 +122,9 @@ func TestFilesTree_Subdirectory(t *testing.T) {
 }
 
 func TestFilesTree_NotFound(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/files/tree?path=nonexistent", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree?path=nonexistent", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -130,9 +134,9 @@ func TestFilesTree_NotFound(t *testing.T) {
 }
 
 func TestFilesTree_PathTraversal(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/files/tree?path=../../../etc", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree?path=../../../etc", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -144,11 +148,11 @@ func TestFilesTree_PathTraversal(t *testing.T) {
 // --- File read ---
 
 func TestFilesRead_Success(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "readme.txt"), []byte("hello world"), 0o644)
 
-	req := httptest.NewRequest("GET", "/api/files/file?path=readme.txt", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/file?path=readme.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -161,9 +165,9 @@ func TestFilesRead_Success(t *testing.T) {
 }
 
 func TestFilesRead_MissingPath(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/files/file", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/file", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -173,9 +177,9 @@ func TestFilesRead_MissingPath(t *testing.T) {
 }
 
 func TestFilesRead_NotFound(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/files/file?path=nope.txt", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/file?path=nope.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -185,11 +189,11 @@ func TestFilesRead_NotFound(t *testing.T) {
 }
 
 func TestFilesRead_Directory(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.Mkdir(filepath.Join(root, "adir"), 0o755)
 
-	req := httptest.NewRequest("GET", "/api/files/file?path=adir", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/file?path=adir", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -199,13 +203,13 @@ func TestFilesRead_Directory(t *testing.T) {
 }
 
 func TestFilesRead_TooLarge(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	// Create a file just over the 2 MB read limit.
 	big := make([]byte, maxFileReadSize+1)
 	os.WriteFile(filepath.Join(root, "big.bin"), big, 0o644)
 
-	req := httptest.NewRequest("GET", "/api/files/file?path=big.bin", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/file?path=big.bin", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -215,9 +219,9 @@ func TestFilesRead_TooLarge(t *testing.T) {
 }
 
 func TestFilesRead_PathTraversal(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/files/file?path=../../etc/passwd", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/file?path=../../etc/passwd", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -229,10 +233,10 @@ func TestFilesRead_PathTraversal(t *testing.T) {
 // --- File write ---
 
 func TestFilesWrite_CreateNew(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	body := strings.NewReader("file contents")
-	req := httptest.NewRequest("PUT", "/api/files/file?path=new.txt", body)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=new.txt", body), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -250,12 +254,12 @@ func TestFilesWrite_CreateNew(t *testing.T) {
 }
 
 func TestFilesWrite_Overwrite(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "existing.txt"), []byte("old"), 0o644)
 
 	body := strings.NewReader("new")
-	req := httptest.NewRequest("PUT", "/api/files/file?path=existing.txt", body)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=existing.txt", body), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -270,10 +274,10 @@ func TestFilesWrite_Overwrite(t *testing.T) {
 }
 
 func TestFilesWrite_CreatesParentDirs(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	body := strings.NewReader("deep")
-	req := httptest.NewRequest("PUT", "/api/files/file?path=a/b/c/deep.txt", body)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=a/b/c/deep.txt", body), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -291,9 +295,9 @@ func TestFilesWrite_CreatesParentDirs(t *testing.T) {
 }
 
 func TestFilesWrite_MissingPath(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("PUT", "/api/files/file", strings.NewReader("x"))
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file", strings.NewReader("x")), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -303,11 +307,11 @@ func TestFilesWrite_MissingPath(t *testing.T) {
 }
 
 func TestFilesWrite_TooLarge(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
 	// Create a body just over the 50 MB write limit.
 	big := strings.NewReader(strings.Repeat("x", maxFileWriteSize+1))
-	req := httptest.NewRequest("PUT", "/api/files/file?path=huge.bin", big)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=huge.bin", big), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -317,10 +321,10 @@ func TestFilesWrite_TooLarge(t *testing.T) {
 }
 
 func TestFilesWrite_PathTraversal(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
 	body := strings.NewReader("evil")
-	req := httptest.NewRequest("PUT", "/api/files/file?path=../escape.txt", body)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=../escape.txt", body), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -330,10 +334,10 @@ func TestFilesWrite_PathTraversal(t *testing.T) {
 }
 
 func TestFilesWrite_NoTempFileLeftOnSuccess(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	body := strings.NewReader("clean")
-	req := httptest.NewRequest("PUT", "/api/files/file?path=clean.txt", body)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=clean.txt", body), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -351,10 +355,10 @@ func TestFilesWrite_NoTempFileLeftOnSuccess(t *testing.T) {
 }
 
 func TestFilesWrite_NoTempFileLeftOnOversize(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	big := strings.NewReader(strings.Repeat("x", maxFileWriteSize+1))
-	req := httptest.NewRequest("PUT", "/api/files/file?path=huge.bin", big)
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=huge.bin", big), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -370,9 +374,9 @@ func TestFilesWrite_NoTempFileLeftOnOversize(t *testing.T) {
 // --- Mkdir ---
 
 func TestFilesMkdir_Success(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/files/mkdir?path=newdir", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/mkdir?path=newdir", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -390,9 +394,9 @@ func TestFilesMkdir_Success(t *testing.T) {
 }
 
 func TestFilesMkdir_Nested(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/files/mkdir?path=a/b/c", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/mkdir?path=a/b/c", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -410,9 +414,9 @@ func TestFilesMkdir_Nested(t *testing.T) {
 }
 
 func TestFilesMkdir_MissingPath(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/files/mkdir", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/mkdir", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -424,11 +428,11 @@ func TestFilesMkdir_MissingPath(t *testing.T) {
 // --- Delete ---
 
 func TestFilesDelete_File(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "doomed.txt"), []byte("bye"), 0o644)
 
-	req := httptest.NewRequest("DELETE", "/api/files/file?path=doomed.txt", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=doomed.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -442,13 +446,13 @@ func TestFilesDelete_File(t *testing.T) {
 }
 
 func TestFilesDelete_Directory(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	dir := filepath.Join(root, "rmdir")
 	os.Mkdir(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "child.txt"), []byte("x"), 0o644)
 
-	req := httptest.NewRequest("DELETE", "/api/files/file?path=rmdir", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=rmdir", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -462,9 +466,9 @@ func TestFilesDelete_Directory(t *testing.T) {
 }
 
 func TestFilesDelete_AlreadyGone(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("DELETE", "/api/files/file?path=ghost.txt", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=ghost.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -475,14 +479,14 @@ func TestFilesDelete_AlreadyGone(t *testing.T) {
 }
 
 func TestFilesDelete_ProtectedPaths(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	for _, name := range []string{"agents", "config", "instances", "skills", "workspace"} {
 		os.MkdirAll(filepath.Join(root, name), 0o755)
 	}
 
 	for _, name := range []string{"agents", "config", "instances", "skills", "workspace"} {
-		req := httptest.NewRequest("DELETE", "/api/files/file?path="+name, nil)
+		req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path="+name, nil), token)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -493,9 +497,9 @@ func TestFilesDelete_ProtectedPaths(t *testing.T) {
 }
 
 func TestFilesDelete_MissingPath(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("DELETE", "/api/files/file", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -505,9 +509,9 @@ func TestFilesDelete_MissingPath(t *testing.T) {
 }
 
 func TestFilesDelete_PathTraversal(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("DELETE", "/api/files/file?path=../../../tmp/nope", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=../../../tmp/nope", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -519,11 +523,11 @@ func TestFilesDelete_PathTraversal(t *testing.T) {
 // --- Rename / Move ---
 
 func TestFilesRename_Success(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "old.txt"), []byte("data"), 0o644)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=old.txt&to=new.txt", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=old.txt&to=new.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -544,11 +548,11 @@ func TestFilesRename_Success(t *testing.T) {
 }
 
 func TestFilesRename_MoveToSubdir(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "moveme.txt"), []byte("moving"), 0o644)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=moveme.txt&to=subdir/moveme.txt", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=moveme.txt&to=subdir/moveme.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -566,12 +570,12 @@ func TestFilesRename_MoveToSubdir(t *testing.T) {
 }
 
 func TestFilesRename_DestinationExists(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644)
 	os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0o644)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=a.txt&to=b.txt", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=a.txt&to=b.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -581,9 +585,9 @@ func TestFilesRename_DestinationExists(t *testing.T) {
 }
 
 func TestFilesRename_SourceNotFound(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=nope.txt&to=dest.txt", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=nope.txt&to=dest.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -593,11 +597,11 @@ func TestFilesRename_SourceNotFound(t *testing.T) {
 }
 
 func TestFilesRename_ProtectedSource(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.Mkdir(filepath.Join(root, "agents"), 0o755)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=agents&to=renamed", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=agents&to=renamed", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -607,7 +611,7 @@ func TestFilesRename_ProtectedSource(t *testing.T) {
 }
 
 func TestFilesRename_MissingParams(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
 	tests := []struct {
 		name string
@@ -620,7 +624,7 @@ func TestFilesRename_MissingParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", tt.url, nil)
+			req := withAuth(httptest.NewRequest("POST", tt.url, nil), token)
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
@@ -632,11 +636,11 @@ func TestFilesRename_MissingParams(t *testing.T) {
 }
 
 func TestFilesRename_PathTraversal(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "legit.txt"), []byte("x"), 0o644)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=legit.txt&to=../../escaped.txt", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=legit.txt&to=../../escaped.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -648,12 +652,12 @@ func TestFilesRename_PathTraversal(t *testing.T) {
 // --- Symlink tests ---
 
 func TestFilesTree_SkipsSymlinks(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "real.txt"), []byte("x"), 0o644)
 	os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "link.txt"))
 
-	req := httptest.NewRequest("GET", "/api/files/tree", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -669,14 +673,14 @@ func TestFilesTree_SkipsSymlinks(t *testing.T) {
 }
 
 func TestFilesDelete_SymlinkBlocked(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	// Create a real file and a symlink to it.
 	os.WriteFile(filepath.Join(root, "target.txt"), []byte("real"), 0o644)
 	symPath := filepath.Join(root, "link.txt")
 	os.Symlink(filepath.Join(root, "target.txt"), symPath)
 
-	req := httptest.NewRequest("DELETE", "/api/files/file?path=link.txt", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=link.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -694,7 +698,7 @@ func TestFilesDelete_SymlinkBlocked(t *testing.T) {
 }
 
 func TestFilesRename_SymlinkSourceBlocked(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	os.WriteFile(filepath.Join(root, "real.txt"), []byte("x"), 0o644)
 	os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "link.txt"))
@@ -702,7 +706,7 @@ func TestFilesRename_SymlinkSourceBlocked(t *testing.T) {
 	// Rename resolves symlinks, so the source becomes real.txt.
 	// The lstat re-check on the resolved path (real.txt) sees a regular file.
 	// So this effectively renames real.txt.
-	req := httptest.NewRequest("POST", "/api/files/rename?from=link.txt&to=renamed.txt", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=link.txt&to=renamed.txt", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -726,12 +730,12 @@ func TestResolveFilesPath_SymlinkEscape(t *testing.T) {
 // --- Delete root guard ---
 
 func TestFilesDelete_RootBlocked(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	// Attempting to delete path="" resolves to root, which should be forbidden.
 	// But DELETE requires a non-empty path parameter.
 	// Test with a path that resolves to root via normalization.
-	req := httptest.NewRequest("DELETE", "/api/files/file?path=.", nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=.", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -749,13 +753,13 @@ func TestFilesDelete_RootBlocked(t *testing.T) {
 // --- Rename directory ---
 
 func TestFilesRename_Directory(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	dir := filepath.Join(root, "olddir")
 	os.Mkdir(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "child.txt"), []byte("inside"), 0o644)
 
-	req := httptest.NewRequest("POST", "/api/files/rename?from=olddir&to=newdir", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=olddir&to=newdir", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -781,11 +785,11 @@ func TestFilesRename_Directory(t *testing.T) {
 // --- Write binary content ---
 
 func TestFilesWrite_BinaryContent(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	// Write binary data with null bytes.
 	binary := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD}
-	req := httptest.NewRequest("PUT", "/api/files/file?path=binary.bin", strings.NewReader(string(binary)))
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=binary.bin", strings.NewReader(string(binary))), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -810,12 +814,12 @@ func TestFilesWrite_BinaryContent(t *testing.T) {
 // --- Tree file size ---
 
 func TestFilesTree_IncludesFileSize(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
 	content := "hello world"
 	os.WriteFile(filepath.Join(root, "sized.txt"), []byte(content), 0o644)
 
-	req := httptest.NewRequest("GET", "/api/files/tree", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/files/tree", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -833,9 +837,9 @@ func TestFilesTree_IncludesFileSize(t *testing.T) {
 // --- Mkdir path traversal ---
 
 func TestFilesMkdir_PathTraversal(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/files/mkdir?path=../escape", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/files/mkdir?path=../escape", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -847,9 +851,9 @@ func TestFilesMkdir_PathTraversal(t *testing.T) {
 // --- Write empty file ---
 
 func TestFilesWrite_EmptyFile(t *testing.T) {
-	srv, root := newFilesTestServer(t)
+	srv, root, token := newFilesTestServer(t)
 
-	req := httptest.NewRequest("PUT", "/api/files/file?path=empty.txt", strings.NewReader(""))
+	req := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=empty.txt", strings.NewReader("")), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -950,10 +954,10 @@ func TestIsProtectedPath(t *testing.T) {
 // --- Integration: write then read round-trip ---
 
 func TestFilesWriteReadRoundTrip(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
 	content := "round trip content"
-	writeReq := httptest.NewRequest("PUT", "/api/files/file?path=rt.txt", strings.NewReader(content))
+	writeReq := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=rt.txt", strings.NewReader(content)), token)
 	writeRec := httptest.NewRecorder()
 	srv.ServeHTTP(writeRec, writeReq)
 
@@ -961,7 +965,7 @@ func TestFilesWriteReadRoundTrip(t *testing.T) {
 		t.Fatalf("write status = %d, want %d", writeRec.Code, http.StatusNoContent)
 	}
 
-	readReq := httptest.NewRequest("GET", "/api/files/file?path=rt.txt", nil)
+	readReq := withAuth(httptest.NewRequest("GET", "/api/files/file?path=rt.txt", nil), token)
 	readRec := httptest.NewRecorder()
 	srv.ServeHTTP(readRec, readReq)
 
@@ -976,10 +980,10 @@ func TestFilesWriteReadRoundTrip(t *testing.T) {
 // --- Integration: write, rename, read at new path ---
 
 func TestFilesWriteRenameReadRoundTrip(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
 	// Write
-	writeReq := httptest.NewRequest("PUT", "/api/files/file?path=before.txt", strings.NewReader("moved"))
+	writeReq := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=before.txt", strings.NewReader("moved")), token)
 	writeRec := httptest.NewRecorder()
 	srv.ServeHTTP(writeRec, writeReq)
 	if writeRec.Code != http.StatusNoContent {
@@ -987,7 +991,7 @@ func TestFilesWriteRenameReadRoundTrip(t *testing.T) {
 	}
 
 	// Rename
-	renameReq := httptest.NewRequest("POST", "/api/files/rename?from=before.txt&to=after.txt", nil)
+	renameReq := withAuth(httptest.NewRequest("POST", "/api/files/rename?from=before.txt&to=after.txt", nil), token)
 	renameRec := httptest.NewRecorder()
 	srv.ServeHTTP(renameRec, renameReq)
 	if renameRec.Code != http.StatusNoContent {
@@ -995,7 +999,7 @@ func TestFilesWriteRenameReadRoundTrip(t *testing.T) {
 	}
 
 	// Old path should be gone
-	readOld := httptest.NewRequest("GET", "/api/files/file?path=before.txt", nil)
+	readOld := withAuth(httptest.NewRequest("GET", "/api/files/file?path=before.txt", nil), token)
 	recOld := httptest.NewRecorder()
 	srv.ServeHTTP(recOld, readOld)
 	if recOld.Code != http.StatusNotFound {
@@ -1003,7 +1007,7 @@ func TestFilesWriteRenameReadRoundTrip(t *testing.T) {
 	}
 
 	// New path should have the content
-	readNew := httptest.NewRequest("GET", "/api/files/file?path=after.txt", nil)
+	readNew := withAuth(httptest.NewRequest("GET", "/api/files/file?path=after.txt", nil), token)
 	recNew := httptest.NewRecorder()
 	srv.ServeHTTP(recNew, readNew)
 	if recNew.Code != http.StatusOK {
@@ -1017,10 +1021,10 @@ func TestFilesWriteRenameReadRoundTrip(t *testing.T) {
 // --- Integration: mkdir, write inside, list, delete ---
 
 func TestFilesMkdirWriteListDelete(t *testing.T) {
-	srv, _ := newFilesTestServer(t)
+	srv, _, token := newFilesTestServer(t)
 
 	// Mkdir
-	mkdirReq := httptest.NewRequest("POST", "/api/files/mkdir?path=project", nil)
+	mkdirReq := withAuth(httptest.NewRequest("POST", "/api/files/mkdir?path=project", nil), token)
 	mkdirRec := httptest.NewRecorder()
 	srv.ServeHTTP(mkdirRec, mkdirReq)
 	if mkdirRec.Code != http.StatusNoContent {
@@ -1028,7 +1032,7 @@ func TestFilesMkdirWriteListDelete(t *testing.T) {
 	}
 
 	// Write a file inside
-	writeReq := httptest.NewRequest("PUT", "/api/files/file?path=project/main.go", strings.NewReader("package main"))
+	writeReq := withAuth(httptest.NewRequest("PUT", "/api/files/file?path=project/main.go", strings.NewReader("package main")), token)
 	writeRec := httptest.NewRecorder()
 	srv.ServeHTTP(writeRec, writeReq)
 	if writeRec.Code != http.StatusNoContent {
@@ -1036,7 +1040,7 @@ func TestFilesMkdirWriteListDelete(t *testing.T) {
 	}
 
 	// List the directory
-	listReq := httptest.NewRequest("GET", "/api/files/tree?path=project", nil)
+	listReq := withAuth(httptest.NewRequest("GET", "/api/files/tree?path=project", nil), token)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -1049,7 +1053,7 @@ func TestFilesMkdirWriteListDelete(t *testing.T) {
 	}
 
 	// Delete the directory
-	delReq := httptest.NewRequest("DELETE", "/api/files/file?path=project", nil)
+	delReq := withAuth(httptest.NewRequest("DELETE", "/api/files/file?path=project", nil), token)
 	delRec := httptest.NewRecorder()
 	srv.ServeHTTP(delRec, delReq)
 	if delRec.Code != http.StatusNoContent {
@@ -1057,7 +1061,7 @@ func TestFilesMkdirWriteListDelete(t *testing.T) {
 	}
 
 	// Verify it's gone
-	listReq2 := httptest.NewRequest("GET", "/api/files/tree?path=project", nil)
+	listReq2 := withAuth(httptest.NewRequest("GET", "/api/files/tree?path=project", nil), token)
 	listRec2 := httptest.NewRecorder()
 	srv.ServeHTTP(listRec2, listReq2)
 	if listRec2.Code != http.StatusNotFound {

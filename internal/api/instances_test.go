@@ -53,8 +53,9 @@ func (f *fakeWorker) Shutdown(_ context.Context) error {
 }
 
 // newInstanceTestServer creates a server with a real manager backed by a temp directory.
-// Returns an agent name that has a valid definition (can create instances from it).
-func newInstanceTestServer(t *testing.T) (*Server, *agent.Manager, string) {
+// Returns an agent name that has a valid definition (can create instances from it)
+// and a session token for authenticated requests.
+func newInstanceTestServer(t *testing.T) (*Server, *agent.Manager, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -76,15 +77,17 @@ func newInstanceTestServer(t *testing.T) (*Server, *agent.Manager, string) {
 	)
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	srv := NewServer(logger, nil, nil, pdb, "")
+	cp, token := testAuthCP(t, dir)
+
+	srv := NewServer(logger, nil, cp, pdb, "")
 	srv.manager = mgr
-	return srv, mgr, "test-agent"
+	return srv, mgr, "test-agent", token
 }
 
 func TestListInstances_Empty(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/instances", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -104,7 +107,7 @@ func TestListInstances_NoManager(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/api/instances", nil)
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	srv.handleListInstances(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200 (empty list)", rec.Code)
@@ -112,7 +115,7 @@ func TestListInstances_NoManager(t *testing.T) {
 }
 
 func TestListInstances_WithInstances(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	// Create an instance.
 	_, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
@@ -120,7 +123,7 @@ func TestListInstances_WithInstances(t *testing.T) {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/instances", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -142,7 +145,7 @@ func TestListInstances_WithInstances(t *testing.T) {
 }
 
 func TestListInstances_ModeFilter(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	_, err := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 	if err != nil {
@@ -150,7 +153,7 @@ func TestListInstances_ModeFilter(t *testing.T) {
 	}
 
 	// Filter by ephemeral → should be empty.
-	req := httptest.NewRequest("GET", "/api/instances?mode=ephemeral", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances?mode=ephemeral", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -162,9 +165,9 @@ func TestListInstances_ModeFilter(t *testing.T) {
 }
 
 func TestStopInstance_NotFound(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
-	req := httptest.NewRequest("POST", "/api/instances/nonexistent/stop", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/instances/nonexistent/stop", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -174,12 +177,12 @@ func TestStopInstance_NotFound(t *testing.T) {
 }
 
 func TestStopInstance_ForbidsRoot(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	// Create a root instance (no parent).
 	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 
-	req := httptest.NewRequest("POST", "/api/instances/"+id+"/stop", nil)
+	req := withAuth(httptest.NewRequest("POST", "/api/instances/"+id+"/stop", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -189,11 +192,11 @@ func TestStopInstance_ForbidsRoot(t *testing.T) {
 }
 
 func TestDeleteInstance_ForbidsRoot(t *testing.T) {
-	srv, mgr, agentName := newInstanceTestServer(t)
+	srv, mgr, agentName, token := newInstanceTestServer(t)
 
 	id, _ := mgr.CreateInstance(context.Background(), agentName, "", "persistent", "", "", "", "")
 
-	req := httptest.NewRequest("DELETE", "/api/instances/"+id, nil)
+	req := withAuth(httptest.NewRequest("DELETE", "/api/instances/"+id, nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -203,9 +206,9 @@ func TestDeleteInstance_ForbidsRoot(t *testing.T) {
 }
 
 func TestInstanceMessages_NotFound(t *testing.T) {
-	srv, _, _ := newInstanceTestServer(t)
+	srv, _, _, token := newInstanceTestServer(t)
 
-	req := httptest.NewRequest("GET", "/api/instances/nonexistent/messages", nil)
+	req := withAuth(httptest.NewRequest("GET", "/api/instances/nonexistent/messages", nil), token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 

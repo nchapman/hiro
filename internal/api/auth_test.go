@@ -230,8 +230,8 @@ func TestRequireAuth_AcceptsBearerToken(t *testing.T) {
 	}
 }
 
-func TestRequireAuth_SkipsDuringSetup(t *testing.T) {
-	// No password set → requireAuth should pass through.
+func TestRequireAuth_EnforcedDuringSetup(t *testing.T) {
+	// No password set → requireAuth should still reject unauthenticated requests.
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cp, _ := controlplane.Load(filepath.Join(dir, "config.yaml"), logger)
@@ -242,9 +242,8 @@ func TestRequireAuth_SkipsDuringSetup(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	// Should not be 401 — auth is skipped during setup.
-	if rec.Code == http.StatusUnauthorized {
-		t.Fatal("auth should be skipped when setup is incomplete")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want 401 — auth must be enforced even during setup", rec.Code)
 	}
 }
 
