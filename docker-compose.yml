@@ -11,17 +11,54 @@ services:
       - net.ipv4.ip_forward=1
     ports:
       - "127.0.0.1:8080:8080"
+      # Expose on all interfaces (use a reverse proxy for TLS):
+      # - "8080:8080"
+      # Cluster gRPC port (required for leader nodes accepting workers):
+      # - "8081:8081"
     volumes:
       - hiro:/hiro
+      # Bind mount instead of volume (replace the line above):
+      # - ./hiro-data:/hiro
     environment:
       - HIRO_ADDR=:8080
       - HIRO_ROOT=/hiro
+      # - HIRO_LOG_LEVEL=debug
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 5s
       start_period: 10s
+    # --- Resource limits / GPU passthrough ---
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "4"
+    #       memory: 8g
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    # labels:
+    #   - "com.centurylinklabs.watchtower.enable=true"
+
+  # --- Auto-update (pulls new images and restarts automatically) ---
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     - WATCHTOWER_CLEANUP=true       # remove old images after update
+  #     - WATCHTOWER_POLL_INTERVAL=86400  # check once per day (default)
+  #   command: --label-enable
 
 # WARNING: 'docker compose down -v' destroys all agent state (history, memory, todos).
+# If using a bind mount above, remove this volumes section.
 volumes:
   hiro:
