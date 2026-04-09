@@ -108,6 +108,10 @@ type agentProcess struct {
 // is active. The read end goes to the child as FD 3 via ExtraFiles. Returns
 // the write end (parent closes it to signal the child), or nil if no pipe needed.
 // PeerName is only set when the parent will perform the veth handshake.
+//
+// The caller must close the write end when done. The read end is owned by the
+// child process after cmd.Start(); if startup fails before Start(), the caller
+// must call cleanupVethPipe to avoid leaking the read end.
 func setupVethPipe(cmd *exec.Cmd, cfg ipc.SpawnConfig) (*os.File, error) {
 	if cfg.PeerName == "" {
 		return nil, nil
@@ -118,6 +122,16 @@ func setupVethPipe(cmd *exec.Cmd, cfg ipc.SpawnConfig) (*os.File, error) {
 	}
 	cmd.ExtraFiles = []*os.File{r} // child FD 3
 	return w, nil
+}
+
+// cleanupVethPipe closes both ends of the veth-ready pipe. Call on error paths
+// before cmd.Start() to avoid leaking the read end stored in cmd.ExtraFiles.
+func cleanupVethPipe(cmd *exec.Cmd, w *os.File) {
+	closeIfNotNil(w)
+	for _, f := range cmd.ExtraFiles {
+		closeIfNotNil(f)
+	}
+	cmd.ExtraFiles = nil
 }
 
 // closeIfNotNil closes the file if it's not nil.
@@ -152,12 +166,12 @@ func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*agentProcess,
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		closeIfNotNil(vethReadyW)
+		cleanupVethPipe(cmd, vethReadyW)
 		return nil, fmt.Errorf("creating stdin pipe: %w", err)
 	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		closeIfNotNil(vethReadyW)
+		cleanupVethPipe(cmd, vethReadyW)
 		return nil, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -165,7 +179,7 @@ func startAgentProcess(ctx context.Context, cfg ipc.SpawnConfig) (*agentProcess,
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		closeIfNotNil(vethReadyW)
+		cleanupVethPipe(cmd, vethReadyW)
 		return nil, fmt.Errorf("starting agent process: %w", err)
 	}
 

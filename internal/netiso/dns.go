@@ -220,7 +220,17 @@ func (d *DNSForwarder) handleQuery(w dns.ResponseWriter, r *dns.Msg, agentID uin
 
 	// Only process A/AAAA queries for IP set population.
 	if q.Qtype == dns.TypeA || q.Qtype == dns.TypeAAAA {
-		ips, minTTL := extractIPs(resp, ad.egress)
+		ips, minTTL, cnameRejected := extractIPs(resp, ad.egress)
+		if cnameRejected {
+			// CNAME chain left the allowlist — return SERVFAIL so the agent
+			// doesn't receive IPs it can't connect to.
+			d.logger.Warn("DNS response rejected: CNAME outside allowlist",
+				"agent_id", agentID,
+				"domain", qname,
+			)
+			dns.HandleFailed(w, r)
+			return
+		}
 		publicIPs := filterPrivateIPs(ips)
 
 		if len(publicIPs) > 0 {
@@ -255,9 +265,9 @@ func (d *DNSForwarder) handleQuery(w dns.ResponseWriter, r *dns.Msg, agentID uin
 
 // extractIPs collects all A/AAAA record IPs from a DNS response, validating
 // CNAME targets against the egress allowlist. If a CNAME points to a domain
-// outside the allowlist, the entire response is rejected (no IPs returned)
-// to prevent allowlist bypass via CNAME redirection.
-func extractIPs(resp *dns.Msg, egress []string) (ips []net.IP, minTTL uint32) {
+// outside the allowlist, rejected is true and the caller should return SERVFAIL
+// instead of forwarding the response (the agent would receive IPs it can't reach).
+func extractIPs(resp *dns.Msg, egress []string) (ips []net.IP, minTTL uint32, rejected bool) {
 	minTTL = 3600 // default 1h
 	wildcard := len(egress) == 1 && egress[0] == "*"
 
@@ -269,7 +279,7 @@ func extractIPs(resp *dns.Msg, egress []string) (ips []net.IP, minTTL uint32) {
 			if cname, ok := rr.(*dns.CNAME); ok {
 				target := strings.TrimSuffix(cname.Target, ".")
 				if !MatchDomain(target, egress) {
-					return nil, 0 // CNAME target outside allowlist — reject
+					return nil, 0, true // CNAME target outside allowlist — reject
 				}
 			}
 		}
@@ -290,7 +300,7 @@ func extractIPs(resp *dns.Msg, egress []string) (ips []net.IP, minTTL uint32) {
 			}
 		}
 	}
-	return ips, minTTL
+	return ips, minTTL, false
 }
 
 // fmtIPs formats a slice of IPs for logging.

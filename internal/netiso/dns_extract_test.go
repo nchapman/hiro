@@ -35,7 +35,10 @@ func TestExtractIPs_NoCNAME(t *testing.T) {
 		aRecord("github.com", "1.2.3.4", 300),
 		aRecord("github.com", "5.6.7.8", 300),
 	)
-	ips, ttl := extractIPs(resp, []string{"github.com"})
+	ips, ttl, rejected := extractIPs(resp, []string{"github.com"})
+	if rejected {
+		t.Fatal("unexpected rejection")
+	}
 	if len(ips) != 2 {
 		t.Fatalf("expected 2 IPs, got %d", len(ips))
 	}
@@ -51,7 +54,10 @@ func TestExtractIPs_ValidCNAMEChain(t *testing.T) {
 		cnameRecord("github.com", "cdn.github.com", 300),
 		aRecord("cdn.github.com", "1.2.3.4", 60),
 	)
-	ips, _ := extractIPs(resp, []string{"github.com", "*.github.com"})
+	ips, _, rejected := extractIPs(resp, []string{"github.com", "*.github.com"})
+	if rejected {
+		t.Fatal("unexpected rejection")
+	}
 	if len(ips) != 1 {
 		t.Fatalf("expected 1 IP for valid CNAME chain, got %d", len(ips))
 	}
@@ -64,7 +70,10 @@ func TestExtractIPs_CNAMEOutsideAllowlist_RejectsAll(t *testing.T) {
 		cnameRecord("github.com", "attacker.com", 300),
 		aRecord("attacker.com", "1.2.3.4", 60),
 	)
-	ips, _ := extractIPs(resp, []string{"github.com"})
+	ips, _, rejected := extractIPs(resp, []string{"github.com"})
+	if !rejected {
+		t.Error("expected rejection when CNAME exits allowlist")
+	}
 	if len(ips) != 0 {
 		t.Errorf("expected 0 IPs when CNAME exits allowlist, got %d: %v", len(ips), ips)
 	}
@@ -78,7 +87,10 @@ func TestExtractIPs_DeepCNAMEChainPartiallyOutside(t *testing.T) {
 		cnameRecord("b.github.com", "evil.com", 300),
 		aRecord("evil.com", "1.2.3.4", 60),
 	)
-	ips, _ := extractIPs(resp, []string{"*.github.com"})
+	ips, _, rejected := extractIPs(resp, []string{"*.github.com"})
+	if !rejected {
+		t.Error("expected rejection when deep CNAME exits allowlist")
+	}
 	if len(ips) != 0 {
 		t.Errorf("expected 0 IPs when deep CNAME exits allowlist, got %d", len(ips))
 	}
@@ -90,7 +102,10 @@ func TestExtractIPs_WildcardEgressSkipsCNAMECheck(t *testing.T) {
 		cnameRecord("github.com", "anything.evil.com", 300),
 		aRecord("anything.evil.com", "1.2.3.4", 60),
 	)
-	ips, _ := extractIPs(resp, []string{"*"})
+	ips, _, rejected := extractIPs(resp, []string{"*"})
+	if rejected {
+		t.Fatal("unexpected rejection with wildcard egress")
+	}
 	if len(ips) != 1 {
 		t.Errorf("expected 1 IP with wildcard egress, got %d", len(ips))
 	}
@@ -98,7 +113,10 @@ func TestExtractIPs_WildcardEgressSkipsCNAMECheck(t *testing.T) {
 
 func TestExtractIPs_EmptyResponse(t *testing.T) {
 	resp := buildDNSResponse()
-	ips, _ := extractIPs(resp, []string{"github.com"})
+	ips, _, rejected := extractIPs(resp, []string{"github.com"})
+	if rejected {
+		t.Fatal("unexpected rejection for empty response")
+	}
 	if len(ips) != 0 {
 		t.Errorf("expected 0 IPs for empty response, got %d", len(ips))
 	}
