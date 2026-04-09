@@ -6,9 +6,11 @@
 
 BINARY := hiro
 PKG := github.com/nchapman/hiro
+VERSION ?= dev
+LDFLAGS := -X main.Version=$(VERSION)
 
 build: web
-	go build -o $(BINARY) ./cmd/hiro
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hiro
 
 test:
 	docker compose -f docker-compose.test.yml build test
@@ -122,7 +124,7 @@ web:
 
 # Build without web UI (for development)
 build-dev:
-	go build -tags dev -o $(BINARY) ./cmd/hiro
+	go build -tags dev -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hiro
 
 docker:
 	docker compose build

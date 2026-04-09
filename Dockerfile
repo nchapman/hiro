@@ -15,8 +15,9 @@ COPY . .
 
 # Build Go binary
 FROM go-base AS build
+ARG VERSION=dev
 COPY --from=web /app/web/ui/dist ./web/ui/dist
-RUN CGO_ENABLED=0 go build -o /hiro ./cmd/hiro
+RUN CGO_ENABLED=0 go build -ldflags "-X main.Version=${VERSION}" -o /hiro ./cmd/hiro
 
 # Test runner — docker compose run --rm --build test
 FROM go-base AS test

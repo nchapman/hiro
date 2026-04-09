@@ -56,11 +56,20 @@ const (
 	minRunDuration = 30 * time.Second
 )
 
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
 // errRestartRequested is returned by run() when the setup API requests a
 // process restart (e.g. after switching to worker mode during onboarding).
 var errRestartRequested = fmt.Errorf("restart requested")
 
 func main() {
+	// Print version and exit.
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Println("hiro " + Version)
+		return
+	}
+
 	// Dispatch subcommand: "hiro agent" runs an agent worker process.
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
 		if err := runAgent(); err != nil {
@@ -506,7 +515,7 @@ func (a *app) serve() error {
 		if a.clusterStarted {
 			clusterInfo = a.cs.listener.Addr().String()
 		}
-		a.logger.Info("hiro starting", "addr", a.listenAddr, "mode", a.cp.ClusterMode(), "cluster", clusterInfo)
+		a.logger.Info("hiro starting", "version", Version, "addr", a.listenAddr, "mode", a.cp.ClusterMode(), "cluster", clusterInfo)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			a.logger.Error("server error", "error", err)
 			a.cancel()
