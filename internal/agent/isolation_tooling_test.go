@@ -248,7 +248,10 @@ func TestIsolation_SupplementaryGroupAccess(t *testing.T) {
 	if err != nil {
 		t.Skip("hiro-operators group not found")
 	}
-	opGID, _ := strconv.ParseUint(opGrp.Gid, 10, 32)
+	opGID, err := strconv.ParseUint(opGrp.Gid, 10, 32)
+	if err != nil {
+		t.Fatalf("parsing hiro-operators GID %q: %v", opGrp.Gid, err)
+	}
 
 	// Create a directory mimicking agents/ — root:hiro-operators with setgid.
 	targetDir, err := os.MkdirTemp("/tmp", "hiro-operators-test-*")
@@ -266,7 +269,6 @@ func TestIsolation_SupplementaryGroupAccess(t *testing.T) {
 	// Agent WITHOUT hiro-operators should NOT be able to write.
 	cmdNoGroup := agentCmd(t, uid, gid, sessDir, "touch", targetDir+"/nope")
 	if err := cmdNoGroup.Run(); err == nil {
-		os.Remove(targetDir + "/nope")
 		t.Fatal("agent without hiro-operators should not write to operators dir")
 	}
 
@@ -282,42 +284,6 @@ func TestIsolation_SupplementaryGroupAccess(t *testing.T) {
 	cmdWithGroup.Env = buildIsolatedEnv(ipcSpawnConfig(sessDir), os.Getenv)
 	if err := cmdWithGroup.Run(); err != nil {
 		t.Fatalf("agent with hiro-operators should write to operators dir: %v", err)
-	}
-}
-
-// TestIsolation_NamespaceGidMappings verifies that setNetworkCloneflags
-// produces the correct GID mappings for supplementary groups by checking
-// the SysProcAttr fields directly. The actual kernel-level validation of
-// CLONE_NEWUSER + GidMappings + setgroups() is covered by the netiso
-// integration tests (make test-netiso) which spawn real processes.
-func TestIsolation_NamespaceGidMappings(t *testing.T) {
-	requireIsolation(t)
-
-	opGrp, err := user.LookupGroup("hiro-operators")
-	if err != nil {
-		t.Skip("hiro-operators group not found")
-	}
-	opGID, _ := strconv.ParseUint(opGrp.Gid, 10, 32)
-
-	cmd := exec.Command("true")
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
-	setNetworkCloneflags(cmd, 10005, 10000, []uint32{10000, uint32(opGID)})
-
-	// Verify GidMappingsEnableSetgroups is set (required for child's setgroups call).
-	if !cmd.SysProcAttr.GidMappingsEnableSetgroups {
-		t.Error("GidMappingsEnableSetgroups should be true")
-	}
-
-	// Verify supplementary GID (hiro-operators) is mapped.
-	found := false
-	for _, m := range cmd.SysProcAttr.GidMappings {
-		if m.ContainerID == int(opGID) && m.HostID == int(opGID) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("hiro-operators GID %d not found in GidMappings: %v", opGID, cmd.SysProcAttr.GidMappings)
 	}
 }
 

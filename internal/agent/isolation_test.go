@@ -355,4 +355,9 @@ func TestIsolation_CloneflagsNoSupplementaryGroups(t *testing.T) {
 	if len(cmd.SysProcAttr.GidMappings) != 1 {
 		t.Fatalf("expected 1 GID mapping, got %d: %v", len(cmd.SysProcAttr.GidMappings), cmd.SysProcAttr.GidMappings)
 	}
+	// GidMappingsEnableSetgroups must always be true, even without supplementary
+	// groups — the child needs setgroups() to be allowed by the kernel.
+	if !cmd.SysProcAttr.GidMappingsEnableSetgroups {
+		t.Error("GidMappingsEnableSetgroups should be true even with no supplementary groups")
+	}
 }
