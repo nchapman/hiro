@@ -9,7 +9,7 @@ services:
     cap_add:
       - NET_ADMIN  # nftables rules, veth pairs
     security_opt:
-      - seccomp=../seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
+      - seccomp=../seccomp.json  # see dev/update-seccomp.sh
     sysctls:
       - net.ipv4.ip_forward=1
     command: ["go", "test", "-race", "./...", "-v", "-count=1"]

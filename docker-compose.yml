@@ -6,7 +6,9 @@ services:
     cap_add:
       - NET_ADMIN  # nftables rules, veth pairs
     security_opt:
-      - seccomp=seccomp.json  # allow CLONE_NEWUSER (Docker default blocks it)
+      # Modified Docker default seccomp — allows clone/unshare/setns/mount for
+      # per-agent namespace isolation. See dev/update-seccomp.sh for full diff.
+      - seccomp=seccomp.json
     sysctls:
       - net.ipv4.ip_forward=1
     ports:

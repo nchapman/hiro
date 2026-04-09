@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation test-netiso test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation test-netiso test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto update-seccomp
 
 # Auto-load .env variables. Command-line overrides (make VAR=x) take precedence.
 # Variables are NOT exported globally — only test targets pass what they need.
@@ -134,6 +134,9 @@ docker-up:
 
 docker-down:
 	docker compose -f dev/docker-compose.yml down
+
+update-seccomp:
+	./dev/update-seccomp.sh
 
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
