@@ -235,6 +235,92 @@ func TestIsolation_MisePreinstalledToolsWork(t *testing.T) {
 	}
 }
 
+// TestIsolation_SupplementaryGroupAccess verifies that an agent with the
+// hiro-operators supplementary group can write to a setgid directory owned
+// by root:hiro-operators. This tests the Credential-based path used by
+// these isolation tests (the production path uses CLONE_NEWUSER + GidMappings
+// + setgroups(), which is tested by make test-netiso).
+func TestIsolation_SupplementaryGroupAccess(t *testing.T) {
+	uid, gid := requireIsolation(t)
+	sessDir := agentSessionDir(t, uid, gid)
+
+	opGrp, err := user.LookupGroup("hiro-operators")
+	if err != nil {
+		t.Skip("hiro-operators group not found")
+	}
+	opGID, _ := strconv.ParseUint(opGrp.Gid, 10, 32)
+
+	// Create a directory mimicking agents/ — root:hiro-operators with setgid.
+	targetDir, err := os.MkdirTemp("/tmp", "hiro-operators-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(targetDir) })
+	if err := os.Chown(targetDir, 0, int(opGID)); err != nil {
+		t.Fatalf("chown: %v", err)
+	}
+	if err := os.Chmod(targetDir, 0o2775); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	// Agent WITHOUT hiro-operators should NOT be able to write.
+	cmdNoGroup := agentCmd(t, uid, gid, sessDir, "touch", targetDir+"/nope")
+	if err := cmdNoGroup.Run(); err == nil {
+		os.Remove(targetDir + "/nope")
+		t.Fatal("agent without hiro-operators should not write to operators dir")
+	}
+
+	// Agent WITH hiro-operators supplementary group should be able to write.
+	cmdWithGroup := exec.Command("touch", targetDir+"/yes")
+	cmdWithGroup.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    uid,
+			Gid:    gid,
+			Groups: []uint32{gid, uint32(opGID)},
+		},
+	}
+	cmdWithGroup.Env = buildIsolatedEnv(ipcSpawnConfig(sessDir), os.Getenv)
+	if err := cmdWithGroup.Run(); err != nil {
+		t.Fatalf("agent with hiro-operators should write to operators dir: %v", err)
+	}
+}
+
+// TestIsolation_NamespaceGidMappings verifies that setNetworkCloneflags
+// produces the correct GID mappings for supplementary groups by checking
+// the SysProcAttr fields directly. The actual kernel-level validation of
+// CLONE_NEWUSER + GidMappings + setgroups() is covered by the netiso
+// integration tests (make test-netiso) which spawn real processes.
+func TestIsolation_NamespaceGidMappings(t *testing.T) {
+	requireIsolation(t)
+
+	opGrp, err := user.LookupGroup("hiro-operators")
+	if err != nil {
+		t.Skip("hiro-operators group not found")
+	}
+	opGID, _ := strconv.ParseUint(opGrp.Gid, 10, 32)
+
+	cmd := exec.Command("true")
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+	setNetworkCloneflags(cmd, 10005, 10000, []uint32{10000, uint32(opGID)})
+
+	// Verify GidMappingsEnableSetgroups is set (required for child's setgroups call).
+	if !cmd.SysProcAttr.GidMappingsEnableSetgroups {
+		t.Error("GidMappingsEnableSetgroups should be true")
+	}
+
+	// Verify supplementary GID (hiro-operators) is mapped.
+	found := false
+	for _, m := range cmd.SysProcAttr.GidMappings {
+		if m.ContainerID == int(opGID) && m.HostID == int(opGID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("hiro-operators GID %d not found in GidMappings: %v", opGID, cmd.SysProcAttr.GidMappings)
+	}
+}
+
 // TestIsolation_NoEnvLeak verifies that the isolated environment does
 // not contain control plane variables that weren't explicitly forwarded.
 func TestIsolation_NoEnvLeak(t *testing.T) {

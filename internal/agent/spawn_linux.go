@@ -36,4 +36,9 @@ func setNetworkCloneflags(cmd *exec.Cmd, uid, gid uint32, groups []uint32) {
 		}
 	}
 	cmd.SysProcAttr.GidMappings = gidMaps
+	// Allow the child to call setgroups() for supplementary group activation.
+	// Without this, Go writes "deny" to /proc/PID/setgroups which blocks
+	// the child's activateGroups() call. The parent has CAP_SETGID (running
+	// as root inside Docker), so the kernel allows this.
+	cmd.SysProcAttr.GidMappingsEnableSetgroups = true
 }
