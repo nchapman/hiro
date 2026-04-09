@@ -81,7 +81,7 @@ type instance struct {
 	allowLayers     [][]toolrules.Rule           // per-source allow rules for call-time enforcement
 	denyRules       []toolrules.Rule             // merged deny rules from all sources
 	configGen       uint64                       // incremented on each model/tool config change under inst.mu
-	effectiveEgress []string                     // effective network egress policy; nil = no network
+	effectiveEgress []string                     // effective network egress policy; always non-nil (empty = default-deny, no connectivity)
 	uid             uint32                       // isolated UID (0 = no isolation)
 	gid             uint32                       // isolated GID
 	groups          []uint32                     // supplementary groups only (not primary GID); used for inheritance checks

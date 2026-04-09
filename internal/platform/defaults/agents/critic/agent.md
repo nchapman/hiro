@@ -1,6 +1,6 @@
 ---
 name: critic
-allowed_tools: [Read, Glob, Grep, WebFetch]
+allowed_tools: [Read, Glob, Grep]
 description: Read-only reviewer for evaluating completed work. Cannot modify files. Provide the content to review and the goal or intent behind it.
 ---
 

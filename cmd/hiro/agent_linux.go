@@ -16,6 +16,24 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 )
 
+// activateGroups sets the process's supplementary group list. The GID mappings
+// (from SysProcAttr.GidMappings) make these GIDs valid inside the user namespace.
+// The primary GID (index 0) is already set via the namespace mapping; supplementary
+// GIDs (index 1+) need an explicit setgroups call.
+func activateGroups(groups []uint32) error {
+	if len(groups) <= 1 {
+		return nil // primary GID only, no supplementary groups
+	}
+	gids := make([]int, len(groups))
+	for i, g := range groups {
+		gids[i] = int(g) //nolint:gosec // GID fits int on 64-bit
+	}
+	if err := syscall.Setgroups(gids); err != nil {
+		return fmt.Errorf("setgroups(%v): %w", gids, err)
+	}
+	return nil
+}
+
 // selfConfigureNetwork configures the network inside the child's user+net+mount
 // namespaces. Called after the parent has created the veth pair and moved the
 // peer into this namespace. The child has full capabilities inside its user

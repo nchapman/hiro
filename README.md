@@ -91,7 +91,7 @@ Hiro uses defense-in-depth to run untrusted LLM-driven agents:
 - **Docker containment** — outer security boundary
 - **Process isolation** — each agent runs as a separate OS process; the control plane handles all LLM inference
 - **Unix user isolation** — 64 pre-created UIDs with `0700` instance directories
-- **Network isolation** — agents with `network.egress` spawn in their own network namespace with a DNS-driven nftables firewall; agents without it share the container's network (unrestricted outbound)
+- **Network isolation** — every agent spawns in its own network namespace (default-deny); agents with `network.egress` can reach declared domains via a DNS-driven nftables firewall
 - **Per-worker seccomp-BPF** — blocks namespace creation, mount, and ptrace in agent processes
 - **Tool capability system** — closed-by-default whitelist with parameterized rules (`Bash(curl *)`) and parent-child inheritance
 
@@ -101,7 +101,7 @@ See [docs/security.md](docs/security.md) for the full threat model.
 
 Agents declare allowed egress domains in their frontmatter. Each agent spawns in its own Linux network namespace with a dedicated veth pair. A DNS forwarder in the control plane resolves allowed domains and dynamically populates per-agent nftables IP sets — filtering is at the IP layer, so HTTPS, SSH, git, and any other protocol work transparently.
 
-Agents without `network.egress` share the container's network namespace (unrestricted outbound — a future default-deny posture is planned). Agents with specific domains are confined to those domains. Agents with `egress: ["*"]` have unrestricted access, constrained by parent inheritance.
+Agents without `network.egress` have no outbound connectivity (default-deny). Agents with specific domains are confined to those domains. Agents with `egress: ["*"]` have unrestricted access, constrained by parent inheritance.
 
 See [docs/network-isolation.md](docs/network-isolation.md) for the full design.
 

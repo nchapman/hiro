@@ -42,31 +42,17 @@ func prepareSocketDir(cfg ipc.SpawnConfig) (socketPath string, socketDir string,
 	return socketDir + "/a.sock", socketDir, nil
 }
 
-// configureIsolation sets up UID isolation on the command. When network egress
-// policy is set, the worker spawns in its own user, network, and mount namespaces
-// (CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS) with UID/GID mappings instead of
-// Credential-based UID drop. Without network isolation, standard Credential-based
-// UID drop is used.
+// configureIsolation sets up UID isolation on the command. All UID-isolated
+// workers spawn in their own user, network, and mount namespaces
+// (CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS) with UID/GID mappings.
+// This provides network isolation (default-deny) and seccomp enforcement
+// for every agent.
 func configureIsolation(cmd *exec.Cmd, cfg ipc.SpawnConfig) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
-
-	if cfg.NetworkEgress != nil {
-		// CLONE_NEWUSER: UID drop happens via namespace mapping (UID 0 inside
-		// maps to agent UID outside). Credential must NOT be set — the child
-		// is UID 0 inside its userns and setuid(agentUID) would fail.
-		setNetworkCloneflags(cmd, cfg.UID, cfg.GID)
-	} else {
-		// No network isolation: drop UID via Credential.
-		groups := cfg.Groups
-		if len(groups) == 0 {
-			groups = []uint32{cfg.GID}
-		}
-		cmd.SysProcAttr.Credential = &syscall.Credential{
-			Uid:    cfg.UID,
-			Gid:    cfg.GID,
-			Groups: groups,
-		}
-	}
+	// CLONE_NEWUSER: UID drop happens via namespace mapping (UID 0 inside
+	// maps to agent UID outside). Credential must NOT be set — the child
+	// is UID 0 inside its userns and setuid(agentUID) would fail.
+	setNetworkCloneflags(cmd, cfg.UID, cfg.GID, cfg.Groups)
 	cmd.Env = buildIsolatedEnv(cfg, os.Getenv)
 }
 
@@ -121,8 +107,9 @@ type agentProcess struct {
 // setupVethPipe creates a pipe for the veth-ready signal if network isolation
 // is active. The read end goes to the child as FD 3 via ExtraFiles. Returns
 // the write end (parent closes it to signal the child), or nil if no pipe needed.
+// PeerName is only set when the parent will perform the veth handshake.
 func setupVethPipe(cmd *exec.Cmd, cfg ipc.SpawnConfig) (*os.File, error) {
-	if cfg.NetworkEgress == nil || cfg.UID == 0 {
+	if cfg.PeerName == "" {
 		return nil, nil
 	}
 	r, w, err := os.Pipe()
@@ -238,7 +225,7 @@ func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.Net
 	}
 	cfg.AgentSocket = socketPath
 
-	needsNetIso := ni != nil && cfg.NetworkEgress != nil && cfg.UID != 0
+	needsNetIso := ni != nil && cfg.UID != 0
 
 	// Populate network self-configuration fields before starting the child,
 	// so they're available in the SpawnConfig written to stdin.
@@ -274,7 +261,7 @@ func spawnWorkerProcess(ctx context.Context, cfg ipc.SpawnConfig, ni *netiso.Net
 			PID:       proc.cmd.Process.Pid,
 			Egress:    cfg.NetworkEgress,
 		}); setupErr != nil {
-			proc.vethReadyW.Close()
+			closeIfNotNil(proc.vethReadyW)
 			_ = proc.cmd.Process.Kill()
 			<-proc.waitCh
 			return nil, fmt.Errorf("setting up network isolation: %w", setupErr)

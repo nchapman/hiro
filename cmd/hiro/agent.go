@@ -66,12 +66,14 @@ func runAgent() error {
 		}
 	}
 
-	// Install seccomp-BPF filter for ALL agent workers, not just
-	// network-isolated ones. This prevents agents from creating user
-	// namespaces, mounting filesystems, or entering other namespaces.
-	// Must run AFTER self-configuration (which needs mount/network) but
+	// For UID-isolated agents: activate supplementary groups (e.g.,
+	// hiro-operators for agents/ write access) then lock down with seccomp.
+	// Both must run AFTER self-configuration (which needs mount) but
 	// BEFORE any agent code.
 	if cfg.UID != 0 {
+		if err := activateGroups(cfg.Groups); err != nil {
+			return fmt.Errorf("activating supplementary groups: %w", err)
+		}
 		if err := installSeccomp(); err != nil {
 			return fmt.Errorf("installing seccomp filter: %w", err)
 		}
@@ -128,19 +130,10 @@ func configureAgentSecurity(cfg ipc.SpawnConfig) error {
 	syscall.Umask(umaskCollaborative)
 
 	// With CLONE_NEWUSER, os.Getuid() returns 0 inside the user namespace
-	// (mapped to the agent UID outside). Without CLONE_NEWUSER (no network
-	// isolation), the process runs directly as the agent UID.
+	// (mapped to the agent UID outside). All UID-isolated agents use namespaces.
 	actualUID := uint32(os.Getuid()) //nolint:gosec // UID fits uint32 on all supported platforms
-	if cfg.PeerName != "" {
-		// Network isolation active: child is UID 0 inside its user namespace.
-		if actualUID != 0 {
-			return fmt.Errorf("expected to run as UID 0 inside user namespace, but running as UID %d", actualUID)
-		}
-	} else {
-		// No network isolation: child runs directly as the agent UID.
-		if actualUID != cfg.UID {
-			return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, actualUID)
-		}
+	if actualUID != 0 {
+		return fmt.Errorf("expected to run as UID 0 inside user namespace, but running as UID %d", actualUID)
 	}
 
 	// Confine file tools to the platform root — prevents reading/writing

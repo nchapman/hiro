@@ -6,4 +6,4 @@ import "os/exec"
 
 // setNetworkCloneflags is a no-op on non-Linux platforms.
 // Network namespace isolation requires Linux.
-func setNetworkCloneflags(_ *exec.Cmd, _, _ uint32) {}
+func setNetworkCloneflags(_ *exec.Cmd, _, _ uint32, _ []uint32) {}

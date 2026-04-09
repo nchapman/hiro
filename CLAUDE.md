@@ -113,10 +113,10 @@ Agent Worker Process (hiro agent)
 ├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
 ├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
 ├── Runs under isolated UID for security
-└── Optional: network namespace + seccomp-BPF (when network.egress is declared)
+└── Network namespace + seccomp-BPF (default-deny, all UID-isolated agents)
 ```
 
-**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`. When network isolation is enabled (`network.egress` in agent frontmatter), the worker additionally spawns in its own user/network/mount namespaces (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`), self-configures its network interface and DNS, then installs a per-worker seccomp-BPF filter before starting gRPC.
+**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled (Docker), every worker spawns in its own user/network/mount namespaces (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`), self-configures its network interface and DNS, installs a per-worker seccomp-BPF filter, then starts gRPC. Network access is default-deny — only agents with `network.egress` declared can reach outbound destinations.
 
 **Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. The `config/` directory is `0700` root-owned, unreadable by agents.
 

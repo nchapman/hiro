@@ -316,9 +316,7 @@ Key properties:
 
 #### Agents with No Network Policy
 
-**Current behavior:** Agents without a `network` field in their definition are not placed in a network namespace — they share the container's network and have unrestricted outbound access. This preserves backward compatibility with existing agent definitions.
-
-**Future (default-deny):** Agents without a `network` field would be placed in a namespace with an empty IP set and no DNS forwarding, giving them effectively zero connectivity. This is tracked as a known limitation in `docs/security.md`.
+Agents without a `network` field in their definition are placed in a network namespace with an empty IP set and no DNS forwarding. The nftables chain allows only DNS to the gateway (which returns NXDOMAIN for everything) and drops all other traffic. Effectively zero connectivity. This is the default-deny posture — agents must explicitly declare `network.egress` to get outbound access.
 
 #### Agents with `egress: ["*"]`
 
@@ -368,7 +366,7 @@ network:
     - "*.pypi.org"
 ```
 
-- **No `network` field**: Currently shares the container's network (unrestricted outbound). A future default-deny posture would place these agents in a namespace with no connectivity. See [Agents with No Network Policy](#agents-with-no-network-policy).
+- **No `network` field**: No outbound connectivity. Agent can only use Unix sockets (gRPC to control plane). This is the default — agents must explicitly declare what network access they need.
 - **`egress: ["*"]`**: Unrestricted outbound. Constrained by inheritance — a child declaring `["*"]` only gets what its parent allows.
 - **Specific domains**: DNS-filtered and firewall-enforced. Works for any protocol.
 

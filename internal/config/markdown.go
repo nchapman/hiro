@@ -233,7 +233,7 @@ type AgentConfig struct {
 	Model           string   // from frontmatter "model"; per-agent model override
 	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
 	Groups          []string // from frontmatter "groups"; supplementary Unix groups for the worker process
-	NetworkEgress   []string // from frontmatter "network.egress"; allowed egress domains (nil = no network, default-deny)
+	NetworkEgress   []string // from frontmatter "network.egress"; allowed egress domains (nil = not declared, treated as empty = default-deny)
 	Prompt          string   // the markdown body — the agent's operating instructions
 	Skills          []SkillConfig
 }

@@ -1,6 +1,6 @@
 ---
 name: expert
-allowed_tools: [Read, Write, Edit, Glob, Grep, WebFetch]
+allowed_tools: [Read, Write, Edit, Glob, Grep]
 description: Subject matter expert for problems requiring domain-specific expertise in any field. Specify the domain, provide the context, and describe what you need (planning, review, or implementation).
 ---
 

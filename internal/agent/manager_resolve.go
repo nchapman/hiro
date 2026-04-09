@@ -159,29 +159,32 @@ func stripRedundantWholeToolRules(rules []toolrules.Rule) []toolrules.Rule {
 	return result
 }
 
-// computeEffectiveEgress returns the effective network egress policy for an instance,
-// computed as the intersection of the agent's declared egress and its parent's effective egress.
-// Returns nil if the agent has no network access (no declaration or no overlap with parent).
+// computeEffectiveEgress returns the effective network egress policy for an instance.
+// Always returns a non-nil slice. An empty slice means default-deny (no connectivity).
+// The policy is the intersection of the agent's declared egress and its parent's effective
+// egress, so children can never exceed their parent's permissions.
 func (m *Manager) computeEffectiveEgress(cfg config.AgentConfig, parentID string) []string {
-	if cfg.NetworkEgress == nil {
-		return nil // no network declared — default deny
+	egress := cfg.NetworkEgress
+	if egress == nil {
+		egress = []string{} // no network declared — default deny (empty allowlist)
 	}
 
 	if parentID == "" {
-		return cfg.NetworkEgress // root agent — use as-is
+		return egress // root agent — use as-is
 	}
 
 	m.mu.RLock()
 	parent, ok := m.instances[parentID]
 	m.mu.RUnlock()
 	if !ok {
-		return nil // parent not found — fail closed (no network access)
-	}
-	if parent.effectiveEgress == nil {
-		return nil // parent has no network — child can't either
+		return []string{} // parent not found — fail closed (no network access)
 	}
 
-	return intersectEgress(cfg.NetworkEgress, parent.effectiveEgress)
+	result := intersectEgress(egress, parent.effectiveEgress)
+	if result == nil {
+		return []string{} // no overlap — empty allowlist (no connectivity)
+	}
+	return result
 }
 
 // intersectEgress computes the intersection of child and parent egress policies.

@@ -1654,10 +1654,64 @@ func TestComputeEffectiveEgress_ParentNotFound_FailClosed(t *testing.T) {
 		NetworkEgress: []string{"github.com", "*.github.com"},
 	}
 
-	// Parent ID that doesn't exist — should return nil (no network).
+	// Parent ID that doesn't exist — should return empty (no network, fail closed).
 	egress := mgr.computeEffectiveEgress(cfg, "nonexistent-parent-id")
-	if egress != nil {
-		t.Errorf("expected nil egress when parent not found, got %v", egress)
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress when parent not found, got %v", egress)
+	}
+}
+
+func TestComputeEffectiveEgress_NilDeclaration_DefaultDeny(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Agent with no network field — should get empty slice (default-deny), not nil.
+	cfg := config.AgentConfig{NetworkEgress: nil}
+	egress := mgr.computeEffectiveEgress(cfg, "")
+	if egress == nil {
+		t.Fatal("expected non-nil (empty) egress for nil declaration, got nil")
+	}
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress for nil declaration, got %v", egress)
+	}
+}
+
+func TestComputeEffectiveEgress_EmptyChildWithWildcardParent(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Inject a parent instance with wildcard egress.
+	parentID := "parent-123"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{effectiveEgress: []string{"*"}}
+	mgr.mu.Unlock()
+
+	// Child with no network declaration under wildcard parent — still default-deny.
+	cfg := config.AgentConfig{NetworkEgress: nil}
+	egress := mgr.computeEffectiveEgress(cfg, parentID)
+	if egress == nil {
+		t.Fatal("expected non-nil (empty) egress, got nil")
+	}
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress (intersect of [] and [*]), got %v", egress)
+	}
+}
+
+func TestComputeEffectiveEgress_EgressChildUnderDeniedParent(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Parent with no egress (default-deny).
+	parentID := "parent-denied"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{effectiveEgress: []string{}}
+	mgr.mu.Unlock()
+
+	// Child declares egress but parent has none — child cannot exceed parent.
+	cfg := config.AgentConfig{NetworkEgress: []string{"github.com"}}
+	egress := mgr.computeEffectiveEgress(cfg, parentID)
+	if egress == nil {
+		t.Fatal("expected non-nil (empty) egress, got nil")
+	}
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress (child cannot exceed denied parent), got %v", egress)
 	}
 }
 
