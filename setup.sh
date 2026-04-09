@@ -119,7 +119,7 @@ if [ "$FRESH" = true ]; then
   echo "  cd $DIR"
   echo "  docker compose up -d"
   echo ""
-  echo "Then open http://localhost:8080"
+  echo "Then open http://localhost:8120"
 else
   echo "Done! To apply updates:"
   echo ""

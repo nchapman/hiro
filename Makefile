@@ -44,7 +44,7 @@ test-online:
 	docker compose -f dev/docker-compose.e2e.yml build hiro-e2e
 	docker compose -f dev/docker-compose.e2e.yml up -d hiro-e2e
 	@# Discover the mapped port and run e2e tests on the host
-	@PORT=$$(docker compose -f dev/docker-compose.e2e.yml port hiro-e2e 8080 | cut -d: -f2); \
+	@PORT=$$(docker compose -f dev/docker-compose.e2e.yml port hiro-e2e 8120 | cut -d: -f2); \
 	HIRO_E2E_URL=http://localhost:$$PORT \
 	HIRO_E2E_CONTAINER=$$(docker compose -f dev/docker-compose.e2e.yml ps -q hiro-e2e) \
 	HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL) \
@@ -61,7 +61,7 @@ test-cluster:
 	docker compose -f dev/docker-compose.cluster.yml build; \
 	docker compose -f dev/docker-compose.cluster.yml up -d; \
 	sleep 3; \
-	PORT=$$(docker compose -f dev/docker-compose.cluster.yml port leader 8080 | cut -d: -f2); \
+	PORT=$$(docker compose -f dev/docker-compose.cluster.yml port leader 8120 | cut -d: -f2); \
 	LEADER_ID=$$(docker compose -f dev/docker-compose.cluster.yml ps -q leader); \
 	WORKER_ID=$$(docker compose -f dev/docker-compose.cluster.yml ps -q worker); \
 	HIRO_E2E_URL=http://localhost:$$PORT \
@@ -88,7 +88,7 @@ test-cluster-relay:
 	docker compose -f dev/docker-compose.cluster-relay.yml up -d; \
 	echo "Waiting for leader + relay registration..."; \
 	sleep 15; \
-	PORT=$$(docker compose -f dev/docker-compose.cluster-relay.yml port leader 8080 | cut -d: -f2); \
+	PORT=$$(docker compose -f dev/docker-compose.cluster-relay.yml port leader 8120 | cut -d: -f2); \
 	LEADER_ID=$$(docker compose -f dev/docker-compose.cluster-relay.yml ps -q leader); \
 	WORKER_ID=$$(docker compose -f dev/docker-compose.cluster-relay.yml ps -q worker); \
 	HIRO_E2E_URL=http://localhost:$$PORT \

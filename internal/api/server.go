@@ -550,7 +550,7 @@ func isSameOrigin(r *http.Request) bool {
 		// a same-origin request from a non-browser client).
 		return true
 	}
-	// Origin includes scheme (e.g. "http://localhost:8080").
+	// Origin includes scheme (e.g. "http://localhost:8120").
 	// Extract host and compare with the request's Host header.
 	host := r.Host
 	if host == "" {

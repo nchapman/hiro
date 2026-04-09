@@ -223,7 +223,7 @@ func initPlatform() (*app, error) {
 	a := &app{
 		rootDir:    rootDir,
 		absRootDir: absRootDir,
-		listenAddr: envOr("HIRO_ADDR", ":8080"),
+		listenAddr: envOr("HIRO_ADDR", ":8120"),
 		logger:     logger,
 		pdb:        pdb,
 		lh:         lh,

@@ -68,7 +68,7 @@ Key details:
 - The `SessionClear` test is known to be flaky due to OpenRouter connection timeouts
 - Tests take ~2-6 minutes depending on LLM latency
 
-Web UI dev server (separate terminal — proxies `/api` and `/ws` to `localhost:8080`):
+Web UI dev server (separate terminal — proxies `/api` and `/ws` to `localhost:8120`):
 ```bash
 cd web/ui && npm run dev
 ```
@@ -83,7 +83,7 @@ These are optional overrides, not required for normal operation:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HIRO_ADDR` | `:8080` | HTTP listen address |
+| `HIRO_ADDR` | `:8120` | HTTP listen address |
 | `HIRO_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 | `HIRO_LOG_LEVEL` | `info` | Log level |

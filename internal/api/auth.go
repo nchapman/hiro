@@ -21,7 +21,7 @@ const (
 )
 
 // sessionCookieName returns a port-scoped cookie name so multiple instances
-// on the same host (e.g., localhost:8080 and localhost:8082) don't clobber
+// on the same host (e.g., localhost:8120 and localhost:8122) don't clobber
 // each other's sessions.
 func sessionCookieName(r *http.Request) string {
 	_, port, err := net.SplitHostPort(r.Host)

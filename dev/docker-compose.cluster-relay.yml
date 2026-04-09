@@ -18,18 +18,15 @@ services:
     networks:
       - leader-net
     ports:
-      - "0:8080"  # HTTP API for test harness (host access only)
+      - "0:8120"  # HTTP API for test harness (host access only)
     environment:
-      - HIRO_ADDR=:8080
-      - HIRO_CLUSTER_ADDR=:8081
-      - HIRO_ROOT=/hiro
       - HIRO_TRACKER_URL=https://discover.hellohiro.ai
       - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
     volumes:
       - leader-hiro:/hiro
       - ../tests/e2e_cluster/leader-config/config.yaml:/hiro/config/config.yaml
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
       interval: 5s
       timeout: 3s
       start_period: 5s
@@ -49,7 +46,6 @@ services:
       leader:
         condition: service_healthy
     environment:
-      - HIRO_ROOT=/hiro
       - HIRO_MODE=worker
       - HIRO_TRACKER_URL=https://discover.hellohiro.ai
       - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}

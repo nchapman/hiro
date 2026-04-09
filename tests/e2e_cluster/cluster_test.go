@@ -8,7 +8,7 @@
 //
 // Required environment:
 //
-//	HIRO_E2E_URL            — leader's HTTP base URL (e.g. http://localhost:8080)
+//	HIRO_E2E_URL            — leader's HTTP base URL (e.g. http://localhost:8120)
 //	HIRO_LEADER_CONTAINER   — leader Docker container ID
 //	HIRO_WORKER_CONTAINER   — worker Docker container ID
 //	HIRO_API_KEY            — LLM provider API key

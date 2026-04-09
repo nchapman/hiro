@@ -3,9 +3,9 @@
 #   docker compose -f dev/docker-compose.yml up --build
 #
 # Then onboard each node through the web UI:
-#   - Node 1 (leader): http://localhost:8080
-#   - Node 2 (worker): http://localhost:8082
-#   - Node 3 (worker): http://localhost:8084
+#   - Node 1 (leader): http://localhost:8120
+#   - Node 2 (worker): http://localhost:8122
+#   - Node 3 (worker): http://localhost:8124
 #
 # All nodes start unconfigured — pick a mode during onboarding.
 # To test approval: onboard node1 as leader, node2/node3 as workers,
@@ -21,12 +21,8 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:8081:8081"
-    environment:
-      - HIRO_ADDR=:8080
-      - HIRO_CLUSTER_ADDR=:8081
-      - HIRO_ROOT=/hiro
+      - "127.0.0.1:8120:8120"
+      - "127.0.0.1:8121:8121"
     volumes:
       - node1:/hiro
 
@@ -40,10 +36,7 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
-      - "127.0.0.1:8082:8080"
-    environment:
-      - HIRO_ADDR=:8080
-      - HIRO_ROOT=/hiro
+      - "127.0.0.1:8122:8120"
     volumes:
       - node2:/hiro
 
@@ -57,10 +50,7 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
-      - "127.0.0.1:8084:8080"
-    environment:
-      - HIRO_ADDR=:8080
-      - HIRO_ROOT=/hiro
+      - "127.0.0.1:8124:8120"
     volumes:
       - node3:/hiro
 

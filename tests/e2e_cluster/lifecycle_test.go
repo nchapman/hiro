@@ -265,7 +265,7 @@ func waitForWorkerStatus(t *testing.T, expected string, timeout time.Duration) {
 	var lastStatus string
 	for time.Now().Before(deadline) {
 		out, err := exec.Command("docker", "exec", workerContainer,
-			"curl", "-sf", "http://localhost:8080/api/settings/cluster").Output()
+			"curl", "-sf", "http://localhost:8120/api/settings/cluster").Output()
 		if err == nil {
 			var settings map[string]any
 			if json.Unmarshal(out, &settings) == nil {

@@ -34,7 +34,7 @@ type Client struct {
 
 // ClientOptions configures a worker client.
 type ClientOptions struct {
-	LeaderURL   string // e.g. "ws://leader:8080/ws/worker"
+	LeaderURL   string // e.g. "ws://leader:8120/ws/worker"
 	AgentName   string
 	Description string
 	Skills      []string

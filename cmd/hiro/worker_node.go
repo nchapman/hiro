@@ -163,7 +163,7 @@ func (wn *workerNode) init() error {
 
 // startHTTPServer runs a minimal HTTP server for the worker's web UI / settings.
 func (wn *workerNode) startHTTPServer() {
-	listenAddr := envOr("HIRO_ADDR", ":8080")
+	listenAddr := envOr("HIRO_ADDR", ":8120")
 
 	webFS, err := web.DistFS()
 	if err != nil {

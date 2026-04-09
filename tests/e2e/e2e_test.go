@@ -6,7 +6,7 @@
 //
 // Required environment:
 //
-//	HIRO_E2E_URL        — base URL of the running server (e.g. http://localhost:8080)
+//	HIRO_E2E_URL        — base URL of the running server (e.g. http://localhost:8120)
 //	HIRO_E2E_CONTAINER  — Docker container name for filesystem access (e.g. hiro-e2e)
 package e2e
 

@@ -67,7 +67,7 @@ func setupNodeIdentity(rootDir string, logger *slog.Logger) (*cluster.NodeIdenti
 // worker node connections, and the file sync service for pushing workspace
 // changes to workers.
 func setupClusterServer(rootDir string, tlsCert tls.Certificate, cp *controlplane.ControlPlane, logger *slog.Logger) (clusterState, error) {
-	clusterAddr := envOr("HIRO_CLUSTER_ADDR", ":8081")
+	clusterAddr := envOr("HIRO_CLUSTER_ADDR", ":8121")
 
 	registry := cluster.NewNodeRegistry()
 	homeName := cp.ClusterNodeName()

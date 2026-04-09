@@ -10,21 +10,19 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8120:8120"
       # Expose on all interfaces (use a reverse proxy for TLS):
-      # - "8080:8080"
+      # - "8120:8120"
       # Cluster gRPC port (required for leader nodes accepting workers):
-      # - "8081:8081"
+      # - "8121:8121"
     volumes:
       - hiro:/hiro
       # Bind mount instead of volume (replace the line above):
       # - ./hiro-data:/hiro
     environment:
-      - HIRO_ADDR=:8080
-      - HIRO_ROOT=/hiro
       # - HIRO_LOG_LEVEL=debug
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
       interval: 30s
       timeout: 5s
       start_period: 10s

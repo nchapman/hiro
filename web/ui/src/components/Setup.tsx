@@ -551,7 +551,7 @@ export default function Setup({ onComplete }: SetupProps) {
                         id="worker-addr"
                         value={workerLeaderAddr}
                         onChange={(e) => setWorkerLeaderAddr(e.target.value)}
-                        placeholder="e.g. 10.0.0.1:8081"
+                        placeholder="e.g. 10.0.0.1:8121"
                         autoFocus
                       />
                     </div>

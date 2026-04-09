@@ -23,7 +23,7 @@ cd hiro
 docker compose up -d
 ```
 
-Open [http://localhost:8080](http://localhost:8080) to complete setup — you'll configure a password and LLM provider through the onboarding flow. Once configured, the operator agent is your primary interface. Ask it to create agents, delegate tasks, or work directly.
+Open [http://localhost:8120](http://localhost:8120) to complete setup — you'll configure a password and LLM provider through the onboarding flow. Once configured, the operator agent is your primary interface. Ask it to create agents, delegate tasks, or work directly.
 
 Agent state lives in a Docker volume and survives container restarts. The port is bound to localhost only; use a reverse proxy to expose it remotely.
 
@@ -52,7 +52,7 @@ Optional overrides — not required for normal use:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HIRO_ADDR` | `:8080` | HTTP listen address |
+| `HIRO_ADDR` | `:8120` | HTTP listen address |
 | `HIRO_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 | `HIRO_LOG_LEVEL` | `info` | Log level |
