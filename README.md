@@ -1,43 +1,44 @@
 # Hiro
 
-A distributed AI agent platform. A single binary serves an HTTP API, WebSocket chat, and a React dashboard. Agents are defined as markdown files and run agentic loops that can spawn and manage child agents.
+Run AI agents that have their own shell, filesystem, and network — managed through a web dashboard or API. Define agents as markdown files, give them tools, and let them work autonomously or in coordinated teams.
+
+Self-hosted. Single binary. No external dependencies beyond an LLM API key.
+
+## What Hiro Does
+
+- **Chat with agents** through a web dashboard — they can read files, run commands, fetch URLs, and create other agents
+- **Define agents in markdown** — system prompt, tool access, and network permissions in a single file
+- **Per-agent sandboxing** — every agent runs as its own Unix user in its own network namespace (default-deny)
+- **Persistent agents** accumulate memory, maintain todo lists, and search their own history across sessions
+- **Multi-agent coordination** — agents spawn children, delegate tasks, and synthesize results
+- **Cluster mode** — add worker nodes to distribute agents across machines
 
 ## Quick Start
 
+The setup script downloads the latest release, verifies its SHA256 checksum, and creates a `hiro/` directory with two files: `docker-compose.yml` and `seccomp.json`. You can also download these files manually from the [latest release](https://github.com/nchapman/hiro/releases/latest).
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/setup.sh | sh
 cd hiro
 docker compose up -d
 ```
 
-Open [http://localhost:8080](http://localhost:8080) to complete setup — you'll configure a password and LLM provider through the onboarding flow.
+Open [http://localhost:8080](http://localhost:8080) to complete setup — you'll configure a password and LLM provider through the onboarding flow. Once configured, the operator agent is your primary interface. Ask it to create agents, delegate tasks, or work directly.
 
 Agent state lives in a Docker volume and survives container restarts. The port is bound to localhost only; use a reverse proxy to expose it remotely.
 
-> **Warning:** `docker compose down -v` destroys all agent state (history, memory, todos).
-
-### Docker Requirements
-
-The container requires extra capabilities for per-agent security isolation:
-
-- `CAP_NET_ADMIN` — veth pairs and nftables rules for network isolation
-- Custom seccomp profile — allows `CLONE_NEWUSER` for namespace creation (does not use `--privileged`)
-- `net.ipv4.ip_forward=1` — routes traffic between agent network namespaces
-
-These are pre-configured in the compose file.
+> [!WARNING]
+> `docker compose down -v` destroys all agent state (history, memory, todos).
 
 ### Updating
 
-Run setup again to check for updated files, then pull the latest image:
+Re-run the setup script (it prompts before replacing files you've customized), then pull the latest image:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/setup.sh | sh
 cd hiro
-docker compose pull
-docker compose up -d
+docker compose pull && docker compose up -d
 ```
-
-The setup script prompts before replacing any files you may have customized.
 
 ## Configuration
 
@@ -73,8 +74,9 @@ The `agent.md` frontmatter configures the agent's tools and network access:
 ```yaml
 ---
 name: my-agent
-description: Does a thing.
+description: A helper agent.
 allowed_tools: [Bash, Read, Write, Edit, Glob, Grep]
+# Agents have NO network access by default. Declare allowed domains explicitly:
 network:
   egress:
     - "github.com"
@@ -83,10 +85,6 @@ network:
 
 Your system prompt goes here.
 ```
-
-Agent mode (persistent or ephemeral) is a runtime property specified by the caller, not part of the definition. Persistent instances get memory, todos, and history search. Ephemeral instances run a single task and clean up.
-
-Agents can create new agent and skill definitions at runtime using their file tools — no restart needed.
 
 ### Skills
 
@@ -105,11 +103,13 @@ Hiro uses defense-in-depth to run untrusted LLM-driven agents:
 - **Per-worker seccomp-BPF** — blocks namespace creation, mount, and ptrace in agent processes
 - **Tool capability system** — closed-by-default whitelist with parameterized rules (`Bash(curl *)`) and parent-child inheritance
 
+The compose file grants `CAP_NET_ADMIN` and a custom seccomp profile to enable per-agent network namespaces and Unix user isolation. No manual configuration needed.
+
 See [docs/security.md](docs/security.md) for the full threat model.
 
 ## Development
 
-Building from source requires Go 1.26+ and Node.js 24+.
+Building from source requires Go and Node.js (see `go.mod` and `web/ui/package.json` for versions).
 
 ```bash
 make build           # Build web UI + Go binary
@@ -129,4 +129,4 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture, package descriptions, and 
 
 ## License
 
-MIT
+[MIT](LICENSE)
