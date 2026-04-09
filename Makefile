@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-isolation test-netiso test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
 
 # Auto-load .env variables. Command-line overrides (make VAR=x) take precedence.
 # Variables are NOT exported globally — only test targets pass what they need.
@@ -11,15 +11,30 @@ build: web
 	go build -o $(BINARY) ./cmd/hiro
 
 test:
-	docker build --target test -t hiro-test .
-	docker run --rm --init hiro-test
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
 
 test-local:
 	go test -race ./... -v -count=1
 
 test-isolation:
-	docker build --target test -t hiro-test .
-	docker run --rm --init hiro-test go test ./internal/agent/... -tags=isolation -v -count=1
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test \
+		go test ./internal/agent/... -tags=isolation -v -count=1; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
+
+test-netiso:
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test \
+		go test ./internal/netiso/... -tags=netiso -v -count=1; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
 
 test-online:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
@@ -91,8 +106,12 @@ lint:
 	golangci-lint run ./...
 
 check:
-	docker build --target test -t hiro-test .
-	docker run --rm --init hiro-test sh -c "go test -race ./... -v -count=1 && go vet ./..."
+	docker compose -f docker-compose.test.yml build test
+	docker compose -f docker-compose.test.yml run --rm test \
+		sh -c "go test -race ./... -v -count=1 && go vet ./..."; \
+	EXIT=$$?; \
+	docker compose -f docker-compose.test.yml down; \
+	exit $$EXIT
 
 clean:
 	rm -f $(BINARY)

@@ -25,12 +25,12 @@ type isolationWorker struct {
 }
 
 // isolationWorkerFactory captures SpawnConfig for inspection.
-func isolationWorkerFactory(response string) (WorkerFactory, *[]*isolationWorker) {
+func isolationWorkerFactory() (WorkerFactory, *[]*isolationWorker) {
 	var workers []*isolationWorker
 	factory := func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
 		done := make(chan struct{})
 		w := &isolationWorker{
-			testWorker: testWorker{response: response, done: done},
+			testWorker: testWorker{done: done},
 			spawnCfg:   cfg,
 		}
 		workers = append(workers, w)
@@ -60,11 +60,11 @@ func setupIsolationManager(t *testing.T) (*Manager, string, *[]*isolationWorker)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	pool := uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
-	factory, workers := isolationWorkerFactory("hello")
+	factory, workers := isolationWorkerFactory()
 
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil)
+	}, nil, logger, factory, pool, nil, nil)
 
 	return mgr, dir, workers
 }
@@ -173,11 +173,11 @@ func TestIsolation_PoolExhaustion(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	// Create a tiny pool (size 2) to test exhaustion
 	pool := uidpool.New(uidpool.DefaultBaseUID, uint32(gid), 2)
-	factory, _ := isolationWorkerFactory("hello")
+	factory, _ := isolationWorkerFactory()
 
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil)
+	}, nil, logger, factory, pool, nil, nil)
 
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
@@ -299,5 +299,65 @@ func TestIsolation_ConfigYAMLProtected(t *testing.T) {
 	// Expect permission denied
 	if !strings.Contains(string(output), "Permission denied") {
 		t.Fatalf("expected 'Permission denied', got: %s (err: %v)", output, err)
+	}
+}
+
+// TestIsolation_CloneflagsGidMappings verifies that setNetworkCloneflags
+// produces the correct GID mappings for supplementary groups.
+func TestIsolation_CloneflagsGidMappings(t *testing.T) {
+	cmd := exec.Command("true")
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+	setNetworkCloneflags(cmd, 10005, 10000, []uint32{10000, 10001})
+
+	// Should have CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS.
+	expected := uintptr(syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET | syscall.CLONE_NEWNS)
+	if cmd.SysProcAttr.Cloneflags != expected {
+		t.Errorf("Cloneflags = %x, want %x", cmd.SysProcAttr.Cloneflags, expected)
+	}
+
+	// UID mapping: 0 inside → 10005 outside.
+	if len(cmd.SysProcAttr.UidMappings) != 1 {
+		t.Fatalf("expected 1 UID mapping, got %d", len(cmd.SysProcAttr.UidMappings))
+	}
+	if cmd.SysProcAttr.UidMappings[0].HostID != 10005 {
+		t.Errorf("UID HostID = %d, want 10005", cmd.SysProcAttr.UidMappings[0].HostID)
+	}
+
+	// GidMappingsEnableSetgroups must be true so the child can call setgroups().
+	if !cmd.SysProcAttr.GidMappingsEnableSetgroups {
+		t.Error("GidMappingsEnableSetgroups should be true")
+	}
+
+	// GID mappings: 0→10000 (primary), 10001→10001 (hiro-operators).
+	// Primary GID (10000) appears in groups but is already mapped as ContainerID 0,
+	// so it should be deduplicated (not mapped twice).
+	if len(cmd.SysProcAttr.GidMappings) != 2 {
+		t.Fatalf("expected 2 GID mappings, got %d: %v", len(cmd.SysProcAttr.GidMappings), cmd.SysProcAttr.GidMappings)
+	}
+	// First: primary GID (0 inside → 10000 outside).
+	if cmd.SysProcAttr.GidMappings[0].ContainerID != 0 || cmd.SysProcAttr.GidMappings[0].HostID != 10000 {
+		t.Errorf("GID mapping[0] = %+v, want {0 → 10000}", cmd.SysProcAttr.GidMappings[0])
+	}
+	// Second: supplementary (10001 inside → 10001 outside).
+	if cmd.SysProcAttr.GidMappings[1].ContainerID != 10001 || cmd.SysProcAttr.GidMappings[1].HostID != 10001 {
+		t.Errorf("GID mapping[1] = %+v, want {10001 → 10001}", cmd.SysProcAttr.GidMappings[1])
+	}
+}
+
+// TestIsolation_CloneflagsNoSupplementaryGroups verifies that agents without
+// supplementary groups get only the primary GID mapping.
+func TestIsolation_CloneflagsNoSupplementaryGroups(t *testing.T) {
+	cmd := exec.Command("true")
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+	setNetworkCloneflags(cmd, 10005, 10000, []uint32{10000})
+
+	// Only primary GID, no supplementary — should have 1 mapping.
+	if len(cmd.SysProcAttr.GidMappings) != 1 {
+		t.Fatalf("expected 1 GID mapping, got %d: %v", len(cmd.SysProcAttr.GidMappings), cmd.SysProcAttr.GidMappings)
+	}
+	// GidMappingsEnableSetgroups must always be true, even without supplementary
+	// groups — the child needs setgroups() to be allowed by the kernel.
+	if !cmd.SysProcAttr.GidMappingsEnableSetgroups {
+		t.Error("GidMappingsEnableSetgroups should be true even with no supplementary groups")
 	}
 }

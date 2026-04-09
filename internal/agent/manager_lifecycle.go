@@ -352,22 +352,26 @@ func (m *Manager) acquireUIDAndChown(instanceID, instDir string) (uint32, uint32
 	}
 	// Transfer ownership of the instance dir (and all contents) to the agent user.
 	// config.yaml is skipped — it stays root-owned so the agent cannot read it.
-	if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if config.IsInstanceConfigFile(path, instDir) {
-			return nil // keep root-owned
-		}
-		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
-	}); err != nil {
-		if os.IsPermission(err) {
-			m.logger.Warn("cannot chown instance dir (not root); file isolation degraded",
-				"instance", instanceID, "uid", uid)
-		} else {
+	//
+	// Chown requires root. In production (Docker), the control plane is always
+	// root. In test-local, we're not root but still create a pool for testing
+	// UID assignment — skip chown and proceed with the assigned UID.
+	if os.Getuid() == 0 {
+		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if config.IsInstanceConfigFile(path, instDir) {
+				return nil // keep root-owned
+			}
+			return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
+		}); err != nil {
 			m.uidPool.Release(instanceID)
 			return 0, 0, fmt.Errorf("chowning instance dir: %w", err)
 		}
+	} else {
+		m.logger.Warn("not root; skipping chown — instance dir owned by process user, not agent UID (test-local only)",
+			"instance", instanceID, "uid", uid)
 	}
 	return uid, gid, nil
 }
@@ -480,6 +484,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 		spawnCtx = m.ctx
 	}
 	supplementaryGroups := m.resolveSupplementaryGroups(cfg, parentID)
+	effectiveEgress := m.computeEffectiveEgress(cfg, parentID)
 	uid, gid, err := m.acquireUIDAndChown(instanceID, instDir)
 	if err != nil {
 		return "", err
@@ -489,7 +494,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 		return "", err
 	}
 
-	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, cfg.Name, allowedTools, sessDir, uid, gid, supplementaryGroups)
+	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, cfg.Name, allowedTools, sessDir, uid, gid, supplementaryGroups, effectiveEgress)
 	cleanup := makeCleanup(sessDir, instDir, dirIsNew, m.uidPool, instanceID)
 	handle, err := m.spawnWorker(spawnCtx, cfg, nodeID, spawnCfg, allowedTools, instanceID, sessionID)
 	if err != nil {
@@ -512,12 +517,12 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 		return "", err
 	}
 
-	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, channelKey, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, memoryMu, effectiveTools, allowLayers, denyRules, uid, gid, supplementaryGroups))
+	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, channelKey, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, memoryMu, effectiveTools, allowLayers, denyRules, effectiveEgress, uid, gid, supplementaryGroups))
 	return instanceID, nil
 }
 
 // buildSpawnConfig creates an ipc.SpawnConfig for worker spawning.
-func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allowedTools map[string]bool, sessDir string, uid, gid uint32, supplementaryGroups []uint32) ipc.SpawnConfig {
+func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allowedTools map[string]bool, sessDir string, uid, gid uint32, supplementaryGroups []uint32, networkEgress []string) ipc.SpawnConfig {
 	return ipc.SpawnConfig{
 		InstanceID:     instanceID,
 		SessionID:      sessionID,
@@ -529,6 +534,7 @@ func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allo
 		UID:            uid,
 		GID:            gid,
 		Groups:         append([]uint32{gid}, supplementaryGroups...),
+		NetworkEgress:  networkEgress,
 	}
 }
 
@@ -547,7 +553,7 @@ func makeCleanup(sessDir, instDir string, dirIsNew bool, pool *uidpool.Pool, ins
 
 // buildInstance creates an instance struct with all resolved fields.
 // The initial session slot is created from the provided handle/loop.
-func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID, model, displayName, displayDesc string, handle *WorkerHandle, loop *inference.Loop, notifications *inference.NotificationQueue, memoryMu *sync.Mutex, effectiveTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, uid, gid uint32, groups []uint32) *instance {
+func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID, model, displayName, displayDesc string, handle *WorkerHandle, loop *inference.Loop, notifications *inference.NotificationQueue, memoryMu *sync.Mutex, effectiveTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, effectiveEgress []string, uid, gid uint32, groups []uint32) *instance {
 	slot := &sessionSlot{
 		sessionID: sessionID,
 		channel:   channelKey,
@@ -567,18 +573,19 @@ func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentCon
 			Model:       model,
 			NodeID:      nodeID,
 		},
-		agentName:      cfg.Name,
-		sessions:       map[string]*sessionSlot{sessionID: slot},
-		channelIndex:   map[string]string{channelKey: sessionID},
-		notifications:  notifications,
-		memoryMu:       memoryMu,
-		effectiveTools: effectiveTools,
-		allowLayers:    allowLayers,
-		denyRules:      denyRules,
-		uid:            uid,
-		gid:            gid,
-		groups:         groups,
-		nodeID:         nodeID,
+		agentName:       cfg.Name,
+		sessions:        map[string]*sessionSlot{sessionID: slot},
+		channelIndex:    map[string]string{channelKey: sessionID},
+		notifications:   notifications,
+		memoryMu:        memoryMu,
+		effectiveTools:  effectiveTools,
+		allowLayers:     allowLayers,
+		denyRules:       denyRules,
+		effectiveEgress: effectiveEgress,
+		uid:             uid,
+		gid:             gid,
+		groups:          groups,
+		nodeID:          nodeID,
 	}
 	return inst
 }

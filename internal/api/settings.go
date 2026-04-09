@@ -34,6 +34,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req settingsResponse
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -70,6 +71,7 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req struct {
 		APIKey  string `json:"api_key"`
 		BaseURL string `json:"base_url"`

@@ -11,6 +11,7 @@ import (
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/models"
+	"github.com/nchapman/hiro/internal/netiso"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/toolrules"
 	"github.com/nchapman/hiro/internal/uidpool"
@@ -69,21 +70,22 @@ type sessionSlot struct {
 // sessions/channelIndex maps and instance-level state; slot.mu serializes
 // Chat calls on individual sessions.
 type instance struct {
-	mu             sync.Mutex // protects sessions, channelIndex, and instance-level state
-	info           InstanceInfo
-	agentName      string                       // agent definition name (immutable, for config loading)
-	sessions       map[string]*sessionSlot      // sessionID → slot
-	channelIndex   map[string]string            // compound channel key → sessionID
-	notifications  *inference.NotificationQueue // instance-level; survives session recreation
-	memoryMu       *sync.Mutex                  // protects concurrent memory.md read-modify-write across sessions
-	effectiveTools map[string]bool              // built-in tools this instance is allowed; nil = unrestricted
-	allowLayers    [][]toolrules.Rule           // per-source allow rules for call-time enforcement
-	denyRules      []toolrules.Rule             // merged deny rules from all sources
-	configGen      uint64                       // incremented on each model/tool config change under inst.mu
-	uid            uint32                       // isolated UID (0 = no isolation)
-	gid            uint32                       // isolated GID
-	groups         []uint32                     // supplementary groups only (not primary GID); used for inheritance checks
-	nodeID         ipc.NodeID                   // which node this instance runs on ("home" for local)
+	mu              sync.Mutex // protects sessions, channelIndex, and instance-level state
+	info            InstanceInfo
+	agentName       string                       // agent definition name (immutable, for config loading)
+	sessions        map[string]*sessionSlot      // sessionID → slot
+	channelIndex    map[string]string            // compound channel key → sessionID
+	notifications   *inference.NotificationQueue // instance-level; survives session recreation
+	memoryMu        *sync.Mutex                  // protects concurrent memory.md read-modify-write across sessions
+	effectiveTools  map[string]bool              // built-in tools this instance is allowed; nil = unrestricted
+	allowLayers     [][]toolrules.Rule           // per-source allow rules for call-time enforcement
+	denyRules       []toolrules.Rule             // merged deny rules from all sources
+	configGen       uint64                       // incremented on each model/tool config change under inst.mu
+	effectiveEgress []string                     // effective network egress policy; always non-nil (empty = default-deny, no connectivity)
+	uid             uint32                       // isolated UID (0 = no isolation)
+	gid             uint32                       // isolated GID
+	groups          []uint32                     // supplementary groups only (not primary GID); used for inheritance checks
+	nodeID          ipc.NodeID                   // which node this instance runs on ("home" for local)
 }
 
 // slotByChannel returns the session slot for a compound channel key, or nil.
@@ -138,6 +140,7 @@ type Manager struct {
 	logger  *slog.Logger
 
 	workerFactory  WorkerFactory               // creates agent workers (default = OS processes)
+	netIso         *netiso.NetIso              // per-agent network isolation; nil = disabled
 	uidPool        *uidpool.Pool               // per-agent Unix user isolation; nil = disabled
 	pdb            *platformdb.DB              // unified platform database
 	clusterService *cluster.LeaderService      // cluster orchestration; nil = standalone
@@ -177,9 +180,14 @@ type ControlPlane interface {
 // containing agents/, instances/, skills/, and workspace/ subdirectories. The context
 // controls the lifetime of persistent instances. cp may be nil if no control
 // plane is configured. If wf is nil, the default OS process spawner is used.
-func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, wf WorkerFactory, pool *uidpool.Pool, pdb *platformdb.DB) *Manager {
+// ni may be nil if network isolation is not available.
+func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPlane, logger *slog.Logger, wf WorkerFactory, pool *uidpool.Pool, pdb *platformdb.DB, ni *netiso.NetIso) *Manager {
 	if wf == nil {
-		wf = defaultWorkerFactory
+		if ni != nil {
+			wf = newWorkerFactory(ni)
+		} else {
+			wf = defaultWorkerFactory
+		}
 	}
 	return &Manager{
 		instances:     make(map[string]*instance),
@@ -190,6 +198,7 @@ func NewManager(ctx context.Context, rootDir string, opts Options, cp ControlPla
 		cp:            cp,
 		logger:        logger.With("component", "agent"),
 		workerFactory: wf,
+		netIso:        ni,
 		uidPool:       pool,
 		pdb:           pdb,
 	}
@@ -221,7 +230,7 @@ func (m *Manager) unregisterLocked(id string, inst *instance) {
 
 // instanceInfoToIPC converts an InstanceInfo to ipc.InstanceInfo.
 func (m *Manager) instanceInfoToIPC(info InstanceInfo) ipc.InstanceInfo {
-	return ipc.InstanceInfo{
+	result := ipc.InstanceInfo{
 		ID:          info.ID,
 		Name:        info.Name,
 		Mode:        string(info.Mode),
@@ -230,4 +239,11 @@ func (m *Manager) instanceInfoToIPC(info InstanceInfo) ipc.InstanceInfo {
 		Status:      string(info.Status),
 		Model:       info.Model,
 	}
+	// Include effective egress if the instance is known.
+	m.mu.RLock()
+	if inst, ok := m.instances[info.ID]; ok {
+		result.EffectiveEgress = inst.effectiveEgress
+	}
+	m.mu.RUnlock()
+	return result
 }

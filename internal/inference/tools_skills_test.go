@@ -38,16 +38,16 @@ func TestIsUnderAllowedDir(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:        "empty allowed dirs means unrestricted",
+			name:        "empty allowed dirs denies all paths",
 			path:        "/anywhere/file.md",
 			allowedDirs: nil,
-			want:        true,
+			want:        false,
 		},
 		{
-			name:        "all empty strings means unrestricted",
+			name:        "all empty strings denies all paths",
 			path:        "/anywhere/file.md",
 			allowedDirs: []string{"", ""},
-			want:        true,
+			want:        false,
 		},
 		{
 			name:        "exact dir match without trailing slash",
@@ -213,6 +213,46 @@ func TestBuildSkillTool_EmptyName(t *testing.T) {
 	}
 	if !resp.IsError {
 		t.Error("expected error for empty name")
+	}
+}
+
+func TestBuildSkillTool_SymlinkEscape_Rejected(t *testing.T) {
+	allowedDir := resolvedTempDir(t)
+	outsideDir := resolvedTempDir(t)
+
+	// Create the real skill file outside the allowed directory.
+	externalSkill := filepath.Join(outsideDir, "secret.md")
+	if err := os.WriteFile(externalSkill, []byte("---\nname: evil\n---\nStolen content."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a symlink inside the allowed directory pointing outside.
+	symlinkPath := filepath.Join(allowedDir, "evil.md")
+	if err := os.Symlink(externalSkill, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.AgentConfig{
+		Skills: []config.SkillConfig{
+			{Name: "evil", Path: symlinkPath},
+		},
+	}
+
+	tool := buildSkillTool(cfg, []string{allowedDir}, nil, testLogger)
+
+	resp, err := tool.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  "Skill",
+		Input: `{"name":"evil"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsError {
+		t.Error("expected error for symlink pointing outside allowed dirs")
+	}
+	if !strings.Contains(resp.Content, "outside allowed") {
+		t.Errorf("expected 'outside allowed' in error, got: %s", resp.Content)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/ipc/grpcipc"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"google.golang.org/grpc"
 )
 
@@ -34,10 +35,48 @@ const (
 // runAgent is the entry point for an agent worker process.
 // Workers are thin tool-execution sandboxes: they receive ExecuteTool
 // RPCs from the control plane and execute tools under an isolated UID.
+//
+// When network isolation is active (PeerName set in config), the startup
+// follows a two-phase handshake:
+//  1. Signal "ns-ready" (namespaces up, awaiting veth from parent)
+//  2. Wait for veth-ready signal (FD 3 closed by parent)
+//  3. Self-configure network (interfaces, routes, bind mounts)
+//  4. Install seccomp-BPF filter (blocks namespace creation, mounts)
+//  5. Signal "ready" (gRPC server listening)
+//
+// All UID-isolated agents (not just network-isolated) get the seccomp filter
+// to prevent namespace creation, mount manipulation, etc.
 func runAgent() error {
 	var cfg ipc.SpawnConfig
 	if err := json.NewDecoder(os.Stdin).Decode(&cfg); err != nil {
 		return fmt.Errorf("reading spawn config: %w", err)
+	}
+
+	// Network isolation handshake: self-configure inside user namespace.
+	if cfg.PeerName != "" {
+		// Signal that namespaces are up and we're ready for the veth peer.
+		fmt.Fprintln(os.Stdout, "ns-ready")
+
+		// Block until parent has created veth and moved peer into our netns.
+		waitForVethReady()
+
+		// Self-configure: rename peer to eth0, set IP/route, bind-mount DNS.
+		if err := selfConfigureNetwork(cfg); err != nil {
+			return fmt.Errorf("self-configuring network: %w", err)
+		}
+	}
+
+	// For UID-isolated agents: activate supplementary groups (e.g.,
+	// hiro-operators for agents/ write access) then lock down with seccomp.
+	// Both must run AFTER self-configuration (which needs mount) but
+	// BEFORE any agent code.
+	if cfg.UID != 0 {
+		if err := activateGroups(cfg.Groups); err != nil {
+			return fmt.Errorf("activating supplementary groups: %w", err)
+		}
+		if err := installSeccomp(); err != nil {
+			return fmt.Errorf("installing seccomp filter: %w", err)
+		}
 	}
 
 	if err := configureAgentSecurity(cfg); err != nil {
@@ -89,8 +128,12 @@ func configureAgentSecurity(cfg ipc.SpawnConfig) error {
 	}
 
 	syscall.Umask(umaskCollaborative)
-	if uint32(os.Getuid()) != cfg.UID { //nolint:gosec // UID fits uint32 on all supported platforms
-		return fmt.Errorf("expected to run as UID %d, but running as UID %d", cfg.UID, os.Getuid())
+
+	// With CLONE_NEWUSER, os.Getuid() returns 0 inside the user namespace
+	// (mapped to the agent UID outside). All UID-isolated agents use namespaces.
+	actualUID := uint32(os.Getuid()) //nolint:gosec // UID fits uint32 on all supported platforms
+	if actualUID != 0 {
+		return fmt.Errorf("expected to run as UID 0 inside user namespace, but running as UID %d", actualUID)
 	}
 
 	// Confine file tools to the platform root — prevents reading/writing
@@ -173,6 +216,10 @@ func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJo
 	if err != nil {
 		return nil, nil, fmt.Errorf("listening on %s: %w", socketPath, err)
 	}
+	// Restrict socket permissions so only the owning UID can connect.
+	// Defense in depth: the socket directory is already 0700, but an
+	// explicit chmod prevents cross-agent access if dir perms ever loosen.
+	os.Chmod(socketPath, fsperm.FilePrivate) //nolint:errcheck // defense in depth: socket dir is 0700, so failure here is non-fatal
 	cleanup := func() { os.Remove(socketPath) }
 
 	srv := grpc.NewServer()

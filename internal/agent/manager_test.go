@@ -76,7 +76,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello from agent"), nil, nil)
+	}, nil, logger, testWorkerFactory("hello from agent"), nil, nil, nil)
 	return mgr, dir
 }
 
@@ -745,7 +745,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -756,7 +756,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -781,7 +781,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -793,7 +793,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	// Create a new manager and restore.
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -834,14 +834,14 @@ Child.`)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	parentID, _ := mgr1.CreateInstance(ctx, "parent-agent", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "child-agent", parentID, "persistent", "", "", "", "")
 	mgr1.StopInstance(childID)
 	mgr1.StopInstance(parentID)
 	mgr1.Shutdown()
 
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -885,7 +885,7 @@ Worker that also wants hiro-operators.`)
 	pool1 := uidpool.New(10000, 10000, 64)
 	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
 
 	parentID, _ := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "worker", parentID, "persistent", "", "", "", "")
@@ -897,7 +897,7 @@ Worker that also wants hiro-operators.`)
 	pool2 := uidpool.New(10000, 10000, 64)
 	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -941,7 +941,7 @@ Wants escalation.`)
 	pool1 := uidpool.New(10000, 10000, 64)
 	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
 
 	parentID, _ := mgr1.CreateInstance(ctx, "unpriv", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "wants-groups", parentID, "persistent", "", "", "", "")
@@ -953,7 +953,7 @@ Wants escalation.`)
 	pool2 := uidpool.New(10000, 10000, 64)
 	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -990,7 +990,7 @@ Operator.`)
 	pool1 := uidpool.New(10000, 10000, 64)
 	pool1.SetGroupGID("hiro-operators", 10001)
 	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
 	mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	mgr1.Shutdown()
 
@@ -998,7 +998,7 @@ Operator.`)
 	pool2 := uidpool.New(10000, 10000, 64)
 	pool2.SetGroupGID("hiro-operators", 10001)
 	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestManager_Restore_EphemeralCleaned(t *testing.T) {
 		Mode:      "ephemeral",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1057,7 +1057,7 @@ func TestManager_Restore_MissingAgentDefSkipped(t *testing.T) {
 		Mode:      "persistent",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1084,7 +1084,7 @@ func TestManager_Restore_MissingInstanceDirCleaned(t *testing.T) {
 		Status:    "running",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1147,7 +1147,7 @@ func setupTestManagerWithPool(t *testing.T, pool *uidpool.Pool) (*Manager, strin
 	factory, configs := capturingWorkerFactory("hello")
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil)
+	}, nil, logger, factory, pool, nil, nil)
 	return mgr, dir, configs
 }
 
@@ -1246,7 +1246,7 @@ func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, failingWorkerFactory(), pool, nil)
+	}, nil, logger, failingWorkerFactory(), pool, nil, nil)
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 
 	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
@@ -1318,7 +1318,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory1, _ := capturingWorkerFactory("hello")
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory1, pool, pdb)
+	}, nil, logger, factory1, pool, pdb, nil)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1334,7 +1334,7 @@ func TestManager_UIDPool_RestoreSessions(t *testing.T) {
 	factory2, configs2 := capturingWorkerFactory("hello")
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory2, pool2, pdb)
+	}, nil, logger, factory2, pool2, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1535,7 +1535,7 @@ func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, cp, logger, testWorkerFactory("ok"), nil, nil)
+	}, cp, logger, testWorkerFactory("ok"), nil, nil, nil)
 	return mgr, dir
 }
 
@@ -1596,6 +1596,122 @@ Child.`)
 
 	if len(denyRules) != 1 || denyRules[0].Pattern != "rm *" {
 		t.Errorf("expected parent deny rule inherited, got %v", denyRules)
+	}
+}
+
+func TestComputeEffectiveTools_ParentNotFound_FailClosed(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "child", `---
+name: child
+allowed_tools: [Bash, Read, Write, Grep]
+---
+Child.`)
+
+	// Parent ID that doesn't exist in the registry — should fail closed.
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("child"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, "nonexistent-parent-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// All tools should be stripped — parent not found means deny all.
+	if len(effective) != 0 {
+		t.Errorf("expected empty effective tools when parent not found, got %v", effective)
+	}
+}
+
+func TestComputeEffectiveTools_ParentNilEffectiveTools_FailClosed(t *testing.T) {
+	mgr, dir := setupTestManager(t)
+	writeAgentMD(t, dir, "child", `---
+name: child
+allowed_tools: [Bash, Read]
+---
+Child.`)
+
+	// Parent exists in registry but has nil effective tools.
+	parentID := "parent-nil-tools"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{
+		effectiveTools: nil,
+	}
+	mgr.mu.Unlock()
+
+	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("child"))
+	effective, _, _, err := mgr.computeEffectiveTools(cfg, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(effective) != 0 {
+		t.Errorf("expected empty effective tools when parent has nil tools, got %v", effective)
+	}
+}
+
+func TestComputeEffectiveEgress_ParentNotFound_FailClosed(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	cfg := config.AgentConfig{
+		NetworkEgress: []string{"github.com", "*.github.com"},
+	}
+
+	// Parent ID that doesn't exist — should return empty (no network, fail closed).
+	egress := mgr.computeEffectiveEgress(cfg, "nonexistent-parent-id")
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress when parent not found, got %v", egress)
+	}
+}
+
+func TestComputeEffectiveEgress_NilDeclaration_DefaultDeny(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Agent with no network field — should get empty slice (default-deny), not nil.
+	cfg := config.AgentConfig{NetworkEgress: nil}
+	egress := mgr.computeEffectiveEgress(cfg, "")
+	if egress == nil {
+		t.Fatal("expected non-nil (empty) egress for nil declaration, got nil")
+	}
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress for nil declaration, got %v", egress)
+	}
+}
+
+func TestComputeEffectiveEgress_EmptyChildWithWildcardParent(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Inject a parent instance with wildcard egress.
+	parentID := "parent-123"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{effectiveEgress: []string{"*"}}
+	mgr.mu.Unlock()
+
+	// Child with no network declaration under wildcard parent — still default-deny.
+	cfg := config.AgentConfig{NetworkEgress: nil}
+	egress := mgr.computeEffectiveEgress(cfg, parentID)
+	if egress == nil {
+		t.Fatal("expected non-nil (empty) egress, got nil")
+	}
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress (intersect of [] and [*]), got %v", egress)
+	}
+}
+
+func TestComputeEffectiveEgress_EgressChildUnderDeniedParent(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Parent with no egress (default-deny).
+	parentID := "parent-denied"
+	mgr.mu.Lock()
+	mgr.instances[parentID] = &instance{effectiveEgress: []string{}}
+	mgr.mu.Unlock()
+
+	// Child declares egress but parent has none — child cannot exceed parent.
+	cfg := config.AgentConfig{NetworkEgress: []string{"github.com"}}
+	egress := mgr.computeEffectiveEgress(cfg, parentID)
+	if egress == nil {
+		t.Fatal("expected non-nil (empty) egress, got nil")
+	}
+	if len(egress) != 0 {
+		t.Errorf("expected empty egress (child cannot exceed denied parent), got %v", egress)
 	}
 }
 
@@ -1683,7 +1799,7 @@ Operator.`)
 
 	// Start persistent instance, shut down
 	pdb := openTestPDB(t, dir)
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	id, err := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -1691,7 +1807,7 @@ Operator.`)
 	mgr1.Shutdown()
 
 	// Restore — persistent mode should survive
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}

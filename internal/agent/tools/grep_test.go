@@ -510,7 +510,7 @@ func TestGrepWithRegex_Fallback(t *testing.T) {
 
 	ctx := context.Background()
 
-	matches, err := grepWithRegex(ctx, "func hello", dir, "")
+	matches, err := grepWithRegex(ctx, "func hello", dir, "", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestGrepWithRegex_Fallback(t *testing.T) {
 		t.Errorf("expected a.go, got %s", matches[0].path)
 	}
 
-	matches, err = grepWithRegex(ctx, "hello", dir, "*.go")
+	matches, err = grepWithRegex(ctx, "hello", dir, "*.go", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestGrepWithRegex_Fallback(t *testing.T) {
 		}
 	}
 
-	_, err = grepWithRegex(ctx, "[invalid", dir, "")
+	_, err = grepWithRegex(ctx, "[invalid", dir, "", false, false)
 	if err == nil {
 		t.Error("expected error for invalid regex")
 	}
@@ -736,6 +736,38 @@ func TestAppendPatternAndPath(t *testing.T) {
 	args = appendPatternAndPath(nil, "test", "/path")
 	if args[0] != "--" || args[1] != "test" {
 		t.Errorf("expected -- separator for normal pattern, got %v", args)
+	}
+}
+
+func TestGrep_PathTraversal_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+	SetAllowedRoots([]string{dir})
+
+	tool := NewGrepTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": ".*", "path": "../../../etc"}`)
+	if !isErr {
+		t.Fatal("expected error for path traversal")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
+	}
+}
+
+func TestGrep_AbsolutePathOutsideRoot_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	origRoots := getAllowedRoots()
+	defer SetAllowedRoots(origRoots)
+	SetAllowedRoots([]string{dir})
+
+	tool := NewGrepTool(dir)
+	content, isErr := runTool(t, tool, `{"pattern": ".*", "path": "/etc"}`)
+	if !isErr {
+		t.Fatal("expected error for absolute path outside root")
+	}
+	if !strings.Contains(content, "access denied") {
+		t.Errorf("expected 'access denied', got %q", content)
 	}
 }
 

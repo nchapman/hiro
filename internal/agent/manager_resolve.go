@@ -104,6 +104,12 @@ func (m *Manager) intersectParentRules(parentID string, effective map[string]boo
 	parent, ok := m.instances[parentID]
 	m.mu.RUnlock()
 	if !ok || parent.effectiveTools == nil {
+		// Parent specified but not found or has no tools — fail closed.
+		// The child cannot exceed the parent's permissions, and an absent
+		// parent means we cannot verify what those permissions were.
+		for t := range effective {
+			delete(effective, t)
+		}
 		return allowLayers, denyRules
 	}
 	for t := range effective {
@@ -151,6 +157,91 @@ func stripRedundantWholeToolRules(rules []toolrules.Rule) []toolrules.Rule {
 		result = append(result, r)
 	}
 	return result
+}
+
+// computeEffectiveEgress returns the effective network egress policy for an instance.
+// Always returns a non-nil slice. An empty slice means default-deny (no connectivity).
+// The policy is the intersection of the agent's declared egress and its parent's effective
+// egress, so children can never exceed their parent's permissions.
+func (m *Manager) computeEffectiveEgress(cfg config.AgentConfig, parentID string) []string {
+	egress := cfg.NetworkEgress
+	if egress == nil {
+		egress = []string{} // no network declared — default deny (empty allowlist)
+	}
+
+	if parentID == "" {
+		return egress // root agent — use as-is
+	}
+
+	m.mu.RLock()
+	parent, ok := m.instances[parentID]
+	m.mu.RUnlock()
+	if !ok {
+		return []string{} // parent not found — fail closed (no network access)
+	}
+
+	result := intersectEgress(egress, parent.effectiveEgress)
+	if result == nil {
+		return []string{} // no overlap — empty allowlist (no connectivity)
+	}
+	return result
+}
+
+// intersectEgress computes the intersection of child and parent egress policies.
+// Wildcard ["*"] means unrestricted. Domain wildcards (*.github.com) are matched.
+func intersectEgress(child, parent []string) []string {
+	// Either side is wildcard → use the other (more restrictive) side.
+	if len(parent) == 1 && parent[0] == "*" {
+		return child
+	}
+	if len(child) == 1 && child[0] == "*" {
+		return parent
+	}
+
+	// Both are specific lists — keep only child entries covered by parent.
+	var result []string
+	for _, c := range child {
+		if egressCovers(parent, c) {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+// egressCovers reports whether the allowlist covers the given domain pattern.
+// A domain pattern is covered if any entry in the list matches it exactly or
+// via wildcard (e.g., "*.github.com" in the list covers "api.github.com" in the query).
+func egressCovers(list []string, domain string) bool {
+	for _, entry := range list {
+		if entry == domain {
+			return true
+		}
+		if entryCoversWildcard(entry, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// entryCoversWildcard checks if a wildcard entry (e.g., "*.github.com") covers the domain.
+func entryCoversWildcard(entry, domain string) bool {
+	if len(entry) <= 2 || entry[:2] != "*." {
+		return false
+	}
+	parentSuffix := entry[1:] // ".github.com"
+
+	// Exact domain under parent wildcard (api.github.com under *.github.com).
+	if len(domain) > len(parentSuffix) && domain[len(domain)-len(parentSuffix):] == parentSuffix {
+		return true
+	}
+	// Child wildcard under parent wildcard (*.api.github.com under *.github.com).
+	if len(domain) > 2 && domain[:2] == "*." {
+		childSuffix := domain[1:] // ".api.github.com"
+		if len(childSuffix) > len(parentSuffix) && childSuffix[len(childSuffix)-len(parentSuffix):] == parentSuffix {
+			return true
+		}
+	}
+	return false
 }
 
 // filterRules returns only rules whose tool name is in the effective set.

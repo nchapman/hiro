@@ -143,16 +143,14 @@ func appendSubdirEntries(resources []string, skillDir, dirName string, maxResour
 
 func isUnderAllowedDir(path string, allowedDirs []string) bool {
 	cleanPath := filepath.Clean(path)
-	hasAny := false
 	for _, dir := range allowedDirs {
 		if dir == "" {
 			continue
 		}
-		hasAny = true
 		prefix := filepath.Clean(dir) + string(filepath.Separator)
 		if strings.HasPrefix(cleanPath, prefix) {
 			return true
 		}
 	}
-	return !hasAny
+	return false // deny when no valid dirs configured or path not under any
 }

@@ -607,3 +607,67 @@ func TestRenderNodeListing_IncludesIDAndStatus(t *testing.T) {
 		}
 	}
 }
+
+// --- Management tool gating tests ---
+
+func TestGatedManagementTools_NotInjectedWhenUndeclared(t *testing.T) {
+	mgr := &fakeHostManager{}
+	cfg := &LoopConfig{
+		HostManager:  mgr,
+		AllowedTools: map[string]bool{"Bash": true, "Read": true},
+	}
+
+	result := gatedManagementTools(cfg, testLogger)
+	if len(result) != 0 {
+		names := make([]string, len(result))
+		for i, tool := range result {
+			names[i] = tool.Info().Name
+		}
+		t.Errorf("expected no management tools when undeclared, got %v", names)
+	}
+}
+
+func TestGatedManagementTools_InjectedWhenDeclared(t *testing.T) {
+	mgr := &fakeHostManager{}
+	cfg := &LoopConfig{
+		HostManager: mgr,
+		AllowedTools: map[string]bool{
+			"Bash":                     true,
+			"CreatePersistentInstance": true,
+			"SendMessage":              true,
+		},
+	}
+
+	result := gatedManagementTools(cfg, testLogger)
+
+	names := make(map[string]bool)
+	for _, tool := range result {
+		names[tool.Info().Name] = true
+	}
+	if !names["CreatePersistentInstance"] {
+		t.Error("expected CreatePersistentInstance when declared")
+	}
+	if !names["SendMessage"] {
+		t.Error("expected SendMessage when declared")
+	}
+	// Tools not declared should be absent.
+	if names["DeleteInstance"] {
+		t.Error("DeleteInstance should not be present when undeclared")
+	}
+	if names["ListNodes"] {
+		t.Error("ListNodes should not be present when undeclared")
+	}
+}
+
+func TestGatedManagementTools_NilAllowedTools_ReturnsNil(t *testing.T) {
+	mgr := &fakeHostManager{}
+	cfg := &LoopConfig{
+		HostManager:  mgr,
+		AllowedTools: nil, // unrestricted test mode
+	}
+
+	result := gatedManagementTools(cfg, testLogger)
+	if result != nil {
+		t.Errorf("expected nil for nil AllowedTools, got %d tools", len(result))
+	}
+}

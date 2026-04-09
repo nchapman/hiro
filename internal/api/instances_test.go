@@ -72,7 +72,7 @@ func newInstanceTestServer(t *testing.T) (*Server, *agent.Manager, string) {
 
 	mgr := agent.NewManager(
 		context.Background(), dir, agent.Options{WorkingDir: dir},
-		nil, logger, testWorkerFactory, nil, pdb,
+		nil, logger, testWorkerFactory, nil, pdb, nil,
 	)
 	t.Cleanup(func() { mgr.Shutdown() })
 

@@ -8,13 +8,14 @@ import "time"
 // Name and Description are resolved: persona.md frontmatter overrides
 // the agent definition defaults.
 type InstanceInfo struct {
-	ID          string
-	Name        string // resolved: persona name > agent definition name
-	Mode        string
-	Description string // resolved: persona description > agent definition description
-	ParentID    string
-	Status      string // "running" or "stopped"
-	Model       string // resolved model ID (e.g. "claude-sonnet-4-20250514")
+	ID              string
+	Name            string // resolved: persona name > agent definition name
+	Mode            string
+	Description     string // resolved: persona description > agent definition description
+	ParentID        string
+	Status          string   // "running" or "stopped"
+	Model           string   // resolved model ID (e.g. "claude-sonnet-4-20250514")
+	EffectiveEgress []string // effective network egress policy; empty = default-deny (no connectivity)
 }
 
 // SessionInfo describes a session within an instance.
@@ -42,4 +43,12 @@ type SpawnConfig struct {
 	UID            uint32          `json:"uid,omitempty"` // 0 = no isolation
 	GID            uint32          `json:"gid,omitempty"`
 	Groups         []uint32        `json:"groups,omitempty"`
+	NetworkEgress  []string        `json:"network_egress"` // allowed egress domains; empty = default-deny (no connectivity)
+
+	// Network self-configuration fields (populated by parent, consumed by child
+	// inside its user namespace for interface/mount setup).
+	PeerName   string `json:"peer_name,omitempty"`
+	AgentIP    string `json:"agent_ip,omitempty"`
+	GatewayIP  string `json:"gateway_ip,omitempty"`
+	SubnetBits int    `json:"subnet_bits,omitempty"`
 }

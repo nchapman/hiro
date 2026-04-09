@@ -88,6 +88,7 @@ func (s *Server) shareSecret() ([]byte, error) {
 // POST /api/files/share  { "path": "workspace/foo.md" }
 // Returns { "token": "abc123..." }
 func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var body struct {
 		Path string `json:"path"`
 	}

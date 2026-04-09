@@ -1,6 +1,6 @@
 ---
 name: character
-allowed_tools: [WebFetch]
+allowed_tools: []
 description: A person to talk to. Create as a persistent instance with a persona — a name is enough for famous people and known characters (add the source for fictional ones). For original characters, a few vivid details beat a biography.
 ---
 

@@ -77,6 +77,9 @@ const (
 	// maxMatchesPerFile caps grep matches per individual file.
 	maxMatchesPerFile = 50
 
+	// maxMultilineFileSize is the maximum file size read into memory for multiline grep.
+	maxMultilineFileSize = 10 * 1024 * 1024 // 10 MB
+
 	// maxGlobResults is the maximum number of glob matches returned.
 	maxGlobResults = 100
 

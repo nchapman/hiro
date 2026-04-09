@@ -11,6 +11,10 @@ const (
 
 // Shared constants used across multiple files in the api package.
 const (
+	// maxJSONBodySize is the maximum request body size for JSON endpoints (1 MB).
+	// Prevents memory exhaustion from oversized requests.
+	maxJSONBodySize = 1 << 20
+
 	// minPasswordLength is the minimum password length for setup and change-password.
 	minPasswordLength = 8
 

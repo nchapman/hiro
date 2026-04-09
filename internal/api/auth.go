@@ -145,6 +145,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -190,6 +191,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req struct {
 		Current string `json:"current"`
 		New     string `json:"new"`

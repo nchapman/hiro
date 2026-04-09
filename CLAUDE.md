@@ -16,6 +16,8 @@ docker compose -f docker-compose.dev.yml up --build -d
 
 Running locally creates runtime directories (`agents/`, `db/`, `instances/`, etc.) in the repo root and conflicts with Docker port bindings.
 
+Docker containers require `CAP_NET_ADMIN`, a custom seccomp profile (`seccomp.json`), and `net.ipv4.ip_forward=1` for network isolation. These are configured in all `docker-compose*.yml` files.
+
 ## Build & Dev Commands
 
 ```bash
@@ -25,6 +27,7 @@ make web                 # Build web UI only (cd web/ui && npm install && npm ru
 make test                # Run tests in Docker (builds test container)
 make test-local          # Run tests locally (no Docker, uses mock workers)
 make test-isolation      # Run UID isolation tests in Docker (requires user pool)
+make test-netiso         # Run network isolation tests in Docker (requires CAP_NET_ADMIN)
 make test-online         # E2E tests against real LLM in Docker (requires HIRO_API_KEY)
 make test-cluster        # Cluster e2e tests: leader + worker topology (requires HIRO_API_KEY)
 make test-cluster-relay  # Cluster e2e tests via relay server (requires HIRO_API_KEY)
@@ -109,16 +112,17 @@ Control Plane Process (hiro)
 Agent Worker Process (hiro agent)
 ├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
 ├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
-└── Runs under isolated UID for security
+├── Runs under isolated UID for security
+└── Network namespace + seccomp-BPF (default-deny, all UID-isolated agents)
 ```
 
-**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-agent-{session-id}.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled, each worker runs as a dedicated Unix user via `SysProcAttr.Credential`.
+**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled (Docker), every worker spawns in its own user/network/mount namespaces (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`), self-configures its network interface and DNS, installs a per-worker seccomp-BPF filter, then starts gRPC. Network access is default-deny — only agents with `network.egress` declared can reach outbound destinations.
 
 **Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. The `config/` directory is `0700` root-owned, unreadable by agents.
 
 **Group-based access control**: Two Unix groups control filesystem access:
 - `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
-- `hiro-operators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-operators]`) and assigned dynamically at spawn time via `SysProcAttr.Credential.Groups`.
+- `hiro-operators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-operators]`) and assigned dynamically at spawn time via `GidMappings` + `setgroups()` in the child's user namespace.
 
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 
@@ -205,6 +209,7 @@ See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, 
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
+- **`internal/netiso`** — Per-agent network isolation via Linux network namespaces, veth pairs, nftables IP sets, and a DNS forwarder. Linux-only (`//go:build linux`); stubs on other platforms. Agents declare `network.egress` in frontmatter; the DNS forwarder resolves allowed domains and populates nftables sets at the IP layer (protocol-agnostic). Requires `CAP_NET_ADMIN`.
 - **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes. Resource limits centralized in `limits.go`.
 - **`internal/controlplane`** — Operator-level config (secrets, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/cluster` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, persona/memory/todos persistence.
@@ -407,6 +412,10 @@ How dynamic context (memories, todos, secrets, skills, agent listings) is inject
 ### [`docs/scheduling.md`](docs/scheduling.md) — Scheduling
 
 How agents schedule recurring and one-time tasks. Covers the subscription data model (SQLite with JSON trigger column), the min-heap priority queue scheduler, triggered sessions (isolated inference turns with Notify for surfacing results), cron and one-shot trigger types, lifecycle integration (pause on stop, resume on start), concurrency model (lock ordering, overlap guards, WaitGroup), and the server timezone setting. Also describes the future trigger type extensibility (webhooks, file watches).
+
+### [`docs/network-isolation.md`](docs/network-isolation.md) — Network Isolation
+
+Per-agent network isolation design and implementation. Each agent spawns in its own network namespace (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS` + veth pair). A DNS forwarder resolves allowed domains and dynamically populates nftables IP sets — filtering is purely at the IP layer, protocol-agnostic (HTTPS, SSH, git all work). Covers requirements, six rejected alternatives, the DNS-driven firewall design, agent configuration (`network.egress`), policy inheritance, spawn protocol changes, per-worker seccomp-BPF, and two rounds of security review findings.
 
 ### [`docs/map.md`](docs/map.md) — Codebase Map
 

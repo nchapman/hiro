@@ -141,6 +141,7 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 	}
 	id := r.PathValue("id")
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req instanceConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
