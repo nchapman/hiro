@@ -122,7 +122,7 @@ Agent Worker Process (hiro agent)
 
 **Group-based access control**: Two Unix groups control filesystem access:
 - `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
-- `hiro-operators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-operators]`) and assigned dynamically at spawn time via `SysProcAttr.Credential.Groups`.
+- `hiro-operators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-operators]`) and assigned dynamically at spawn time via `GidMappings` + `setgroups()` in the child's user namespace.
 
 **Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
 

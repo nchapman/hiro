@@ -4,7 +4,7 @@ This document captures requirements, threat analysis, options considered, and th
 
 ## Background
 
-Hiro runs untrusted LLM-driven agents that can execute arbitrary shell commands. All agents currently share the container's network namespace. A compromised or manipulated agent with Bash access can:
+Hiro runs untrusted LLM-driven agents that can execute arbitrary shell commands. Prior to implementing network isolation, all agents shared the container's network namespace. A compromised or manipulated agent with Bash access could:
 
 - Make outbound HTTP requests to exfiltrate data (`curl`, `wget`, raw sockets, `/dev/tcp`)
 - Port-scan the container's network and discover other agents' services
@@ -25,9 +25,9 @@ Hiro's security model is significantly stronger than OpenClaw and its variants:
 - **Environment scrubbing**: Workers receive minimal env vars. No API keys leak to workers.
 - **Docker containment**: Outer boundary. Container escape requires a kernel exploit regardless of inner defenses.
 
-### The Gap
+### The Gap (Resolved)
 
-Network isolation is the primary remaining weakness. The `docs/security.md` limitations section acknowledges: "No network isolation between agents" and "No syscall filtering."
+Network isolation was the primary remaining weakness. This document describes the design and implementation that closed this gap — per-agent network namespaces with DNS-driven nftables firewall rules and per-worker seccomp-BPF.
 
 ## Requirements
 
@@ -237,24 +237,20 @@ Agent runs: git clone git@github.com:user/repo.git
 
 Every protocol works identically. The agent's tools see normal networking — DNS resolves, connections succeed to allowed destinations, connections fail to everything else. No proxy configuration, no special handling per protocol.
 
-### Spawn Protocol Changes
+### Spawn Protocol
 
-Current:
+All UID-isolated agents use the following spawn protocol:
+
 1. Acquire UID from pool
 2. Chown instance directory
-3. Fork `hiro agent` with `SysProcAttr.Credential`
-4. Worker starts gRPC, writes "ready"
-
-New:
-1. Acquire UID from pool
-2. Chown instance directory
-3. Fork `hiro agent` with `SysProcAttr.Credential` **+ `Cloneflags: CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`** and UID/GID mapping (maps UID 0 inside → agent UID outside, e.g., `0 10000 1`)
-4. **Control plane: create veth pair (temp peer name `hp-{prefix}` in host ns), move peer into child's network namespace, configure host-side address and nftables rules**
-5. **Control plane: signal child that veth is ready**
-6. **Child (inside its user namespace, where it has full capabilities): configure eth0 address, default route, loopback, bind-mount per-agent `/etc/resolv.conf` and `/etc/hosts`**
-7. **Child: install per-worker seccomp-BPF filter (blocks namespace, mount, ptrace, and kernel-load syscalls — see [Per-Worker seccomp](#per-worker-seccomp-required) for full list) + set `PR_SET_NO_NEW_PRIVS`, then signal ready**
-8. **Control plane: register agent with DNS forwarder, start per-agent listener on gateway IP**
-9. Worker starts gRPC, writes "ready"
+3. Fork `hiro agent` with `Cloneflags: CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS` and UID/GID mappings (UID 0 inside → agent UID outside; supplementary GIDs mapped to themselves for group-based filesystem access)
+4. Child signals "ns-ready" (namespaces up, awaiting veth)
+5. Control plane: create veth pair (temp peer name `hp-{prefix}` in host ns), move peer into child's network namespace, configure host-side address and nftables rules
+6. Control plane: signal child that veth is ready (close pipe)
+7. Child (inside its user namespace, where it has full capabilities): configure eth0 address, default route, loopback, bind-mount per-agent `/etc/resolv.conf` and `/etc/hosts`
+8. Child: activate supplementary groups via `setgroups()`, install per-worker seccomp-BPF filter (blocks namespace, mount, ptrace, and kernel-load syscalls — see [Per-Worker seccomp](#per-worker-seccomp-required) for full list) + set `PR_SET_NO_NEW_PRIVS`
+9. Control plane: register agent with DNS forwarder, start per-agent listener on gateway IP
+10. Worker starts gRPC, writes "ready"
 
 **Why CLONE_NEWUSER:** The kernel gates `CLONE_NEWNET` and `CLONE_NEWNS` on `CAP_SYS_ADMIN` — the broadest Linux capability. By wrapping namespace creation in a user namespace (`CLONE_NEWUSER`), the child process gets full capabilities *within* its own user namespace without the container needing `CAP_SYS_ADMIN`. The container only needs `CAP_NET_ADMIN` (for veth creation and nftables management from the host namespace) plus a custom seccomp profile that allows `CLONE_NEWUSER` (blocked by Docker's default seccomp). See [Container Privilege Requirements](#container-privilege-requirements).
 

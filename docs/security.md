@@ -58,10 +58,10 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 
 **Per-agent isolation:**
 
-- When an agent starts, the control plane acquires a UID from the pool and sets `SysProcAttr.Credential` on the child process so it runs as that user.
+- When an agent starts, the control plane acquires a UID from the pool and spawns the child in its own user namespace (`CLONE_NEWUSER`) with UID/GID mappings (UID 0 inside → agent UID outside).
 - The agent's instance directory is `chown`ed to its UID:GID before the process starts.
 - Instance directories use `0700` permissions — only the owning agent can read or write its own memory, history, and todos.
-- Operator-mode agents receive `hiro-operators` as a supplementary group via `Credential.Groups`, granting write access to `agents/` and `skills/`.
+- Operator-mode agents receive `hiro-operators` as a supplementary group via `GidMappings` + `setgroups()` in the child, granting write access to `agents/` and `skills/`.
 - When an agent stops, its UID is released back to the pool.
 
 **Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={instance-dir}`, `LANG`, `LC_ALL`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_GLOBAL_CONFIG_FILE`) rather than inheriting the control plane's full environment. Workers explicitly do not receive `HIRO_API_KEY` — inference runs in the control plane, not in workers. Setting `HOME` to the instance directory gives each agent an isolated home for dotfiles, caches, and temp data.
