@@ -7,9 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/nchapman/hiro/internal/platform/fsperm"
@@ -25,24 +23,13 @@ var requiredDirs = []string{
 	"db",
 	"instances",
 	"skills",
-	"workspace", // setgid so files created inside inherit the hiro-agents group
-}
-
-// operatorDirs are directories owned by the hiro-operators group.
-// Operator-mode agents get write access; others get read-only via "other" bits.
-var operatorDirs = map[string]bool{
-	"agents": true,
-	"skills": true,
+	"workspace",
 }
 
 // Init ensures the platform root directory structure exists and seeds default
 // agent definitions if the platform is new. It is safe to call on an
 // existing platform — it will not overwrite files that already exist.
 func Init(dir string, logger *slog.Logger) error {
-	// Detect groups for directory ownership.
-	coordGID := lookupGroupGID("hiro-operators")
-	agentsGID := lookupGroupGID("hiro-agents")
-
 	for _, d := range requiredDirs {
 		path := filepath.Join(dir, d)
 		// config/ contains secrets — restrict to owner only.
@@ -60,24 +47,6 @@ func Init(dir string, logger *slog.Logger) error {
 				logger.Warn("failed to tighten config directory permissions", "error", err)
 			}
 		}
-		// agents/ and skills/ are owned by hiro-operators with setgid,
-		// so operator agents can write and others get read-only access.
-		// Also walk existing subdirectories to handle upgrades from
-		// pre-operator versions where dirs were owned by root.
-		if coordGID >= 0 && operatorDirs[d] {
-			if err := applyOperatorOwnership(path, coordGID, logger); err != nil {
-				logger.Warn("failed to apply operator ownership", "dir", d, "error", err)
-			}
-		}
-		// workspace/ is group-writable by all agents (hiro-agents) with
-		// setgid so files created inside inherit the group.
-		if agentsGID >= 0 && d == "workspace" {
-			if err := os.Chown(path, -1, agentsGID); err != nil {
-				logger.Warn("failed to chown workspace to hiro-agents", "error", err)
-			} else if err := os.Chmod(path, fsperm.DirSetgid); err != nil {
-				logger.Warn("failed to set setgid on workspace", "error", err)
-			}
-		}
 	}
 
 	// Seed default agents if the agents directory is empty.
@@ -92,19 +61,17 @@ func Init(dir string, logger *slog.Logger) error {
 	}
 
 	logger.Info("seeding default agent definitions")
-	return seedDefaults(agentsDir, coordGID)
+	return seedDefaults(agentsDir)
 }
 
 // seedDefaults copies embedded default agent definitions into the workspace.
-func seedDefaults(agentsDir string, coordGID int) error {
+func seedDefaults(agentsDir string) error {
 	return fs.WalkDir(defaultAgents, "defaults/agents", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Strip the "defaults/agents/" prefix to get the relative path.
-		// embed.FS always uses forward slashes, so use strings.TrimPrefix
-		// and filepath.FromSlash for cross-platform correctness.
 		rel := strings.TrimPrefix(path, "defaults/agents/")
 		if rel == path {
 			return nil
@@ -113,75 +80,16 @@ func seedDefaults(agentsDir string, coordGID int) error {
 		dest := filepath.Join(agentsDir, filepath.FromSlash(rel))
 
 		if d.IsDir() {
-			if err := os.MkdirAll(dest, fsperm.DirStandard); err != nil {
-				return err
-			}
-			// Setgid + group-writable so operator agents can
-			// create new files inside seeded agent directories.
-			return setOperatorDir(dest, rel, coordGID)
+			return os.MkdirAll(dest, fsperm.DirStandard)
 		}
 
 		data, err := defaultAgents.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading embedded %s: %w", path, err)
 		}
-		// Seeded files are 0o644 (not group-writable) intentionally —
-		// operators can create new agents but cannot rewrite the
-		// shipped defaults, preventing prompt injection persistence.
 		if err := os.WriteFile(dest, data, fsperm.FileStandard); err != nil {
 			return fmt.Errorf("writing %s: %w", dest, err)
 		}
 		return nil
 	})
-}
-
-// setOperatorDir sets hiro-operators group and setgid on a single directory.
-// No-op when coordGID is negative (group not available).
-func setOperatorDir(dest, rel string, coordGID int) error {
-	if coordGID < 0 {
-		return nil
-	}
-	if err := os.Chown(dest, -1, coordGID); err != nil {
-		return fmt.Errorf("chown %s to hiro-operators: %w", rel, err)
-	}
-	if err := os.Chmod(dest, fsperm.DirSetgid); err != nil {
-		return fmt.Errorf("chmod %s: %w", rel, err)
-	}
-	return nil
-}
-
-// applyOperatorOwnership sets hiro-operators group and setgid on a
-// directory and all its subdirectories. Files are left as-is (seeded defaults
-// stay root-owned 0o644 to prevent prompt injection persistence; new files
-// created by operators inherit the group via setgid).
-func applyOperatorOwnership(root string, coordGID int, logger *slog.Logger) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		if err := os.Chown(path, -1, coordGID); err != nil { //nolint:gosec // G122: platform directory, no symlink risk
-			logger.Warn("cannot chown directory to hiro-operators", "path", path, "error", err)
-			return nil // best-effort
-		}
-		if err := os.Chmod(path, fsperm.DirSetgid); err != nil { //nolint:gosec // G122: same controlled directory
-			logger.Warn("cannot set setgid on directory", "path", path, "error", err)
-		}
-		return nil
-	})
-}
-
-// lookupGroupGID returns the GID of the named group, or -1 if not found.
-func lookupGroupGID(name string) int {
-	grp, err := user.LookupGroup(name)
-	if err != nil {
-		return -1
-	}
-	gid, err := strconv.Atoi(grp.Gid)
-	if err != nil {
-		return -1
-	}
-	return gid
 }

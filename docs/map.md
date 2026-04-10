@@ -315,7 +315,7 @@ Operator-level config management — auth, providers, secrets, clustering. Split
 | `provider` | `provider.go` | 174 | LLM provider construction (`CreateLanguageModel`, `TestConnection`, `AvailableProviders`). Imports all fantasy provider SDKs. |
 | `platform/loghandler` | `handler.go` | 356 | Structured slog handler for platform-wide log capture |
 | `auth` | `auth.go` | 118 | Token-based auth, session management |
-| `uidpool` | `pool.go` | 96 | Pre-allocated UID pool for process isolation |
+| `landlock` | `landlock.go`, `landlock_other.go` | 110 | Landlock LSM filesystem restrictions (Linux-only, stubs on other platforms) |
 
 **Tests**: All have corresponding test files.
 
@@ -404,7 +404,6 @@ shadcn/ui components: badge, button, card, collapsible, dialog, dropdown-menu, i
 |---------|-------------|---------------|
 | `make test` | Docker | All unit + integration (mock workers) |
 | `make test-local` | Local | Same, no Docker needed |
-| `make test-isolation` | Docker (root) | UID isolation, permissions |
 | `make test-online` | Local + API key | Real LLM calls |
 | `make test-cluster` | Docker Compose | Multi-node cluster |
 | `make test-cluster-relay` | Docker Compose | Cluster with relay |
@@ -454,7 +453,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 22 | **Search Tools** | `agent/tools/grep.go`, `glob.go` | 968 | 2 test files | Ripgrep integration, Go fallbacks, pagination, output modes. |
 | 23 | **Edit Tool** | `agent/tools/edit.go` | 128 | 1 test file | Find-and-replace. |
 | 24 | **File Tools** | `agent/tools/read.go`, `write.go` | 131 | 2 test files | Read/write with sandboxing. |
-| 25 | **UID Pool** | `uidpool/pool.go` | 96 | `pool_test.go` | UID allocation for process isolation. |
+| 25 | **Landlock** | `landlock/landlock.go` | 110 | — | Landlock LSM filesystem restrictions. Linux-only; stubs on other platforms. |
 | 26 | **File Watcher** | `watcher/watcher.go` | 347 | `watcher_test.go` | fsnotify wrapper, debounced events. |
 | 27 | **Tool Rules** | `toolrules/*.go` | 662 | `toolrules_test.go` | Tool permission rules engine, Bash command filtering, wildcards. |
 | 28 | **Log Handler** | `platform/loghandler/handler.go` | 356 | `handler_test.go` | Structured slog handler for platform-wide log capture. |

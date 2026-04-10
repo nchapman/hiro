@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -287,13 +285,11 @@ func (m *Manager) createSessionSlot(ctx context.Context, inst *instance, instanc
 			return "", err
 		}
 	}
-	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", sessionID)
-
 	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
 	}
-	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups, inst.effectiveEgress)
+	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, m.instanceDir(instanceID), sessDir)
 	spawnCtx := ctx
 	if inst.info.Mode.IsPersistent() {
 		spawnCtx = m.ctx
@@ -437,13 +433,11 @@ func (m *Manager) NewSessionForChannel(instanceID, channelKey string) (string, e
 	if err := m.registerSessionInDBWithChannel(instanceID, newSessionID, inst.agentName, inst.info.Mode, chType, chID); err != nil {
 		return "", err
 	}
-	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", newSessionID)
-
 	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
 	}
-	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups, inst.effectiveEgress)
+	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, m.instanceDir(instanceID), sessDir)
 
 	// Shut down old worker concurrently while spawning the new one.
 	shutdownDone := m.shutdownOldWorkerAsync(oldHandle)
@@ -530,22 +524,6 @@ func (m *Manager) markSessionStopped(sessionID string) {
 		if err := m.pdb.UpdateSessionStatus(context.Background(), sessionID, "stopped"); err != nil {
 			m.logger.Warn("failed to mark old session as stopped", "session", sessionID, "error", err)
 		}
-	}
-}
-
-// chownDir recursively chowns a directory to the given uid/gid.
-// No-op if uid is 0 (isolation not enabled).
-func chownDir(dir string, uid, gid uint32, logger interface{ Warn(string, ...any) }, label, id string) {
-	if uid == 0 {
-		return
-	}
-	if err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled directory, no symlink risk
-	}); err != nil {
-		logger.Warn("failed to chown dir", label, id, "error", err)
 	}
 }
 

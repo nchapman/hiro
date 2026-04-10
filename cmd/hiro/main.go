@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"syscall"
@@ -24,11 +23,10 @@ import (
 	webchannel "github.com/nchapman/hiro/internal/channel/web"
 	"github.com/nchapman/hiro/internal/cluster"
 	"github.com/nchapman/hiro/internal/controlplane"
-	"github.com/nchapman/hiro/internal/netiso"
+	"github.com/nchapman/hiro/internal/landlock"
 	"github.com/nchapman/hiro/internal/platform"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/platform/loghandler"
-	"github.com/nchapman/hiro/internal/uidpool"
 	"github.com/nchapman/hiro/internal/watcher"
 	"github.com/nchapman/hiro/web"
 )
@@ -180,6 +178,10 @@ func run() error {
 func initPlatform() (*app, error) {
 	// Load .env file if present (does not override existing env vars).
 	_ = godotenv.Load()
+
+	// Scrub sensitive env vars after loading so they don't persist in
+	// /proc/self/environ where worker processes (same UID) could read them.
+	os.Unsetenv("HIRO_API_KEY")
 
 	// Parse log level from environment (default INFO).
 	logLevel := slog.LevelInfo
@@ -427,16 +429,16 @@ func (a *app) startManager() error {
 		return fmt.Errorf("no LLM provider configured")
 	}
 
-	pool, err := detectUIDPool(a.logger)
-	if err != nil {
-		return err
+	landlockOK := landlock.Probe() == nil
+	if landlockOK {
+		a.logger.Info("landlock filesystem isolation enabled")
+	} else {
+		a.logger.Info("landlock not available (kernel too old or not supported)")
 	}
-
-	ni := initNetIso(a.logger)
 
 	a.mgr = agent.NewManager(a.ctx, a.rootDir, agent.Options{
 		WorkingDir: a.absRootDir,
-	}, a.cp, a.logger, nil, pool, a.pdb, ni)
+	}, a.cp, a.logger, nil, a.pdb, landlockOK)
 	if a.clusterSvc != nil {
 		a.mgr.SetClusterService(a.clusterSvc)
 	}
@@ -612,49 +614,7 @@ func (a *app) pruneLogsLoop() {
 	}
 }
 
-// detectUIDPool checks for the hiro-agents Unix group and sets up the UID pool
-// for process isolation. Returns nil if isolation is not available.
-func detectUIDPool(logger *slog.Logger) (*uidpool.Pool, error) {
-	grp, err := user.LookupGroup("hiro-agents")
-	if err != nil {
-		return nil, nil //nolint:nilerr // group not found means isolation is disabled
-	}
-
-	gid, err := strconv.ParseUint(grp.Gid, 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("parsing hiro-agents GID %q: %w", grp.Gid, err)
-	}
-	pool := uidpool.New(uidpool.DefaultBaseUID, uint32(gid), uidpool.DefaultSize)
-	logger.Info("unix user isolation enabled", "pool_size", uidpool.DefaultSize)
-
-	if coordGrp, err := user.LookupGroup("hiro-operators"); err == nil {
-		coordGID, err := strconv.ParseUint(coordGrp.Gid, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("parsing hiro-operators GID %q: %w", coordGrp.Gid, err)
-		}
-		pool.SetGroupGID("hiro-operators", uint32(coordGID))
-		logger.Info("operator group detected", "gid", coordGID)
-	}
-
-	return pool, nil
-}
-
-// initNetIso probes for CAP_NET_ADMIN and creates a NetIso instance.
-// Returns nil if network isolation is not available (e.g. outside Docker).
-func initNetIso(logger *slog.Logger) *netiso.NetIso {
-	if err := netiso.Probe(); err != nil {
-		logger.Info("network isolation disabled", "reason", err)
-		return nil
-	}
-	ni, err := netiso.New(logger)
-	if err != nil {
-		logger.Warn("failed to initialize network isolation", "error", err)
-		return nil
-	}
-	logger.Info("network isolation enabled")
-	return ni
-}
-
+// envOr returns the value of the environment variable key, or fallback if unset.
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

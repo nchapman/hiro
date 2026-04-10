@@ -51,8 +51,10 @@ func testRevokeConnectedWorker(t *testing.T) string {
 	// Step 3: Worker should disappear from leader's settings.
 	waitForNodeAbsent(t, nodeID, 15*time.Second)
 
-	// Step 4: Worker should detect the revocation.
-	waitForWorkerStatus(t, "revoked", 15*time.Second)
+	// Step 4: Worker should detect the revocation. Verify by checking
+	// container logs for the revocation message (the worker's HTTP API
+	// requires auth, so we can't query it via curl from docker exec).
+	waitForWorkerLogMessage(t, "approval revoked by leader", 30*time.Second)
 
 	// Step 5: Worker should NOT reappear in pending list.
 	t.Log("waiting 10s to verify worker does not reappear as pending...")
@@ -257,28 +259,19 @@ func waitForNodeAbsent(t *testing.T, nodeID string, timeout time.Duration) {
 	t.Fatalf("node %s still present in settings after %v", nodeID, timeout)
 }
 
-// waitForWorkerStatus checks the worker's own /api/settings/cluster endpoint
-// via docker exec and waits for connection_status to match expected.
-func waitForWorkerStatus(t *testing.T, expected string, timeout time.Duration) {
+// waitForWorkerLogMessage checks the worker container's logs for a specific
+// message, polling until found or timeout. Used instead of API queries when
+// the worker's HTTP API requires authentication.
+func waitForWorkerLogMessage(t *testing.T, message string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var lastStatus string
 	for time.Now().Before(deadline) {
-		out, err := exec.Command("docker", "exec", workerContainer,
-			"curl", "-sf", "http://localhost:8120/api/settings/cluster").Output()
-		if err == nil {
-			var settings map[string]any
-			if json.Unmarshal(out, &settings) == nil {
-				if status, ok := settings["connection_status"].(string); ok {
-					lastStatus = status
-					if status == expected {
-						t.Logf("worker connection_status=%s", status)
-						return
-					}
-				}
-			}
+		out, err := exec.Command("docker", "logs", workerContainer).CombinedOutput()
+		if err == nil && strings.Contains(string(out), message) {
+			t.Logf("found worker log: %s", message)
+			return
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(time.Second)
 	}
-	t.Fatalf("worker connection_status=%q after %v, want %q", lastStatus, timeout, expected)
+	t.Fatalf("worker log message %q not found after %v", message, timeout)
 }

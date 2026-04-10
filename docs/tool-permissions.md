@@ -238,7 +238,6 @@ max_turns: 50
 | `disallowed_tools` | string[] | `nil` | Tools to deny; checked at call time |
 | `model` | string | CP default | Model override (e.g., `sonnet`, `opus`, full model ID) |
 | `max_turns` | int | 0 (unlimited) | Max agentic turns before forcing final response |
-| `groups` | string[] | `nil` | Supplementary Unix groups for the worker process (e.g., `[hiro-operators]`) |
 
 ### Skill (`skills/*.md`)
 

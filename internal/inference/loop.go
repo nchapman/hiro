@@ -885,6 +885,9 @@ func (l *Loop) buildLocalTools(cfg *LoopConfig) []Tool {
 		localTools = append(localTools, buildNotifyTool(l.notifications))
 	}
 
+	// WebFetch runs in the control plane (no worker socket needed).
+	localTools = append(localTools, buildWebFetchTool())
+
 	// Skill tool.
 	if cfg.HasSkills {
 		var allowedDirs []string

@@ -86,10 +86,6 @@ func (m *Manager) softStop(id string) {
 		m.shutdownHandle(h)
 		h.Close()
 	}
-	// Release UID and update DB status.
-	if m.uidPool != nil {
-		m.uidPool.Release(id)
-	}
 	m.setInstanceStatus(id, string(InstanceStatusStopped))
 
 	// Pause cron subscriptions for this instance.
@@ -205,9 +201,6 @@ func (m *Manager) handleInstanceDeath(instanceID string) {
 				h.Close()
 			}
 			m.setInstanceStatus(id, string(InstanceStatusStopped))
-			if m.uidPool != nil {
-				m.uidPool.Release(id)
-			}
 		} else {
 			m.mu.Lock()
 			handles := m.detachAllSlots(deadInst, "")
@@ -218,9 +211,6 @@ func (m *Manager) handleInstanceDeath(instanceID string) {
 				h.Close()
 			}
 			os.RemoveAll(m.instanceDir(id))
-			if m.uidPool != nil {
-				m.uidPool.Release(id)
-			}
 		}
 	}
 }
@@ -294,10 +284,6 @@ func (m *Manager) removeInstance(id string) {
 	for _, h := range handles {
 		m.shutdownHandle(h)
 		h.Close()
-	}
-	// Release UID.
-	if m.uidPool != nil {
-		m.uidPool.Release(id)
 	}
 	if !inst.info.Mode.IsPersistent() {
 		os.RemoveAll(m.instanceDir(id))

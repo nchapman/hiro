@@ -337,7 +337,7 @@ func TestGetHistory_WithPDB(t *testing.T) {
 	pdb := openTestPDB(t, dir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -360,7 +360,7 @@ func TestGetHistory_WithMessages(t *testing.T) {
 	pdb := openTestPDB(t, dir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -395,7 +395,7 @@ func TestGetSessionHistory(t *testing.T) {
 	pdb := openTestPDB(t, dir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -865,7 +865,7 @@ func TestRegisterInstanceInDB_WithPDB(t *testing.T) {
 	dir := t.TempDir()
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	err := mgr.registerInstanceInDB(t.Context(), "inst-1", "sess-1", "", "", config.AgentConfig{Name: "test"}, config.ModePersistent, "", "home")
 	if err != nil {
@@ -1078,7 +1078,7 @@ func TestResolveModelSpec_EnvOverridesAgent(t *testing.T) {
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
 		Model:      "openai/gpt-4o-mini",
-	}, cp, logger, testWorkerFactory("hello"), nil, nil, nil)
+	}, cp, logger, testWorkerFactory("hello"), nil, false)
 
 	// Even though agent specifies one model, env override wins.
 	spec, apiKey, _, err := mgr.resolveModelSpec("anthropic/claude-sonnet-4-20250514")
@@ -1192,7 +1192,7 @@ func TestRegisterSessionInDB_WithPDB(t *testing.T) {
 	dir := t.TempDir()
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	// Create the instance first (FK constraint).
 	_ = pdb.CreateInstance(t.Context(), platformdb.Instance{
@@ -1207,14 +1207,6 @@ func TestRegisterSessionInDB_WithPDB(t *testing.T) {
 
 // --- manager_worker.go ---
 
-func TestChownDir_ZeroUID(t *testing.T) {
-	// chownDir should be a no-op when uid is 0.
-	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	// Should not panic or error.
-	chownDir(dir, 0, 0, logger, "test", "id")
-}
-
 func TestSetInstanceStatus_NilPDB(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 	// Should not panic with nil PDB.
@@ -1225,7 +1217,7 @@ func TestSetInstanceStatus_WithPDB(t *testing.T) {
 	dir := t.TempDir()
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	writeAgentMD(t, dir, "test-agent", testAgentMD)
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
@@ -1296,9 +1288,10 @@ func TestPrepareInstanceDirs_ExistingInstance(t *testing.T) {
 
 func TestBuildSpawnConfig(t *testing.T) {
 	mgr, dir := setupTestManager(t)
-	_ = dir
+	instDir := filepath.Join(dir, "instances", "inst-1")
+	sessDir := filepath.Join(dir, "instances", "inst-1", "sessions", "sess-1")
 	tools := map[string]bool{"Bash": true, "Read": true}
-	cfg := mgr.buildSpawnConfig("inst-1", "sess-1", "test-agent", tools, "/tmp/sess", 10000, 10000, []uint32{10001}, nil)
+	cfg := mgr.buildSpawnConfig("inst-1", "sess-1", "test-agent", tools, instDir, sessDir)
 
 	if cfg.InstanceID != "inst-1" {
 		t.Errorf("InstanceID = %q, want inst-1", cfg.InstanceID)
@@ -1312,15 +1305,9 @@ func TestBuildSpawnConfig(t *testing.T) {
 	if !cfg.EffectiveTools["Bash"] || !cfg.EffectiveTools["Read"] {
 		t.Error("EffectiveTools should contain Bash and Read")
 	}
-	if cfg.UID != 10000 {
-		t.Errorf("UID = %d, want 10000", cfg.UID)
-	}
-	if cfg.GID != 10000 {
-		t.Errorf("GID = %d, want 10000", cfg.GID)
-	}
-	// Groups should be [primary GID, supplementary groups...]
-	if len(cfg.Groups) != 2 || cfg.Groups[0] != 10000 || cfg.Groups[1] != 10001 {
-		t.Errorf("Groups = %v, want [10000, 10001]", cfg.Groups)
+	// NetworkAccess should be true because Bash is in effective tools.
+	if !cfg.NetworkAccess {
+		t.Error("NetworkAccess should be true when Bash is in effective tools")
 	}
 }
 
@@ -1335,7 +1322,7 @@ func TestMakeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cleanup := makeCleanup(sessDir, instDir, true, nil, "test-id")
+	cleanup := makeCleanup(sessDir, instDir, true)
 	cleanup()
 
 	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
@@ -1357,7 +1344,7 @@ func TestMakeCleanup_NotNewDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cleanup := makeCleanup(sessDir, instDir, false, nil, "test-id")
+	cleanup := makeCleanup(sessDir, instDir, false)
 	cleanup()
 
 	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
@@ -1628,7 +1615,7 @@ func TestBuildInstance(t *testing.T) {
 	cfg := config.AgentConfig{Name: "test", Description: "desc"}
 	inst := buildInstance("inst-1", "sess-1", "web", cfg, config.ModePersistent, "parent-1", "home",
 		"anthropic/model", "Display", "Display Desc",
-		handle, nil, nil, &sync.Mutex{}, map[string]bool{"Bash": true}, nil, nil, nil, 10000, 10000, []uint32{10001})
+		handle, nil, nil, &sync.Mutex{}, map[string]bool{"Bash": true}, nil, nil)
 
 	if inst.info.ID != "inst-1" {
 		t.Errorf("ID = %q, want inst-1", inst.info.ID)
@@ -1644,9 +1631,6 @@ func TestBuildInstance(t *testing.T) {
 	}
 	if inst.info.Status != InstanceStatusRunning {
 		t.Errorf("Status = %q, want running", inst.info.Status)
-	}
-	if inst.uid != 10000 {
-		t.Errorf("uid = %d, want 10000", inst.uid)
 	}
 	if inst.agentName != "test" {
 		t.Errorf("agentName = %q, want test", inst.agentName)
@@ -1665,7 +1649,7 @@ func TestBuildInstance_FallbackNames(t *testing.T) {
 	cfg := config.AgentConfig{Name: "agent-name", Description: "agent-desc"}
 	inst := buildInstance("inst-2", "sess-2", "web", cfg, config.ModeEphemeral, "", "home",
 		"model", "", "", // empty display name/desc
-		handle, nil, nil, nil, nil, nil, nil, nil, 0, 0, nil)
+		handle, nil, nil, nil, nil, nil, nil)
 
 	if inst.info.Name != "agent-name" {
 		t.Errorf("Name = %q, want agent-name (fallback)", inst.info.Name)
@@ -1759,7 +1743,7 @@ func TestNewManager_NilWorkerFactory(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	// nil wf should fall back to defaultWorkerFactory (which would fail on actual spawn,
 	// but the manager should create successfully).
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, nil, nil, nil, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, nil, nil, false)
 	if mgr == nil {
 		t.Fatal("NewManager should not return nil")
 	}
@@ -1781,7 +1765,7 @@ func TestRestore_InvalidAgentNameSkipped(t *testing.T) {
 		Status:    "running",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1834,7 +1818,7 @@ func TestStartInstance_ResumesLatestSession(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1870,12 +1854,12 @@ func TestRestore_ResumesExistingSession(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	id, _ := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	sessID := mgr1.ActiveSessionID(id)
 	mgr1.Shutdown()
 
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1894,7 +1878,7 @@ func TestGetHistory_FiltersByRole(t *testing.T) {
 	pdb := openTestPDB(t, dir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1936,7 +1920,7 @@ func TestGetHistory_MetaMessages(t *testing.T) {
 	pdb := openTestPDB(t, dir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -1966,7 +1950,7 @@ func TestDeleteInstance_WithPDB(t *testing.T) {
 	pdb := openTestPDB(t, dir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {

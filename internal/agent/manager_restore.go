@@ -117,15 +117,7 @@ func (m *Manager) registerStoppedInstances(stopped []restoreEntry) int {
 		m.mu.Unlock()
 	}
 
-	// Pass 2: resolve groups via the shared helper, now that all
-	// stopped instances are registered and parentGroupSet works.
 	for _, e := range stopped {
-		if m.uidPool != nil {
-			groups := m.resolveSupplementaryGroups(e.cfg, e.dbInst.ParentID)
-			m.mu.Lock()
-			m.instances[e.dbInst.ID].groups = groups
-			m.mu.Unlock()
-		}
 		m.logger.Info("restored stopped instance",
 			"id", e.dbInst.ID, "name", e.cfg.Name)
 	}

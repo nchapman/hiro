@@ -14,12 +14,6 @@ services:
   node1:
     build: ..
     init: true
-    cap_add:
-      - NET_ADMIN
-    security_opt:
-      - seccomp=../seccomp.json
-    sysctls:
-      - net.ipv4.ip_forward=1
     ports:
       - "127.0.0.1:8120:8120"
       - "127.0.0.1:8121:8121"
@@ -29,12 +23,6 @@ services:
   node2:
     build: ..
     init: true
-    cap_add:
-      - NET_ADMIN
-    security_opt:
-      - seccomp=../seccomp.json
-    sysctls:
-      - net.ipv4.ip_forward=1
     ports:
       - "127.0.0.1:8122:8120"
     volumes:
@@ -43,12 +31,6 @@ services:
   node3:
     build: ..
     init: true
-    cap_add:
-      - NET_ADMIN
-    security_opt:
-      - seccomp=../seccomp.json
-    sysctls:
-      - net.ipv4.ip_forward=1
     ports:
       - "127.0.0.1:8124:8120"
     volumes:

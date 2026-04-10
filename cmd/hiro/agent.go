@@ -25,61 +25,29 @@ import (
 )
 
 const (
-	// umaskCollaborative allows group writes for UID-isolated agents.
-	umaskCollaborative = 0o002
-
 	// jobCompletionBufSize is the channel buffer for background job completions.
 	jobCompletionBufSize = 64
 )
 
 // runAgent is the entry point for an agent worker process.
 // Workers are thin tool-execution sandboxes: they receive ExecuteTool
-// RPCs from the control plane and execute tools under an isolated UID.
+// RPCs from the control plane and execute tools under isolated filesystem
+// and syscall restrictions.
 //
-// When network isolation is active (PeerName set in config), the startup
-// follows a two-phase handshake:
-//  1. Signal "ns-ready" (namespaces up, awaiting veth from parent)
-//  2. Wait for veth-ready signal (FD 3 closed by parent)
-//  3. Self-configure network (interfaces, routes, bind mounts)
-//  4. Install seccomp-BPF filter (blocks namespace creation, mounts)
-//  5. Signal "ready" (gRPC server listening)
-//
-// All UID-isolated agents (not just network-isolated) get the seccomp filter
-// to prevent namespace creation, mount manipulation, etc.
+// Startup sequence:
+//  1. Read SpawnConfig from stdin
+//  2. Apply Landlock filesystem restrictions (if available)
+//  3. Install seccomp-BPF filter (blocks dangerous syscalls; blocks sockets when NetworkAccess=false)
+//  4. Configure file tool confinement
+//  5. Start gRPC server for ExecuteTool RPCs
+//  6. Signal "ready"
 func runAgent() error {
 	var cfg ipc.SpawnConfig
 	if err := json.NewDecoder(os.Stdin).Decode(&cfg); err != nil {
 		return fmt.Errorf("reading spawn config: %w", err)
 	}
 
-	// Network isolation handshake: self-configure inside user namespace.
-	if cfg.PeerName != "" {
-		// Signal that namespaces are up and we're ready for the veth peer.
-		fmt.Fprintln(os.Stdout, "ns-ready")
-
-		// Block until parent has created veth and moved peer into our netns.
-		waitForVethReady()
-
-		// Self-configure: rename peer to eth0, set IP/route, bind-mount DNS.
-		if err := selfConfigureNetwork(cfg); err != nil {
-			return fmt.Errorf("self-configuring network: %w", err)
-		}
-	}
-
-	// For UID-isolated agents: activate supplementary groups (e.g.,
-	// hiro-operators for agents/ write access) then lock down with seccomp.
-	// Both must run AFTER self-configuration (which needs mount) but
-	// BEFORE any agent code.
-	if cfg.UID != 0 {
-		if err := activateGroups(cfg.Groups); err != nil {
-			return fmt.Errorf("activating supplementary groups: %w", err)
-		}
-		if err := installSeccomp(); err != nil {
-			return fmt.Errorf("installing seccomp filter: %w", err)
-		}
-	}
-
-	if err := configureAgentSecurity(cfg); err != nil {
+	if err := applySandbox(cfg); err != nil {
 		return err
 	}
 
@@ -118,29 +86,30 @@ func runAgent() error {
 	return nil
 }
 
-// configureAgentSecurity sets up UID isolation when running under the Unix user
-// pool. This includes: collaborative umask, UID verification, file tool
-// confinement to the platform root, and SSRF protection against cloud metadata
-// endpoints. The Bash tool is not confinable here — it relies on UID/group DAC.
-func configureAgentSecurity(cfg ipc.SpawnConfig) error {
-	if cfg.UID == 0 {
-		return nil
+// applySandbox applies all isolation layers: Landlock filesystem restrictions,
+// seccomp-BPF syscall filtering, and file tool confinement.
+func applySandbox(cfg ipc.SpawnConfig) error {
+	// PR_SET_NO_NEW_PRIVS is required for both Landlock and seccomp.
+	// Must be called before either restriction is applied.
+	if err := setNoNewPrivs(); err != nil {
+		return err
 	}
 
-	syscall.Umask(umaskCollaborative)
-
-	// With CLONE_NEWUSER, os.Getuid() returns 0 inside the user namespace
-	// (mapped to the agent UID outside). All UID-isolated agents use namespaces.
-	actualUID := uint32(os.Getuid()) //nolint:gosec // UID fits uint32 on all supported platforms
-	if actualUID != 0 {
-		return fmt.Errorf("expected to run as UID 0 inside user namespace, but running as UID %d", actualUID)
+	// Apply Landlock filesystem restrictions if available.
+	if len(cfg.LandlockPaths.ReadWrite) > 0 || len(cfg.LandlockPaths.ReadOnly) > 0 {
+		if err := applyLandlock(cfg.LandlockPaths); err != nil {
+			return fmt.Errorf("applying landlock: %w", err)
+		}
 	}
 
-	// Confine file tools to the platform root — prevents reading/writing
-	// outside the workspace. Block SSRF to prevent hitting cloud metadata
-	// or internal services.
+	// Install seccomp-BPF filter. Blocks dangerous syscalls; blocks sockets
+	// when NetworkAccess is false (agent doesn't have Bash tool).
+	if err := installSeccomp(cfg.NetworkAccess); err != nil {
+		return fmt.Errorf("installing seccomp: %w", err)
+	}
+
+	// Confine file tools to the platform root.
 	tools.SetAllowedRoots([]string{cfg.WorkingDir})
-	tools.SetSSRFProtection(true)
 	return nil
 }
 
@@ -264,7 +233,6 @@ func buildWorkerTools(workingDir string, bgMgr *tools.BackgroundJobManager, allo
 		tools.NewWriteTool(workingDir),
 		tools.NewGlobTool(workingDir),
 		tools.NewGrepTool(workingDir),
-		tools.NewWebFetchTool(),
 		tools.NewTaskOutputTool(bgMgr),
 		tools.NewTaskStopTool(bgMgr),
 	}

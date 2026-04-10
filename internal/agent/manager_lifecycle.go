@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,7 +21,6 @@ import (
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/provider"
 	"github.com/nchapman/hiro/internal/toolrules"
-	"github.com/nchapman/hiro/internal/uidpool"
 )
 
 // CreateInstance loads an agent definition by name and starts an instance in the
@@ -67,55 +65,6 @@ func (m *Manager) CreateInstance(ctx context.Context, name, parentInstanceID, mo
 		m.logger.Error("instance creation failed", "instance_id", instanceID, "agent", name, "error", err2)
 	}
 	return id, err2
-}
-
-// resolveSupplementaryGroups resolves the supplementary Unix groups for an agent,
-// intersecting declared groups with the parent's groups. Returns nil if no UID
-// pool is configured. This is the single source of truth for group resolution —
-// used by both startInstance (running) and RestoreInstances (stopped).
-func (m *Manager) resolveSupplementaryGroups(cfg config.AgentConfig, parentID string) []uint32 {
-	if m.uidPool == nil {
-		return nil
-	}
-	parentGroups := m.parentGroupSet(parentID)
-	var groups []uint32
-	for _, g := range cfg.Groups {
-		groupGID := m.uidPool.GroupGID(g)
-		if groupGID == 0 {
-			m.logger.Warn("agent declared unknown group, ignoring",
-				"agent", cfg.Name, "group", g)
-			continue
-		}
-		if parentGroups != nil && !parentGroups[groupGID] {
-			m.logger.Warn("agent declared group not held by parent, ignoring",
-				"agent", cfg.Name, "group", g)
-			continue
-		}
-		groups = append(groups, groupGID)
-	}
-	return groups
-}
-
-// parentGroupSet returns the set of supplementary GIDs held by the parent instance.
-// Returns nil if there is no parent (root instance — no restriction).
-// Returns an empty non-nil map if the parent exists but has no groups, or if the
-// parent ID is specified but not found (fail-closed: deny all supplementary groups).
-func (m *Manager) parentGroupSet(parentID string) map[uint32]bool {
-	if parentID == "" {
-		return nil // root instance — no restriction
-	}
-	m.mu.RLock()
-	parent, ok := m.instances[parentID]
-	m.mu.RUnlock()
-	if !ok {
-		// Parent specified but not found — deny all supplementary groups.
-		return map[uint32]bool{}
-	}
-	set := make(map[uint32]bool, len(parent.groups))
-	for _, g := range parent.groups {
-		set[g] = true
-	}
-	return set
 }
 
 // SpawnEphemeral starts an ephemeral instance that runs the given prompt and returns
@@ -340,42 +289,6 @@ func (m *Manager) registerInstanceInDB(ctx context.Context, instanceID, sessionI
 	return nil
 }
 
-// acquireUIDAndChown acquires a UID from the pool and chowns the instance directory.
-// Returns uid, gid (both zero if no pool configured).
-func (m *Manager) acquireUIDAndChown(instanceID, instDir string) (uint32, uint32, error) {
-	if m.uidPool == nil {
-		return 0, 0, nil
-	}
-	uid, gid, err := m.uidPool.Acquire(instanceID)
-	if err != nil {
-		return 0, 0, fmt.Errorf("acquiring UID: %w", err)
-	}
-	// Transfer ownership of the instance dir (and all contents) to the agent user.
-	// config.yaml is skipped — it stays root-owned so the agent cannot read it.
-	//
-	// Chown requires root. In production (Docker), the control plane is always
-	// root. In test-local, we're not root but still create a pool for testing
-	// UID assignment — skip chown and proceed with the assigned UID.
-	if os.Getuid() == 0 {
-		if err := filepath.WalkDir(instDir, func(path string, _ fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if config.IsInstanceConfigFile(path, instDir) {
-				return nil // keep root-owned
-			}
-			return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled instance directory, no symlink risk
-		}); err != nil {
-			m.uidPool.Release(instanceID)
-			return 0, 0, fmt.Errorf("chowning instance dir: %w", err)
-		}
-	} else {
-		m.logger.Warn("not root; skipping chown — instance dir owned by process user, not agent UID (test-local only)",
-			"instance", instanceID, "uid", uid)
-	}
-	return uid, gid, nil
-}
-
 // agentHasSkills reports whether the agent has skills defined inline or on disk.
 func (m *Manager) agentHasSkills(cfg config.AgentConfig) bool {
 	if len(cfg.Skills) > 0 {
@@ -458,7 +371,7 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 	return instDir, sessDir, dirIsNew, nil
 }
 
-func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, channelKey string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) { //nolint:funlen // 41 statements, one over limit from channelKey param
+func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, channelKey string, cfg config.AgentConfig, parentID string, mode config.AgentMode, nodeID ipc.NodeID, displayName, displayDesc, personaBody string) (string, error) {
 	instDir, sessDir, dirIsNew, err := m.prepareInstanceDirs(instanceID, sessionID, mode, displayName, displayDesc, personaBody, cfg.AllowedTools, cfg.DisallowedTools)
 	if err != nil {
 		return "", err
@@ -483,19 +396,13 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 	if mode.IsPersistent() {
 		spawnCtx = m.ctx
 	}
-	supplementaryGroups := m.resolveSupplementaryGroups(cfg, parentID)
-	effectiveEgress := m.computeEffectiveEgress(cfg, parentID)
-	uid, gid, err := m.acquireUIDAndChown(instanceID, instDir)
-	if err != nil {
-		return "", err
-	}
 	modelSpec, apiKey, baseURL, err := m.resolveModelSpec(cfg.Model)
 	if err != nil {
 		return "", err
 	}
 
-	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, cfg.Name, allowedTools, sessDir, uid, gid, supplementaryGroups, effectiveEgress)
-	cleanup := makeCleanup(sessDir, instDir, dirIsNew, m.uidPool, instanceID)
+	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, cfg.Name, allowedTools, instDir, sessDir)
+	cleanup := makeCleanup(sessDir, instDir, dirIsNew)
 	handle, err := m.spawnWorker(spawnCtx, cfg, nodeID, spawnCfg, allowedTools, instanceID, sessionID)
 	if err != nil {
 		cleanup()
@@ -517,43 +424,89 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 		return "", err
 	}
 
-	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, channelKey, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, memoryMu, effectiveTools, allowLayers, denyRules, effectiveEgress, uid, gid, supplementaryGroups))
+	m.registerAndStartInstance(spawnCtx, buildInstance(instanceID, sessionID, channelKey, cfg, mode, parentID, nodeID, modelSpec.String(), displayName, displayDesc, handle, loop, notifications, memoryMu, effectiveTools, allowLayers, denyRules))
 	return instanceID, nil
 }
 
 // buildSpawnConfig creates an ipc.SpawnConfig for worker spawning.
-func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allowedTools map[string]bool, sessDir string, uid, gid uint32, supplementaryGroups []uint32, networkEgress []string) ipc.SpawnConfig {
-	return ipc.SpawnConfig{
+func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allowedTools map[string]bool, instDir, sessDir string) ipc.SpawnConfig {
+	// Compute the socket dir that prepareSocketDir will create. This must
+	// match exactly so the Landlock RW path covers socket creation.
+	sessPrefix := sessionID
+	if len(sessPrefix) > ipc.MaxSessionPrefix {
+		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
+	}
+	socketDir := filepath.Join(os.TempDir(), fmt.Sprintf("hiro-%s", sessPrefix))
+
+	cfg := ipc.SpawnConfig{
 		InstanceID:     instanceID,
 		SessionID:      sessionID,
 		AgentName:      agentName,
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
-		AgentSocket:    filepath.Join(os.TempDir(), fmt.Sprintf("hiro-agent-%s.sock", sessionID)),
-		UID:            uid,
-		GID:            gid,
-		Groups:         append([]uint32{gid}, supplementaryGroups...),
-		NetworkEgress:  networkEgress,
+		NetworkAccess:  allowedTools["Bash"], // Bash tool implies socket access needed
 	}
+
+	if m.landlockEnabled {
+		cfg.LandlockPaths = m.buildLandlockPaths(instDir, sessDir, socketDir, allowedTools)
+	}
+
+	return cfg
 }
 
-// makeCleanup returns a function that removes directories and releases UID on failure.
-func makeCleanup(sessDir, instDir string, dirIsNew bool, pool *uidpool.Pool, instanceID string) func() {
+// buildLandlockPaths computes filesystem access paths for Landlock.
+func (m *Manager) buildLandlockPaths(instDir, sessDir, socketDir string, allowedTools map[string]bool) ipc.LandlockPaths {
+	agentsDir := filepath.Join(m.rootDir, "agents")
+	skillsDir := filepath.Join(m.rootDir, "skills")
+
+	paths := ipc.LandlockPaths{
+		ReadWrite: []string{
+			instDir,                               // instance dir (persona.md, memory.md, etc.)
+			sessDir,                               // session dir (scratch/, tmp/)
+			socketDir,                             // gRPC socket dir (under /tmp)
+			filepath.Join(m.rootDir, "workspace"), // shared workspace
+		},
+		ReadOnly: []string{
+			"/usr",  // system binaries/libraries
+			"/lib",  // shared libraries
+			"/etc",  // system config (resolv.conf, etc.)
+			"/proc", // /proc/self for Go runtime (os.Executable, net package)
+			"/dev",  // /dev/null, /dev/urandom — required by many tools
+		},
+	}
+
+	// Operators need write access to agents/ and skills/ for creating new
+	// agent definitions. Other agents only need read access.
+	if allowedTools["CreatePersistentInstance"] {
+		paths.ReadWrite = append(paths.ReadWrite, agentsDir, skillsDir)
+	} else {
+		paths.ReadOnly = append(paths.ReadOnly, agentsDir, skillsDir)
+	}
+
+	// mise tool manager paths
+	if miseDir := os.Getenv("MISE_DATA_DIR"); miseDir != "" {
+		paths.ReadOnly = append(paths.ReadOnly, miseDir)
+	} else if _, err := os.Stat("/opt/mise"); err == nil {
+		paths.ReadOnly = append(paths.ReadOnly, "/opt/mise")
+	}
+
+	return paths
+}
+
+// makeCleanup returns a function that removes directories on failure.
+func makeCleanup(sessDir, instDir string, dirIsNew bool) func() {
 	return func() {
 		os.RemoveAll(sessDir)
 		if dirIsNew {
 			os.RemoveAll(instDir)
-		}
-		if pool != nil {
-			pool.Release(instanceID)
 		}
 	}
 }
 
 // buildInstance creates an instance struct with all resolved fields.
 // The initial session slot is created from the provided handle/loop.
-func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID, model, displayName, displayDesc string, handle *WorkerHandle, loop *inference.Loop, notifications *inference.NotificationQueue, memoryMu *sync.Mutex, effectiveTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule, effectiveEgress []string, uid, gid uint32, groups []uint32) *instance {
+func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentConfig, mode config.AgentMode, parentID string, nodeID ipc.NodeID, model, displayName, displayDesc string, handle *WorkerHandle, loop *inference.Loop, notifications *inference.NotificationQueue, memoryMu *sync.Mutex, effectiveTools map[string]bool, allowLayers [][]toolrules.Rule, denyRules []toolrules.Rule) *instance {
 	slot := &sessionSlot{
 		sessionID: sessionID,
 		channel:   channelKey,
@@ -573,19 +526,15 @@ func buildInstance(instanceID, sessionID, channelKey string, cfg config.AgentCon
 			Model:       model,
 			NodeID:      nodeID,
 		},
-		agentName:       cfg.Name,
-		sessions:        map[string]*sessionSlot{sessionID: slot},
-		channelIndex:    map[string]string{channelKey: sessionID},
-		notifications:   notifications,
-		memoryMu:        memoryMu,
-		effectiveTools:  effectiveTools,
-		allowLayers:     allowLayers,
-		denyRules:       denyRules,
-		effectiveEgress: effectiveEgress,
-		uid:             uid,
-		gid:             gid,
-		groups:          groups,
-		nodeID:          nodeID,
+		agentName:      cfg.Name,
+		sessions:       map[string]*sessionSlot{sessionID: slot},
+		channelIndex:   map[string]string{channelKey: sessionID},
+		notifications:  notifications,
+		memoryMu:       memoryMu,
+		effectiveTools: effectiveTools,
+		allowLayers:    allowLayers,
+		denyRules:      denyRules,
+		nodeID:         nodeID,
 	}
 	return inst
 }

@@ -71,11 +71,11 @@ jobs:
       - name: Bundle release assets
         run: |
           mkdir -p release
-          cp docker-compose.yml seccomp.json release/
+          cp docker-compose.yml release/
           # Tarball contains only the deployment files, not SHA256SUMS
-          tar czf hiro-${{ github.ref_name }}.tar.gz -C release docker-compose.yml seccomp.json
+          tar czf hiro-${{ github.ref_name }}.tar.gz -C release docker-compose.yml
           # SHA256SUMS covers both individual files and the tarball
-          (cd release && sha256sum docker-compose.yml seccomp.json) > release/SHA256SUMS
+          (cd release && sha256sum docker-compose.yml) > release/SHA256SUMS
           sha256sum hiro-${{ github.ref_name }}.tar.gz >> release/SHA256SUMS
 
       - uses: softprops/action-gh-release@v2

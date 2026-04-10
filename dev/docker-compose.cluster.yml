@@ -5,18 +5,12 @@ services:
   leader:
     build: ..
     init: true
-    cap_add:
-      - NET_ADMIN
-    security_opt:
-      - seccomp=../seccomp.json
-    sysctls:
-      - net.ipv4.ip_forward=1
     ports:
       - "0:8120"  # HTTP API (random host port)
       - "0:8121"  # Cluster gRPC (random host port)
     volumes:
       - leader-hiro:/hiro
-      - ../tests/e2e_cluster/leader-config/config.yaml:/hiro/config/config.yaml
+      - ../tests/e2e_cluster/leader-config:/hiro/config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
       interval: 5s
@@ -26,12 +20,6 @@ services:
   worker:
     build: ..
     init: true
-    cap_add:
-      - NET_ADMIN
-    security_opt:
-      - seccomp=../seccomp.json
-    sysctls:
-      - net.ipv4.ip_forward=1
     depends_on:
       leader:
         condition: service_healthy

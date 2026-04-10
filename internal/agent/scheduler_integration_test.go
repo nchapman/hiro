@@ -20,7 +20,7 @@ func newTestSchedulerWithDB(t *testing.T) (*Scheduler, *platformdb.DB, *Manager)
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("test"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("test"), pdb, false)
 	sched := NewScheduler(pdb, mgr, time.UTC, logger)
 	return sched, pdb, mgr
 }
@@ -624,7 +624,7 @@ func TestNewScheduler_NilTimezoneDefaultsToUTC(t *testing.T) {
 	dir := t.TempDir()
 	pdb := openTestPDB(t, dir)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("test"), nil, pdb, nil)
+	mgr := NewManager(t.Context(), dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("test"), pdb, false)
 
 	sched := NewScheduler(pdb, mgr, nil, logger)
 	if sched.tz != time.UTC {

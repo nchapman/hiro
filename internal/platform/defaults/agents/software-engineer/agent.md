@@ -1,8 +1,6 @@
 ---
 name: software-engineer
 allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop]
-network:
-  egress: ["*"]
 description: Software engineer for coding tasks — writing, debugging, refactoring, and reviewing code in any language or framework. Provide the task, relevant file paths, and any constraints.
 ---
 
