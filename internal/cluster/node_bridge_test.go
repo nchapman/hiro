@@ -168,7 +168,7 @@ func TestCreateWorkerSocket_LongSessionID(t *testing.T) {
 		os.RemoveAll(socketDir)
 	})
 
-	expected := "/tmp/hiro-" + longID[:ipc.MaxSessionPrefix]
+	expected := filepath.Join(os.TempDir(), "hiro-"+longID[:ipc.MaxSessionPrefix])
 	if socketDir != expected {
 		t.Fatalf("socketDir = %q, want %q", socketDir, expected)
 	}

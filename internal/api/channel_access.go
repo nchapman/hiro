@@ -152,8 +152,8 @@ func (s *Server) handleGlobalPendingChannelAccess(w http.ResponseWriter, _ *http
 	instances := s.manager.ListInstances()
 	var items []channelSenderJSON
 	for _, inst := range instances {
-		instDir := s.manager.InstanceDir(inst.ID)
-		cfg, err := config.LoadInstanceConfig(instDir)
+		configPath := s.manager.InstanceConfigPath(inst.ID)
+		cfg, err := config.LoadInstanceConfig(configPath)
 		if err != nil || cfg.Channels == nil {
 			continue
 		}

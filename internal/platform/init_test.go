@@ -213,20 +213,3 @@ func TestInit_SeededAgentHasContent(t *testing.T) {
 		t.Fatalf("walking agents dir: %v", err)
 	}
 }
-
-func TestLookupGroupGID_NonexistentGroup(t *testing.T) {
-	// lookupGroupGID should return -1 for groups that don't exist.
-	gid := lookupGroupGID("hiro-nonexistent-group-xyz-99999")
-	if gid != -1 {
-		t.Errorf("expected -1 for nonexistent group, got %d", gid)
-	}
-}
-
-func TestSetOperatorDir_NegativeGID(t *testing.T) {
-	// setOperatorDir should be a no-op when coordGID is negative.
-	dir := t.TempDir()
-	err := setOperatorDir(dir, "test", -1)
-	if err != nil {
-		t.Errorf("expected no-op for negative GID, got: %v", err)
-	}
-}

@@ -2,12 +2,6 @@
 services:
   hiro-e2e:
     build: ..
-    cap_add:
-      - NET_ADMIN
-    security_opt:
-      - seccomp=../seccomp.json
-    sysctls:
-      - net.ipv4.ip_forward=1
     ports:
       - "0:8120" # random host port to avoid conflicts
     volumes:

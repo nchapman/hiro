@@ -8,7 +8,8 @@ import (
 
 func TestLoadInstanceConfig_NotExists(t *testing.T) {
 	dir := t.TempDir()
-	cfg, err := LoadInstanceConfig(dir)
+	path := filepath.Join(dir, "nonexistent.yaml")
+	cfg, err := LoadInstanceConfig(path)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -19,10 +20,11 @@ func TestLoadInstanceConfig_NotExists(t *testing.T) {
 
 func TestLoadInstanceConfig_Empty(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), nil, 0o600); err != nil {
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadInstanceConfig(dir)
+	cfg, err := LoadInstanceConfig(path)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -33,14 +35,15 @@ func TestLoadInstanceConfig_Empty(t *testing.T) {
 
 func TestSaveAndLoadInstanceConfig_ModelOnly(t *testing.T) {
 	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
 	want := InstanceConfig{
 		Model:           "anthropic/claude-sonnet-4",
 		ReasoningEffort: "high",
 	}
-	if err := SaveInstanceConfig(dir, want); err != nil {
+	if err := SaveInstanceConfig(path, want); err != nil {
 		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
-	got, err := LoadInstanceConfig(dir)
+	got, err := LoadInstanceConfig(path)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -54,6 +57,7 @@ func TestSaveAndLoadInstanceConfig_ModelOnly(t *testing.T) {
 
 func TestSaveAndLoadInstanceConfig_Full(t *testing.T) {
 	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
 	want := InstanceConfig{
 		Model:           "openrouter/anthropic/claude-sonnet-4",
 		ReasoningEffort: "medium",
@@ -67,10 +71,10 @@ func TestSaveAndLoadInstanceConfig_Full(t *testing.T) {
 			},
 		},
 	}
-	if err := SaveInstanceConfig(dir, want); err != nil {
+	if err := SaveInstanceConfig(path, want); err != nil {
 		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
-	got, err := LoadInstanceConfig(dir)
+	got, err := LoadInstanceConfig(path)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -96,10 +100,11 @@ func TestSaveAndLoadInstanceConfig_Full(t *testing.T) {
 
 func TestSaveInstanceConfig_Permissions(t *testing.T) {
 	dir := t.TempDir()
-	if err := SaveInstanceConfig(dir, InstanceConfig{Model: "test"}); err != nil {
+	path := filepath.Join(dir, "config.yaml")
+	if err := SaveInstanceConfig(path, InstanceConfig{Model: "test"}); err != nil {
 		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
-	info, err := os.Stat(filepath.Join(dir, "config.yaml"))
+	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -111,13 +116,14 @@ func TestSaveInstanceConfig_Permissions(t *testing.T) {
 
 func TestSaveInstanceConfig_Overwrites(t *testing.T) {
 	dir := t.TempDir()
-	if err := SaveInstanceConfig(dir, InstanceConfig{Model: "first"}); err != nil {
+	path := filepath.Join(dir, "config.yaml")
+	if err := SaveInstanceConfig(path, InstanceConfig{Model: "first"}); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	if err := SaveInstanceConfig(dir, InstanceConfig{Model: "second"}); err != nil {
+	if err := SaveInstanceConfig(path, InstanceConfig{Model: "second"}); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
-	got, err := LoadInstanceConfig(dir)
+	got, err := LoadInstanceConfig(path)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -128,14 +134,15 @@ func TestSaveInstanceConfig_Overwrites(t *testing.T) {
 
 func TestSaveAndLoadInstanceConfig_WithTools(t *testing.T) {
 	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
 	want := InstanceConfig{
 		AllowedTools:    []string{"Bash", "Read", "Write", "Glob"},
 		DisallowedTools: []string{"Bash(rm *)"},
 	}
-	if err := SaveInstanceConfig(dir, want); err != nil {
+	if err := SaveInstanceConfig(path, want); err != nil {
 		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
-	got, err := LoadInstanceConfig(dir)
+	got, err := LoadInstanceConfig(path)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -150,15 +157,25 @@ func TestSaveAndLoadInstanceConfig_WithTools(t *testing.T) {
 	}
 }
 
-func TestIsInstanceConfigFile(t *testing.T) {
-	instDir := "/instances/abc123"
-	if !IsInstanceConfigFile("/instances/abc123/config.yaml", instDir) {
-		t.Error("should match config.yaml in instance root")
+func TestSaveInstanceConfig_CreatesDirs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config", "instances", "test-id.yaml")
+	if err := SaveInstanceConfig(path, InstanceConfig{Model: "test"}); err != nil {
+		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
-	if IsInstanceConfigFile("/instances/abc123/sessions/xyz/config.yaml", instDir) {
-		t.Error("should not match config.yaml in subdirectory")
+	got, err := LoadInstanceConfig(path)
+	if err != nil {
+		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
-	if IsInstanceConfigFile("/instances/abc123/persona.md", instDir) {
-		t.Error("should not match other files")
+	if got.Model != "test" {
+		t.Errorf("Model: got %q, want %q", got.Model, "test")
+	}
+}
+
+func TestInstanceConfigPath(t *testing.T) {
+	got := InstanceConfigPath("/hiro", "abc-123")
+	want := "/hiro/config/instances/abc-123.yaml"
+	if got != want {
+		t.Errorf("InstanceConfigPath: got %q, want %q", got, want)
 	}
 }

@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -171,18 +169,18 @@ func (m *Manager) persistInstanceConfig(instanceID string, modify func(*config.I
 	}
 }
 
-// persistInstanceConfigErr applies a modify function to the instance's config.yaml
+// persistInstanceConfigErr applies a modify function to the instance's config
 // through the config locker (if set) or directly.
 func (m *Manager) persistInstanceConfigErr(instanceID string, modify func(*config.InstanceConfig) error) error {
 	if m.configLocker != nil {
 		return m.configLocker.ModifyConfig(instanceID, modify)
 	}
-	instDir := m.instanceDir(instanceID)
-	existing, _ := config.LoadInstanceConfig(instDir)
+	configPath := m.instanceConfigPath(instanceID)
+	existing, _ := config.LoadInstanceConfig(configPath)
 	if err := modify(&existing); err != nil {
 		return err
 	}
-	return config.SaveInstanceConfig(instDir, existing)
+	return config.SaveInstanceConfig(configPath, existing)
 }
 
 func (m *Manager) applyToolOverrides(inst *instance, allowedTools, disallowedTools []string) error {
@@ -287,13 +285,11 @@ func (m *Manager) createSessionSlot(ctx context.Context, inst *instance, instanc
 			return "", err
 		}
 	}
-	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", sessionID)
-
 	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
 	}
-	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups, inst.effectiveEgress)
+	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, sc.agentConfig.Name, sc.allowedTools, m.instanceDir(instanceID), sessDir)
 	spawnCtx := ctx
 	if inst.info.Mode.IsPersistent() {
 		spawnCtx = m.ctx
@@ -437,13 +433,11 @@ func (m *Manager) NewSessionForChannel(instanceID, channelKey string) (string, e
 	if err := m.registerSessionInDBWithChannel(instanceID, newSessionID, inst.agentName, inst.info.Mode, chType, chID); err != nil {
 		return "", err
 	}
-	chownDir(sessDir, inst.uid, inst.gid, m.logger, "session", newSessionID)
-
 	sc, err := m.resolveSessionConfig(inst)
 	if err != nil {
 		return "", err
 	}
-	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, sessDir, inst.uid, inst.gid, inst.groups, inst.effectiveEgress)
+	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, m.instanceDir(instanceID), sessDir)
 
 	// Shut down old worker concurrently while spawning the new one.
 	shutdownDone := m.shutdownOldWorkerAsync(oldHandle)
@@ -533,22 +527,6 @@ func (m *Manager) markSessionStopped(sessionID string) {
 	}
 }
 
-// chownDir recursively chowns a directory to the given uid/gid.
-// No-op if uid is 0 (isolation not enabled).
-func chownDir(dir string, uid, gid uint32, logger interface{ Warn(string, ...any) }, label, id string) {
-	if uid == 0 {
-		return
-	}
-	if err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		return os.Chown(path, int(uid), int(gid)) //nolint:gosec // G122: controlled directory, no symlink risk
-	}); err != nil {
-		logger.Warn("failed to chown dir", label, id, "error", err)
-	}
-}
-
 // sessionConfig holds the resolved configuration for starting a new session.
 type sessionConfig struct {
 	agentConfig  config.AgentConfig
@@ -573,7 +551,7 @@ func (m *Manager) resolveSessionConfig(inst *instance) (sessionConfig, error) {
 
 	hasSkills := m.agentHasSkills(cfg)
 	// Instance config is the source of truth for tool declarations.
-	applyInstanceToolConfig(m.instanceDir(inst.info.ID), &cfg)
+	applyInstanceToolConfig(m.instanceConfigPath(inst.info.ID), &cfg)
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, inst.info.ParentID)
 	if err != nil {
 		return sessionConfig{}, fmt.Errorf("computing effective tools: %w", err)
@@ -767,7 +745,7 @@ func (m *Manager) pushToolsAndModel(inst *instance, instanceID, parentID string,
 	// Instance config is the source of truth for tool declarations.
 	// Agent.md changes to tools don't flow to existing instances.
 	cfg := pc.cfg
-	applyInstanceToolConfig(m.instanceDir(instanceID), &cfg)
+	applyInstanceToolConfig(m.instanceConfigPath(instanceID), &cfg)
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, parentID)
 	if err != nil {
 		m.logger.Warn("failed to recompute tools for config push",

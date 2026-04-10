@@ -121,6 +121,7 @@ func (nb *NodeBridge) prepareSpawnConfig(msg *pb.SpawnWorker) (ipc.SpawnConfig, 
 		EffectiveTools: msg.EffectiveTools,
 		WorkingDir:     workingDir,
 		SessionDir:     sessionDir,
+		NetworkAccess:  msg.EffectiveTools["Bash"],
 	}, nil
 }
 
@@ -247,7 +248,7 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	}
 
 	// Connect gRPC client.
-	conn, err := grpc.NewClient("unix://"+socketPath,
+	conn, err := grpc.NewClient("unix:"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
@@ -280,14 +281,15 @@ func (nb *NodeBridge) spawnLocalWorker(ctx context.Context, cfg ipc.SpawnConfig)
 	}, nil
 }
 
-// createWorkerSocket creates a private socket directory and returns the
-// directory path and socket path.
+// createWorkerSocket creates a private socket directory under /tmp and returns
+// the directory path and socket path. Uses /tmp (not the session dir) to stay
+// within the 104-byte Unix socket path length limit.
 func (nb *NodeBridge) createWorkerSocket(sessionID string) (socketDir, socketPath string, err error) {
 	sessPrefix := sessionID
 	if len(sessPrefix) > ipc.MaxSessionPrefix {
 		sessPrefix = sessPrefix[:ipc.MaxSessionPrefix]
 	}
-	socketDir = fmt.Sprintf("/tmp/hiro-%s", sessPrefix)
+	socketDir = filepath.Join(os.TempDir(), fmt.Sprintf("hiro-%s", sessPrefix))
 	if err := os.MkdirAll(socketDir, fsperm.DirPrivate); err != nil {
 		return "", "", fmt.Errorf("creating socket dir: %w", err)
 	}

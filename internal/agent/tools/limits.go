@@ -13,9 +13,6 @@ const (
 	// grepTimeout is the maximum duration for a grep search.
 	grepTimeout = 30 * time.Second
 
-	// fetchTimeout is the maximum duration for an HTTP fetch.
-	fetchTimeout = 30 * time.Second
-
 	// killTimeout bounds how long Kill waits for a job to exit.
 	killTimeout = 5 * time.Second
 
@@ -24,9 +21,6 @@ const (
 
 	// outputPollInterval is the polling interval for bash job output checks.
 	outputPollInterval = 100 * time.Millisecond
-
-	// dialTimeout is the timeout for establishing network connections.
-	dialTimeout = 10 * time.Second
 )
 
 // --- Output and buffer sizes ---
@@ -41,9 +35,6 @@ const (
 
 	// maxBufferBytes is the maximum size of each stdout/stderr buffer (4MB).
 	maxBufferBytes = 4 << 20
-
-	// maxResponseBody is the maximum size of an HTTP fetch response (bytes).
-	maxResponseBody = 64000
 
 	// maxFileReadLen is the maximum output length when reading a file (bytes).
 	maxFileReadLen = 64000

@@ -66,9 +66,11 @@ For content that's a text blob where diffing individual changes isn't meaningful
 | `TodoProvider` | `todos` | Content hash | sessionDir set | `todos.yaml` |
 | `SecretProvider` | `secrets` | Named-set delta | secretNamesFn non-nil | `ControlPlane.SecretNames()` |
 | `AgentListingProvider` | `agents` | Named-set delta | SpawnInstance or CreatePersistentInstance tool active | `HostManager.ListAgentDefs()` |
+| `NodeListingProvider` | `nodes` | Content hash | ListNodes tool active | `HostManager.ListNodes()` |
 | `SkillProvider` | `skills` | Named-set delta | Skill tool active | `config.LoadSkills()` from disk |
+| `SubscriptionProvider` | `schedules` | Content hash | pdb non-nil | `pdb.ListSubscriptionsByInstance()` |
 
-Providers are registered in order in `manager_lifecycle.go` and `manager_session.go`. Registration order determines the order of sections in merged messages.
+Providers are registered in order in `buildLoopConfig()` in `manager_lifecycle.go`. Registration order determines the order of sections in merged messages.
 
 ## Structured metadata
 
@@ -106,14 +108,15 @@ No special compaction handling is needed. The system is self-healing by design.
 4. Use `replayAnnounced()` or `replayLatestHash()` to check what was previously announced
 5. Return `nil` if nothing changed; return a `*DeltaResult` with a message if something did
 6. Use `buildDeltaMessage()` for named-set or `buildContentMessage()` for content-hash
-7. Register the provider in `manager_lifecycle.go` and `manager_session.go`
+7. Register the provider in `buildLoopConfig()` in `manager_lifecycle.go`
 
 ## Key files
 
 | File | Role |
 |------|------|
-| `internal/inference/context_providers.go` | Core types, helpers, and all provider implementations |
-| `internal/inference/tools_spawn.go` | `AgentListingProvider` (co-located with spawn tools) |
+| `internal/inference/context_providers.go` | Core types, helpers, and most provider implementations |
+| `internal/inference/tools_spawn.go` | `AgentListingProvider`, `NodeListingProvider` (co-located with spawn tools) |
+| `internal/inference/context_subscriptions.go` | `SubscriptionProvider` (schedule listing for persistent agents) |
 | `internal/inference/loop.go` | `applyContextDeltas()` — calls providers and persists results |
 | `internal/inference/prompt.go` | System prompt (static identity only) |
 | `internal/agent/manager_lifecycle.go` | Provider registration for persistent instances |

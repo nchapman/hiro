@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -109,6 +110,7 @@ func TestTouchSender(t *testing.T) {
 
 func TestSaveAndLoadSenders(t *testing.T) {
 	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
 	cfg := InstanceConfig{
 		Channels: &InstanceChannelsConfig{
 			Telegram: &InstanceTelegramConfig{BotToken: "test"},
@@ -117,11 +119,11 @@ func TestSaveAndLoadSenders(t *testing.T) {
 	cfg.Channels.SetSender("tg:100", ChannelAccessApproved, "User A", "hello")
 	cfg.Channels.SetSender("slack:C123", ChannelAccessPending, "Channel", "hi")
 
-	if err := SaveInstanceConfig(dir, cfg); err != nil {
+	if err := SaveInstanceConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
 
-	got, err := LoadInstanceConfig(dir)
+	got, err := LoadInstanceConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}

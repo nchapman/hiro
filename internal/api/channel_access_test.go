@@ -35,8 +35,8 @@ func newChannelAccessTestServer(t *testing.T) (*Server, string, string) {
 // seedSender writes a sender entry directly to the instance config.
 func seedSender(t *testing.T, srv *Server, instID, key string, status config.ChannelAccessStatus) {
 	t.Helper()
-	instDir := srv.manager.InstanceDir(instID)
-	cfg, err := config.LoadInstanceConfig(instDir)
+	configPath := srv.manager.InstanceConfigPath(instID)
+	cfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -44,7 +44,7 @@ func seedSender(t *testing.T, srv *Server, instID, key string, status config.Cha
 		cfg.Channels = &config.InstanceChannelsConfig{}
 	}
 	cfg.Channels.SetSender(key, status, "Test User", "hello")
-	if err := config.SaveInstanceConfig(instDir, cfg); err != nil {
+	if err := config.SaveInstanceConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveInstanceConfig: %v", err)
 	}
 }
@@ -98,8 +98,8 @@ func TestApproveChannelSender(t *testing.T) {
 	}
 
 	// Verify the sender is now approved.
-	instDir := srv.manager.InstanceDir(instID)
-	cfg, _ := config.LoadInstanceConfig(instDir)
+	configPath := srv.manager.InstanceConfigPath(instID)
+	cfg, _ := config.LoadInstanceConfig(configPath)
 	status, found := cfg.Channels.SenderStatus("tg:12345")
 	if !found || status != config.ChannelAccessApproved {
 		t.Errorf("sender status=%v found=%v, want approved", status, found)
@@ -117,8 +117,8 @@ func TestBlockChannelSender(t *testing.T) {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 
-	instDir := srv.manager.InstanceDir(instID)
-	cfg, _ := config.LoadInstanceConfig(instDir)
+	configPath := srv.manager.InstanceConfigPath(instID)
+	cfg, _ := config.LoadInstanceConfig(configPath)
 	status, found := cfg.Channels.SenderStatus("tg:12345")
 	if !found || status != config.ChannelAccessBlocked {
 		t.Errorf("sender status=%v found=%v, want blocked", status, found)
@@ -137,8 +137,8 @@ func TestDismissChannelSender(t *testing.T) {
 	}
 
 	// Verify the sender is gone.
-	instDir := srv.manager.InstanceDir(instID)
-	cfg, _ := config.LoadInstanceConfig(instDir)
+	configPath := srv.manager.InstanceConfigPath(instID)
+	cfg, _ := config.LoadInstanceConfig(configPath)
 	if _, found := cfg.Channels.SenderStatus("tg:12345"); found {
 		t.Error("sender should be removed after dismiss")
 	}

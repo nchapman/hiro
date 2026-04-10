@@ -60,7 +60,7 @@ An instance runs in one of two modes, specified at creation time:
 | **Ephemeral** | Single task, then auto-deleted. Instance and session collapse into one thing. No durable state. |
 | **Persistent** | Long-lived. Survives restarts. Has memory, identity, and session history. |
 
-Any agent can spawn and manage child instances — management tools (`SendMessage`, `StopInstance`, etc.) are available to agents that declare them in `allowed_tools` and are scoped to descendants via `ScopedManager.checkDescendant()`. Write access to `agents/` and `skills/` is controlled by the `hiro-operators` Unix group, declared in agent frontmatter (`groups: [hiro-operators]`).
+Any agent can spawn and manage child instances — management tools (`SendMessage`, `StopInstance`, etc.) are available to agents that declare them in `allowed_tools` and are scoped to descendants via `ScopedManager.checkDescendant()`.
 
 ### Instance Lifecycle
 
@@ -138,7 +138,7 @@ Search is scoped to the active session. Cross-session history is not searchable.
 
 ## Ephemeral Agents
 
-For ephemeral agents, the instance and session are the same thing. There is no durable state — the agent runs a single task, returns a result, and everything is cleaned up. No instance directory is created on disk. This is the common case for spawned sub-agents doing one-off work.
+For ephemeral agents, the instance and session are the same thing. There is no durable state — the agent runs a single task, returns a result, and everything is cleaned up. An instance directory is created temporarily but removed after the instance completes. This is the common case for spawned sub-agents doing one-off work.
 
 ## Parent-Child Relationships
 

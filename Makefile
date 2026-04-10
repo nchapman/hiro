@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-isolation test-netiso test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto update-seccomp
+.PHONY: build test test-local test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
 
 # Auto-load .env variables. Command-line overrides (make VAR=x) take precedence.
 # Variables are NOT exported globally — only test targets pass what they need.
@@ -22,22 +22,6 @@ test:
 test-local:
 	go test -race ./... -v -count=1
 
-test-isolation:
-	docker compose -f dev/docker-compose.test.yml build test
-	docker compose -f dev/docker-compose.test.yml run --rm test \
-		go test ./internal/agent/... -tags=isolation -v -count=1; \
-	EXIT=$$?; \
-	docker compose -f dev/docker-compose.test.yml down; \
-	exit $$EXIT
-
-test-netiso:
-	docker compose -f dev/docker-compose.test.yml build test
-	docker compose -f dev/docker-compose.test.yml run --rm test \
-		go test ./internal/netiso/... -tags=netiso -v -count=1; \
-	EXIT=$$?; \
-	docker compose -f dev/docker-compose.test.yml down; \
-	exit $$EXIT
-
 test-online:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
 	@# Build production image and start hiro server
@@ -56,6 +40,7 @@ test-online:
 test-cluster:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
 	mkdir -p tests/e2e_cluster/leader-config; \
+	chmod 777 tests/e2e_cluster/leader-config; \
 	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
 	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
 	docker compose -f dev/docker-compose.cluster.yml build; \
@@ -81,6 +66,7 @@ test-cluster-relay:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
 	SWARM=$$(openssl rand -hex 16); \
 	mkdir -p tests/e2e_cluster/leader-config; \
+	chmod 777 tests/e2e_cluster/leader-config; \
 	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
 	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
 	docker compose -f dev/docker-compose.cluster-relay.yml build; \
@@ -134,9 +120,6 @@ docker-up:
 
 docker-down:
 	docker compose -f dev/docker-compose.yml down
-
-update-seccomp:
-	./dev/update-seccomp.sh
 
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \

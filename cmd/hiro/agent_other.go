@@ -4,7 +4,6 @@ package main
 
 import "github.com/nchapman/hiro/internal/ipc"
 
-func activateGroups(_ []uint32) error              { return nil }
-func selfConfigureNetwork(_ ipc.SpawnConfig) error { return nil }
-func waitForVethReady()                            {}
-func installSeccomp() error                        { return nil }
+func setNoNewPrivs() error                    { return nil }
+func applyLandlock(_ ipc.LandlockPaths) error { return nil }
+func installSeccomp(_ bool) error             { return nil }

@@ -16,7 +16,7 @@ docker compose -f dev/docker-compose.yml up --build -d
 
 Running locally creates runtime directories (`agents/`, `db/`, `instances/`, etc.) in the repo root and conflicts with Docker port bindings.
 
-Docker containers require `CAP_NET_ADMIN`, a custom seccomp profile (`seccomp.json`), and `net.ipv4.ip_forward=1` for network isolation. These are configured in `docker-compose.yml` and all `dev/docker-compose*.yml` files.
+The Docker container runs as a non-root `hiro` user. Agent isolation uses Landlock LSM for filesystem restrictions and per-worker seccomp-BPF for syscall filtering — no root, no capabilities, no namespaces required.
 
 ## Build & Dev Commands
 
@@ -26,8 +26,6 @@ make build-dev           # Build Go binary without web UI (uses -tags dev)
 make web                 # Build web UI only (cd web/ui && npm install && npm run build)
 make test                # Run tests in Docker (builds test container)
 make test-local          # Run tests locally (no Docker, uses mock workers)
-make test-isolation      # Run UID isolation tests in Docker (requires user pool)
-make test-netiso         # Run network isolation tests in Docker (requires CAP_NET_ADMIN)
 make test-online         # E2E tests against real LLM in Docker (requires HIRO_API_KEY)
 make test-cluster        # Cluster e2e tests: leader + worker topology (requires HIRO_API_KEY)
 make test-cluster-relay  # Cluster e2e tests via relay server (requires HIRO_API_KEY)
@@ -96,7 +94,7 @@ A `.env` file is loaded automatically via godotenv (does not override existing v
 
 ### Process Model
 
-Hiro uses **process isolation**: the control plane owns all inference (LLM calls, conversation history, system prompt assembly) while tool execution runs in separate worker processes under isolated Unix UIDs. Communication is via gRPC over Unix sockets.
+Hiro uses **process isolation**: the control plane owns all inference (LLM calls, conversation history, system prompt assembly) while tool execution runs in separate worker processes. Communication is via gRPC over Unix sockets.
 
 ```
 Control Plane Process (hiro)
@@ -104,27 +102,25 @@ Control Plane Process (hiro)
 ├── Inference loops (fantasy agent per instance)
 ├── Unified database (db/hiro.db — instances, sessions, messages, usage, logs)
 ├── System prompt assembly, context providers, compaction
-├── Local tools: memory, todos, history, spawn, management, skills
+├── Local tools: memory, todos, history, spawn, management, skills, WebFetch
 ├── Secrets + tool policies + tool rules (config/config.yaml)
 ├── Process registry + instance lifecycle
 └── Spawns: hiro agent (one worker per session)
 
 Agent Worker Process (hiro agent)
-├── Tool execution sandbox (Bash, file ops, Glob, Grep, WebFetch)
+├── Tool execution sandbox (Bash, file ops, Glob, Grep)
 ├── gRPC AgentWorker server (ExecuteTool + Shutdown only)
-├── Runs under isolated UID for security
-└── Network namespace + seccomp-BPF (default-deny, all UID-isolated agents)
+├── Landlock filesystem restrictions (kernel-enforced path whitelist)
+└── seccomp-BPF syscall filter (blocks dangerous syscalls; blocks sockets when no Bash)
 ```
 
-**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`) and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC. When UID isolation is enabled (Docker), every worker spawns in its own user/network/mount namespaces (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS`), self-configures its network interface and DNS, installs a per-worker seccomp-BPF filter, then starts gRPC. Network access is default-deny — only agents with `network.egress` declared can reach outbound destinations.
+**Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker applies Landlock filesystem restrictions and seccomp-BPF filter, starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`), and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC.
 
-**Unix user isolation**: Auto-detected at startup (enabled iff `hiro-agents` group exists). A pre-created pool of 64 Unix users (`hiro-agent-0` through `hiro-agent-63`, UIDs 10000-10063) provides per-agent isolation. Instance dirs are `chown`ed to the agent's UID. Workspace uses setgid (`2775`) for collaborative file access. The control plane runs as root inside Docker for UID switching. The `config/` directory is `0700` root-owned, unreadable by agents.
+**Landlock filesystem isolation**: Auto-detected at startup (probes for kernel support). Each worker receives a Landlock path whitelist in its `SpawnConfig` — read-write paths for the instance and session directories, read-only paths for the platform root and system tools. The kernel blocks all other filesystem access. No root or capabilities required.
 
-**Group-based access control**: Two Unix groups control filesystem access:
-- `hiro-agents` (GID 10000) — primary group for all agent UIDs. Grants read/write to `/hiro` and `/opt/mise`.
-- `hiro-operators` (GID 10001) — supplementary group for agents that need write access to `agents/` and `skills/` directories (setgid `2775`). Other agents get read-only access via "other" bits. Group membership is declared in agent frontmatter (`groups: [hiro-operators]`) and assigned dynamically at spawn time via `GidMappings` + `setgroups()` in the child's user namespace.
+**Seccomp-BPF syscall filtering**: Each worker installs a BPF filter that blocks dangerous syscalls (ptrace, mount, io_uring, etc.). When the agent does not have the Bash tool, socket creation is also blocked, preventing all outbound network connections. Agents with Bash retain socket access for commands like `curl` and `git`.
 
-**Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers. `make test-isolation` runs isolation-specific tests requiring root and the user pool.
+**Testing**: `WorkerFactory` abstraction allows injecting fake workers in unit tests. `make test` runs tests in Docker; `make test-local` runs locally with mock workers.
 
 ### Agent Lifecycle
 
@@ -132,18 +128,18 @@ Agent Worker Process (hiro agent)
 agents/<name>/agent.md  →  config.LoadAgentDir()  →  Manager creates inference Loop + spawns worker
                                                                        ↓
                                                               instances/<uuid>/
-                                                                config.yaml (root-owned, 0600)
                                                                 persona.md
                                                                 memory.md
                                                                 sessions/<session-id>/
                                                                   todos.yaml
                                                                   scratch/
                                                                   tmp/
+                                                              config/instances/<uuid>.yaml
                                                               db/hiro.db (shared, all instances)
 ```
 
 - **Agent definitions** live in `agents/<name>/` with `agent.md` (required) and an optional `skills/` subdirectory.
-- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `config.yaml` (control-plane-managed, root-owned), `persona.md`, and `memory.md`. Persistent instances survive restarts via `RestoreInstances()`.
+- **Instances** are durable agent identities stored in `instances/<uuid>/`. Instance-level state includes `persona.md` and `memory.md`. Per-instance config (tool declarations, channels) lives at `config/instances/<uuid>.yaml` — outside the instance directory so Landlock prevents agents from modifying their own tool config. Persistent instances survive restarts via `RestoreInstances()`.
 - **Sessions** are task-scoped work within an instance. An instance has a single active session at a time. Session-level state includes `todos.yaml` (created on first TodoWrite call), `scratch/`, and `tmp/`. A new session is created on `/clear`, replacing the previous one.
 - **Agent mode** (ephemeral, persistent) is a **runtime property**, not part of the agent definition. The same agent definition can be launched in different modes. Mode is specified by the caller at instance creation time (`CreateInstance` takes a `mode` parameter). The `SpawnInstance` tool accepts a `mode` parameter (defaulting to ephemeral).
 - **Ephemeral instances** run a single prompt and are cleaned up automatically.
@@ -208,9 +204,8 @@ See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, 
 - **`internal/cluster`** — Leader/worker clustering over gRPC with mTLS. Includes file sync, relay for NAT traversal, tracker-based discovery, node approval, and remote terminal sessions.
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
-- **`internal/uidpool`** — Pre-allocated Unix UID pool for per-agent user isolation. Pure bookkeeping (no OS calls). Manager acquires/releases UIDs on agent start/stop.
-- **`internal/netiso`** — Per-agent network isolation via Linux network namespaces, veth pairs, nftables IP sets, and a DNS forwarder. Linux-only (`//go:build linux`); stubs on other platforms. Agents declare `network.egress` in frontmatter; the DNS forwarder resolves allowed domains and populates nftables sets at the IP layer (protocol-agnostic). Requires `CAP_NET_ADMIN`.
-- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep, WebFetch). These run in worker processes. Resource limits centralized in `limits.go`.
+- **`internal/landlock`** — Landlock LSM filesystem restrictions. Restricts worker processes to whitelisted paths via kernel-enforced access control. Linux-only (`//go:build linux`); stubs on other platforms. No root or capabilities required.
+- **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep). These run in worker processes. Resource limits centralized in `limits.go`.
 - **`internal/controlplane`** — Operator-level config (secrets, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/cluster` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, persona/memory/todos persistence.
 - **`internal/api`** — HTTP server with REST endpoints, WebSocket chat (`/ws/chat`), WebSocket terminal (`/ws/terminal`), file browser, sharing, usage tracking, log querying/streaming, and cluster node management.
@@ -222,7 +217,7 @@ See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, 
 
 ## Agent Tools
 
-### Built-in Tools (9 total, agents must declare which they use)
+### Remote Tools (8 total, agents must declare which they use)
 
 Implementations in `internal/agent/tools/*.go`. These run in worker processes and are dispatched via `ExecuteTool` gRPC from the control plane.
 
@@ -236,7 +231,14 @@ Implementations in `internal/agent/tools/*.go`. These run in worker processes an
 | `Bash` | Execute shell commands | `command`, `working_dir`, `timeout`, `description`, `run_in_background` | Default auto-background after 60s; `timeout` overrides (max 600000ms); 32KB max output |
 | `TaskOutput` | Get output from background task | `task_id`, `block` | Returns stdout/stderr and completion status; block (default true) waits for completion |
 | `TaskStop` | Stop a running background task | `task_id` | Immediately terminates the process |
-| `WebFetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel |
+
+### WebFetch Tool (control plane)
+
+`WebFetch` runs in the control plane process, not in workers. This allows HTTP requests without granting workers network access. SSRF-protected: blocks loopback, private, and link-local addresses.
+
+| Tool | Purpose | Key Params | Constraints |
+|------|---------|------------|-------------|
+| `WebFetch` | Fetch URL content | `url` | 30s timeout, 64KB max response; runs in parallel; SSRF-protected |
 
 ### Spawn Tool (all agents)
 
@@ -291,8 +293,8 @@ Defined in `internal/inference/tools_schedule.go`, `tools_notify.go`. Run in the
 
 ### Tool Totals by Agent Type
 
-- **Ephemeral instances:** 9 built-in + 1 spawn = 10 tools (+ 1 if skills)
-- **Persistent instances:** 9 built-in + 1 spawn + 2 memory + 1 todos + 2 history + 4 schedule = 19 tools (+ 1 if skills, + management tools if declared in allowed_tools)
+- **Ephemeral instances:** 8 remote + 1 WebFetch + 1 spawn = 10 tools (+ 1 if skills)
+- **Persistent instances:** 8 remote + 1 WebFetch + 1 spawn + 2 memory + 1 todos + 2 history + 4 schedule = 19 tools (+ 1 if skills, + management tools if declared in allowed_tools)
 
 ## Operator Agent
 
@@ -305,7 +307,7 @@ The operator (`agents/operator/agent.md`) is the top-level agent, started as a p
 4. `InstanceByAgentName("operator")` — check if already running (from restore)
 5. If not running, `CreateInstance(ctx, "operator", "", "persistent")` — no parent, persistent mode, becomes root
 
-The operator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and schedule tools (`ScheduleRecurring`, `ScheduleOnce`, `CancelSchedule`, `ListSchedules`) in its `allowed_tools` frontmatter and `groups: [hiro-operators]` for write access to `agents/` and `skills/`. All agents get `SpawnInstance`.
+The operator agent declares management tools (`CreatePersistentInstance`, `ResumeInstance`, `StopInstance`, `DeleteInstance`, `SendMessage`, `ListInstances`, `ListNodes`) and schedule tools (`ScheduleRecurring`, `ScheduleOnce`, `CancelSchedule`, `ListSchedules`) in its `allowed_tools` frontmatter. All agents get `SpawnInstance`.
 
 ## Control Plane
 
@@ -335,7 +337,7 @@ secrets:
 
 ## Instance Config
 
-Per-instance operational configuration lives in `instances/<uuid>/config.yaml`. This file is **root-owned with `0600` permissions** — agent worker processes cannot read or modify it. Only the control plane reads and writes this file.
+Per-instance operational configuration lives at `config/instances/<uuid>.yaml` — outside the instance directory so Landlock filesystem restrictions prevent agents from modifying their own tool declarations. Only the control plane reads and writes this file.
 
 ```yaml
 model: anthropic/claude-sonnet-4           # optional model override
@@ -352,23 +354,25 @@ channels:
     allowed_channels: ["C123"]
 ```
 
-**Tool declarations** are seeded from `agent.md` at instance creation and owned by the instance thereafter. Changes to `agent.md` `allowed_tools` do not flow to existing instances — each instance's `config.yaml` is the source of truth.
+**Tool declarations** are seeded from `agent.md` at instance creation and owned by the instance thereafter. Changes to `agent.md` `allowed_tools` do not flow to existing instances — each instance's config file is the source of truth.
 
 **What lives where:**
 
 | Config | Location | Why |
 |--------|----------|-----|
-| Model override, reasoning effort | `instances/<uuid>/config.yaml` | Per-instance operational config |
-| Tool declarations | `instances/<uuid>/config.yaml` | Seeded from agent.md, instance-owned thereafter |
-| Channel bindings (Telegram/Slack) | `instances/<uuid>/config.yaml` | Per-instance, multiple agents can have channels |
+| Model override, reasoning effort | `config/instances/<uuid>.yaml` | Per-instance operational config, outside Landlock scope |
+| Tool declarations | `config/instances/<uuid>.yaml` | Seeded from agent.md, instance-owned thereafter |
+| Channel bindings (Telegram/Slack) | `config/instances/<uuid>.yaml` | Per-instance, multiple agents can have channels |
 | Secrets | `config/config.yaml` | Operator-level, referenced by `${NAME}` |
-| Persona, memory | `instances/<uuid>/persona.md`, `memory.md` | Agent-editable identity (chowned to agent UID) |
+| Persona, memory | `instances/<uuid>/persona.md`, `memory.md` | Agent-editable identity |
 
-**Filesystem protection:** During `acquireUIDAndChown`, `config.yaml` is skipped — it stays root-owned while the rest of the instance directory is transferred to the agent UID. This uses the same protection model as `config/config.yaml`.
+**Filesystem protection:** Instance config lives under `config/instances/` which is never included in Landlock paths. The `config/` directory is the control plane's exclusive domain — it also holds `config/config.yaml` (secrets, provider settings). Workers get Landlock access to `instances/<uuid>/` (persona, memory) but not `config/`.
 
-**Channel lifecycle:** Per-instance channels are managed via `InstanceLifecycleHook` (`cmd/hiro/channels.go`). When an instance starts, its `config.yaml` is read and any configured channels are created. When it stops, channels are destroyed. Each instance gets unique channel names (`telegram:<instanceID>`, `slack:<instanceID>`) and Slack webhook routes (`POST /api/instances/{id}/slack/events`).
+**Channel lifecycle:** Per-instance channels are managed via `InstanceLifecycleHook` (`cmd/hiro/channels.go`). When an instance starts, its config is read and any configured channels are created. When it stops, channels are destroyed. Each instance gets unique channel names (`telegram:<instanceID>`, `slack:<instanceID>`) and Slack webhook routes (`POST /api/instances/{id}/slack/events`).
 
-**Implementation:** `internal/config/instance_config.go` provides `LoadInstanceConfig`/`SaveInstanceConfig`. The web channel's config message handler calls `Manager.UpdateInstanceConfig` which does a read-modify-write to preserve channel config while updating model/reasoning fields.
+**Implementation:** `internal/config/instance_config.go` provides `LoadInstanceConfig`/`SaveInstanceConfig` (both take a file path). `config.InstanceConfigPath(rootDir, instanceID)` computes the path. The web channel's config message handler calls `Manager.UpdateInstanceConfig` which does a read-modify-write to preserve channel config while updating model/reasoning fields.
+
+**Migration:** On first startup after upgrading, `RestoreInstances` automatically migrates any `instances/<uuid>/config.yaml` files to the new `config/instances/<uuid>.yaml` location.
 
 ## Creating Agents at Runtime
 
@@ -399,7 +403,7 @@ The conceptual model for how agents work. Describes the three-tier hierarchy (De
 
 ### [`docs/security.md`](docs/security.md) — Security Model
 
-Defense-in-depth security architecture. Covers Docker containment, process isolation via separate worker processes, Unix user isolation (UID pool with 64 pre-created users), filesystem permissions (who can read/write what), the tool capability system, secrets management (names in prompts, values only in env vars), agent authorization scoping (descendants only), and IPC security (Unix sockets, no TCP). Includes a threat model of what agents can and cannot do.
+Defense-in-depth security architecture. Covers Docker containment (non-root, no capabilities), process isolation via separate worker processes, Landlock LSM filesystem restrictions, per-worker seccomp-BPF syscall filtering, WebFetch in control plane (SSRF-protected), the tool capability system, secrets management (names in prompts, values only in env vars), agent authorization scoping (descendants only), and IPC security (Unix sockets, no TCP). Includes a threat model of what agents can and cannot do.
 
 ### [`docs/tool-permissions.md`](docs/tool-permissions.md) — Tool Permissions
 
@@ -412,10 +416,6 @@ How dynamic context (memories, todos, secrets, skills, agent listings) is inject
 ### [`docs/scheduling.md`](docs/scheduling.md) — Scheduling
 
 How agents schedule recurring and one-time tasks. Covers the subscription data model (SQLite with JSON trigger column), the min-heap priority queue scheduler, triggered sessions (isolated inference turns with Notify for surfacing results), cron and one-shot trigger types, lifecycle integration (pause on stop, resume on start), concurrency model (lock ordering, overlap guards, WaitGroup), and the server timezone setting. Also describes the future trigger type extensibility (webhooks, file watches).
-
-### [`docs/network-isolation.md`](docs/network-isolation.md) — Network Isolation
-
-Per-agent network isolation design and implementation. Each agent spawns in its own network namespace (`CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWNS` + veth pair). A DNS forwarder resolves allowed domains and dynamically populates nftables IP sets — filtering is purely at the IP layer, protocol-agnostic (HTTPS, SSH, git all work). Covers requirements, six rejected alternatives, the DNS-driven firewall design, agent configuration (`network.egress`), policy inheritance, spawn protocol changes, per-worker seccomp-BPF, and two rounds of security review findings.
 
 ### [`docs/map.md`](docs/map.md) — Codebase Map
 
@@ -430,4 +430,4 @@ Comprehensive map of every package, file, and capability with LOC counts. Includ
 - CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker. `make test-local` runs locally with mock workers.
-- In Docker, each worker runs as a separate Unix user (from a pre-created pool). Instance dirs are private (`0700`), shared files are collaborative (setgid `2775`), and `config/` is root-only (`0700`). Agents with `groups: [hiro-operators]` in frontmatter get the supplementary group for `agents/`/`skills/` write access. Outside Docker, isolation is disabled (no `hiro-agents` group).
+- In Docker, each worker is isolated via Landlock (filesystem path whitelist) and seccomp-BPF (syscall filtering). The container runs as a non-root `hiro` user — no capabilities or namespaces required. On non-Linux platforms or older kernels, isolation is silently disabled.

@@ -9,12 +9,10 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
       attestations: write
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,27 +58,6 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-  release:
-    runs-on: ubuntu-latest
-    needs: docker
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Bundle release assets
-        run: |
-          mkdir -p release
-          cp docker-compose.yml seccomp.json release/
-          # Tarball contains only the deployment files, not SHA256SUMS
-          tar czf hiro-${{ github.ref_name }}.tar.gz -C release docker-compose.yml seccomp.json
-          # SHA256SUMS covers both individual files and the tarball
-          (cd release && sha256sum docker-compose.yml seccomp.json) > release/SHA256SUMS
-          sha256sum hiro-${{ github.ref_name }}.tar.gz >> release/SHA256SUMS
-
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            hiro-${{ github.ref_name }}.tar.gz
-            release/SHA256SUMS
           generate_release_notes: true

@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
 	"github.com/nchapman/hiro/internal/toolrules"
-	"github.com/nchapman/hiro/internal/uidpool"
 )
 
 // openTestPDB opens a platform DB in the given directory for testing.
@@ -76,7 +74,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello from agent"), nil, nil, nil)
+	}, nil, logger, testWorkerFactory("hello from agent"), nil, false)
 	return mgr, dir
 }
 
@@ -745,7 +743,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -756,7 +754,7 @@ func TestManager_RestoreSessions(t *testing.T) {
 	// Create a new manager and restore
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -781,7 +779,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	ctx := t.Context()
 	mgr1 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	}, nil, logger, testWorkerFactory("hello"), pdb, false)
 
 	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
 	if err != nil {
@@ -793,7 +791,7 @@ func TestManager_RestoreSessions_Stopped(t *testing.T) {
 	// Create a new manager and restore.
 	mgr2 := NewManager(ctx, dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -834,14 +832,14 @@ Child.`)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx := t.Context()
 
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	parentID, _ := mgr1.CreateInstance(ctx, "parent-agent", "", "persistent", "", "", "", "")
 	childID, _ := mgr1.CreateInstance(ctx, "child-agent", parentID, "persistent", "", "", "", "")
 	mgr1.StopInstance(childID)
 	mgr1.StopInstance(parentID)
 	mgr1.Shutdown()
 
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -863,159 +861,6 @@ Child.`)
 	}
 }
 
-func TestManager_Restore_StoppedGroupInheritance(t *testing.T) {
-	// Stopped child should only get groups held by its stopped parent.
-	dir := t.TempDir()
-	writeAgentMD(t, dir, "coord", `---
-name: coord
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Operator.`)
-	writeAgentMD(t, dir, "worker", `---
-name: worker
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Worker that also wants hiro-operators.`)
-	pdb := openTestPDB(t, dir)
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	ctx := t.Context()
-
-	pool1 := uidpool.New(10000, 10000, 64)
-	pool1.SetGroupGID("hiro-operators", 10001)
-	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
-
-	parentID, _ := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
-	childID, _ := mgr1.CreateInstance(ctx, "worker", parentID, "persistent", "", "", "", "")
-	mgr1.StopInstance(childID)
-	mgr1.StopInstance(parentID)
-	mgr1.Shutdown()
-
-	// Restore with fresh pool — both stopped, child should inherit parent's groups.
-	pool2 := uidpool.New(10000, 10000, 64)
-	pool2.SetGroupGID("hiro-operators", 10001)
-	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
-	if err := mgr2.RestoreInstances(ctx); err != nil {
-		t.Fatalf("restore: %v", err)
-	}
-
-	// Now start the child — it should get hiro-operators (parent has it).
-	if err := mgr2.StartInstance(ctx, childID); err != nil {
-		t.Fatalf("start child: %v", err)
-	}
-
-	if len(*configs2) != 1 {
-		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
-	}
-	childCfg := (*configs2)[0]
-	groupSet := make(map[uint32]bool)
-	for _, g := range childCfg.Groups {
-		groupSet[g] = true
-	}
-	if !groupSet[10001] {
-		t.Error("restored child should have hiro-operators (parent has it)")
-	}
-}
-
-func TestManager_Restore_StoppedGroupEscalationBlocked(t *testing.T) {
-	// Stopped child with groups NOT held by stopped parent should be denied.
-	dir := t.TempDir()
-	writeAgentMD(t, dir, "unpriv", `---
-name: unpriv
-allowed_tools: [Bash]
----
-No groups.`)
-	writeAgentMD(t, dir, "wants-groups", `---
-name: wants-groups
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Wants escalation.`)
-	pdb := openTestPDB(t, dir)
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	ctx := t.Context()
-
-	pool1 := uidpool.New(10000, 10000, 64)
-	pool1.SetGroupGID("hiro-operators", 10001)
-	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
-
-	parentID, _ := mgr1.CreateInstance(ctx, "unpriv", "", "persistent", "", "", "", "")
-	childID, _ := mgr1.CreateInstance(ctx, "wants-groups", parentID, "persistent", "", "", "", "")
-	mgr1.StopInstance(childID)
-	mgr1.StopInstance(parentID)
-	mgr1.Shutdown()
-
-	// Restore with fresh pool.
-	pool2 := uidpool.New(10000, 10000, 64)
-	pool2.SetGroupGID("hiro-operators", 10001)
-	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
-	if err := mgr2.RestoreInstances(ctx); err != nil {
-		t.Fatalf("restore: %v", err)
-	}
-
-	// Start the child — should NOT get hiro-operators (parent doesn't have it).
-	if err := mgr2.StartInstance(ctx, childID); err != nil {
-		t.Fatalf("start child: %v", err)
-	}
-
-	if len(*configs2) != 1 {
-		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
-	}
-	childCfg := (*configs2)[0]
-	for _, g := range childCfg.Groups {
-		if g == 10001 {
-			t.Error("restored child should NOT have hiro-operators (parent doesn't have it)")
-		}
-	}
-}
-
-func TestManager_Restore_RunningInstanceGroups(t *testing.T) {
-	// Running instance should be restored with correct groups via startInstance.
-	dir := t.TempDir()
-	writeAgentMD(t, dir, "coord", `---
-name: coord
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Operator.`)
-	pdb := openTestPDB(t, dir)
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	ctx := t.Context()
-
-	pool1 := uidpool.New(10000, 10000, 64)
-	pool1.SetGroupGID("hiro-operators", 10001)
-	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory1, pool1, pdb, nil)
-	mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
-	mgr1.Shutdown()
-
-	// Restore — running instances go through startInstance.
-	pool2 := uidpool.New(10000, 10000, 64)
-	pool2.SetGroupGID("hiro-operators", 10001)
-	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, factory2, pool2, pdb, nil)
-	if err := mgr2.RestoreInstances(ctx); err != nil {
-		t.Fatalf("restore: %v", err)
-	}
-
-	if len(*configs2) != 1 {
-		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
-	}
-	cfg := (*configs2)[0]
-	groupSet := make(map[uint32]bool)
-	for _, g := range cfg.Groups {
-		groupSet[g] = true
-	}
-	if !groupSet[10001] {
-		t.Error("restored running instance should have hiro-operators")
-	}
-}
-
 func TestManager_Restore_EphemeralCleaned(t *testing.T) {
 	// Ephemeral instances in the DB should be cleaned up on restore.
 	dir := t.TempDir()
@@ -1031,7 +876,7 @@ func TestManager_Restore_EphemeralCleaned(t *testing.T) {
 		Mode:      "ephemeral",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1057,7 +902,7 @@ func TestManager_Restore_MissingAgentDefSkipped(t *testing.T) {
 		Mode:      "persistent",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1084,7 +929,7 @@ func TestManager_Restore_MissingInstanceDirCleaned(t *testing.T) {
 		Status:    "running",
 	})
 
-	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore should not fail: %v", err)
 	}
@@ -1133,254 +978,17 @@ func capturingWorkerFactory(_ string) (WorkerFactory, *[]ipc.SpawnConfig) {
 	return factory, &configs
 }
 
-// failingWorkerFactory returns an error on every spawn attempt.
-func failingWorkerFactory() WorkerFactory {
-	return func(ctx context.Context, cfg ipc.SpawnConfig) (*WorkerHandle, error) {
-		return nil, fmt.Errorf("simulated spawn failure")
-	}
-}
-
-func setupTestManagerWithPool(t *testing.T, pool *uidpool.Pool) (*Manager, string, *[]ipc.SpawnConfig) {
+// setupTestManagerWithCapture creates a Manager with a capturing worker factory
+// for inspecting SpawnConfig values.
+func setupTestManagerWithCapture(t *testing.T) (*Manager, string, *[]ipc.SpawnConfig) {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	factory, configs := capturingWorkerFactory("hello")
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, nil, logger, factory, pool, nil, nil)
+	}, nil, logger, factory, nil, false)
 	return mgr, dir, configs
-}
-
-func TestManager_UIDPool_Assigned(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	if len(*configs) != 1 {
-		t.Fatalf("expected 1 spawn config, got %d", len(*configs))
-	}
-	cfg := (*configs)[0]
-	if cfg.UID == 0 {
-		t.Fatal("expected non-zero UID in SpawnConfig")
-	}
-	if cfg.GID == 0 {
-		t.Fatal("expected non-zero GID in SpawnConfig")
-	}
-	if cfg.UID != 10000 {
-		t.Errorf("expected UID 10000, got %d", cfg.UID)
-	}
-	if pool.InUse() != 1 {
-		t.Errorf("expected 1 UID in use, got %d", pool.InUse())
-	}
-}
-
-func TestManager_UIDPool_DifferentUIDs(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "a", `---
-name: agent-a
-model: fake-model
----
-A.`)
-	writeAgentMD(t, dir, "b", `---
-name: agent-b
-model: fake-model
----
-B.`)
-
-	mgr.CreateInstance(t.Context(), "a", "", "persistent", "", "", "", "")
-	mgr.CreateInstance(t.Context(), "b", "", "persistent", "", "", "", "")
-
-	if len(*configs) != 2 {
-		t.Fatalf("expected 2 spawn configs, got %d", len(*configs))
-	}
-	if (*configs)[0].UID == (*configs)[1].UID {
-		t.Fatalf("agents should get different UIDs, both got %d", (*configs)[0].UID)
-	}
-	if pool.InUse() != 2 {
-		t.Errorf("expected 2 UIDs in use, got %d", pool.InUse())
-	}
-}
-
-func TestManager_UIDPool_ReleasedOnStop(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, _ := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	id, _ := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if pool.InUse() != 1 {
-		t.Fatalf("expected 1 UID in use, got %d", pool.InUse())
-	}
-
-	mgr.StopInstance(id)
-	if pool.InUse() != 0 {
-		t.Fatalf("expected 0 UIDs in use after stop, got %d", pool.InUse())
-	}
-}
-
-func TestManager_UIDPool_ReleasedOnShutdown(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, _ := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if pool.InUse() != 2 {
-		t.Fatalf("expected 2 UIDs in use, got %d", pool.InUse())
-	}
-
-	mgr.Shutdown()
-	if pool.InUse() != 0 {
-		t.Fatalf("expected 0 UIDs in use after shutdown, got %d", pool.InUse())
-	}
-}
-
-func TestManager_UIDPool_ReleasedOnSpawnFailure(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := NewManager(t.Context(), dir, Options{
-		WorkingDir: dir,
-	}, nil, logger, failingWorkerFactory(), pool, nil, nil)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if err == nil {
-		t.Fatal("expected spawn failure")
-	}
-
-	// UID should be released despite spawn failure
-	if pool.InUse() != 0 {
-		t.Fatalf("expected 0 UIDs in use after spawn failure, got %d", pool.InUse())
-	}
-}
-
-func TestManager_UIDPool_Exhaustion(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 2) // tiny pool
-	mgr, dir, _ := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	_, err := mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start 1: %v", err)
-	}
-	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start 2: %v", err)
-	}
-	_, err = mgr.CreateInstance(t.Context(), "test-agent", "", "persistent", "", "", "", "")
-	if err == nil {
-		t.Fatal("expected pool exhaustion error")
-	}
-}
-
-func TestManager_UIDPool_StopChildReleasesUID(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, _ := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "parent", `---
-name: parent
-model: fake-model
----
-Parent.`)
-	writeAgentMD(t, dir, "child", `---
-name: child
-model: fake-model
----
-Child.`)
-
-	parentID, _ := mgr.CreateInstance(t.Context(), "parent", "", "persistent", "", "", "", "")
-	mgr.CreateInstance(t.Context(), "child", parentID, "persistent", "", "", "", "")
-	if pool.InUse() != 2 {
-		t.Fatalf("expected 2 UIDs, got %d", pool.InUse())
-	}
-
-	// Stop parent — should release both parent and child UIDs
-	mgr.StopInstance(parentID)
-	if pool.InUse() != 0 {
-		t.Fatalf("expected 0 UIDs after stopping parent+child, got %d", pool.InUse())
-	}
-}
-
-func TestManager_UIDPool_RestoreSessions(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	dir := t.TempDir()
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-	pdb := openTestPDB(t, dir)
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	ctx := t.Context()
-
-	// Start with a pool, create an agent, shut down
-	factory1, _ := capturingWorkerFactory("hello")
-	mgr1 := NewManager(ctx, dir, Options{
-		WorkingDir: dir,
-	}, nil, logger, factory1, pool, pdb, nil)
-
-	id, err := mgr1.CreateInstance(ctx, "test-agent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	mgr1.Shutdown()
-	if pool.InUse() != 0 {
-		t.Fatalf("expected 0 after shutdown, got %d", pool.InUse())
-	}
-
-	// Restore with a fresh pool
-	pool2 := uidpool.New(10000, 10000, 64)
-	factory2, configs2 := capturingWorkerFactory("hello")
-	mgr2 := NewManager(ctx, dir, Options{
-		WorkingDir: dir,
-	}, nil, logger, factory2, pool2, pdb, nil)
-	if err := mgr2.RestoreInstances(ctx); err != nil {
-		t.Fatalf("restore: %v", err)
-	}
-
-	// Restored agent should have a UID assigned
-	if pool2.InUse() != 1 {
-		t.Fatalf("expected 1 UID in use after restore, got %d", pool2.InUse())
-	}
-	if len(*configs2) != 1 {
-		t.Fatalf("expected 1 spawn config, got %d", len(*configs2))
-	}
-	if (*configs2)[0].UID == 0 {
-		t.Fatal("restored agent should have non-zero UID")
-	}
-
-	// Verify same agent ID
-	info, ok := mgr2.GetInstance(id)
-	if !ok {
-		t.Fatal("restored agent not found")
-	}
-	if info.Name != "test-agent" {
-		t.Errorf("restored name = %q, want test-agent", info.Name)
-	}
-}
-
-func TestManager_UIDPool_SpawnSubagent(t *testing.T) {
-	// SpawnSession creates an ephemeral agent with a UID, then cleans up.
-	// Without a provider, SendMessage fails, but cleanup should still release the UID.
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "test-agent", testAgentMD)
-
-	_, _ = mgr.SpawnEphemeral(t.Context(), "test-agent", "do something", "", "", nil)
-	// Error expected (no loop), but cleanup should happen.
-
-	if len(*configs) != 1 {
-		t.Fatalf("expected 1 spawn config, got %d", len(*configs))
-	}
-	if (*configs)[0].UID == 0 {
-		t.Fatal("ephemeral agent should have non-zero UID")
-	}
-
-	// UID should be released after subagent cleanup.
-	if pool.InUse() != 0 {
-		t.Fatalf("expected 0 UIDs after subagent cleanup, got %d", pool.InUse())
-	}
 }
 
 func TestManager_EffectiveTools(t *testing.T) {
@@ -1535,7 +1143,7 @@ func setupTestManagerWithCP(t *testing.T, cp ControlPlane) (*Manager, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mgr := NewManager(t.Context(), dir, Options{
 		WorkingDir: dir,
-	}, cp, logger, testWorkerFactory("ok"), nil, nil, nil)
+	}, cp, logger, testWorkerFactory("ok"), nil, false)
 	return mgr, dir
 }
 
@@ -1647,74 +1255,6 @@ Child.`)
 	}
 }
 
-func TestComputeEffectiveEgress_ParentNotFound_FailClosed(t *testing.T) {
-	mgr, _ := setupTestManager(t)
-
-	cfg := config.AgentConfig{
-		NetworkEgress: []string{"github.com", "*.github.com"},
-	}
-
-	// Parent ID that doesn't exist — should return empty (no network, fail closed).
-	egress := mgr.computeEffectiveEgress(cfg, "nonexistent-parent-id")
-	if len(egress) != 0 {
-		t.Errorf("expected empty egress when parent not found, got %v", egress)
-	}
-}
-
-func TestComputeEffectiveEgress_NilDeclaration_DefaultDeny(t *testing.T) {
-	mgr, _ := setupTestManager(t)
-
-	// Agent with no network field — should get empty slice (default-deny), not nil.
-	cfg := config.AgentConfig{NetworkEgress: nil}
-	egress := mgr.computeEffectiveEgress(cfg, "")
-	if egress == nil {
-		t.Fatal("expected non-nil (empty) egress for nil declaration, got nil")
-	}
-	if len(egress) != 0 {
-		t.Errorf("expected empty egress for nil declaration, got %v", egress)
-	}
-}
-
-func TestComputeEffectiveEgress_EmptyChildWithWildcardParent(t *testing.T) {
-	mgr, _ := setupTestManager(t)
-
-	// Inject a parent instance with wildcard egress.
-	parentID := "parent-123"
-	mgr.mu.Lock()
-	mgr.instances[parentID] = &instance{effectiveEgress: []string{"*"}}
-	mgr.mu.Unlock()
-
-	// Child with no network declaration under wildcard parent — still default-deny.
-	cfg := config.AgentConfig{NetworkEgress: nil}
-	egress := mgr.computeEffectiveEgress(cfg, parentID)
-	if egress == nil {
-		t.Fatal("expected non-nil (empty) egress, got nil")
-	}
-	if len(egress) != 0 {
-		t.Errorf("expected empty egress (intersect of [] and [*]), got %v", egress)
-	}
-}
-
-func TestComputeEffectiveEgress_EgressChildUnderDeniedParent(t *testing.T) {
-	mgr, _ := setupTestManager(t)
-
-	// Parent with no egress (default-deny).
-	parentID := "parent-denied"
-	mgr.mu.Lock()
-	mgr.instances[parentID] = &instance{effectiveEgress: []string{}}
-	mgr.mu.Unlock()
-
-	// Child declares egress but parent has none — child cannot exceed parent.
-	cfg := config.AgentConfig{NetworkEgress: []string{"github.com"}}
-	egress := mgr.computeEffectiveEgress(cfg, parentID)
-	if egress == nil {
-		t.Fatal("expected non-nil (empty) egress, got nil")
-	}
-	if len(egress) != 0 {
-		t.Errorf("expected empty egress (child cannot exceed denied parent), got %v", egress)
-	}
-}
-
 func TestComputeEffectiveTools_ParseError(t *testing.T) {
 	mgr, dir := setupTestManager(t)
 	writeAgentMD(t, dir, "bad", `---
@@ -1799,7 +1339,7 @@ Operator.`)
 
 	// Start persistent instance, shut down
 	pdb := openTestPDB(t, dir)
-	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr1 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	id, err := mgr1.CreateInstance(ctx, "coord", "", "persistent", "", "", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -1807,7 +1347,7 @@ Operator.`)
 	mgr1.Shutdown()
 
 	// Restore — persistent mode should survive
-	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), nil, pdb, nil)
+	mgr2 := NewManager(ctx, dir, Options{WorkingDir: dir}, nil, logger, testWorkerFactory("hello"), pdb, false)
 	if err := mgr2.RestoreInstances(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -1839,8 +1379,7 @@ Operator.`)
 }
 
 func TestManager_ManagementTools_InSpawnConfig(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	mgr, dir, configs := setupTestManagerWithCapture(t)
 	writeAgentMD(t, dir, "coord", `---
 name: coord
 allowed_tools: [Bash, DeleteInstance, SendMessage, ListInstances]
@@ -1865,96 +1404,8 @@ Operator.`)
 	}
 }
 
-func TestManager_Groups_InSpawnConfig(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "coord", `---
-name: coord
-model: fake-model
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Operator.`)
-
-	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	cfg := (*configs)[0]
-	// Should have both primary group and operator group (order-independent).
-	groupSet := make(map[uint32]bool)
-	for _, g := range cfg.Groups {
-		groupSet[g] = true
-	}
-	if !groupSet[10000] {
-		t.Error("primary GID 10000 should be in groups")
-	}
-	if !groupSet[10001] {
-		t.Error("hiro-operators GID 10001 should be in groups")
-	}
-	if len(cfg.Groups) != 2 {
-		t.Errorf("expected 2 groups, got %v", cfg.Groups)
-	}
-}
-
-func TestManager_Groups_UnknownGroupSkipped(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	// "hiro-operators" not registered in pool
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "coord", `---
-name: coord
-model: fake-model
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Operator.`)
-
-	_, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	cfg := (*configs)[0]
-	// Only primary group — unknown group silently skipped
-	if len(cfg.Groups) != 1 {
-		t.Fatalf("expected 1 group (primary only), got %v", cfg.Groups)
-	}
-	if cfg.Groups[0] != 10000 {
-		t.Errorf("group should be primary (10000), got %d", cfg.Groups[0])
-	}
-}
-
-func TestManager_NoGroups_NoExtraGIDs(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-	writeAgentMD(t, dir, "worker", `---
-name: worker
-model: fake-model
-allowed_tools: [Bash]
----
-Worker.`)
-
-	_, err := mgr.CreateInstance(t.Context(), "worker", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	cfg := (*configs)[0]
-	// Should only have primary group — no groups declared in frontmatter
-	if len(cfg.Groups) != 1 {
-		t.Fatalf("expected 1 group, got %v", cfg.Groups)
-	}
-	if cfg.Groups[0] != 10000 {
-		t.Errorf("group should be primary (10000), got %d", cfg.Groups[0])
-	}
-}
-
 func TestManager_EphemeralAgent_NoManagementTools(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
+	mgr, dir, configs := setupTestManagerWithCapture(t)
 	writeAgentMD(t, dir, "worker", `---
 name: worker
 model: fake-model
@@ -1978,299 +1429,6 @@ Worker.`)
 		if spawnCfg.EffectiveTools[tool] {
 			t.Errorf("ephemeral should NOT have management tool %s", tool)
 		}
-	}
-}
-
-func TestManager_Groups_InheritedFromParent(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	pool.SetGroupGID("custom-group", 20000)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-
-	// Parent agent has hiro-operators but NOT custom-group.
-	writeAgentMD(t, dir, "parent-agent", `---
-name: parent-agent
-allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-operators]
----
-Parent.`)
-
-	// Child agent declares both groups.
-	writeAgentMD(t, dir, "child-agent", `---
-name: child-agent
-allowed_tools: [Bash]
-groups: [hiro-operators, custom-group]
----
-Child.`)
-
-	parentID, err := mgr.CreateInstance(t.Context(), "parent-agent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-	parentCfg := (*configs)[0]
-
-	// Parent should have hiro-operators.
-	parentGroupSet := make(map[uint32]bool)
-	for _, g := range parentCfg.Groups {
-		parentGroupSet[g] = true
-	}
-	if !parentGroupSet[10001] {
-		t.Error("parent should have hiro-operators (10001)")
-	}
-
-	// Spawn child with parent.
-	_, err = mgr.CreateInstance(t.Context(), "child-agent", parentID, "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-	childCfg := (*configs)[1]
-
-	childGroupSet := make(map[uint32]bool)
-	for _, g := range childCfg.Groups {
-		childGroupSet[g] = true
-	}
-
-	// Child should inherit hiro-operators (parent has it).
-	if !childGroupSet[10001] {
-		t.Error("child should have hiro-operators (inherited from parent)")
-	}
-
-	// Child should NOT get custom-group (parent doesn't have it).
-	if childGroupSet[20000] {
-		t.Error("child should NOT have custom-group (parent doesn't have it)")
-	}
-}
-
-func TestManager_Groups_UnprivilegedParentCannotEscalate(t *testing.T) {
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-
-	// Parent has no groups.
-	writeAgentMD(t, dir, "unpriv", `---
-name: unpriv
-allowed_tools: [Bash, CreatePersistentInstance]
----
-Unprivileged.`)
-
-	// Child declares hiro-operators.
-	writeAgentMD(t, dir, "wants-coord", `---
-name: wants-coord
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Wants escalation.`)
-
-	parentID, err := mgr.CreateInstance(t.Context(), "unpriv", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-
-	_, err = mgr.CreateInstance(t.Context(), "wants-coord", parentID, "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-	childCfg := (*configs)[1]
-
-	// Child should only have the primary group — no hiro-operators.
-	if len(childCfg.Groups) != 1 {
-		t.Fatalf("expected 1 group (primary only), got %v", childCfg.Groups)
-	}
-	if childCfg.Groups[0] != 10000 {
-		t.Errorf("expected primary GID 10000, got %d", childCfg.Groups[0])
-	}
-}
-
-func TestManager_Groups_ChildDoesNotAutoInheritParentGroups(t *testing.T) {
-	// A privileged parent spawning a child that declares NO groups
-	// should NOT pass its groups to the child. Groups are opt-in.
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-
-	writeAgentMD(t, dir, "coord", `---
-name: coord
-allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-operators]
----
-Operator.`)
-
-	writeAgentMD(t, dir, "plain-worker", `---
-name: plain-worker
-allowed_tools: [Bash]
----
-Worker with no group declarations.`)
-
-	parentID, err := mgr.CreateInstance(t.Context(), "coord", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-
-	_, err = mgr.CreateInstance(t.Context(), "plain-worker", parentID, "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-	childCfg := (*configs)[1]
-
-	// Child should only have primary group — parent's hiro-operators NOT inherited.
-	if len(childCfg.Groups) != 1 {
-		t.Fatalf("expected 1 group (primary only), got %v", childCfg.Groups)
-	}
-	if childCfg.Groups[0] != 10000 {
-		t.Errorf("expected primary GID 10000, got %d", childCfg.Groups[0])
-	}
-}
-
-func TestManager_Groups_RootInstanceGetsAllDeclaredGroups(t *testing.T) {
-	// Root instances (no parent) get whatever they declare — no intersection.
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	pool.SetGroupGID("custom-group", 20000)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-
-	writeAgentMD(t, dir, "root-agent", `---
-name: root-agent
-allowed_tools: [Bash]
-groups: [hiro-operators, custom-group]
----
-Root agent with multiple groups.`)
-
-	_, err := mgr.CreateInstance(t.Context(), "root-agent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	cfg := (*configs)[0]
-
-	groupSet := make(map[uint32]bool)
-	for _, g := range cfg.Groups {
-		groupSet[g] = true
-	}
-	if !groupSet[10000] {
-		t.Error("root should have primary GID 10000")
-	}
-	if !groupSet[10001] {
-		t.Error("root should have hiro-operators (10001)")
-	}
-	if !groupSet[20000] {
-		t.Error("root should have custom-group (20000)")
-	}
-	if len(cfg.Groups) != 3 {
-		t.Errorf("expected 3 groups, got %v", cfg.Groups)
-	}
-}
-
-func TestManager_Groups_ThreeLevelInheritance(t *testing.T) {
-	// Grandchild can only get groups that flow through the entire chain.
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	pool.SetGroupGID("extra-group", 20000)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-
-	// Root has both groups.
-	writeAgentMD(t, dir, "root", `---
-name: root
-allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-operators, extra-group]
----
-Root.`)
-
-	// Middle agent only has hiro-operators (not extra-group).
-	writeAgentMD(t, dir, "middle", `---
-name: middle
-allowed_tools: [Bash, CreatePersistentInstance]
-groups: [hiro-operators]
----
-Middle.`)
-
-	// Leaf requests both groups.
-	writeAgentMD(t, dir, "leaf", `---
-name: leaf
-allowed_tools: [Bash]
-groups: [hiro-operators, extra-group]
----
-Leaf.`)
-
-	rootID, err := mgr.CreateInstance(t.Context(), "root", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create root: %v", err)
-	}
-
-	middleID, err := mgr.CreateInstance(t.Context(), "middle", rootID, "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create middle: %v", err)
-	}
-
-	_, err = mgr.CreateInstance(t.Context(), "leaf", middleID, "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create leaf: %v", err)
-	}
-
-	leafCfg := (*configs)[2]
-	leafGroups := make(map[uint32]bool)
-	for _, g := range leafCfg.Groups {
-		leafGroups[g] = true
-	}
-
-	// Leaf should get hiro-operators (root has it, middle has it, leaf declares it).
-	if !leafGroups[10001] {
-		t.Error("leaf should have hiro-operators")
-	}
-
-	// Leaf should NOT get extra-group — middle doesn't have it, breaking the chain.
-	if leafGroups[20000] {
-		t.Error("leaf should NOT have extra-group (middle doesn't have it)")
-	}
-}
-
-func TestManager_Groups_EphemeralChildSameRules(t *testing.T) {
-	// Ephemeral children follow the same group inheritance rules.
-	pool := uidpool.New(10000, 10000, 64)
-	pool.SetGroupGID("hiro-operators", 10001)
-	mgr, dir, configs := setupTestManagerWithPool(t, pool)
-
-	writeAgentMD(t, dir, "no-groups-parent", `---
-name: no-groups-parent
-allowed_tools: [Bash]
----
-Parent without groups.`)
-
-	writeAgentMD(t, dir, "eph-child", `---
-name: eph-child
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Ephemeral child wanting groups.`)
-
-	parentID, err := mgr.CreateInstance(t.Context(), "no-groups-parent", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-
-	cfg, _ := config.LoadAgentDir(mgr.agentDefDir("eph-child"))
-	mgr.startInstance(t.Context(), "eph-id", "eph-sess-id", "web", cfg, parentID, config.ModeEphemeral, "", "", "", "")
-
-	childCfg := (*configs)[1]
-
-	// Ephemeral child should only have primary group.
-	if len(childCfg.Groups) != 1 {
-		t.Fatalf("expected 1 group, got %v", childCfg.Groups)
-	}
-}
-
-func TestManager_Groups_NoPoolNoGroups(t *testing.T) {
-	// Without a UID pool (local dev, no Docker), groups are irrelevant.
-	mgr, dir := setupTestManager(t) // no pool
-	writeAgentMD(t, dir, "agent-with-groups", `---
-name: agent-with-groups
-allowed_tools: [Bash]
-groups: [hiro-operators]
----
-Agent.`)
-
-	// Should succeed — groups are silently ignored without a pool.
-	_, err := mgr.CreateInstance(t.Context(), "agent-with-groups", "", "persistent", "", "", "", "")
-	if err != nil {
-		t.Fatalf("create: %v", err)
 	}
 }
 

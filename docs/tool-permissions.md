@@ -63,14 +63,14 @@ Rules apply to the 10 tools registered in the rule checker: Bash, Read, Write, E
 
 ## Permission Sources
 
-Permissions come from four sources, evaluated in order:
+Permissions come from three sources, evaluated in order:
 
-### 1. Instance Config (`instances/<uuid>/config.yaml`)
+### 1. Instance Config (`config/instances/<uuid>.yaml`)
 
-Each instance owns its tool declarations. These are **seeded from `agent.md`** at creation time and decoupled thereafter — changes to `agent.md` `allowed_tools` do not flow to existing instances.
+Each instance owns its tool declarations, stored outside the instance directory so Landlock prevents agents from modifying their own tool config. These are **seeded from `agent.md`** at creation time and decoupled thereafter — changes to `agent.md` `allowed_tools` do not flow to existing instances.
 
 ```yaml
-# instances/<uuid>/config.yaml
+# config/instances/<uuid>.yaml
 allowed_tools: [Bash(curl *), Read, Grep, WebFetch]
 disallowed_tools: [Bash(rm *)]
 ```
@@ -103,7 +103,7 @@ Result: [Bash, Read, Write]  (Grep removed — parent doesn't have it)
 
 The parent's parameterized rules and deny rules also propagate to all descendants.
 
-### 4. Skill Activation
+### 3. Skill Activation
 
 Skills can grant additional tools when activated. A skill's `allowed_tools` expand the agent's tool set for the rest of the session:
 
@@ -238,7 +238,6 @@ max_turns: 50
 | `disallowed_tools` | string[] | `nil` | Tools to deny; checked at call time |
 | `model` | string | CP default | Model override (e.g., `sonnet`, `opus`, full model ID) |
 | `max_turns` | int | 0 (unlimited) | Max agentic turns before forcing final response |
-| `groups` | string[] | `nil` | Supplementary Unix groups for the worker process (e.g., `[hiro-operators]`) |
 
 ### Skill (`skills/*.md`)
 

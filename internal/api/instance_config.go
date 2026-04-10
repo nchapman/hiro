@@ -196,6 +196,7 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 // applyInstanceFileUpdates writes persona.md, memory.md, and channel config changes.
 func (s *Server) applyInstanceFileUpdates(id string, info agent.InstanceInfo, req instanceConfigRequest) error {
 	instDir := s.manager.InstanceDir(id)
+	configPath := s.manager.InstanceConfigPath(id)
 
 	if err := applyPersonaUpdate(instDir, req); err != nil {
 		return err
@@ -208,7 +209,7 @@ func (s *Server) applyInstanceFileUpdates(id string, info agent.InstanceInfo, re
 	}
 
 	if req.Telegram != nil || req.Slack != nil {
-		if err := s.applyChannelUpdate(id, instDir, info, req); err != nil {
+		if err := s.applyChannelUpdate(id, configPath, info, req); err != nil {
 			return err
 		}
 	}
@@ -238,10 +239,10 @@ func applyPersonaUpdate(instDir string, req instanceConfigRequest) error {
 	return nil
 }
 
-// applyChannelUpdate writes channel config to config.yaml and restarts channel
-// bindings for running instances. Uses the access checker's per-instance lock
-// to prevent lost-update races with concurrent sender status changes.
-func (s *Server) applyChannelUpdate(id, instDir string, info agent.InstanceInfo, req instanceConfigRequest) error {
+// applyChannelUpdate writes channel config and restarts channel bindings for
+// running instances. Uses the access checker's per-instance lock to prevent
+// lost-update races with concurrent sender status changes.
+func (s *Server) applyChannelUpdate(id, configPath string, info agent.InstanceInfo, req instanceConfigRequest) error {
 	modify := func(existing *config.InstanceConfig) error {
 		if existing.Channels == nil {
 			existing.Channels = &config.InstanceChannelsConfig{}
@@ -263,14 +264,14 @@ func (s *Server) applyChannelUpdate(id, instDir string, info agent.InstanceInfo,
 		err = s.accessChecker.ModifyConfig(id, modify)
 	} else {
 		// Fallback for tests without an access checker.
-		existing, loadErr := config.LoadInstanceConfig(instDir)
+		existing, loadErr := config.LoadInstanceConfig(configPath)
 		if loadErr != nil {
 			return fmt.Errorf("loading instance config: %w", loadErr)
 		}
 		if modErr := modify(&existing); modErr != nil {
 			return modErr
 		}
-		err = config.SaveInstanceConfig(instDir, existing)
+		err = config.SaveInstanceConfig(configPath, existing)
 	}
 	if err != nil {
 		return fmt.Errorf("writing channel config: %w", err)

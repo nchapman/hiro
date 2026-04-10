@@ -25,17 +25,6 @@ FROM go-base AS test
 # Stub web UI so go:embed is satisfied without building the frontend.
 RUN mkdir -p web/ui/dist && echo '<!doctype html>' > web/ui/dist/index.html
 
-# Network isolation tests need nftables and iproute2.
-RUN apt-get update && apt-get install -y --no-install-recommends nftables iproute2 && rm -rf /var/lib/apt/lists/*
-
-# Create agent user pool and groups for isolation tests.
-RUN groupadd -g 10000 hiro-agents \
-    && groupadd -g 10001 hiro-operators \
-    && for i in $(seq 0 63); do \
-        uid=$((10000 + i)); \
-        useradd -r -u $uid -g hiro-agents -M -d /nonexistent -s /bin/bash "hiro-agent-$i"; \
-    done
-
 # Install mise — same env vars as runtime stage.
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CONFIG_DIR=/opt/mise/config
@@ -45,9 +34,7 @@ ENV MISE_INSTALL_PATH=/usr/local/bin/mise
 ENV PATH="/opt/mise/shims:${PATH}"
 RUN curl -fsSL https://mise.run | sh \
     && mise use -g node@24 python@3.12 \
-    && chgrp -R hiro-agents /opt/mise \
-    && chmod -R g+rX /opt/mise \
-    && chmod -R g-w /opt/mise
+    && chmod -R a+rX /opt/mise
 
 # Pre-build the binary so tests that spawn agent processes have it available.
 RUN go build -o /usr/local/bin/hiro ./cmd/hiro
@@ -72,7 +59,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     # terminal multiplexer (persistent sessions across disconnects)
     tmux \
     # networking
-    dnsutils iputils-ping net-tools netcat-openbsd socat iproute2 nftables \
+    dnsutils iputils-ping net-tools netcat-openbsd socat \
     # system
     sudo locales \
     && locale-gen en_US.UTF-8 \
@@ -81,25 +68,17 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# Create agent user pool for per-agent Unix user isolation.
-# Each agent process runs as a dedicated user from this pool.
-# hiro-operators grants write access to agents/ and skills/ directories.
-RUN groupadd -g 10000 hiro-agents \
-    && groupadd -g 10001 hiro-operators \
-    && for i in $(seq 0 63); do \
-        uid=$((10000 + i)); \
-        useradd -r -u $uid -g hiro-agents -M -d /nonexistent -s /bin/bash "hiro-agent-$i"; \
-    done
+# Create a single non-root user for the control plane and agent workers.
+# Landlock + seccomp provide isolation — no UID pool needed.
+RUN groupadd -g 10000 hiro \
+    && useradd -u 10000 -g hiro -m -s /bin/bash hiro
 
-# Platform root uses setgid (2775) so files created by any agent inherit the
-# hiro-agents group and are group-writable for collaborative access.
-# Subdirectory ownership (agents/, skills/, workspace/) is set by platform.Init()
-# at runtime — hiro-operators for agents/ and skills/, hiro-agents for workspace/.
-RUN mkdir -p /hiro && chown root:hiro-agents /hiro && chmod 2775 /hiro
+# Platform root — owned by hiro user.
+RUN mkdir -p /hiro && chown hiro:hiro /hiro
 
 # Install mise (tool version manager). All mise state lives under /opt/mise —
-# binary, tool installs, config, cache, and shims — so every user (root and
-# agent UIDs) shares one installation. Shims on PATH resolve tools automatically.
+# binary, tool installs, config, cache, and shims — so the hiro user and
+# agent workers share one installation. Shims on PATH resolve tools automatically.
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CONFIG_DIR=/opt/mise/config
 ENV MISE_CACHE_DIR=/opt/mise/cache
@@ -128,12 +107,8 @@ RUN mise use -g eza@latest bat@latest fd@latest fzf@latest zoxide@latest delta@l
     && eza --version && bat --version && fd --version && fzf --version \
     && zoxide --version && delta --version && starship --version
 
-# Make mise installations readable (but not writable) by agent users.
-# Root owns everything — agents cannot inject malicious shims or replace binaries.
-# Agents that need to install tools at runtime should use per-instance directories.
-RUN chgrp -R hiro-agents /opt/mise \
-    && chmod -R g+rX /opt/mise \
-    && chmod -R g-w /opt/mise
+# Make mise installations readable by the hiro user.
+RUN chown -R hiro:hiro /opt/mise
 
 # Shell configuration — polished terminal experience for all users.
 COPY docker/shell/bashrc /etc/hiro.bashrc
@@ -154,5 +129,6 @@ WORKDIR /hiro
 
 COPY --from=build /hiro /usr/local/bin/hiro
 
-# Control plane runs as root (required for per-agent UID switching).
+# Run as non-root hiro user. Landlock + seccomp-BPF provide agent isolation.
+USER hiro
 ENTRYPOINT ["hiro"]

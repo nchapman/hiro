@@ -151,53 +151,6 @@ When searching, use multiple sources and cross-reference.`
 	}
 }
 
-func TestLoadAgentDir_NetworkEgress(t *testing.T) {
-	dir := t.TempDir()
-	agentMD := `---
-name: net-agent
-network:
-  egress:
-    - "github.com"
-    - "*.npmjs.org"
-    - "pypi.org"
----
-
-Agent with network access.`
-	os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644)
-
-	cfg, err := LoadAgentDir(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(cfg.NetworkEgress) != 3 {
-		t.Fatalf("expected 3 egress entries, got %d: %v", len(cfg.NetworkEgress), cfg.NetworkEgress)
-	}
-	if cfg.NetworkEgress[0] != "github.com" {
-		t.Errorf("egress[0] = %q, want github.com", cfg.NetworkEgress[0])
-	}
-	if cfg.NetworkEgress[1] != "*.npmjs.org" {
-		t.Errorf("egress[1] = %q, want *.npmjs.org", cfg.NetworkEgress[1])
-	}
-}
-
-func TestLoadAgentDir_NoNetworkEgress(t *testing.T) {
-	dir := t.TempDir()
-	agentMD := `---
-name: offline-agent
----
-
-Agent without network access.`
-	os.WriteFile(filepath.Join(dir, "agent.md"), []byte(agentMD), 0o644)
-
-	cfg, err := LoadAgentDir(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.NetworkEgress != nil {
-		t.Errorf("expected nil NetworkEgress, got %v", cfg.NetworkEgress)
-	}
-}
-
 func TestLoadAgentDir_MissingName(t *testing.T) {
 	dir := t.TempDir()
 	agentMD := `---

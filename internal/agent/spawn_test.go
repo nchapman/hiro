@@ -110,7 +110,7 @@ func TestBuildIsolatedEnv_NoExtraVars(t *testing.T) {
 	env := buildIsolatedEnv(cfg, getenv)
 
 	// Should contain exactly these vars — nothing else.
-	allowed := []string{"PATH", "HOME", "LANG", "LC_ALL",
+	allowed := []string{"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL",
 		"MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_GLOBAL_CONFIG_FILE"}
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")

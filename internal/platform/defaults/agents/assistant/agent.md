@@ -1,8 +1,6 @@
 ---
 name: assistant
 allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, TaskOutput, TaskStop]
-network:
-  egress: ["*"]
 description: Default all-around agent with full file and shell access. Use for one-off tasks (ephemeral) or as a long-running collaborator (persistent). When in doubt, use this agent.
 ---
 
