@@ -42,6 +42,9 @@ var ssrfTransport = &http.Transport{
 		if err != nil {
 			return nil, fmt.Errorf("fetch blocked: DNS resolution failed for %s: %w", host, err)
 		}
+		if len(addrs) == 0 {
+			return nil, fmt.Errorf("fetch blocked: DNS returned no addresses for %s", host)
+		}
 
 		for _, a := range addrs {
 			ip := net.ParseIP(a)
@@ -50,18 +53,14 @@ var ssrfTransport = &http.Transport{
 			}
 		}
 
-		if len(addrs) == 0 {
-			return nil, fmt.Errorf("fetch blocked: DNS returned no addresses for %s", host)
-		}
-
 		dialer := &net.Dialer{Timeout: webDialTimeout}
 		return dialer.DialContext(ctx, network, net.JoinHostPort(addrs[0], port))
 	},
 }
 
-// isBlockedIP returns true for loopback, private, and link-local addresses.
+// isBlockedIP returns true for loopback, private, link-local, and multicast addresses.
 func isBlockedIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
 func buildWebFetchTool() Tool {
@@ -132,6 +131,9 @@ func ssrfRedirectCheck(ctx context.Context) func(*http.Request, []*http.Request)
 		addrs, err := net.DefaultResolver.LookupHost(ctx, host)
 		if err != nil {
 			return fmt.Errorf("fetch blocked: DNS resolution failed for redirect target %s: %w", host, err)
+		}
+		if len(addrs) == 0 {
+			return fmt.Errorf("fetch blocked: DNS returned no addresses for redirect target %s", host)
 		}
 		for _, a := range addrs {
 			ip := net.ParseIP(a)

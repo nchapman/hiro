@@ -17,6 +17,7 @@ func TestIsBlockedIP(t *testing.T) {
 		"0.0.0.0",     // unspecified
 		"fe80::1",     // link-local v6
 		"ff02::1",     // link-local multicast
+		"ff0e::1",     // global multicast
 	}
 	for _, addr := range blocked {
 		ip := net.ParseIP(addr)
