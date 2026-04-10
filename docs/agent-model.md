@@ -138,7 +138,7 @@ Search is scoped to the active session. Cross-session history is not searchable.
 
 ## Ephemeral Agents
 
-For ephemeral agents, the instance and session are the same thing. There is no durable state — the agent runs a single task, returns a result, and everything is cleaned up. No instance directory is created on disk. This is the common case for spawned sub-agents doing one-off work.
+For ephemeral agents, the instance and session are the same thing. There is no durable state — the agent runs a single task, returns a result, and everything is cleaned up. An instance directory is created temporarily but removed after the instance completes. This is the common case for spawned sub-agents doing one-off work.
 
 ## Parent-Child Relationships
 

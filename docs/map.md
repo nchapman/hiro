@@ -7,10 +7,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Go source (non-test) | ~26.6k LOC across 122 files |
-| Go test code | ~34.3k LOC across 107 test files |
+| Go source (non-test) | ~34.7k LOC across 142 files |
+| Go test code | ~38.2k LOC across 106 test files |
 | Frontend (TS/TSX) | ~9.0k LOC across 59 files |
-| Internal packages | 17 |
+| Internal packages | 18 |
 | Top-level commands | 4 (`main.go`, `bootstrap.go`, `agent.go`, `worker_node.go`) |
 
 ---
@@ -19,9 +19,9 @@
 
 | File | LOC | Role |
 |------|-----|------|
-| `main.go` | 584 | CLI parsing, `run()` starts control plane (HTTP, manager, DB) |
+| `main.go` | 623 | CLI parsing, `run()` starts control plane (HTTP, manager, DB) |
 | `bootstrap.go` | 195 | Cluster setup helpers: `setupNodeIdentity`, `setupClusterServer`, `bootstrapOperator` |
-| `agent.go` | 236 | Agent worker subprocess — reads SpawnConfig from stdin, serves gRPC |
+| `agent.go` | 251 | Agent worker subprocess — reads SpawnConfig from stdin, serves gRPC |
 | `worker_node.go` | 496 | Worker node for cluster mode — connects to leader, bridges remote tool calls |
 
 **Bootstrap flow**: parse flags → load `.env` → open DB → `setupNodeIdentity` → `setupClusterServer` → create Manager → `bootstrapOperator` → start HTTP server.
@@ -34,16 +34,16 @@ The core of instance lifecycle management. Split into focused files (was 1,742 L
 
 | File | LOC | Role |
 |------|-----|------|
-| `manager.go` | 164 | Core types (Manager, instance, InstanceInfo, WorkerHandle), constructor, registry primitives |
-| `manager_lifecycle.go` | 611 | CreateInstance, SpawnEphemeral, StopInstance, DeleteInstance, startInstance, Shutdown |
-| `manager_session.go` | 511 | StartInstance (restart), NewSession, UpdateInstanceConfig (model/reasoning to filesystem), agent definition config push/watch |
-| `manager_query.go` | 278 | GetInstance, ListInstances, GetHistory, InstanceByAgentName, IsDescendant |
-| `manager_worker.go` | 249 | shutdownHandle, cleanupWorker, softStop, watchWorker, removeInstance |
-| `manager_resolve.go` | 327 | computeEffectiveTools, buildAllowedToolsMap, tool rules, resolveProvider/Model/Credentials |
-| `manager_helpers.go` | 213 | SendMessage, SecretNames/Env, path helpers, validateAgentName |
-| `manager_restore.go` | 194 | RestoreInstances (startup recovery from DB) |
+| `manager.go` | 230 | Core types (Manager, instance, InstanceInfo, WorkerHandle), constructor, registry primitives |
+| `manager_lifecycle.go` | 631 | CreateInstance, SpawnEphemeral, StopInstance, DeleteInstance, startInstance, Shutdown |
+| `manager_session.go` | 796 | StartInstance (restart), NewSession, UpdateInstanceConfig (model/reasoning to filesystem), agent definition config push/watch |
+| `manager_query.go` | 297 | GetInstance, ListInstances, GetHistory, InstanceByAgentName, IsDescendant |
+| `manager_worker.go` | 291 | shutdownHandle, cleanupWorker, softStop, watchWorker, removeInstance |
+| `manager_resolve.go` | 305 | computeEffectiveTools, buildAllowedToolsMap, tool rules, resolveProvider/Model/Credentials |
+| `manager_helpers.go` | 342 | SendMessage, SecretNames/Env, path helpers, validateAgentName |
+| `manager_restore.go` | 255 | RestoreInstances (startup recovery from DB), migrateInstanceConfigs |
 | `agent.go` | 9 | Options struct (provider code extracted to `internal/provider`) |
-| `spawn.go` | 217 | Worker process spawning (exec, UID switching, stdin pipe) |
+| `spawn.go` | 216 | Worker process spawning (exec, stdin pipe, Landlock isolation) |
 | `tool_executor.go` | 48 | ToolExecutor adapter — dispatches tool calls to local fantasy.AgentTool by name |
 
 ### `internal/agent/tools/` — Built-in Tool Implementations
@@ -76,8 +76,8 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 
 | File | LOC | Role |
 |------|-----|------|
-| `loop.go` | 887 | Main inference loop — calls `fantasy.Agent.Stream()`, handles tool dispatch |
-| `tools_spawn.go` | 431 | Spawn tool + management tools (ScopedManager, ListNodes, SendMessage, etc.) |
+| `loop.go` | 938 | Main inference loop — calls `fantasy.Agent.Stream()`, handles tool dispatch |
+| `tools_spawn.go` | 476 | Spawn tool + management tools (ScopedManager, ListNodes, SendMessage, etc.) |
 | `tools_memory.go` | 141 | AddMemory, ForgetMemory tools |
 | `tools_history.go` | 148 | HistorySearch, HistoryRecall |
 | `tools_skills.go` | 158 | Skill + path validation |
@@ -121,7 +121,7 @@ Unified SQLite database (`db/hiro.db`). Single writer, WAL mode, FTS5 for search
 
 | File | LOC | Role |
 |------|-----|------|
-| `messages.go` | 637 | Message CRUD, FTS indexing, summary storage, context assembly queries |
+| `messages.go` | 649 | Message CRUD, FTS indexing, summary storage, context assembly queries |
 | `instances.go` | 252 | Instance CRUD, parent-child relationships |
 | `sessions.go` | 241 | Session lifecycle, cascade deletes |
 | `usage.go` | 234 | Token/cost usage tracking and aggregation |
@@ -222,7 +222,7 @@ Wire protocol for leader ↔ worker WebSocket communication.
 |------|-----|------|
 | `terminal_session.go` | 826 | Terminal session management (multi-session PTY lifecycle, resize, reconnect) |
 | `files.go` | 555 | File browser API (list, read, write, rename, delete) |
-| `server.go` | 528 | Router setup, middleware, static file serving; `NewServer(logger, webFS, cp, pdb, rootDir)` |
+| `server.go` | 700 | Router setup, middleware, static file serving; `NewServer(logger, webFS, cp, pdb, rootDir)` |
 | `chat.go` | 479 | WebSocket chat handler — message relay to/from operator; `SetManager`, `SetStartManager`, `SetWatcher` |
 | `setup.go` | 354 | First-run setup flow (API key, provider, swarm validation) |
 | `auth.go` | 330 | Auth middleware, session management, rate limiting |
@@ -433,7 +433,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 1 | **Agent Manager** | `agent/manager*.go` | ~2550 (8 files) | `manager_test.go` + 6 more | Split into 8 focused files. Lifecycle, session, query, worker, resolve, restore. |
 | 2 | **Inference Loop** | `inference/loop.go` | 887 | (integration) | Core agentic loop, streaming, tool dispatch. |
 | 3 | **Compaction** | `inference/compaction.go` | 777 | `compaction_test.go` | LLM-driven summarization. Complex async logic. |
-| 4 | **Local Tools** | `inference/tools_*.go` | ~964 (6 files) | 7 test files | Split: spawn, memory, todos, history, skills. |
+| 4 | **Local Tools** | `inference/tools_*.go` | ~1480 (8 files) | 7 test files | Split: spawn, memory, todos, history, skills, schedule, notify, webfetch. |
 | 5 | **System Prompt** | `inference/prompt.go`, `assembly.go`, `context.go`, `context_providers.go` | 776 | 3 test files | Prompt assembly, token budgeting, context provider system. |
 | 6 | **File Sync** | `cluster/filesync*.go` | 802 (5 files) | 2 test files | Bidirectional sync, atomic writes, streaming tar. |
 | 7 | **Cluster Leader** | `cluster/leader_service.go`, `leader_stream.go` | 883 | `stream_test.go` | gRPC service, worker registration, tool dispatch. |
@@ -448,7 +448,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 16 | **Auth** | `api/auth.go`, `auth/auth.go` | 448 | `auth_test.go` | Token auth, sessions, rate limiter, password change. |
 | 17 | **Database** | `platform/db/*.go` | 1711 | 6 test files | Schema, messages, instances, sessions, usage, logs, FTS. |
 | 18 | **Config Parsing** | `config/markdown.go`, `persona.go` | 554 | `markdown_test.go`, `persona_test.go` | YAML frontmatter + markdown, agent/skill/persona loading. |
-| 19 | **Worker Spawn** | `agent/spawn.go` | 217 | `spawn_test.go` | Process exec, UID switching, stdin pipe. |
+| 19 | **Worker Spawn** | `agent/spawn.go` | 216 | `spawn_test.go` | Process exec, stdin pipe, Landlock isolation. |
 | 20 | **IPC/gRPC** | `ipc/`, `ipc/grpcipc/` | 359 | `grpcipc_test.go` | Interfaces, proto, gRPC adapters (bufconn tests). |
 | 21 | **Bash Tool** | `agent/tools/bash.go`, `background.go` | 437 | 3 test files | Shell exec, job management, auto-background. |
 | 22 | **Search Tools** | `agent/tools/grep.go`, `glob.go` | 968 | 2 test files | Ripgrep integration, Go fallbacks, pagination, output modes. |
@@ -492,7 +492,7 @@ Files over 500 LOC or with high cyclomatic complexity deserve the most attention
 | `cmd/hiro/main.go` | 584 | CLI parsing, bootstrap, HTTP server setup |
 | `api/files.go` | 555 | File CRUD — path traversal security surface |
 | `api/server.go` | 528 | Router setup, middleware stack |
-| `agent/manager_session.go` | 511 | Session management, model/reasoning config, agent definition push |
+| `agent/manager_session.go` | 796 | Session management, model/reasoning config, agent definition push |
 | `cmd/hiro/worker_node.go` | 496 | Worker node connection lifecycle |
 | `api/chat.go` | 479 | WebSocket chat handler |
 | `cluster/leader_service.go` | 446 | gRPC service with stream management |

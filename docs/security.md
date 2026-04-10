@@ -72,11 +72,14 @@ Each worker process installs a seccomp-BPF filter that blocks dangerous syscalls
 
 **Blocked syscalls (all workers):**
 
-- `ptrace`, `mount`, `umount2`, `pivot_root` — prevent privilege escalation and filesystem manipulation
+- `clone3`, `unshare`, `setns` — prevent namespace creation
+- `ptrace`, `mount`, `umount2`, `pivot_root`, `chroot` — prevent privilege escalation and filesystem manipulation
 - `kexec_load` — prevent loading a new kernel
 - `process_vm_readv`, `process_vm_writev` — prevent cross-process memory access
-- `io_uring_setup` — prevent io_uring (can bypass seccomp on some kernels)
+- `io_uring_setup`, `io_uring_enter`, `io_uring_register` — prevent io_uring (can bypass seccomp on some kernels)
 - `shmget`, `shmat`, `shmctl` — prevent SysV shared memory
+
+Additionally, `clone` with `CLONE_NEWUSER` or `CLONE_NEWNET` flags is blocked via argument inspection.
 
 **Network socket blocking:** When `NetworkAccess` is false (the agent does not have the Bash tool), the seccomp filter additionally blocks `socket(AF_INET)` and `socket(AF_INET6)`, preventing all outbound network connections. Agents with Bash need sockets for commands like `curl` and `git`. The `NetworkAccess` flag is derived from the agent's effective tool set at spawn time.
 

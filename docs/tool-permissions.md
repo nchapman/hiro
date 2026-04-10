@@ -63,7 +63,7 @@ Rules apply to the 10 tools registered in the rule checker: Bash, Read, Write, E
 
 ## Permission Sources
 
-Permissions come from four sources, evaluated in order:
+Permissions come from three sources, evaluated in order:
 
 ### 1. Instance Config (`config/instances/<uuid>.yaml`)
 
@@ -103,7 +103,7 @@ Result: [Bash, Read, Write]  (Grep removed — parent doesn't have it)
 
 The parent's parameterized rules and deny rules also propagate to all descendants.
 
-### 4. Skill Activation
+### 3. Skill Activation
 
 Skills can grant additional tools when activated. A skill's `allowed_tools` expand the agent's tool set for the rest of the session:
 
