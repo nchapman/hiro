@@ -1,25 +1,23 @@
 # Hiro
 
-Run AI agents that have their own shell, filesystem, and network — managed through a web dashboard or API. Define agents as markdown files, give them tools, and let them work autonomously or in coordinated teams.
+Run AI agents that have their own shell, filesystem, and tools — managed through a web dashboard or API. Define agents as markdown files, give them tools, and let them work autonomously or in coordinated teams.
 
 Self-hosted. Single binary. No external dependencies beyond an LLM API key.
 
 ## What Hiro Does
 
 - **Chat with agents** through a web dashboard — they can read files, run commands, fetch URLs, and create other agents
-- **Define agents in markdown** — system prompt, tool access, and network permissions in a single file
-- **Per-agent sandboxing** — every agent runs as its own Unix user in its own network namespace (default-deny)
+- **Define agents in markdown** — system prompt and tool access in a single file
+- **Per-agent sandboxing** — Landlock LSM for filesystem isolation + seccomp-BPF for syscall filtering, all unprivileged
 - **Persistent agents** accumulate memory, maintain todo lists, and search their own history across sessions
 - **Multi-agent coordination** — agents spawn children, delegate tasks, and synthesize results
 - **Cluster mode** — add worker nodes to distribute agents across machines
 
 ## Quick Start
 
-The setup script downloads the latest release, verifies its SHA256 checksum, and creates a `hiro/` directory with two files: `docker-compose.yml` and `seccomp.json`. You can also download these files manually from the [latest release](https://github.com/nchapman/hiro/releases/latest).
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/setup.sh | sh
-cd hiro
+mkdir hiro && cd hiro
+curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 
@@ -32,11 +30,7 @@ Agent state lives in a Docker volume and survives container restarts. The port i
 
 ### Updating
 
-Re-run the setup script (it prompts before replacing files you've customized), then pull the latest image:
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nchapman/hiro/main/setup.sh | sh
-cd hiro
 docker compose pull && docker compose up -d
 ```
 
@@ -69,22 +63,19 @@ agents/
       delegate.md     # Skills available to this agent
 ```
 
-The `agent.md` frontmatter configures the agent's tools and network access:
+The `agent.md` frontmatter configures the agent's tools:
 
 ```yaml
 ---
 name: my-agent
 description: A helper agent.
-allowed_tools: [Bash, Read, Write, Edit, Glob, Grep]
-# Agents have NO network access by default. Declare allowed domains explicitly:
-network:
-  egress:
-    - "github.com"
-    - "*.npmjs.org"
+allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch]
 ---
 
 Your system prompt goes here.
 ```
+
+Agents with `Bash` get network access (for `curl`, `git`, etc.). Agents without `Bash` cannot create IP sockets — enforced by the kernel via seccomp-BPF.
 
 ### Skills
 
@@ -96,14 +87,14 @@ Skills can be flat `.md` files or directories that bundle scripts, references, a
 
 Hiro uses defense-in-depth to run untrusted LLM-driven agents:
 
-- **Docker containment** — outer security boundary
+- **Docker containment** — outer security boundary, runs as non-root `hiro` user (no capabilities)
 - **Process isolation** — each agent runs as a separate OS process; the control plane handles all LLM inference
-- **Unix user isolation** — 64 pre-created UIDs with `0700` instance directories
-- **Network isolation** — every agent spawns in its own network namespace (default-deny); agents with `network.egress` can reach declared domains via a DNS-driven nftables firewall
-- **Per-worker seccomp-BPF** — blocks namespace creation, mount, and ptrace in agent processes
+- **Landlock LSM** — kernel-enforced filesystem path whitelist per worker (instance dir, session dir, workspace)
+- **seccomp-BPF** — blocks dangerous syscalls (namespace creation, ptrace, io_uring, mount); blocks IP sockets for agents without Bash
+- **WebFetch in control plane** — HTTP requests run in the control plane with SSRF protection, not in worker sandboxes
 - **Tool capability system** — closed-by-default whitelist with parameterized rules (`Bash(curl *)`) and parent-child inheritance
 
-The compose file grants `CAP_NET_ADMIN` and a custom seccomp profile to enable per-agent network namespaces and Unix user isolation. No manual configuration needed.
+No capabilities, no custom seccomp profiles, no sidecar files. Just `docker compose up`.
 
 See [docs/security.md](docs/security.md) for the full threat model.
 
