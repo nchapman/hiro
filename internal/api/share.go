@@ -4,17 +4,25 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // binaryCheckSize is the number of bytes to scan when detecting binary content.
 const binaryCheckSize = 8192
+
+// shareKeyLen is the AES-256 key length in bytes for share token encryption.
+const shareKeyLen = 32
 
 // encryptPath encrypts a relative file path into an opaque hex token using AES-GCM.
 func (s *Server) encryptPath(relPath string) (string, error) {
@@ -64,7 +72,7 @@ func (s *Server) decryptToken(token string) (string, error) {
 
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize {
-		return "", err
+		return "", fmt.Errorf("share token too short")
 	}
 
 	plaintext, err := gcm.Open(nil, data[:nonceSize], data[nonceSize:], nil)
@@ -74,14 +82,20 @@ func (s *Server) decryptToken(token string) (string, error) {
 	return string(plaintext), nil
 }
 
-// shareSecret returns the 32-byte signing secret from the control plane,
-// reused for share token encryption.
+// shareSecret derives a 32-byte AES key from the session signing secret
+// using HKDF, so share tokens use a separate key from session HMAC.
 func (s *Server) shareSecret() ([]byte, error) {
 	signer, err := s.cp.TokenSigner()
 	if err != nil {
 		return nil, err
 	}
-	return signer.Secret(), nil
+	// Nil salt is safe: the IKM (session signing secret) is already a 32-byte uniform random key.
+	r := hkdf.New(sha256.New, signer.Secret(), nil, []byte("hiro-share-token-v1"))
+	key := make([]byte, shareKeyLen)
+	if _, err := io.ReadFull(r, key); err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 // handleShareCreate creates a share token for a file path.

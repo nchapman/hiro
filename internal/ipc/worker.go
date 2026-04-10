@@ -17,3 +17,9 @@ type AgentWorker interface {
 type SecretEnvSetter interface {
 	SetSecretEnvFn(fn func() []string)
 }
+
+// NeedsSecrets reports whether a tool requires secret env var injection.
+// Only Bash needs secrets; other tools have no use for them.
+func NeedsSecrets(toolName string) bool {
+	return toolName == "Bash"
+}

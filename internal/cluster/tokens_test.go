@@ -13,16 +13,15 @@ func TestGenerateSwarmCode_Format(t *testing.T) {
 		t.Fatalf("GenerateSwarmCode: %v", err)
 	}
 
-	// Should be "xxxx-xxxx" format.
+	// Should be "xxxx-xxxx-xxxx" format.
 	parts := strings.Split(code, "-")
-	if len(parts) != 2 {
-		t.Fatalf("expected 2 parts separated by dash, got %q", code)
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts separated by dashes, got %q", code)
 	}
-	if len(parts[0]) != 4 {
-		t.Fatalf("first part should be 4 chars, got %d", len(parts[0]))
-	}
-	if len(parts[1]) != 4 {
-		t.Fatalf("second part should be 4 chars, got %d", len(parts[1]))
+	for i, p := range parts {
+		if len(p) != 4 {
+			t.Fatalf("part %d should be 4 chars, got %d in %q", i, len(p), code)
+		}
 	}
 }
 

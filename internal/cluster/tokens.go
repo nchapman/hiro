@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// GenerateSwarmCode returns a human-friendly swarm code like "hk7m-q3fx".
+// GenerateSwarmCode returns a human-friendly swarm code like "hk7m-q3fx-ab2n".
 // Uses lowercase alphanumeric characters excluding ambiguous ones (0, o, 1, l).
 func GenerateSwarmCode() (string, error) {
 	const charset = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -23,6 +23,6 @@ func GenerateSwarmCode() (string, error) {
 			i++
 		}
 	}
-	// Format as xxxx-xxxx for readability.
-	return string(code[:4]) + "-" + string(code[4:]), nil
+	// Format as xxxx-xxxx-xxxx for readability.
+	return string(code[:4]) + "-" + string(code[4:8]) + "-" + string(code[8:]), nil
 }

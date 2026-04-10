@@ -44,8 +44,8 @@ func NewTokenSigner(secret []byte, ttl time.Duration) (*TokenSigner, error) {
 	}, nil
 }
 
-// Secret returns the raw signing key. Used by the share token subsystem
-// which reuses this secret for AES-GCM encryption.
+// Secret returns the raw signing key. The share token subsystem derives
+// a separate AES-GCM key from this via HKDF.
 func (ts *TokenSigner) Secret() []byte {
 	return ts.secret
 }

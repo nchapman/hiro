@@ -23,8 +23,8 @@ func NewWorkerClient(cc grpc.ClientConnInterface) *WorkerClient {
 }
 
 // SetSecretEnvFn sets the function that provides secret env vars.
-// Called by the control plane after construction. Secrets are sent
-// with each ExecuteTool request so bash commands can access them.
+// Called by the control plane after construction. Secrets are only
+// injected into Bash tool calls.
 func (c *WorkerClient) SetSecretEnvFn(fn func() []string) {
 	c.secretEnvFn = fn
 }
@@ -35,7 +35,7 @@ func (c *WorkerClient) ExecuteTool(ctx context.Context, callID, name, input stri
 		Name:   name,
 		Input:  input,
 	}
-	if c.secretEnvFn != nil {
+	if c.secretEnvFn != nil && ipc.NeedsSecrets(name) {
 		req.SecretEnv = c.secretEnvFn()
 	}
 	resp, err := c.client.ExecuteTool(ctx, req)

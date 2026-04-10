@@ -18,7 +18,7 @@ type RemoteWorker struct {
 	nodeID    NodeID
 	sessionID string
 
-	secretEnvFn func() []string // provides secrets for each tool call
+	secretEnvFn func() []string // provides secrets for Bash tool calls
 
 	mu      sync.Mutex
 	pending map[string]chan toolResponse // callID → result channel
@@ -53,7 +53,7 @@ func (rw *RemoteWorker) NodeID() NodeID {
 }
 
 // SetSecretEnvFn sets the function that provides secret env vars.
-// Secrets are sent with each ExecuteTool call.
+// Secrets are only injected into Bash tool calls.
 func (rw *RemoteWorker) SetSecretEnvFn(fn func() []string) {
 	rw.secretEnvFn = fn
 }
@@ -84,7 +84,7 @@ func (rw *RemoteWorker) ExecuteTool(ctx context.Context, callID, name, input str
 		ToolName:  name,
 		Input:     input,
 	}
-	if rw.secretEnvFn != nil {
+	if rw.secretEnvFn != nil && ipc.NeedsSecrets(name) {
 		req.SecretEnv = rw.secretEnvFn()
 	}
 

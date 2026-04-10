@@ -222,15 +222,30 @@ func TestRemoteWorker_ExecuteTool_WithSecrets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	_, err := rw.ExecuteTool(ctx, "call-3", "bash", `{"command":"echo $API_KEY"}`)
+	_, err := rw.ExecuteTool(ctx, "call-3", "Bash", `{"command":"echo $API_KEY"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
 
 	secretsMu.Lock()
-	defer secretsMu.Unlock()
 	if len(receivedSecrets) != 1 || receivedSecrets[0] != "API_KEY=secret123" {
 		t.Errorf("secrets = %v, want [API_KEY=secret123]", receivedSecrets)
+	}
+	secretsMu.Unlock()
+
+	// Non-Bash tools should not receive secrets.
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel2()
+
+	_, err = rw.ExecuteTool(ctx2, "call-4", "Read", `{"file_path":"/tmp/foo"}`)
+	if err != nil {
+		t.Fatalf("ExecuteTool(Read): %v", err)
+	}
+
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	if len(receivedSecrets) != 0 {
+		t.Errorf("expected 0 secrets for Read tool, got %v", receivedSecrets)
 	}
 }
 

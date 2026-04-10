@@ -75,7 +75,8 @@ const (
 	byteRange = 256
 
 	// swarmCodeLen is the number of random characters in a generated swarm code.
-	swarmCodeLen = 8
+	// 12 chars from a 32-char alphabet gives ~60 bits of entropy.
+	swarmCodeLen = 12
 )
 
 // Terminal management constants.

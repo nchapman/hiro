@@ -141,7 +141,8 @@ func TestWorkerRoundtrip_SecretEnvInjection(t *testing.T) {
 		return []string{"API_KEY=sk-secret-123", "DB_PASS=hunter2"}
 	})
 
-	_, err = client.ExecuteTool(t.Context(), "call-1", "bash", `{"command":"echo $API_KEY"}`)
+	// Bash tool should receive secrets.
+	_, err = client.ExecuteTool(t.Context(), "call-1", "Bash", `{"command":"echo $API_KEY"}`)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -154,6 +155,16 @@ func TestWorkerRoundtrip_SecretEnvInjection(t *testing.T) {
 	}
 	if receivedSecrets[1] != "DB_PASS=hunter2" {
 		t.Errorf("secret[1] = %q, want DB_PASS=hunter2", receivedSecrets[1])
+	}
+
+	// Non-Bash tools should not receive secrets.
+	receivedSecrets = nil
+	_, err = client.ExecuteTool(t.Context(), "call-2", "Read", `{"file_path":"/tmp/foo"}`)
+	if err != nil {
+		t.Fatalf("ExecuteTool(Read): %v", err)
+	}
+	if len(receivedSecrets) != 0 {
+		t.Fatalf("expected 0 secrets for Read tool, got %d", len(receivedSecrets))
 	}
 }
 
