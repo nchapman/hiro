@@ -65,12 +65,12 @@ Rules apply to the 10 tools registered in the rule checker: Bash, Read, Write, E
 
 Permissions come from four sources, evaluated in order:
 
-### 1. Instance Config (`instances/<uuid>/config.yaml`)
+### 1. Instance Config (`config/instances/<uuid>.yaml`)
 
-Each instance owns its tool declarations. These are **seeded from `agent.md`** at creation time and decoupled thereafter — changes to `agent.md` `allowed_tools` do not flow to existing instances.
+Each instance owns its tool declarations, stored outside the instance directory so Landlock prevents agents from modifying their own tool config. These are **seeded from `agent.md`** at creation time and decoupled thereafter — changes to `agent.md` `allowed_tools` do not flow to existing instances.
 
 ```yaml
-# instances/<uuid>/config.yaml
+# config/instances/<uuid>.yaml
 allowed_tools: [Bash(curl *), Read, Grep, WebFetch]
 disallowed_tools: [Bash(rm *)]
 ```

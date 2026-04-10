@@ -128,7 +128,7 @@ func (m *Manager) GetInstanceConfig(instanceID string) (config.InstanceConfig, e
 	if !ok {
 		return config.InstanceConfig{}, ErrInstanceNotFound
 	}
-	return config.LoadInstanceConfig(m.instanceDir(instanceID))
+	return config.LoadInstanceConfig(m.instanceConfigPath(instanceID))
 }
 
 // GetHistory returns recent messages from the web session of a persistent instance.

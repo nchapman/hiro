@@ -17,12 +17,12 @@ var persistentTools = []string{
 }
 
 // applyInstanceToolConfig overrides the agent config's tool declarations with
-// the instance's config.yaml values. Instance config is the source of truth
+// the instance's config values. Instance config is the source of truth
 // for tool declarations — tools are seeded from agent.md at creation and owned
 // by the instance thereafter. Falls back to agent.md if no instance tools exist
 // (backward compat for pre-existing instances).
-func applyInstanceToolConfig(instDir string, cfg *config.AgentConfig) {
-	instCfg, err := config.LoadInstanceConfig(instDir)
+func applyInstanceToolConfig(configPath string, cfg *config.AgentConfig) {
+	instCfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil || len(instCfg.AllowedTools) == 0 {
 		return // no instance config or no tools declared — use agent.md defaults
 	}

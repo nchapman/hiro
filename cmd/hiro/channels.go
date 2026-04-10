@@ -37,11 +37,11 @@ func newChannelManager(router *channel.Router, cp agent.ControlPlane, mux *http.
 	}
 }
 
-// OnInstanceStart reads the instance's config.yaml and starts any configured channels.
+// OnInstanceStart reads the instance's config and starts any configured channels.
 // Idempotent — safe to call multiple times for the same instance (e.g. during
 // leader bootstrap where the hook fires from registerAndStartInstance and again
 // from initChannels).
-func (cm *channelManager) OnInstanceStart(ctx context.Context, instanceID, instDir string) error {
+func (cm *channelManager) OnInstanceStart(ctx context.Context, instanceID, configPath string) error {
 	// Idempotency guard: skip if channels are already running for this instance.
 	cm.mu.Lock()
 	if _, exists := cm.channels[instanceID]; exists {
@@ -50,7 +50,7 @@ func (cm *channelManager) OnInstanceStart(ctx context.Context, instanceID, instD
 	}
 	cm.mu.Unlock()
 
-	cfg, err := config.LoadInstanceConfig(instDir)
+	cfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("loading instance config: %w", err)
 	}

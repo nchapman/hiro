@@ -94,7 +94,7 @@ Agent capabilities are controlled by a closed-by-default tool whitelist. An agen
 Effective tools = instance declared tools ∩ parent's effective tools
 ```
 
-**Instance tool declarations:** Each instance owns its tool declarations in `config.yaml`. Tools are seeded from the agent definition (`agent.md`) at creation time and can be modified by the operator via the control plane. If no tools are declared, the agent gets no built-in tools.
+**Instance tool declarations:** Each instance owns its tool declarations in `config/instances/<uuid>.yaml` — stored outside the instance directory so Landlock prevents agents from modifying their own tool config. Tools are seeded from the agent definition (`agent.md`) at creation time and can be modified by the operator via the control plane. If no tools are declared, the agent gets no built-in tools.
 
 **Parent inheritance:** A child agent's effective tools are intersected with its parent's effective tools. A child can never have more capabilities than its parent.
 
@@ -166,7 +166,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 ### What agents CANNOT do
 
 - Access files outside their Landlock-permitted paths — blocked by the kernel.
-- Read `config/config.yaml` or secret values directly — not in Landlock paths.
+- Read `config/` directory (secrets, instance tool config) — not in Landlock paths.
 - Manage agents outside their descendant tree — blocked by ScopedManager descendant checks.
 - Use tools they weren't granted — blocked by the capability intersection.
 - Open network sockets without Bash — blocked by seccomp-BPF socket filter.

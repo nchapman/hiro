@@ -159,8 +159,8 @@ func (m *Manager) SetLifecycleHook(hook InstanceLifecycleHook) {
 	m.lifecycleHook = hook
 }
 
-// SetConfigLocker sets the instance config locker for serializing config.yaml
-// read-modify-write operations across all writers.
+// SetConfigLocker sets the instance config locker for serializing
+// read-modify-write operations across all config writers.
 func (m *Manager) SetConfigLocker(locker config.InstanceConfigLocker) {
 	m.configLocker = locker
 }
@@ -174,7 +174,7 @@ func (m *Manager) RestartChannels(instanceID string) {
 		return
 	}
 	m.lifecycleHook.OnInstanceStop(instanceID)
-	if err := m.lifecycleHook.OnInstanceStart(m.ctx, instanceID, m.instanceDir(instanceID)); err != nil {
+	if err := m.lifecycleHook.OnInstanceStart(m.ctx, instanceID, m.instanceConfigPath(instanceID)); err != nil {
 		m.logger.Warn("lifecycle hook restart failed", "instance", instanceID, "error", err)
 	}
 }
@@ -263,6 +263,17 @@ func (m *Manager) instanceDir(id string) string {
 // InstanceDir returns the filesystem path for an instance's directory.
 func (m *Manager) InstanceDir(id string) string {
 	return m.instanceDir(id)
+}
+
+func (m *Manager) instanceConfigPath(id string) string {
+	return config.InstanceConfigPath(m.rootDir, id)
+}
+
+// InstanceConfigPath returns the path to an instance's config file.
+// Config files live at config/instances/<id>.yaml, outside the instance
+// directory, so Landlock prevents agents from modifying their own config.
+func (m *Manager) InstanceConfigPath(id string) string {
+	return m.instanceConfigPath(id)
 }
 
 func (m *Manager) instanceSessionDir(instanceID, sessionID string) string {

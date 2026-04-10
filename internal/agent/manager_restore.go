@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/google/uuid"
 
 	"github.com/nchapman/hiro/internal/config"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 )
 
 // restoreEntry holds the data needed to restore a single instance.
@@ -25,6 +27,8 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	if m.pdb == nil {
 		return nil
 	}
+
+	m.migrateInstanceConfigs()
 
 	instances, err := m.pdb.ListInstances(ctx, "", "")
 	if err != nil {
@@ -180,7 +184,7 @@ func (m *Manager) resolveSessionForRestore(ctx context.Context, instanceID, agen
 // restoreInstanceConfig restores per-instance config (model override, reasoning effort)
 // from the instance's config.yaml file.
 func (m *Manager) restoreInstanceConfig(ctx context.Context, instanceID string) {
-	instCfg, err := config.LoadInstanceConfig(m.instanceDir(instanceID))
+	instCfg, err := config.LoadInstanceConfig(m.instanceConfigPath(instanceID))
 	if err != nil {
 		m.logger.Warn("failed to load instance config", "instance", instanceID, "error", err)
 		return
@@ -192,5 +196,60 @@ func (m *Manager) restoreInstanceConfig(ctx context.Context, instanceID string) 
 	if err := m.UpdateInstanceConfig(ctx, instanceID, instCfg.Model, &effort, nil, nil); err != nil {
 		m.logger.Warn("failed to restore instance config",
 			"instance", instanceID, "error", err)
+	}
+}
+
+// migrateInstanceConfigs moves config.yaml files from instances/<uuid>/config.yaml
+// to config/instances/<uuid>.yaml. This one-time migration runs on first startup
+// after the config location change.
+func (m *Manager) migrateInstanceConfigs() {
+	instancesDir := filepath.Join(m.rootDir, "instances")
+	entries, err := os.ReadDir(instancesDir)
+	if err != nil {
+		return // no instances dir — nothing to migrate
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		instanceID := entry.Name()
+		oldPath := filepath.Join(instancesDir, instanceID, "config.yaml")
+		newPath := m.instanceConfigPath(instanceID)
+
+		// Skip if old file doesn't exist, isn't a regular file, or new file already exists.
+		info, err := os.Lstat(oldPath)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if _, err := os.Stat(newPath); err == nil {
+			// New file already exists — just remove the old one.
+			os.Remove(oldPath)
+			continue
+		}
+
+		data, err := os.ReadFile(oldPath) //nolint:gosec // path constructed from instance dir listing
+		if err != nil {
+			m.logger.Warn("failed to read old instance config for migration",
+				"instance", instanceID, "error", err)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(newPath), fsperm.DirPrivate); err != nil {
+			m.logger.Warn("failed to create config dir for migration",
+				"instance", instanceID, "error", err)
+			continue
+		}
+
+		if err := os.WriteFile(newPath, data, fsperm.FilePrivate); err != nil { //nolint:gosec // path from instanceConfigPath()
+			m.logger.Warn("failed to write migrated instance config",
+				"instance", instanceID, "error", err)
+			continue
+		}
+
+		os.Remove(oldPath)
+		m.logger.Info("migrated instance config",
+			"instance", instanceID,
+			"from", oldPath,
+			"to", newPath)
 	}
 }

@@ -612,7 +612,8 @@ func TestSeedInstanceFiles_PersistentWithDisplayNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "My Agent", "A helpful agent", "", nil, nil); err != nil {
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := seedInstanceFiles(instDir, configPath, config.ModePersistent, "My Agent", "A helpful agent", "", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -641,7 +642,8 @@ func TestSeedInstanceFiles_PersistentWithPersonaBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "Backend Lead", "Owns API rewrite", "You focus on Go and PostgreSQL.", nil, nil); err != nil {
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := seedInstanceFiles(instDir, configPath, config.ModePersistent, "Backend Lead", "Owns API rewrite", "You focus on Go and PostgreSQL.", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -664,7 +666,8 @@ func TestSeedInstanceFiles_EphemeralEmptyPersona(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := seedInstanceFiles(instDir, config.ModeEphemeral, "", "", "", nil, nil); err != nil {
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := seedInstanceFiles(instDir, configPath, config.ModeEphemeral, "", "", "", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -686,7 +689,8 @@ func TestSeedInstanceFiles_PersistentNoDisplayName(t *testing.T) {
 	}
 
 	// Persistent but no display name/desc — should create empty persona.md.
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "", "", "", nil, nil); err != nil {
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := seedInstanceFiles(instDir, configPath, config.ModePersistent, "", "", "", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -703,14 +707,15 @@ func TestSeedInstanceFiles_ToolsSeeded(t *testing.T) {
 	dir := t.TempDir()
 	instDir := filepath.Join(dir, "inst")
 	os.MkdirAll(instDir, 0o755)
+	configPath := filepath.Join(dir, "config", "instances", "test-inst.yaml")
 
 	tools := []string{"Bash", "Read", "Write"}
 	denied := []string{"Bash(rm *)"}
-	if err := seedInstanceFiles(instDir, config.ModePersistent, "", "", "", tools, denied); err != nil {
+	if err := seedInstanceFiles(instDir, configPath, config.ModePersistent, "", "", "", tools, denied); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	instCfg, err := config.LoadInstanceConfig(instDir)
+	instCfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadInstanceConfig: %v", err)
 	}
@@ -724,9 +729,10 @@ func TestSeedInstanceFiles_ToolsSeeded(t *testing.T) {
 
 func TestApplyInstanceToolConfig(t *testing.T) {
 	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
 
 	// Save instance config with custom tools.
-	config.SaveInstanceConfig(dir, config.InstanceConfig{
+	config.SaveInstanceConfig(configPath, config.InstanceConfig{
 		AllowedTools:    []string{"Read", "Glob"},
 		DisallowedTools: []string{"Read(/etc/*)"},
 	})
@@ -738,7 +744,7 @@ func TestApplyInstanceToolConfig(t *testing.T) {
 	}
 
 	// Instance config should override.
-	applyInstanceToolConfig(dir, &cfg)
+	applyInstanceToolConfig(configPath, &cfg)
 	if len(cfg.AllowedTools) != 2 || cfg.AllowedTools[0] != "Read" {
 		t.Errorf("AllowedTools not overridden: got %v", cfg.AllowedTools)
 	}
@@ -749,9 +755,10 @@ func TestApplyInstanceToolConfig(t *testing.T) {
 
 func TestApplyInstanceToolConfig_NoInstanceTools(t *testing.T) {
 	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
 
 	// Save instance config without tools (e.g. pre-existing instance).
-	config.SaveInstanceConfig(dir, config.InstanceConfig{Model: "test"})
+	config.SaveInstanceConfig(configPath, config.InstanceConfig{Model: "test"})
 
 	cfg := config.AgentConfig{
 		AllowedTools: []string{"Bash", "Read"},
@@ -760,7 +767,7 @@ func TestApplyInstanceToolConfig_NoInstanceTools(t *testing.T) {
 	copy(original, cfg.AllowedTools)
 
 	// Should not override — fall back to agent.md.
-	applyInstanceToolConfig(dir, &cfg)
+	applyInstanceToolConfig(configPath, &cfg)
 	if len(cfg.AllowedTools) != len(original) {
 		t.Errorf("AllowedTools should not change: got %v", cfg.AllowedTools)
 	}
@@ -768,13 +775,14 @@ func TestApplyInstanceToolConfig_NoInstanceTools(t *testing.T) {
 
 func TestApplyInstanceToolConfig_MissingFile(t *testing.T) {
 	dir := t.TempDir()
+	configPath := filepath.Join(dir, "nonexistent.yaml")
 
 	cfg := config.AgentConfig{
 		AllowedTools: []string{"Bash", "Read"},
 	}
 
-	// No config.yaml — should not override.
-	applyInstanceToolConfig(dir, &cfg)
+	// No config file — should not override.
+	applyInstanceToolConfig(configPath, &cfg)
 	if len(cfg.AllowedTools) != 2 {
 		t.Errorf("AllowedTools should not change: got %v", cfg.AllowedTools)
 	}
@@ -1322,7 +1330,10 @@ func TestMakeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cleanup := makeCleanup(sessDir, instDir, true)
+	configPath := filepath.Join(dir, "config.yaml")
+	os.WriteFile(configPath, []byte("test"), 0o600)
+
+	cleanup := makeCleanup(sessDir, instDir, configPath, true)
 	cleanup()
 
 	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
@@ -1330,6 +1341,9 @@ func TestMakeCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(instDir); !os.IsNotExist(err) {
 		t.Error("instDir should be removed when dirIsNew=true")
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Error("configPath should be removed when dirIsNew=true")
 	}
 }
 
@@ -1344,13 +1358,16 @@ func TestMakeCleanup_NotNewDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cleanup := makeCleanup(sessDir, instDir, false)
+	configPath := filepath.Join(dir, "config.yaml")
+	os.WriteFile(configPath, []byte("test"), 0o600)
+
+	cleanup := makeCleanup(sessDir, instDir, configPath, false)
 	cleanup()
 
 	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
 		t.Error("sessDir should be removed")
 	}
-	// instDir should remain since dirIsNew=false.
+	// instDir and configPath should remain since dirIsNew=false.
 	if _, err := os.Stat(instDir); err != nil {
 		t.Error("instDir should survive when dirIsNew=false")
 	}

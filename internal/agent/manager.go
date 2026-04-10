@@ -140,7 +140,7 @@ type Manager struct {
 	scheduler       *Scheduler                  // cron scheduler; nil until SetScheduler called
 	timezone        *time.Location              // server timezone for cron evaluation
 	lifecycleHook   InstanceLifecycleHook       // optional hook for instance start/stop events
-	configLocker    config.InstanceConfigLocker // serializes config.yaml read-modify-write; nil = no locking
+	configLocker    config.InstanceConfigLocker // serializes config read-modify-write; nil = no locking
 }
 
 // InstanceLifecycleHook is called when instances start or stop, allowing
@@ -148,8 +148,8 @@ type Manager struct {
 // import cycles between the agent and channel packages.
 type InstanceLifecycleHook interface {
 	// OnInstanceStart is called after an instance is fully registered and running.
-	// instDir is the instance's filesystem directory.
-	OnInstanceStart(ctx context.Context, instanceID, instDir string) error
+	// configPath is the path to the instance's config file.
+	OnInstanceStart(ctx context.Context, instanceID, configPath string) error
 
 	// OnInstanceStop is called when an instance is being stopped or removed.
 	// Must be idempotent — may be called multiple times for the same instance

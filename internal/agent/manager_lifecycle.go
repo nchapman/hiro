@@ -173,8 +173,9 @@ func (m *Manager) DeleteInstance(instanceID string) error {
 			m.scheduler.PauseInstance(context.Background(), id)
 		}
 
-		// Always delete instance dir and DB record regardless of mode.
+		// Always delete instance dir, config file, and DB record regardless of mode.
 		os.RemoveAll(m.instanceDir(id))
+		os.Remove(m.instanceConfigPath(id))
 		if m.pdb != nil {
 			if err := m.pdb.DeleteInstance(context.Background(), id); err != nil {
 				m.logger.Warn("failed to delete instance from DB", "id", id, "error", err)
@@ -224,9 +225,10 @@ func (m *Manager) Shutdown() {
 	m.logger.Info("instance manager shut down")
 }
 
-// seedInstanceFiles creates persona.md, memory.md, and config.yaml in a new instance directory.
-// config.yaml is seeded with the agent's tool declarations so the instance owns its own tool config.
-func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displayDesc, personaBody string, allowedTools, disallowedTools []string) error {
+// seedInstanceFiles creates persona.md and memory.md in a new instance directory,
+// and writes the instance config to configPath (outside the instance dir).
+// The config is seeded with the agent's tool declarations so the instance owns its own tool config.
+func seedInstanceFiles(instDir, configPath string, mode config.AgentMode, displayName, displayDesc, personaBody string, allowedTools, disallowedTools []string) error {
 	if mode.IsPersistent() && (displayName != "" || displayDesc != "" || personaBody != "") {
 		if err := config.WritePersonaFile(instDir, displayName, displayDesc, personaBody); err != nil {
 			return fmt.Errorf("creating persona.md: %w", err)
@@ -239,11 +241,11 @@ func seedInstanceFiles(instDir string, mode config.AgentMode, displayName, displ
 	if err := os.WriteFile(filepath.Join(instDir, "memory.md"), nil, fsperm.FilePrivate); err != nil {
 		return fmt.Errorf("creating memory.md: %w", err)
 	}
-	if err := config.SaveInstanceConfig(instDir, config.InstanceConfig{
+	if err := config.SaveInstanceConfig(configPath, config.InstanceConfig{
 		AllowedTools:    allowedTools,
 		DisallowedTools: disallowedTools,
 	}); err != nil {
-		return fmt.Errorf("creating config.yaml: %w", err)
+		return fmt.Errorf("creating instance config: %w", err)
 	}
 	return nil
 }
@@ -360,7 +362,8 @@ func (m *Manager) prepareInstanceDirs(instanceID, sessionID string, mode config.
 		return "", "", false, fmt.Errorf("creating instance dir: %w", err)
 	}
 	if dirIsNew {
-		if err := seedInstanceFiles(instDir, mode, displayName, displayDesc, personaBody, allowedTools, disallowedTools); err != nil {
+		configPath := m.instanceConfigPath(instanceID)
+		if err := seedInstanceFiles(instDir, configPath, mode, displayName, displayDesc, personaBody, allowedTools, disallowedTools); err != nil {
 			return "", "", false, err
 		}
 	}
@@ -384,8 +387,8 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 		return "", err
 	}
 	// Instance config is the source of truth for tool declarations.
-	// Override the agent definition's tools with the instance's config.yaml.
-	applyInstanceToolConfig(instDir, &cfg)
+	// Override the agent definition's tools with the instance's config.
+	applyInstanceToolConfig(m.instanceConfigPath(instanceID), &cfg)
 	effectiveTools, allowLayers, denyRules, err := m.computeEffectiveTools(cfg, parentID)
 	if err != nil {
 		return "", err
@@ -402,7 +405,7 @@ func (m *Manager) startInstance(ctx context.Context, instanceID, sessionID, chan
 	}
 
 	spawnCfg := m.buildSpawnConfig(instanceID, sessionID, cfg.Name, allowedTools, instDir, sessDir)
-	cleanup := makeCleanup(sessDir, instDir, dirIsNew)
+	cleanup := makeCleanup(sessDir, instDir, m.instanceConfigPath(instanceID), dirIsNew)
 	handle, err := m.spawnWorker(spawnCtx, cfg, nodeID, spawnCfg, allowedTools, instanceID, sessionID)
 	if err != nil {
 		cleanup()
@@ -494,12 +497,13 @@ func (m *Manager) buildLandlockPaths(instDir, sessDir, socketDir string, allowed
 	return paths
 }
 
-// makeCleanup returns a function that removes directories on failure.
-func makeCleanup(sessDir, instDir string, dirIsNew bool) func() {
+// makeCleanup returns a function that removes directories and config on failure.
+func makeCleanup(sessDir, instDir, configPath string, dirIsNew bool) func() {
 	return func() {
 		os.RemoveAll(sessDir)
 		if dirIsNew {
 			os.RemoveAll(instDir)
+			os.Remove(configPath)
 		}
 	}
 }
@@ -620,7 +624,7 @@ func (m *Manager) registerAndStartInstance(ctx context.Context, inst *instance) 
 
 	// Notify lifecycle hook (e.g. channel manager) after the instance is running.
 	if m.lifecycleHook != nil {
-		if err := m.lifecycleHook.OnInstanceStart(ctx, instanceID, m.instanceDir(instanceID)); err != nil {
+		if err := m.lifecycleHook.OnInstanceStart(ctx, instanceID, m.instanceConfigPath(instanceID)); err != nil {
 			m.logger.Warn("lifecycle hook OnInstanceStart failed", "instance", instanceID, "error", err)
 		}
 	}

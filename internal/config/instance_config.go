@@ -6,24 +6,32 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nchapman/hiro/internal/platform/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
-const instanceConfigFileName = "config.yaml"
-
 // InstanceConfigLocker serializes read-modify-write operations on an instance's
-// config.yaml. All writers that modify instance config must go through this
+// config file. All writers that modify instance config must go through this
 // interface to prevent lost-update races.
 type InstanceConfigLocker interface {
-	// ModifyConfig loads the instance's config.yaml, calls modify with a mutable
+	// ModifyConfig loads the instance's config, calls modify with a mutable
 	// pointer, and saves the result — all under a per-instance lock.
 	ModifyConfig(instanceID string, modify func(*InstanceConfig) error) error
 }
 
+// InstanceConfigPath returns the path to an instance's config file.
+// Config files live outside the instance directory at config/instances/<id>.yaml
+// so that Landlock filesystem restrictions prevent agents from modifying their
+// own tool declarations.
+func InstanceConfigPath(rootDir, instanceID string) string {
+	return filepath.Join(rootDir, "config", "instances", instanceID+".yaml")
+}
+
 // InstanceConfig holds per-instance operational configuration.
-// This file is root-owned with 0600 permissions — the agent worker
-// process cannot read or modify it. Only the control plane reads and
-// writes this file.
+// Stored at config/instances/<uuid>.yaml — outside the instance directory
+// so Landlock filesystem restrictions prevent agent workers from modifying
+// their own tool declarations. Only the control plane reads and writes
+// this file.
 type InstanceConfig struct {
 	Model           string                  `yaml:"model,omitempty"`
 	ReasoningEffort string                  `yaml:"reasoning_effort,omitempty"`
@@ -159,12 +167,11 @@ func (c *InstanceChannelsConfig) RemoveSender(key string) bool {
 	return false
 }
 
-// LoadInstanceConfig reads the per-instance config.yaml from the given
-// instance directory. Returns a zero-value InstanceConfig (not an error)
-// if the file does not exist.
-func LoadInstanceConfig(instDir string) (InstanceConfig, error) {
-	path := filepath.Join(instDir, instanceConfigFileName)
-	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from instance dir, not user input
+// LoadInstanceConfig reads a per-instance config file from the given path.
+// Returns a zero-value InstanceConfig (not an error) if the file does not exist.
+// Use InstanceConfigPath() to compute the path from rootDir + instanceID.
+func LoadInstanceConfig(configPath string) (InstanceConfig, error) {
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is constructed from root dir, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return InstanceConfig{}, nil
@@ -181,19 +188,17 @@ func LoadInstanceConfig(instDir string) (InstanceConfig, error) {
 	return cfg, nil
 }
 
-// SaveInstanceConfig writes the per-instance config.yaml to the given
-// instance directory using atomic write (temp+rename) with 0600 permissions.
-func SaveInstanceConfig(instDir string, cfg InstanceConfig) error {
-	path := filepath.Join(instDir, instanceConfigFileName)
+// SaveInstanceConfig writes a per-instance config file to the given path
+// using atomic write (temp+rename) with 0600 permissions. Creates parent
+// directories if they don't exist.
+// Use InstanceConfigPath() to compute the path from rootDir + instanceID.
+func SaveInstanceConfig(configPath string, cfg InstanceConfig) error {
+	if err := os.MkdirAll(filepath.Dir(configPath), fsperm.DirPrivate); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling instance config: %w", err)
 	}
-	return atomicWrite(path, data)
-}
-
-// IsInstanceConfigFile reports whether the given path (relative to an
-// instance directory root) is the protected config.yaml file.
-func IsInstanceConfigFile(path, instDir string) bool {
-	return filepath.Base(path) == instanceConfigFileName && filepath.Dir(path) == instDir
+	return atomicWrite(configPath, data)
 }

@@ -497,7 +497,7 @@ func (a *app) initChannels(leaderID string) {
 	// bootstrapped before the router had a web channel. Trigger the
 	// hook now so the leader's channels (if any) get started.
 	if a.chanMgr != nil {
-		if err := a.chanMgr.OnInstanceStart(a.ctx, leaderID, a.mgr.InstanceDir(leaderID)); err != nil {
+		if err := a.chanMgr.OnInstanceStart(a.ctx, leaderID, a.mgr.InstanceConfigPath(leaderID)); err != nil {
 			a.logger.Warn("failed to start channels for leader instance", "error", err)
 		}
 	}

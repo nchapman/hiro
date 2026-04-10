@@ -41,7 +41,7 @@ type ConfigAccessChecker struct {
 
 // AccessManager is the narrow interface the access checker needs from the manager.
 type AccessManager interface {
-	InstanceDir(id string) string
+	InstanceConfigPath(id string) string
 }
 
 // NewConfigAccessChecker creates a new ConfigAccessChecker.
@@ -73,14 +73,14 @@ const maxPendingSenders = 10
 
 // CheckAccess checks whether a sender is allowed to message the given instance.
 // Unknown senders are registered as pending. The check reads and writes the
-// instance's config.yaml under a per-instance mutex.
+// instance's config file under a per-instance mutex.
 func (c *ConfigAccessChecker) CheckAccess(instanceID, senderKey, displayName, sampleText string) AccessResult {
 	mu := c.lockFor(instanceID)
 	mu.Lock()
 	defer mu.Unlock()
 
-	instDir := c.manager.InstanceDir(instanceID)
-	cfg, err := config.LoadInstanceConfig(instDir)
+	configPath := c.manager.InstanceConfigPath(instanceID)
+	cfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		c.logger.Warn("failed to load instance config for access check",
 			"instance_id", instanceID,
@@ -98,7 +98,7 @@ func (c *ConfigAccessChecker) CheckAccess(instanceID, senderKey, displayName, sa
 		// Debounce LastSeen updates — only write if stale by >5 minutes.
 		// This avoids a disk write on every inbound message from known senders.
 		if cfg.Channels.TouchSenderIfStale(senderKey, touchDebounce) {
-			if err := config.SaveInstanceConfig(instDir, cfg); err != nil {
+			if err := config.SaveInstanceConfig(configPath, cfg); err != nil {
 				c.logger.Warn("failed to update sender last-seen", "error", err)
 			}
 		}
@@ -124,7 +124,7 @@ func (c *ConfigAccessChecker) CheckAccess(instanceID, senderKey, displayName, sa
 
 	// Unknown sender — register as pending.
 	cfg.Channels.SetSender(senderKey, config.ChannelAccessPending, displayName, sampleText)
-	if err := config.SaveInstanceConfig(instDir, cfg); err != nil {
+	if err := config.SaveInstanceConfig(configPath, cfg); err != nil {
 		c.logger.Warn("failed to save pending sender",
 			"instance_id", instanceID,
 			"sender_key", senderKey,
@@ -149,8 +149,8 @@ func (c *ConfigAccessChecker) UpdateSenderStatus(instanceID, senderKey string, s
 	mu.Lock()
 	defer mu.Unlock()
 
-	instDir := c.manager.InstanceDir(instanceID)
-	cfg, err := config.LoadInstanceConfig(instDir)
+	configPath := c.manager.InstanceConfigPath(instanceID)
+	cfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (c *ConfigAccessChecker) UpdateSenderStatus(instanceID, senderKey string, s
 	}
 	// Empty displayName/sampleText preserves existing values (SetSender semantics).
 	cfg.Channels.SetSender(senderKey, status, "", "")
-	return config.SaveInstanceConfig(instDir, cfg)
+	return config.SaveInstanceConfig(configPath, cfg)
 }
 
 // RemoveSender removes a sender entry under the per-instance lock.
@@ -171,33 +171,33 @@ func (c *ConfigAccessChecker) RemoveSender(instanceID, senderKey string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	instDir := c.manager.InstanceDir(instanceID)
-	cfg, err := config.LoadInstanceConfig(instDir)
+	configPath := c.manager.InstanceConfigPath(instanceID)
+	cfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		return err
 	}
 	if cfg.Channels == nil || !cfg.Channels.RemoveSender(senderKey) {
 		return ErrSenderNotFound
 	}
-	return config.SaveInstanceConfig(instDir, cfg)
+	return config.SaveInstanceConfig(configPath, cfg)
 }
 
-// ModifyConfig performs an atomic read-modify-write of an instance's config.yaml
+// ModifyConfig performs an atomic read-modify-write of an instance's config
 // under the per-instance lock. The modify function receives a mutable config and
-// should apply its changes in place. All config.yaml writers should use this to
+// should apply its changes in place. All config writers should use this to
 // prevent lost-update races.
 func (c *ConfigAccessChecker) ModifyConfig(instanceID string, modify func(*config.InstanceConfig) error) error {
 	mu := c.lockFor(instanceID)
 	mu.Lock()
 	defer mu.Unlock()
 
-	instDir := c.manager.InstanceDir(instanceID)
-	cfg, err := config.LoadInstanceConfig(instDir)
+	configPath := c.manager.InstanceConfigPath(instanceID)
+	cfg, err := config.LoadInstanceConfig(configPath)
 	if err != nil {
 		return err
 	}
 	if err := modify(&cfg); err != nil {
 		return err
 	}
-	return config.SaveInstanceConfig(instDir, cfg)
+	return config.SaveInstanceConfig(configPath, cfg)
 }
