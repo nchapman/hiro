@@ -59,7 +59,6 @@ All run in **worker processes**, dispatched via gRPC.
 | `edit.go` | 128 | Surgical find-and-replace |
 | `read.go` | 82 | Read with offset/limit, 64KB cap |
 | `write.go` | 49 | Atomic file write (temp+rename), auto-mkdir |
-| `webfetch.go` | 122 | HTTP fetch, 64KB response cap |
 | `task_output.go` | 72 | Background task stdout/stderr |
 | `task_stop.go` | 46 | Terminate background task |
 | `schema.go` | 36 | `RemoteToolNames` registry + `RemoteToolInfos()` for schema extraction |
@@ -83,6 +82,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 | `tools_history.go` | 148 | HistorySearch, HistoryRecall |
 | `tools_skills.go` | 158 | Skill + path validation |
 | `tools_todos.go` | 86 | TodoWrite tool |
+| `tools_webfetch.go` | 144 | WebFetch — SSRF-protected HTTP fetch (control plane, not worker) |
 
 | `compaction.go` | 777 | LLM-driven conversation summarization (now with MaxSummaryDepth cap) |
 | `context_providers.go` | 441 | Context provider system — delta-tracked system reminders (memories, todos, secrets, skills, agents) |
@@ -109,6 +109,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 | `DeleteInstance` | Operator | Permanently remove child + subtree |
 | `ListInstances` | Operator | List direct children |
 | `Skill` | Agents with skills | Load skill instructions on demand |
+| `WebFetch` | All agents | SSRF-protected HTTP fetch (runs in control plane) |
 
 **Tests**: 17 test files — `assembly_test.go`, `compaction_test.go`, `context_test.go`, `helpers_test.go`, `notifications_test.go`, `prompt_test.go`, `redact_test.go`, `tools_test.go`, `tools_history_test.go`, `tools_management_test.go`, `tools_memory_test.go`, `tools_skills_test.go`, `tools_spawn_test.go`, `tools_todos_test.go`, plus online eval tests (`compaction_online_test.go`, `eval_code_test.go`, `eval_locomo_test.go`).
 
@@ -315,7 +316,7 @@ Operator-level config management — auth, providers, secrets, clustering. Split
 | `provider` | `provider.go` | 174 | LLM provider construction (`CreateLanguageModel`, `TestConnection`, `AvailableProviders`). Imports all fantasy provider SDKs. |
 | `platform/loghandler` | `handler.go` | 356 | Structured slog handler for platform-wide log capture |
 | `auth` | `auth.go` | 118 | Token-based auth, session management |
-| `landlock` | `landlock.go`, `landlock_other.go` | 110 | Landlock LSM filesystem restrictions (Linux-only, stubs on other platforms) |
+| `landlock` | `landlock.go`, `landlock_other.go` | 196 | Landlock LSM filesystem restrictions (Linux-only, stubs on other platforms) |
 
 **Tests**: All have corresponding test files.
 
@@ -453,7 +454,7 @@ Each row is a reviewable unit. Tackle them in any order.
 | 22 | **Search Tools** | `agent/tools/grep.go`, `glob.go` | 968 | 2 test files | Ripgrep integration, Go fallbacks, pagination, output modes. |
 | 23 | **Edit Tool** | `agent/tools/edit.go` | 128 | 1 test file | Find-and-replace. |
 | 24 | **File Tools** | `agent/tools/read.go`, `write.go` | 131 | 2 test files | Read/write with sandboxing. |
-| 25 | **Landlock** | `landlock/landlock.go` | 110 | — | Landlock LSM filesystem restrictions. Linux-only; stubs on other platforms. |
+| 25 | **Landlock** | `landlock/landlock.go` | 196 | — | Landlock LSM filesystem restrictions. Linux-only; stubs on other platforms. |
 | 26 | **File Watcher** | `watcher/watcher.go` | 347 | `watcher_test.go` | fsnotify wrapper, debounced events. |
 | 27 | **Tool Rules** | `toolrules/*.go` | 662 | `toolrules_test.go` | Tool permission rules engine, Bash command filtering, wildcards. |
 | 28 | **Log Handler** | `platform/loghandler/handler.go` | 356 | `handler_test.go` | Structured slog handler for platform-wide log capture. |

@@ -77,7 +77,6 @@ Control plane                          Worker process
      |                                      |-- read SpawnConfig
      |                                      |-- prctl(PR_SET_NO_NEW_PRIVS)
      |                                      |-- landlock_restrict_self(path allowlist)
-     |                                      |-- prctl(PR_SET_DUMPABLE, 0)
      |                                      |-- seccomp(SET_MODE_FILTER)
      |                                      |     - blocks dangerous syscalls
      |                                      |     - if no Bash: blocks AF_INET/AF_INET6
@@ -93,7 +92,7 @@ Key differences from current:
 - **Worker self-isolates.** The control plane just forks and waits for "ready." No host-side setup.
 - **No pipes, no FD passing.** The veth-ready pipe (FD 3) is eliminated.
 - **No namespaces.** No CLONE_NEWUSER, CLONE_NEWNET, CLONE_NEWNS, or CLONE_NEWPID.
-- **Order matters:** `PR_SET_NO_NEW_PRIVS` first (required by Landlock and seccomp), then Landlock (restricts filesystem), then `PR_SET_DUMPABLE(0)` (prevents core dumps and reduces `/proc/self` exposure from other same-UID processes), then seccomp (restricts syscalls + optionally blocks network). Each step is strictly more restrictive.
+- **Order matters:** `PR_SET_NO_NEW_PRIVS` first (required by Landlock and seccomp), then Landlock (restricts filesystem), then seccomp (restricts syscalls + optionally blocks network). Each step is strictly more restrictive.
 - **Minimal work before isolation.** The worker reads SpawnConfig from stdin then immediately applies all restrictions before opening any files, starting gRPC, or doing anything else. This minimizes the pre-isolation window.
 
 ### Landlock Filesystem Policy
@@ -103,34 +102,35 @@ Each worker applies a Landlock ruleset at startup:
 ```
 Allowed paths (read + write):
   - instances/<uuid>/          — agent's own instance directory (memory, sessions, todos)
+  - sessions/<uuid>/           — session dir (scratch/, tmp/)
+  - /tmp/hiro-<session>/       — socket directory for gRPC IPC
   - workspace/                 — shared collaborative space
 
 Allowed paths (read only):
   - agents/                    — agent definitions (read-only for non-operators)
   - skills/                    — shared skills
   - /opt/mise/                 — shared toolchain (node, python, etc.)
-  - /usr/, /bin/, /lib/, ...   — system binaries and libraries
-  - /tmp/hiro-<session>/       — socket directory for gRPC IPC
-  - /proc/self/                — own process info only
+  - /usr/, /lib/, /etc/        — system binaries, libraries, config
+  - /proc/                     — process info (Go runtime needs /proc/self/exe, net pkg needs /proc/sys/)
+  - /dev/                      — /dev/null, /dev/urandom
 
 Denied (by omission — Landlock default-denies unlisted paths):
   - config/                    — secrets, tool policies
   - db/                        — platform database
   - instances/<other-uuid>/    — other agents' data
   - /tmp/ (broadly)            — other agents' socket directories
-  - /proc/<other-pid>/         — other agents' process info (environ, maps, fd)
   - /dev/shm/                  — shared memory (cross-agent communication channel)
 ```
 
-**Socket directory isolation:** The control plane creates each agent's socket directory (`/tmp/hiro-<session>/`) before spawning the worker. The specific directory path is added to the worker's Landlock allowlist. Workers cannot access other agents' socket directories because only the specific path is allowed, not `/tmp/` broadly.
+**Socket directory isolation:** The control plane creates each agent's socket directory (`/tmp/hiro-<session>/`) before spawning the worker. The specific directory path is added to the worker's Landlock ReadWrite list. Workers cannot access other agents' socket directories because only the specific path is allowed, not `/tmp/` broadly.
 
-**`/proc` isolation:** Only `/proc/self/` is in the Landlock read-only allowlist. All other `/proc` paths are denied. This prevents a critical attack: without this restriction, a same-UID worker could read `/proc/<pid>/environ` on any other worker, leaking secret environment variables (the primary mechanism for secret injection into Bash commands). Landlock resolves `/proc/self/` to the calling process's own entry, so each worker can only see its own process info.
+**`/proc` access:** `/proc` is in the read-only allowlist because the Go runtime requires `/proc/self/exe` (for `os.Executable()`) and the `net` package reads `/proc/sys/net/`. This grants read access to all of `/proc`, including other processes' entries. Sensitive environment variable leakage is mitigated by scrubbing secrets from the control plane's environment at startup (`os.Unsetenv("HIRO_API_KEY")`) and by never placing secrets in worker environments — secrets flow per-tool-call via gRPC, applied only as subprocess env vars for Bash commands.
 
-**`/dev/shm` exclusion:** `/dev/shm` is omitted from the Landlock allowlist. This prevents agents from using POSIX shared memory as a cross-agent communication channel. Agent workloads do not need `/dev/shm`.
+**`/dev/shm` exclusion:** `/dev/shm` is not in any Landlock allowlist. Landlock's default-deny behavior prevents agents from using POSIX shared memory as a cross-agent communication channel.
 
-**Landlock ABI v2 (Linux 5.19+):** The design targets ABI v2 rather than v1 because v1 does not restrict `io_uring`, which can bypass Landlock file restrictions entirely. ABI v2 closes this gap. Ubuntu 22.04 HWE ships 5.19+ and Ubuntu 24.04 ships 6.8, so this is not a practical constraint.
+**Landlock ABI negotiation:** The implementation auto-detects the kernel's highest supported ABI version and includes all corresponding access rights. ABI v1 (kernel 5.13+) provides the 13 base filesystem access rights. ABI v2 (5.19+) adds `REFER` (cross-directory linking). ABI v3 (6.2+) adds `TRUNCATE`. ABI v5 (6.10+) adds `IOCTL_DEV`. Access rights not declared in the ruleset are implicitly allowed everywhere, so including all known rights is critical. `io_uring` bypass of Landlock is mitigated separately by blocking all three `io_uring` syscalls via seccomp.
 
-**Operator agents** (those with `groups: [hiro-operators]` in frontmatter) get read+write access to `agents/` and `skills/` instead of read-only. This replaces the hiro-operators group + setgid mechanism.
+**Operator agents** (those with `CreatePersistentInstance` in their effective tools) get read+write access to `agents/` and `skills/` instead of read-only. This replaces the hiro-operators group + setgid mechanism.
 
 **config.yaml protection** no longer relies on root ownership + `0600` permissions. Landlock simply doesn't include `config/` in the allowlist. The worker cannot open it regardless of file permissions.
 
@@ -147,7 +147,7 @@ Each worker installs a seccomp-BPF filter (unprivileged, self-imposed via `PR_SE
 - `ptrace` — prevent inspecting other processes
 - `process_vm_readv`, `process_vm_writev` — prevent cross-process memory access (same-UID processes can use these without ptrace; separate syscalls that must be blocked independently)
 - `kexec_load` — prevent loading a new kernel
-- `io_uring_setup` — io_uring bypasses Landlock on older kernels; unnecessary for agent workloads
+- `io_uring_setup`, `io_uring_enter`, `io_uring_register` — io_uring can bypass seccomp on some kernels; unnecessary for agent workloads
 - `shmget`, `shmat`, `shmctl` — prevent cross-agent shared memory communication
 
 **Conditionally blocked (workers without `Bash` tool):**
@@ -222,7 +222,7 @@ The system probes for Landlock at startup:
 
 | Probe | How | If unavailable |
 |-------|-----|----------------|
-| Landlock | `landlock_create_ruleset()` with ABI v2 access mask | Log warning. Filesystem isolation disabled. Workers run with full filesystem access. |
+| Landlock | `landlock_create_ruleset(LANDLOCK_CREATE_RULESET_VERSION)` | Log warning. Filesystem isolation disabled. Workers run with full filesystem access. |
 | seccomp-BPF | Always available (requires only `PR_SET_NO_NEW_PRIVS`) | Fatal — this should never fail on any modern Linux. |
 
 Startup logs report isolation status:
@@ -283,16 +283,13 @@ WARN  filesystem isolation disabled — all agents share the process user's file
 
 ## What Gets Added
 
-### Code (~200-300 lines estimated)
+### Code (~570 lines added)
 
-| Component | Est. lines | What it does |
+| Component | Lines | What it does |
 |---|---|---|
-| `internal/landlock/` | ~100 | Landlock ruleset creation and self-restriction. Thin wrapper around syscalls. |
-| Worker startup (in `cmd/hiro/agent_linux.go`) | ~40 | Call `landlock_restrict_self()` with computed path allowlist |
-| Worker seccomp (in `cmd/hiro/agent_linux.go`) | ~30 | Updated BPF filter with conditional AF_INET/AF_INET6 blocking |
-| Startup probes (in `cmd/hiro/main.go`) | ~20 | Detect Landlock availability |
-| SpawnConfig changes (in `internal/ipc/`) | ~20 | Add Landlock path allowlist, network access boolean. Remove UID/GID/veth fields. |
-| WebFetch as control plane tool | ~30 | Move from worker tool to local tool (like memory/todos) |
+| `internal/landlock/` | 196 | Landlock ABI negotiation (v1-v5), ruleset creation, self-restriction. Thin syscall wrappers + non-Linux stubs. |
+| `cmd/hiro/agent_linux.go` | 226 | seccomp-BPF filter with placeholder-and-patch offsets, Landlock application, NO_NEW_PRIVS |
+| `internal/inference/tools_webfetch.go` | 144 | WebFetch as control plane local tool with SSRF protection (DNS-before-dial, redirect validation) |
 
 ### New fields in SpawnConfig
 
@@ -360,7 +357,7 @@ network:
 | Network: no-network agents | Empty network namespace | seccomp blocks socket creation (stronger — can't even create a socket) |
 | Network: network agents | Domain-level filtering via nftables | Full host network (weaker — no domain filtering) |
 | Syscall restriction | Per-worker seccomp-BPF | Per-worker seccomp-BPF (same, with additions) |
-| Process visibility | UID isolation (different users) | Landlock restricts /proc to /proc/self/ + PR_SET_DUMPABLE(0) (comparable) |
+| Process visibility | UID isolation (different users) | /proc readable but secrets scrubbed from env; no sensitive data exposed (weaker) |
 | Cross-agent memory | UID isolation blocks process_vm_readv | seccomp blocks process_vm_readv/writev (same) |
 | Cross-agent signals | UID isolation blocks kill() | Same user, kill() possible but PIDs not discoverable (weaker) |
 | Container requirements | root, CAP_NET_ADMIN, custom seccomp, sysctls | None |
@@ -370,9 +367,9 @@ network:
 
 1. **No domain-level network filtering.** Agents with Bash get full host network. This is a real regression for high-security deployments. The mitigation is tool rules (`Bash(curl *)` deny rules) and the fact that most agents don't need Bash.
 
-2. **No PID namespace isolation.** All workers run as the same user. Mitigated by: Landlock restricts `/proc` access to `/proc/self/` only, so workers cannot enumerate other PIDs or read `/proc/<pid>/environ`. `PR_SET_DUMPABLE(0)` further reduces `/proc/self` exposure from other same-UID processes. `process_vm_readv`/`process_vm_writev` are blocked by seccomp.
+2. **No PID namespace isolation.** All workers run as the same user and can read `/proc` broadly (the Go runtime requires this). Mitigated by: secrets are scrubbed from the control plane's environment at startup (`os.Unsetenv`), secrets are never placed in worker environments (they flow per-tool-call via gRPC), and `process_vm_readv`/`process_vm_writev` are blocked by seccomp.
 
-3. **Cross-agent signals.** A worker with Bash could `kill` another worker's process since they share a UID. Mitigated by: without `/proc` access, the attacker cannot discover other workers' PIDs. Agents without Bash cannot call `kill` at all. This is a residual risk for Bash-capable agents that somehow learn another worker's PID.
+3. **Cross-agent signals.** A worker with Bash could `kill` another worker's process since they share a UID. Mitigated by: while `/proc` is readable and PIDs are discoverable, killing another worker just causes it to be restarted. Agents without Bash cannot call `kill` at all. This is a residual risk for Bash-capable agents — denial of service, not data exfiltration.
 
 4. **Abstract Unix sockets.** Abstract namespace Unix sockets (null-byte prefix) are not filesystem-bound and are **not restricted by Landlock**. Two colluding agents could use abstract sockets for communication or to pass file descriptors via `SCM_RIGHTS`. This requires both agents to cooperate in the attack and is low risk in practice.
 
