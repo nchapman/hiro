@@ -50,6 +50,10 @@ var ssrfTransport = &http.Transport{
 			}
 		}
 
+		if len(addrs) == 0 {
+			return nil, fmt.Errorf("fetch blocked: DNS returned no addresses for %s", host)
+		}
+
 		dialer := &net.Dialer{Timeout: webDialTimeout}
 		return dialer.DialContext(ctx, network, net.JoinHostPort(addrs[0], port))
 	},
@@ -110,8 +114,7 @@ func executeWebFetch(ctx context.Context, params webFetchParams) (fantasy.ToolRe
 		truncated = "\n[response truncated]"
 	}
 
-	result := fmt.Sprintf("HTTP %d %s\nContent-Type: %s\n\n%s%s",
-		resp.StatusCode,
+	result := fmt.Sprintf("HTTP %s\nContent-Type: %s\n\n%s%s",
 		resp.Status,
 		resp.Header.Get("Content-Type"),
 		string(body),

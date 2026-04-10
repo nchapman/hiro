@@ -266,7 +266,7 @@ func waitForWorkerLogMessage(t *testing.T, message string, timeout time.Duration
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, err := exec.Command("docker", "logs", workerContainer).CombinedOutput()
+		out, err := exec.Command("docker", "logs", "--tail", "100", workerContainer).CombinedOutput()
 		if err == nil && strings.Contains(string(out), message) {
 			t.Logf("found worker log: %s", message)
 			return

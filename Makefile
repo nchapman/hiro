@@ -40,7 +40,7 @@ test-online:
 test-cluster:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
 	mkdir -p tests/e2e_cluster/leader-config; \
-	chmod 777 tests/e2e_cluster/leader-config; \
+	chmod 775 tests/e2e_cluster/leader-config; \
 	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
 	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
 	docker compose -f dev/docker-compose.cluster.yml build; \
@@ -66,7 +66,7 @@ test-cluster-relay:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
 	SWARM=$$(openssl rand -hex 16); \
 	mkdir -p tests/e2e_cluster/leader-config; \
-	chmod 777 tests/e2e_cluster/leader-config; \
+	chmod 775 tests/e2e_cluster/leader-config; \
 	printf "cluster:\n  mode: leader\n" > tests/e2e_cluster/leader-config/config.yaml; \
 	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
 	docker compose -f dev/docker-compose.cluster-relay.yml build; \
