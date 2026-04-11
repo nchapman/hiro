@@ -179,14 +179,14 @@ func (s *Server) handlePutInstanceConfig(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "instance status changed; please try again", http.StatusConflict)
 		default:
 			s.logger.Error("failed to update instance config", "id", id, "error", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "invalid configuration", http.StatusBadRequest)
 		}
 		return
 	}
 
 	if err := s.applyInstanceFileUpdates(id, info, req); err != nil {
 		s.logger.Error("failed to write instance files", "id", id, "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to write instance files", http.StatusInternalServerError)
 		return
 	}
 

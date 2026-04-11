@@ -8,16 +8,18 @@ import (
 
 func TestIsBlockedIP(t *testing.T) {
 	blocked := []string{
-		"127.0.0.1",   // loopback
-		"::1",         // loopback v6
-		"10.0.0.1",    // private
-		"172.16.0.1",  // private
-		"192.168.1.1", // private
-		"169.254.1.1", // link-local
-		"0.0.0.0",     // unspecified
-		"fe80::1",     // link-local v6
-		"ff02::1",     // link-local multicast
-		"ff0e::1",     // global multicast
+		"127.0.0.1",       // loopback
+		"::1",             // loopback v6
+		"10.0.0.1",        // private
+		"172.16.0.1",      // private
+		"192.168.1.1",     // private
+		"169.254.1.1",     // link-local
+		"0.0.0.0",         // unspecified
+		"fe80::1",         // link-local v6
+		"ff02::1",         // link-local multicast
+		"ff0e::1",         // global multicast
+		"100.64.0.1",      // CGNAT (RFC 6598)
+		"100.100.100.200", // Alibaba Cloud metadata
 	}
 	for _, addr := range blocked {
 		ip := net.ParseIP(addr)

@@ -471,11 +471,11 @@ func (m *Manager) buildLandlockPaths(instDir, sessDir, socketDir string, allowed
 			filepath.Join(m.rootDir, "workspace"), // shared workspace
 		},
 		ReadOnly: []string{
-			"/usr",  // system binaries/libraries
-			"/lib",  // shared libraries
-			"/etc",  // system config (resolv.conf, etc.)
-			"/proc", // /proc/self for Go runtime (os.Executable, net package)
-			"/dev",  // /dev/null, /dev/urandom — required by many tools
+			"/usr",       // system binaries/libraries
+			"/lib",       // shared libraries
+			"/etc",       // system config (resolv.conf, etc.)
+			"/proc/self", // Go runtime needs /proc/self (os.Executable, net package); /proc would expose other processes' environ
+			"/dev",       // /dev/null, /dev/urandom — required by many tools
 		},
 	}
 

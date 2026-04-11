@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,6 +33,9 @@ type webFetchParams struct {
 // all resolved IPs are checked, preventing DNS rebinding attacks where a
 // name initially resolves to a public IP then switches to a private one.
 var ssrfTransport = &http.Transport{
+	// Explicitly disable proxy to prevent HTTP_PROXY env var from bypassing
+	// SSRF checks (proxy would be dialed instead of the target, skipping IP validation).
+	Proxy: func(*http.Request) (*url.URL, error) { return nil, nil },
 	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
@@ -58,9 +62,18 @@ var ssrfTransport = &http.Transport{
 	},
 }
 
-// isBlockedIP returns true for loopback, private, link-local, and multicast addresses.
+// cgnatRange is RFC 6598 (100.64.0.0/10), used by CGNAT and some cloud metadata
+// services (e.g. Alibaba Cloud at 100.100.100.200).
+var cgnatRange = func() *net.IPNet {
+	_, n, _ := net.ParseCIDR("100.64.0.0/10")
+	return n
+}()
+
+// isBlockedIP returns true for loopback, private, link-local, multicast,
+// unspecified, and CGNAT addresses.
 func isBlockedIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsMulticast() || ip.IsUnspecified() || cgnatRange.Contains(ip)
 }
 
 func buildWebFetchTool() Tool {

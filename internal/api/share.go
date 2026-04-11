@@ -111,16 +111,23 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Block sharing anything in the config directory (contains secrets).
-	if body.Path == "config" || strings.HasPrefix(body.Path, "config/") {
-		http.Error(w, "config directory cannot be shared", http.StatusForbidden)
-		return
-	}
-
 	// Verify the file exists and is within root.
 	absPath, err := resolveFilesPath(s.rootDir, body.Path)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Block sharing anything in protected directories (config, etc.) after
+	// path resolution to prevent traversal bypasses like ./config/config.yaml.
+	realRoot, err := filepath.EvalSymlinks(s.rootDir)
+	if err != nil {
+		s.logger.Error("root resolution failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if isProtectedPath(realRoot, absPath) {
+		http.Error(w, "this path cannot be shared", http.StatusForbidden)
 		return
 	}
 	info, err := os.Stat(absPath)
@@ -162,6 +169,15 @@ func (s *Server) resolveShareToken(w http.ResponseWriter, r *http.Request) (stri
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return "", "", false
+	}
+
+	// Block access to protected paths in case a token was minted before
+	// the creation-time check was added.
+	if realRoot, err := filepath.EvalSymlinks(s.rootDir); err == nil {
+		if isProtectedPath(realRoot, absPath) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return "", "", false
+		}
 	}
 
 	return relPath, absPath, true

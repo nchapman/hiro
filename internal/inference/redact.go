@@ -7,7 +7,8 @@ import (
 )
 
 // minSecretLen is the minimum length a secret value must have to be redacted.
-const minSecretLen = 8
+// Very short values (1-2 chars) would cause too many false-positive replacements.
+const minSecretLen = 3
 
 // Redactor replaces secret values with their names in text output.
 type Redactor struct {

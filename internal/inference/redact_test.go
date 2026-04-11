@@ -25,11 +25,21 @@ func TestRedactor_ReplacesSecrets(t *testing.T) {
 
 func TestRedactor_SkipsShortSecrets(t *testing.T) {
 	r := NewRedactor(func() []string {
-		return []string{"SHORT=abc"} // len 3 < minSecretLen (8)
+		return []string{"SHORT=ab"} // len 2 < minSecretLen (3)
 	})
-	got := r.Redact("value is abc here")
-	if got != "value is abc here" {
+	got := r.Redact("value is ab here")
+	if got != "value is ab here" {
 		t.Errorf("short secrets should not be redacted: %q", got)
+	}
+}
+
+func TestRedactor_RedactsShortishSecrets(t *testing.T) {
+	r := NewRedactor(func() []string {
+		return []string{"PIN=1234"} // len 4 >= minSecretLen (3)
+	})
+	got := r.Redact("pin is 1234")
+	if got != "pin is [PIN]" {
+		t.Errorf("secrets >= 3 chars should be redacted: %q", got)
 	}
 }
 

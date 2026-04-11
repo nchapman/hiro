@@ -452,7 +452,7 @@ func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := s.manager.StopInstance(id); err != nil {
 		s.logger.Error("failed to stop instance", "id", id, "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to stop instance", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -507,7 +507,7 @@ func (s *Server) handleClearInstance(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "instance not found", http.StatusNotFound)
 		} else {
 			s.logger.Error("failed to clear instance", "id", id, "error", err)
-			http.Error(w, err.Error(), http.StatusConflict)
+			http.Error(w, "failed to clear session", http.StatusConflict)
 		}
 		return
 	}
@@ -534,7 +534,7 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.manager.DeleteInstance(id); err != nil {
 		s.logger.Error("failed to delete instance", "id", id, "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to delete instance", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

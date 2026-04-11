@@ -111,6 +111,9 @@ func buildSeccompFilter(networkAccess bool) []unix.SockFilter {
 		uint32(unix.SYS_SHMGET),
 		uint32(unix.SYS_SHMAT),
 		uint32(unix.SYS_SHMCTL),
+		uint32(unix.SYS_BPF),
+		uint32(unix.SYS_USERFAULTFD),
+		uint32(unix.SYS_PERF_EVENT_OPEN),
 	}
 
 	filter := []unix.SockFilter{
@@ -185,7 +188,10 @@ func buildSeccompFilter(networkAccess bool) []unix.SockFilter {
 			bpfJeq(syscall.AF_INET6, 0, 1),
 			deny,
 
-			// Other socket domains (AF_UNIX, AF_NETLINK, etc.) → allow.
+			bpfJeq(syscall.AF_NETLINK, 0, 1),
+			deny,
+
+			// Other socket domains (AF_UNIX for gRPC, etc.) → allow.
 			allow,
 		)
 

@@ -169,6 +169,15 @@ func (nb *NodeBridge) handleExecuteTool(ctx context.Context, msg *pb.ExecuteTool
 		return
 	}
 
+	// Inject secrets from the leader for Bash tool calls. The leader sends
+	// secrets via the mTLS-encrypted gRPC stream in the SecretEnv field.
+	if len(msg.SecretEnv) > 0 && ipc.NeedsSecrets(msg.ToolName) {
+		if s, ok := w.worker.(ipc.SecretEnvSetter); ok {
+			env := msg.SecretEnv // capture for closure
+			s.SetSecretEnvFn(func() []string { return env })
+		}
+	}
+
 	result, err := w.worker.ExecuteTool(ctx, msg.CallId, msg.ToolName, msg.Input)
 	if err != nil {
 		_ = nb.stream.SendToolResult(msg.SessionId, msg.CallId, "", false, err.Error())
