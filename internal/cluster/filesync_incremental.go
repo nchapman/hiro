@@ -32,6 +32,12 @@ func (s *FileSyncService) WatchAndSync() error {
 		}
 	}
 
+	// Watch rootDir (non-recursively) to hot-reload .syncignore on change.
+	syncIgnorePath := filepath.Join(s.rootDir, ".syncignore")
+	if err := watcher.Add(s.rootDir); err != nil {
+		s.logger.Debug("failed to watch root dir for .syncignore changes", "error", err)
+	}
+
 	// Debounce timer and pending changes.
 	var mu sync.Mutex
 	pending := make(map[string]bool) // path → deleted
@@ -46,6 +52,13 @@ func (s *FileSyncService) WatchAndSync() error {
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
+			}
+			// Hot-reload .syncignore on change.
+			if event.Name == syncIgnorePath {
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) {
+					s.reloadSyncIgnore()
+				}
+				continue
 			}
 			s.handleFSEvent(watcher, event, &mu, pending, timer)
 
@@ -65,7 +78,7 @@ func (s *FileSyncService) WatchAndSync() error {
 // change set and watching newly created directories.
 func (s *FileSyncService) handleFSEvent(watcher *fsnotify.Watcher, event fsnotify.Event, mu *sync.Mutex, pending map[string]bool, timer *time.Timer) {
 	relPath, err := filepath.Rel(s.rootDir, event.Name)
-	if err != nil || shouldIgnore(relPath) {
+	if err != nil || s.shouldIgnore(relPath) {
 		return
 	}
 	if s.isEchoSuppressed(relPath) {
@@ -158,7 +171,7 @@ func (s *FileSyncService) sendChange(relPath string, deleted bool) error {
 // If a conflict is detected (local file was modified since the last known
 // state), the local version is preserved as a .conflict file.
 func (s *FileSyncService) ApplyFileUpdate(update *pb.FileUpdate) error {
-	if shouldIgnore(update.Path) {
+	if s.shouldIgnore(update.Path) {
 		return nil
 	}
 
@@ -252,7 +265,7 @@ func (s *FileSyncService) detectAndHandleConflict(absPath string, update *pb.Fil
 		"last_received", lastReceived,
 		"conflict_file", conflictPath,
 	)
-	if err := os.WriteFile(conflictPath, update.Content, os.FileMode(update.Mode)); err != nil {
+	if err := os.WriteFile(conflictPath, update.Content, os.FileMode(update.Mode)&filePermNoExec); err != nil {
 		s.logger.Warn("failed to write conflict file", "path", conflictPath, "error", err)
 	}
 	// Still update the received mtime so future updates don't

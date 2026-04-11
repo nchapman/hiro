@@ -692,7 +692,7 @@ func TestStress_ReconnectionGap(t *testing.T) {
 			return nil //nolint:nilerr // skip inaccessible entries, keep walking
 		}
 		relPath, _ := filepath.Rel(p.workerDir, path)
-		if shouldIgnore(relPath) || strings.Contains(filepath.Base(path), ".conflict.") {
+		if p.worker.shouldIgnore(relPath) || strings.Contains(filepath.Base(path), ".conflict.") {
 			return nil
 		}
 		info, err := d.Info()

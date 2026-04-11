@@ -3,6 +3,7 @@ package cluster
 import (
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
@@ -42,6 +43,10 @@ type FileSyncService struct {
 	receivedMu    sync.Mutex
 	receivedMtime map[string]int64
 
+	// Ignore patterns loaded from .syncignore (or defaults).
+	// Hot-reloaded when .syncignore changes on disk.
+	ignorePatterns atomic.Pointer[[]syncIgnorePattern]
+
 	// Stop signal.
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -62,7 +67,8 @@ func NewFileSyncService(cfg FileSyncConfig) *FileSyncService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &FileSyncService{
+	patterns := loadSyncIgnore(cfg.RootDir, logger)
+	svc := &FileSyncService{
 		rootDir:       cfg.RootDir,
 		syncDirs:      cfg.SyncDirs,
 		nodeID:        cfg.NodeID,
@@ -72,6 +78,8 @@ func NewFileSyncService(cfg FileSyncConfig) *FileSyncService {
 		receivedMtime: make(map[string]int64),
 		stopCh:        make(chan struct{}),
 	}
+	svc.ignorePatterns.Store(&patterns)
+	return svc
 }
 
 // Stop signals the watcher to shut down.

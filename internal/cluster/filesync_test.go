@@ -3,6 +3,7 @@ package cluster
 import (
 	"archive/tar"
 	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,13 @@ import (
 )
 
 func TestShouldIgnore(t *testing.T) {
+	// Uses default patterns (no .syncignore file in temp dir).
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  t.TempDir(),
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+	})
+
 	tests := []struct {
 		path   string
 		ignore bool
@@ -28,11 +36,12 @@ func TestShouldIgnore(t *testing.T) {
 		{"workspace/.DS_Store", true},
 		{"workspace/file.swp", true},
 		{"workspace/file.go", false},
-		{"vendor/pkg/lib.go", true},
+		{"vendor/pkg/lib.go", false},
+		{"workspace/Thumbs.db", true},
 	}
 
 	for _, tt := range tests {
-		if got := shouldIgnore(tt.path); got != tt.ignore {
+		if got := svc.shouldIgnore(tt.path); got != tt.ignore {
 			t.Errorf("shouldIgnore(%q) = %v, want %v", tt.path, got, tt.ignore)
 		}
 	}
@@ -553,11 +562,241 @@ func TestReconcile_CatchesDrift(t *testing.T) {
 }
 
 func TestShouldIgnore_HiveTmp(t *testing.T) {
-	if !shouldIgnore("workspace/.hiro-tmp-123456789") {
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  t.TempDir(),
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+	})
+
+	if !svc.shouldIgnore("workspace/.hiro-tmp-123456789") {
 		t.Error("expected .hiro-tmp-* files to be ignored")
 	}
-	if shouldIgnore("workspace/hiro-tmp-file.txt") {
+	if svc.shouldIgnore("workspace/hiro-tmp-file.txt") {
 		t.Error("regular files with hiro-tmp in name should not be ignored")
+	}
+}
+
+func TestSyncIgnoreFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".syncignore"), []byte(`
+# Custom ignore patterns
+build
+*.log
+data/*.csv
+workspace/logs
+`), 0o644)
+
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+	})
+
+	tests := []struct {
+		path   string
+		ignore bool
+	}{
+		{"workspace/build/output.js", true},    // "build" matches component
+		{"workspace/app.log", true},            // "*.log" matches component
+		{"data/export.csv", true},              // "data/*.csv" matches full path
+		{"workspace/data/export.csv", false},   // "data/*.csv" doesn't match (different prefix)
+		{"workspace/main.go", false},           // not matched
+		{"workspace/.hiro-tmp-123", true},      // always ignored (hardcoded)
+		{"workspace/node_modules/x.js", false}, // not in custom file
+		{".git/HEAD", false},                   // not in custom file
+		{"workspace/logs/app.log", true},       // "workspace/logs" matches as directory prefix
+		{"workspace/logs/sub/debug.log", true}, // prefix match works recursively
+		{"workspace/logs", true},               // exact match on the path itself
+		{"other/logs/readme.txt", false},       // different prefix, no match
+	}
+
+	for _, tt := range tests {
+		if got := svc.shouldIgnore(tt.path); got != tt.ignore {
+			t.Errorf("shouldIgnore(%q) = %v, want %v", tt.path, got, tt.ignore)
+		}
+	}
+}
+
+func TestSyncIgnoreFile_TrailingSlash(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".syncignore"), []byte("output/\n"), 0o644)
+
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+	})
+
+	if !svc.shouldIgnore("workspace/output/bundle.js") {
+		t.Error("trailing slash pattern should still match directory component")
+	}
+}
+
+func TestParseIgnorePatterns(t *testing.T) {
+	logger := slog.Default()
+	patterns := parseIgnorePatterns([]string{
+		"node_modules",
+		"*.swp",
+		"workspace/data/*.csv",
+		"trailing/",
+		"",
+	}, logger)
+
+	if len(patterns) != 4 {
+		t.Fatalf("expected 4 patterns, got %d", len(patterns))
+	}
+	if patterns[0].isPath {
+		t.Error("node_modules should not be a path pattern")
+	}
+	if patterns[1].isPath {
+		t.Error("*.swp should not be a path pattern")
+	}
+	if !patterns[2].isPath {
+		t.Error("workspace/data/*.csv should be a path pattern")
+	}
+	if patterns[3].isPath {
+		t.Error("trailing/ (stripped to 'trailing') should not be a path pattern")
+	}
+}
+
+func TestParseIgnorePatterns_InvalidSkipped(t *testing.T) {
+	logger := slog.Default()
+	patterns := parseIgnorePatterns([]string{
+		"valid",
+		"[unclosed", // malformed glob — should be skipped
+		"**/*.log",  // ** not supported — should be skipped
+		"also-valid",
+	}, logger)
+
+	if len(patterns) != 2 {
+		t.Fatalf("expected 2 valid patterns, got %d", len(patterns))
+	}
+	if patterns[0].pattern != "valid" {
+		t.Errorf("patterns[0] = %q, want %q", patterns[0].pattern, "valid")
+	}
+	if patterns[1].pattern != "also-valid" {
+		t.Errorf("patterns[1] = %q, want %q", patterns[1].pattern, "also-valid")
+	}
+}
+
+func TestSyncIgnoreFile_EmptyFallsBackToDefaults(t *testing.T) {
+	dir := t.TempDir()
+	// Empty .syncignore (only comments/blanks).
+	os.WriteFile(filepath.Join(dir, ".syncignore"), []byte(`
+# This file is intentionally empty
+`), 0o644)
+
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+	})
+
+	// Should still use defaults — .git and node_modules should be ignored.
+	if !svc.shouldIgnore(".git/HEAD") {
+		t.Error("empty .syncignore should fall back to defaults (.git)")
+	}
+	if !svc.shouldIgnore("workspace/node_modules/pkg/index.js") {
+		t.Error("empty .syncignore should fall back to defaults (node_modules)")
+	}
+}
+
+func TestSyncIgnoreFile_MissingUsesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	// No .syncignore file at all.
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+	})
+
+	if !svc.shouldIgnore(".git/HEAD") {
+		t.Error("missing .syncignore should use defaults (.git)")
+	}
+	if !svc.shouldIgnore("workspace/file.swp") {
+		t.Error("missing .syncignore should use defaults (*.swp)")
+	}
+}
+
+func TestApplyInitialSync_IgnoredEntriesSkipped(t *testing.T) {
+	// Create a tar with an ignored directory entry — it should be
+	// skipped on the receiving side even though the sender included it.
+	srcDir := t.TempDir()
+	os.MkdirAll(filepath.Join(srcDir, "workspace", "project"), 0o755)
+	os.WriteFile(filepath.Join(srcDir, "workspace", "project", "main.go"), []byte("package main"), 0o644)
+
+	// Create initial sync without a .syncignore (defaults apply on sender).
+	src := NewFileSyncService(FileSyncConfig{
+		RootDir:  srcDir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "leader",
+	})
+	data, err := src.CreateInitialSync()
+	if err != nil {
+		t.Fatalf("CreateInitialSync: %v", err)
+	}
+
+	// On the receiving side, create a .syncignore that excludes "project".
+	dstDir := t.TempDir()
+	os.WriteFile(filepath.Join(dstDir, ".syncignore"), []byte("project\n"), 0o644)
+
+	dst := NewFileSyncService(FileSyncConfig{
+		RootDir:  dstDir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "worker-1",
+	})
+
+	if err := dst.ApplyInitialSyncStream(bytes.NewReader(data)); err != nil {
+		t.Fatalf("ApplyInitialSyncStream: %v", err)
+	}
+
+	// The "project" directory and its contents should NOT be extracted.
+	if _, err := os.Stat(filepath.Join(dstDir, "workspace", "project", "main.go")); !os.IsNotExist(err) {
+		t.Error("expected ignored 'project' directory to be excluded from initial sync extraction")
+	}
+}
+
+func TestSyncIgnoreHotReload(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "workspace"), 0o755)
+
+	svc := NewFileSyncService(FileSyncConfig{
+		RootDir:  dir,
+		SyncDirs: []string{"workspace"},
+		NodeID:   "test",
+		SendFn:   func(*pb.FileUpdate) error { return nil },
+	})
+
+	// Initially no .syncignore — defaults apply.
+	if !svc.shouldIgnore("workspace/node_modules/x.js") {
+		t.Fatal("expected defaults to ignore node_modules")
+	}
+	if svc.shouldIgnore("workspace/custom-build/output.js") {
+		t.Fatal("expected defaults to not ignore custom-build")
+	}
+
+	// Write a .syncignore that adds custom-build but drops node_modules.
+	os.WriteFile(filepath.Join(dir, ".syncignore"), []byte("custom-build\n"), 0o644)
+
+	// Simulate hot-reload (normally triggered by fsnotify in WatchAndSync).
+	svc.reloadSyncIgnore()
+
+	if svc.shouldIgnore("workspace/node_modules/x.js") {
+		t.Error("after reload, node_modules should no longer be ignored (not in custom file)")
+	}
+	if !svc.shouldIgnore("workspace/custom-build/output.js") {
+		t.Error("after reload, custom-build should be ignored")
+	}
+
+	// Remove .syncignore — should revert to defaults.
+	os.Remove(filepath.Join(dir, ".syncignore"))
+	svc.reloadSyncIgnore()
+
+	if !svc.shouldIgnore("workspace/node_modules/x.js") {
+		t.Error("after removing .syncignore, defaults should apply again (node_modules)")
+	}
+	if svc.shouldIgnore("workspace/custom-build/output.js") {
+		t.Error("after removing .syncignore, custom-build should not be ignored")
 	}
 }
 

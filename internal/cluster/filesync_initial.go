@@ -57,7 +57,7 @@ func (s *FileSyncService) tarEntry(tw *tar.Writer, path string, d fs.DirEntry, w
 	if relErr != nil {
 		return nil
 	}
-	if shouldIgnore(relPath) {
+	if s.shouldIgnore(relPath) {
 		if d.IsDir() {
 			return filepath.SkipDir
 		}
@@ -129,6 +129,12 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 			continue
 		}
 
+		// Defense-in-depth: filter on the receiving side too, in case the
+		// sender has a different .syncignore or the tar was tampered with.
+		if s.shouldIgnore(rel) {
+			continue
+		}
+
 		// Suppress echo — derive relPath from resolved target rather than
 		// trusting header.Name, so echo suppression works regardless of how
 		// the tar was produced.
@@ -137,14 +143,16 @@ func (s *FileSyncService) ApplyInitialSyncStream(r io.Reader) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil { //nolint:gosec // mode comes from our own tar, bounded by filePermNoExec
+			// Strip setuid, setgid, and sticky bits from remote directory modes.
+			dirMode := os.FileMode(header.Mode) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky) //nolint:gosec // mode sanitized by mask
+			if err := os.MkdirAll(target, dirMode); err != nil {
 				return fmt.Errorf("creating dir %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), fsperm.DirStandard); err != nil {
 				return err
 			}
-			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&filePermNoExec); err != nil { //nolint:gosec // mode comes from our own tar, masked by filePermNoExec
+			if err := atomicWriteFromReader(target, tr, os.FileMode(header.Mode)&filePermNoExec); err != nil { //nolint:gosec // mode sanitized by filePermNoExec mask
 				return fmt.Errorf("writing file %s: %w", header.Name, err)
 			}
 		}

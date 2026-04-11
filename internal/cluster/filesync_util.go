@@ -61,7 +61,7 @@ func (s *FileSyncService) reconcileEntry(path string, d fs.DirEntry, walkErr err
 		return nil //nolint:nilerr // skip inaccessible entries
 	}
 	relPath, _ := filepath.Rel(s.rootDir, path)
-	if shouldIgnore(relPath) {
+	if s.shouldIgnore(relPath) {
 		if d.IsDir() {
 			return filepath.SkipDir
 		}
@@ -116,7 +116,7 @@ func (s *FileSyncService) addWatchRecursive(w *fsnotify.Watcher, dir string) err
 			return nil
 		}
 		relPath, _ := filepath.Rel(s.rootDir, path)
-		if shouldIgnore(relPath) {
+		if s.shouldIgnore(relPath) {
 			return filepath.SkipDir
 		}
 		if err := w.Add(path); err != nil {
@@ -135,7 +135,7 @@ func (s *FileSyncService) scanNewDir(dir string, mu *sync.Mutex, pending map[str
 			return nil //nolint:nilerr // skip inaccessible entries and directories
 		}
 		relPath, err := filepath.Rel(s.rootDir, path)
-		if err != nil || shouldIgnore(relPath) {
+		if err != nil || s.shouldIgnore(relPath) {
 			return nil //nolint:nilerr // skip entries that can't be relativized or are ignored
 		}
 		if s.isEchoSuppressed(relPath) {
