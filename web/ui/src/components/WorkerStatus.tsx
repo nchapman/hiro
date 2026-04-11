@@ -150,7 +150,7 @@ export default function WorkerStatus({ onDisconnect }: WorkerStatusProps) {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Swarm</span>
                   <code className="font-mono text-xs">
-                    {settings.swarm_code}
+                    {settings.swarm_code.toUpperCase()}
                   </code>
                 </div>
               )}

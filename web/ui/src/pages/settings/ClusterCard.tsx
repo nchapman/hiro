@@ -171,7 +171,7 @@ export default function ClusterCard() {
                 <span className="text-sm font-medium">Swarm Code</span>
                 <div className="flex items-center gap-2">
                   <code className="rounded bg-muted px-2 py-1 text-sm font-mono">
-                    {settings.swarm_code}
+                    {settings.swarm_code.toUpperCase()}
                   </code>
                   <Button
                     variant="ghost"

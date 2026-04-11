@@ -575,9 +575,11 @@ func isSameOrigin(r *http.Request) bool {
 func isLoopbackOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		// No Origin → not a browser request. Verify the remote IP is loopback
-		// to prevent non-browser remote clients from reaching setup endpoints.
-		return isLoopbackRemote(r)
+		// No Origin → either a non-browser client or a same-origin GET from a
+		// browser (browsers only send Origin on POST/PUT/DELETE and cross-origin).
+		// Accept if RemoteAddr is loopback OR if Host is loopback (covers Docker
+		// port-forwarding where RemoteAddr is the bridge IP but Host is localhost).
+		return isLoopbackRemote(r) || isLoopbackHost(r.Host)
 	}
 	if !isSameOrigin(r) {
 		return false

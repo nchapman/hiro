@@ -54,9 +54,11 @@ func TestIsLoopbackOrigin(t *testing.T) {
 		{"DNS rebinding attack", "http://attacker.com", "attacker.com", "", false},
 		{"cross-origin", "http://evil.com", "localhost:8080", "", false},
 
-		// Non-browser requests (no Origin): check RemoteAddr is loopback.
+		// Non-browser requests (no Origin): accept if RemoteAddr OR Host is loopback.
+		// Host check covers Docker port-forwarding where RemoteAddr is the bridge IP.
 		{"no origin, loopback remote", "", "localhost:8080", "127.0.0.1:1234", true},
-		{"no origin, remote IP", "", "localhost:8080", "192.168.1.1:1234", false},
+		{"no origin, docker bridge with localhost host", "", "localhost:8080", "192.168.1.1:1234", true},
+		{"no origin, remote IP non-loopback host", "", "evil.local:8080", "192.168.1.1:1234", false},
 		{"no origin, ::1 remote", "", "localhost:8080", "[::1]:1234", true},
 	}
 

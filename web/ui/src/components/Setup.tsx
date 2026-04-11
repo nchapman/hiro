@@ -421,7 +421,7 @@ export default function Setup({ onComplete }: SetupProps) {
               <div className="flex flex-col gap-4">
                 <div className="flex items-center gap-2 rounded-lg border bg-muted/50 p-4">
                   <code className="flex-1 text-center text-2xl font-bold tracking-widest">
-                    {generatedSwarmCode}
+                    {generatedSwarmCode.toUpperCase()}
                   </code>
                   <Button
                     variant="ghost"
