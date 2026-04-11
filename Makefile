@@ -8,9 +8,10 @@ BINARY := hiro
 PKG := github.com/nchapman/hiro
 VERSION ?= dev
 LDFLAGS := -X main.Version=$(VERSION)
+TAGS := sqlite_fts5
 
 build: web
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hiro
+	go build -tags "$(TAGS)" -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hiro
 
 test:
 	docker compose -f dev/docker-compose.test.yml build test
@@ -20,7 +21,7 @@ test:
 	exit $$EXIT
 
 test-local:
-	go test -race ./... -v -count=1
+	go test -tags "$(TAGS)" -race ./... -v -count=1
 
 test-online:
 	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi
@@ -32,7 +33,7 @@ test-online:
 	HIRO_E2E_URL=http://localhost:$$PORT \
 	HIRO_E2E_CONTAINER=$$(docker compose -f dev/docker-compose.e2e.yml ps -q hiro-e2e) \
 	HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL) \
-	go test ./tests/e2e/... -tags=e2e -v -count=1 -timeout=10m; \
+	go test ./tests/e2e/... -tags="e2e,$(TAGS)" -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	docker compose -f dev/docker-compose.e2e.yml down -v; \
 	exit $$EXIT
@@ -52,7 +53,7 @@ test-cluster:
 	HIRO_E2E_URL=http://localhost:$$PORT \
 	HIRO_LEADER_CONTAINER=$$LEADER_ID \
 	HIRO_WORKER_CONTAINER=$$WORKER_ID \
-	go test ./tests/e2e_cluster/... -tags=e2e_cluster -v -count=1 -timeout=10m; \
+	go test ./tests/e2e_cluster/... -tags="e2e_cluster,$(TAGS)" -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	echo "=== LEADER LOGS ==="; \
 	docker compose -f dev/docker-compose.cluster.yml logs leader --tail=50; \
@@ -80,7 +81,7 @@ test-cluster-relay:
 	HIRO_E2E_URL=http://localhost:$$PORT \
 	HIRO_LEADER_CONTAINER=$$LEADER_ID \
 	HIRO_WORKER_CONTAINER=$$WORKER_ID \
-	go test ./tests/e2e_cluster/... -tags=e2e_cluster -v -count=1 -timeout=10m; \
+	go test ./tests/e2e_cluster/... -tags="e2e_cluster,$(TAGS)" -v -count=1 -timeout=10m; \
 	EXIT=$$?; \
 	echo "=== LEADER LOGS ==="; \
 	docker compose -f dev/docker-compose.cluster-relay.yml logs leader --tail=50; \
@@ -96,7 +97,7 @@ lint:
 check:
 	docker compose -f dev/docker-compose.test.yml build test
 	docker compose -f dev/docker-compose.test.yml run --rm test \
-		sh -c "go test -race ./... -v -count=1 && go vet ./..."; \
+		sh -c "go test -tags '$(TAGS)' -race ./... -v -count=1 && go vet -tags '$(TAGS)' ./..."; \
 	EXIT=$$?; \
 	docker compose -f dev/docker-compose.test.yml down; \
 	exit $$EXIT
@@ -110,7 +111,7 @@ web:
 
 # Build without web UI (for development)
 build-dev:
-	go build -tags dev -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hiro
+	go build -tags "dev,$(TAGS)" -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hiro
 
 docker:
 	docker compose -f dev/docker-compose.yml build

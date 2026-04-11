@@ -16,15 +16,39 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"net/url"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 
+	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+	sqlite3 "github.com/mattn/go-sqlite3"
 	"github.com/nchapman/hiro/internal/platform/fsperm"
-	_ "modernc.org/sqlite" // SQLite driver
 )
+
+func init() {
+	sqlitevec.Auto()
+
+	sql.Register("sqlite3_hiro", &sqlite3.SQLiteDriver{
+		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+			for _, pragma := range []string{
+				"journal_mode=WAL",
+				"synchronous=NORMAL",
+				"foreign_keys=1",
+				"busy_timeout=5000",
+				"cache_size=-16000",
+				"mmap_size=268435456",
+				"temp_store=MEMORY",
+			} {
+				if _, err := conn.Exec("PRAGMA "+pragma, nil); err != nil {
+					return fmt.Errorf("setting PRAGMA %s: %w", pragma, err)
+				}
+			}
+			return nil
+		},
+	})
+}
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
@@ -51,25 +75,10 @@ func Open(path string) (*DB, error) {
 	}
 	f.Close()
 
-	// Use _pragma DSN parameters so every pooled connection gets the same
-	// pragmas automatically. This allows multiple concurrent readers in WAL
-	// mode while writes are serialized via writeMu.
-	dsn := (&url.URL{
-		Path: path,
-		RawQuery: url.Values{
-			"_pragma": {
-				"journal_mode(WAL)",    // persists in DB header; idempotent per connection
-				"synchronous(NORMAL)",  // safe in WAL mode; avoids fsync per commit (2-5x faster writes)
-				"foreign_keys(1)",      // connection-scoped; must be set per connection
-				"busy_timeout(5000)",   // safety net for read-vs-checkpoint contention; writes serialized by writeMu
-				"cache_size(-16000)",   // 16MB page cache (default 2MB); improves FTS and JOIN-heavy reads
-				"mmap_size(268435456)", // 256MB memory-mapped I/O for faster reads via OS page cache
-				"temp_store(MEMORY)",   // keep temp tables and sort spills in memory
-			},
-		}.Encode(),
-	}).String()
-
-	conn, err := sql.Open("sqlite", dsn)
+	// Pragmas are set per-connection via the ConnectHook registered in init().
+	// This ensures every pooled connection gets identical settings, allowing
+	// concurrent readers in WAL mode while writes are serialized via writeMu.
+	conn, err := sql.Open("sqlite3_hiro", path)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
@@ -84,6 +93,16 @@ func Open(path string) (*DB, error) {
 		conn.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
+
+	// Verify sqlite-vec extension loaded correctly. Fail fast at startup
+	// rather than getting cryptic errors when vector operations are used.
+	var vecVersion string
+	if err := conn.QueryRowContext(context.Background(), "SELECT vec_version()").Scan(&vecVersion); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("sqlite-vec not available: %w", err)
+	}
+	slog.Info("database opened", "path", path, "sqlite_vec", vecVersion)
+
 	return d, nil
 }
 

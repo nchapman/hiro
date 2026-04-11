@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
 // parseTime parses a SQLite datetime string, logging a warning on failure.
@@ -30,9 +32,12 @@ var ErrNotFound = errors.New("not found")
 // ErrDuplicate is returned when an insert violates a uniqueness constraint.
 var ErrDuplicate = errors.New("already exists")
 
-// isUniqueViolation checks if an error is a SQLite UNIQUE constraint violation.
+// isUniqueViolation checks if an error is a SQLite UNIQUE or PRIMARY KEY constraint violation.
 func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) &&
+		(sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique ||
+			sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey)
 }
 
 // Session represents a row in the sessions table.

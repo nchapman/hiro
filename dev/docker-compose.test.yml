@@ -6,4 +6,4 @@ services:
       context: ..
       target: test
     init: true
-    command: ["go", "test", "-race", "./...", "-v", "-count=1"]
+    command: ["go", "test", "-tags", "sqlite_fts5", "-race", "./...", "-v", "-count=1"]

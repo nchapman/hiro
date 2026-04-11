@@ -8,16 +8,23 @@ RUN npm run build
 
 # Go source + dependencies (shared between build and test stages)
 FROM golang:1.26 AS go-base
+
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
+
+# sqlite-vec CGO bindings need sqlite3.h for compilation. Use the header
+# bundled with mattn/go-sqlite3 to guarantee the compile-time and link-time
+# SQLite versions match exactly (avoids ABI skew vs system libsqlite3-dev).
+RUN cp "$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)/sqlite3-binding.h" \
+    /usr/include/sqlite3.h
 COPY . .
 
 # Build Go binary
 FROM go-base AS build
 ARG VERSION=dev
 COPY --from=web /app/web/ui/dist ./web/ui/dist
-RUN CGO_ENABLED=0 go build -ldflags "-X main.Version=${VERSION}" -o /hiro ./cmd/hiro
+RUN CGO_ENABLED=1 go build -tags sqlite_fts5 -ldflags "-X main.Version=${VERSION}" -o /hiro ./cmd/hiro
 
 # Test runner — docker compose run --rm --build test
 FROM go-base AS test
@@ -37,9 +44,9 @@ RUN curl -fsSL https://mise.run | sh \
     && chmod -R a+rX /opt/mise
 
 # Pre-build the binary so tests that spawn agent processes have it available.
-RUN go build -o /usr/local/bin/hiro ./cmd/hiro
+RUN CGO_ENABLED=1 go build -tags sqlite_fts5 -o /usr/local/bin/hiro ./cmd/hiro
 
-CMD ["go", "test", "-race", "./...", "-v", "-count=1"]
+CMD ["go", "test", "-tags", "sqlite_fts5", "-race", "./...", "-v", "-count=1"]
 
 # Runtime
 FROM ubuntu:24.04

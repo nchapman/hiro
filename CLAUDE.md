@@ -427,7 +427,7 @@ Comprehensive map of every package, file, and capability with LOC counts. Includ
 - Platform DB tests (`internal/platform/db`) test the unified database schema, CRUD operations, FTS search, usage tracking, and cascade deletes.
 - The `tools/` package tests run actual file/process operations in temp directories.
 - gRPC adapter tests use `bufconn` (in-memory gRPC) for fast, socket-free testing of `ExecuteTool` and `Shutdown` RPCs.
-- CGO is not required — SQLite uses `modernc.org/sqlite` (pure Go). `CGO_ENABLED=0` in Docker build.
+- CGO is required — SQLite uses `mattn/go-sqlite3` (CGO) with `sqlite-vec` for vector search. Build with `-tags sqlite_fts5`.
 - Files tagged `//go:build online` contain integration tests that hit real APIs — excluded from normal test runs.
 - `make test` runs tests in Docker. `make test-local` runs locally with mock workers.
 - In Docker, each worker is isolated via Landlock (filesystem path whitelist) and seccomp-BPF (syscall filtering). The container runs as a non-root `hiro` user — no capabilities or namespaces required. On non-Linux platforms or older kernels, isolation is silently disabled.

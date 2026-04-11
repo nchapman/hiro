@@ -161,7 +161,7 @@ Workers with the `Bash` tool get IP socket access because Bash commands may need
 
 Landlock restricts future `open()` calls but **does not revoke already-open file descriptors**. When the control plane forks a worker, the child inherits all open FDs. If the control plane has `db/hiro.db` or `config/config.yaml` open, the child could read/write them.
 
-**Mitigation:** Go's `os.OpenFile` sets `O_CLOEXEC` by default, which closes the FD on `exec`. Since workers are spawned via `exec.Command` (fork + exec), `CLOEXEC` handles this. The SQLite library (`modernc.org/sqlite`) also uses `CLOEXEC`. This should be verified during implementation but is expected to work correctly with no code changes.
+**Mitigation:** Go's `os.OpenFile` sets `O_CLOEXEC` by default, which closes the FD on `exec`. Since workers are spawned via `exec.Command` (fork + exec), `CLOEXEC` handles this. The SQLite library (`mattn/go-sqlite3`) sets `O_CLOEXEC` on all file opens via its bundled amalgamation. This should be verified during implementation but is expected to work correctly with no code changes.
 
 ### Users and Groups
 

@@ -117,7 +117,7 @@ Runs in the **control plane process**. Drives the agentic loop per instance.
 
 ## 4. Database (`internal/platform/db/`)
 
-Unified SQLite database (`db/hiro.db`). Single writer, WAL mode, FTS5 for search. Pure Go SQLite via `modernc.org/sqlite`.
+Unified SQLite database (`db/hiro.db`). Single writer, WAL mode, FTS5 for search. CGO SQLite via `mattn/go-sqlite3` with `sqlite-vec` for vector search.
 
 | File | LOC | Role |
 |------|-----|------|
