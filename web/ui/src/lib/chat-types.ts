@@ -22,11 +22,19 @@ export interface MessageAttachment {
   data?: string
 }
 
+export interface AgentNotification {
+  agent: string
+  status: string
+  summary: string
+  result: string
+}
+
 export interface Message {
   id: string
   role: "user" | "assistant" | "system"
   content: string
   toolCalls?: ToolCall[]
+  notifications?: AgentNotification[]
   thinking?: string
   isThinking?: boolean
   attachments?: MessageAttachment[]

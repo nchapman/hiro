@@ -1,12 +1,12 @@
 import { memo } from "react"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Wrench01Icon, ArrowRight01Icon, File02Icon } from "@hugeicons/core-free-icons"
+import { Wrench01Icon, ArrowRight01Icon, File02Icon, UserMultiple02Icon } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
 import { isImageType } from "@/lib/file-utils"
 import { Markdown } from "@/components/prompt-kit/markdown"
 import { Loader } from "@/components/prompt-kit/loader"
-import type { ToolCall, Message } from "@/lib/chat-types"
+import type { ToolCall, AgentNotification, Message } from "@/lib/chat-types"
 
 // --- Formatting helpers ---
 
@@ -81,6 +81,37 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCal
   )
 })
 
+// --- Agent notification UI ---
+
+export const NotificationBlock = memo(function NotificationBlock({ notification }: { notification: AgentNotification }) {
+  const isFailed = notification.status === "failed"
+  const label = isFailed
+    ? `Agent "${notification.agent}" failed`
+    : `Agent "${notification.agent}" completed`
+
+  return (
+    <Collapsible className="rounded-lg border">
+      <CollapsibleTrigger
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground cursor-pointer transition-colors hover:bg-muted/50"
+      >
+        <HugeiconsIcon icon={UserMultiple02Icon} className="h-3 w-3 shrink-0" />
+        <span className={cn(isFailed && "text-destructive")}>{label}</span>
+        <span className="flex-1" />
+        <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3 shrink-0 transition-transform [[data-panel-open]_&]:rotate-90" />
+      </CollapsibleTrigger>
+
+      <CollapsibleContent>
+        <div className="border-t bg-muted/20 px-3 py-2 text-xs">
+          <div className="mb-1 font-medium">{notification.summary}</div>
+          {notification.result && (
+            <div className="whitespace-pre-wrap break-words text-muted-foreground">{notification.result}</div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+})
+
 // --- Thinking block ---
 
 export const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
@@ -107,12 +138,20 @@ export const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming 
 
 export const AssistantMessage = memo(function AssistantMessage({ message }: { message: Message }) {
   const toolCalls = message.toolCalls ?? []
+  const notifications = message.notifications ?? []
   const content = message.content
 
   return (
     <div className="flex flex-col gap-2">
       {message.thinking && (
         <ThinkingBlock content={message.thinking} isStreaming={message.isThinking} />
+      )}
+      {notifications.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {notifications.map((n, i) => (
+            <NotificationBlock key={`notif-${i}`} notification={n} />
+          ))}
+        </div>
       )}
       {toolCalls.length > 0 && (
         <div className="flex flex-col gap-1.5">

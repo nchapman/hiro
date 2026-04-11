@@ -1,4 +1,4 @@
-import type { ToolCall, Message, MessageAttachment, HistoryMessage, FantasyMessage } from "./chat-types"
+import type { ToolCall, Message, MessageAttachment, AgentNotification, HistoryMessage, FantasyMessage } from "./chat-types"
 
 export function extractToolOutput(raw: unknown): { output: string; isError: boolean } | null {
   if (!raw || typeof raw !== "object") return null
@@ -78,6 +78,17 @@ export function parseToolResults(rawJSON: string): Map<string, { output: string;
   return results
 }
 
+function parseAgentNotification(content: string): AgentNotification | null {
+  const match = content.match(/<agent-notification>([\s\S]*?)<\/agent-notification>/)
+  if (!match) return null
+  const xml = match[1]
+  const agent = xml.match(/<agent>([\s\S]*?)<\/agent>/)?.[1]?.trim() ?? ""
+  const status = xml.match(/<status>([\s\S]*?)<\/status>/)?.[1]?.trim() ?? ""
+  const summary = xml.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim() ?? ""
+  const result = xml.match(/<result>([\s\S]*?)<\/result>/)?.[1]?.trim() ?? ""
+  return { agent, status, summary, result }
+}
+
 export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
   const messages: Message[] = []
   let current: Message | undefined
@@ -90,7 +101,20 @@ export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
   }
 
   for (const m of history) {
-    if (m.is_meta) continue
+    // Show agent notifications as expandable blocks; skip other meta messages.
+    if (m.is_meta) {
+      if (m.role === "user") {
+        const notif = parseAgentNotification(m.content)
+        if (notif) {
+          // Attach to current assistant message or create one.
+          if (!current) {
+            current = { id: crypto.randomUUID(), role: "assistant", content: "", toolCalls: [] }
+          }
+          current.notifications = [...(current.notifications ?? []), notif]
+        }
+      }
+      continue
+    }
 
     if (m.role === "tool" && m.raw_json) {
       if (current) {
@@ -127,6 +151,13 @@ export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
         flushCurrent()
         continue
       }
+    }
+
+    // If current has pending notifications, merge a plain assistant message into it.
+    if (m.role === "assistant" && current?.notifications?.length) {
+      current.content += m.content
+      flushCurrent()
+      continue
     }
 
     flushCurrent()

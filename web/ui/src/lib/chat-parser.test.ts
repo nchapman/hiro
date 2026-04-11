@@ -325,6 +325,85 @@ describe("mergeHistoryMessages", () => {
     expect(messages[0].toolCalls![0].isError).toBeUndefined()
   })
 
+  it("parses agent notification meta messages into notification blocks", () => {
+    const history: HistoryMessage[] = [
+      { role: "user", content: "spawn an agent", is_meta: false },
+      {
+        role: "user",
+        content: '<agent-notification>\n<agent>assistant</agent>\n<status>completed</status>\n<summary>Agent "assistant" finished</summary>\n<result>hostname is hiro-minimax</result>\n</agent-notification>',
+        is_meta: true,
+      },
+      { role: "assistant", content: "The hostname is hiro-minimax." },
+    ]
+    const messages = mergeHistoryMessages(history)
+    expect(messages).toHaveLength(2)
+    expect(messages[0].content).toBe("spawn an agent")
+    // Notification is attached to the assistant message
+    expect(messages[1].notifications).toHaveLength(1)
+    expect(messages[1].notifications![0].agent).toBe("assistant")
+    expect(messages[1].notifications![0].status).toBe("completed")
+    expect(messages[1].notifications![0].result).toBe("hostname is hiro-minimax")
+    expect(messages[1].content).toBe("The hostname is hiro-minimax.")
+  })
+
+  it("parses failed agent notification with empty result", () => {
+    const history: HistoryMessage[] = [
+      {
+        role: "user",
+        content: '<agent-notification>\n<agent>assistant</agent>\n<status>failed</status>\n<summary>Agent "assistant" failed: node not found</summary>\n<result></result>\n</agent-notification>',
+        is_meta: true,
+      },
+      { role: "assistant", content: "The spawn failed." },
+    ]
+    const messages = mergeHistoryMessages(history)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].notifications).toHaveLength(1)
+    expect(messages[0].notifications![0].status).toBe("failed")
+    expect(messages[0].notifications![0].result).toBe("")
+    expect(messages[0].content).toBe("The spawn failed.")
+  })
+
+  it("handles multiple consecutive agent notifications", () => {
+    const notif = (agent: string) =>
+      `<agent-notification>\n<agent>${agent}</agent>\n<status>completed</status>\n<summary>Agent "${agent}" finished</summary>\n<result>done</result>\n</agent-notification>`
+    const history: HistoryMessage[] = [
+      { role: "user", content: notif("a"), is_meta: true },
+      { role: "user", content: notif("b"), is_meta: true },
+      { role: "assistant", content: "Both done." },
+    ]
+    const messages = mergeHistoryMessages(history)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].notifications).toHaveLength(2)
+    expect(messages[0].notifications![0].agent).toBe("a")
+    expect(messages[0].notifications![1].agent).toBe("b")
+  })
+
+  it("notification-only history (no following assistant message) flushes correctly", () => {
+    const history: HistoryMessage[] = [
+      {
+        role: "user",
+        content: '<agent-notification>\n<agent>x</agent>\n<status>completed</status>\n<summary>done</summary>\n<result>ok</result>\n</agent-notification>',
+        is_meta: true,
+      },
+    ]
+    const messages = mergeHistoryMessages(history)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("assistant")
+    expect(messages[0].notifications).toHaveLength(1)
+    expect(messages[0].content).toBe("")
+  })
+
+  it("still filters non-notification meta messages", () => {
+    const history: HistoryMessage[] = [
+      { role: "user", content: "<system-reminder>secrets</system-reminder>", is_meta: true },
+      { role: "assistant", content: "meta response", is_meta: true },
+      { role: "user", content: "Hello" },
+    ]
+    const messages = mergeHistoryMessages(history)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].content).toBe("Hello")
+  })
+
   it("flushes pending current message at end of history", () => {
     const raw = JSON.stringify({
       role: "assistant",
