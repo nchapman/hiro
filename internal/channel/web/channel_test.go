@@ -204,10 +204,14 @@ func TestHandleConn_SlashClear(t *testing.T) {
 	consumeSessionEvent(t, conn)
 	_ = wsjson.Write(t.Context(), conn, ChatMessage{Type: "message", Content: "/clear"})
 
-	// Should get clear + done.
+	// Should get clear + session + done.
 	msg := readMessage(t, conn)
 	if msg.Type != "clear" {
 		t.Errorf("got type %q, want 'clear'", msg.Type)
+	}
+	msg = readMessage(t, conn)
+	if msg.Type != "session" {
+		t.Errorf("got type %q, want 'session'", msg.Type)
 	}
 	msg = readMessage(t, conn)
 	if msg.Type != "done" {

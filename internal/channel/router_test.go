@@ -285,10 +285,10 @@ func TestDispatch_ErrorReportedToChannel(t *testing.T) {
 func TestSlashCommand_Clear(t *testing.T) {
 	t.Parallel()
 
-	var clearCalled atomic.Bool
+	var clearCalled bool
 	mgr := newMockManager()
 	mgr.newSessionFn = func(string, string) (string, error) {
-		clearCalled.Store(true)
+		clearCalled = true
 		return "new-session", nil
 	}
 
@@ -316,17 +316,14 @@ func TestSlashCommand_Clear(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if !clearCalled {
+		t.Error("expected NewSession to be called")
+	}
 	if !gotClear {
 		t.Error("expected clear event")
 	}
 	if !gotDone {
 		t.Error("expected done callback")
-	}
-
-	// NewSession runs async — wait briefly.
-	time.Sleep(50 * time.Millisecond)
-	if !clearCalled.Load() {
-		t.Error("expected NewSession to be called")
 	}
 }
 

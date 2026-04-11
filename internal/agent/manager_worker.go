@@ -31,6 +31,7 @@ func (m *Manager) shutdownHandle(h *WorkerHandle) {
 		// Process exited cleanly.
 	case <-shutCtx.Done():
 		// Deadline expired — force-kill and wait.
+		m.logger.Warn("worker shutdown timeout, force-killing")
 		if h.Kill != nil {
 			h.Kill()
 		}

@@ -69,7 +69,7 @@ func runAgent() error {
 		logger:   logger,
 	}
 
-	srv, cleanup, err := startAgentGRPC(cfg, worker, bg, cancel, logger)
+	srv, ws, cleanup, err := startAgentGRPC(cfg, worker, bg, cancel, logger)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,8 @@ func runAgent() error {
 	logger.Info("agent worker ready")
 
 	<-ctx.Done()
-	srv.GracefulStop()
+	ws.Stop()          // Signal WatchJobs stream to return.
+	srv.GracefulStop() // Drains cleanly now that streaming RPCs have ended.
 	bg.mgr.KillAll()
 	logger.Info("agent worker stopped")
 	return nil
@@ -171,11 +172,11 @@ func setupBackgroundJobs(logger *slog.Logger) backgroundJobs {
 }
 
 // startAgentGRPC creates and starts the gRPC server on a Unix socket for
-// receiving ExecuteTool RPCs from the control plane. Returns the server (for
-// GracefulStop) and a cleanup function that removes the socket file. The cancel
-// func is called if the gRPC server encounters a fatal error, unblocking the
-// caller's ctx.Done() wait.
-func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJobs, cancel context.CancelFunc, logger *slog.Logger) (*grpc.Server, func(), error) {
+// receiving ExecuteTool RPCs from the control plane. Returns the server, the
+// WorkerServer (for Stop), and a cleanup function that removes the socket file.
+// The cancel func is called if the gRPC server encounters a fatal error,
+// unblocking the caller's ctx.Done() wait.
+func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJobs, cancel context.CancelFunc, logger *slog.Logger) (*grpc.Server, *grpcipc.WorkerServer, func(), error) {
 	socketPath := cfg.AgentSocket
 	if socketPath == "" {
 		socketPath = fmt.Sprintf("/tmp/hiro-agent-%s.sock", cfg.SessionID)
@@ -183,7 +184,7 @@ func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJo
 	os.Remove(socketPath)
 	lis, err := net.Listen("unix", socketPath) //nolint:noctx // startup-time listener, no cancellation needed
 	if err != nil {
-		return nil, nil, fmt.Errorf("listening on %s: %w", socketPath, err)
+		return nil, nil, nil, fmt.Errorf("listening on %s: %w", socketPath, err)
 	}
 	// Restrict socket permissions so only the owning UID can connect.
 	// Defense in depth: the socket directory is already 0700, but an
@@ -204,7 +205,7 @@ func startAgentGRPC(cfg ipc.SpawnConfig, worker ipc.AgentWorker, bg backgroundJo
 		}
 	}()
 
-	return srv, cleanup, nil
+	return srv, ws, cleanup, nil
 }
 
 // toolWorker implements ipc.AgentWorker as a thin tool executor.

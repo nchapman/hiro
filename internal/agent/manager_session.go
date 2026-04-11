@@ -439,13 +439,17 @@ func (m *Manager) NewSessionForChannel(instanceID, channelKey string) (string, e
 	}
 	spawnCfg := m.buildSpawnConfig(instanceID, newSessionID, sc.agentConfig.Name, sc.allowedTools, m.instanceDir(instanceID), sessDir)
 
-	// Shut down old worker concurrently while spawning the new one.
-	shutdownDone := m.shutdownOldWorkerAsync(oldHandle)
+	// Shut down old worker in the background — don't block on it.
+	// The new worker spawns on a different Unix socket so there's no conflict.
+	m.shutdownOldWorkerAsync(oldHandle)
 	handle, loop, err := m.spawnSessionWorkerAndLoop(m.ctx, inst, sc.agentConfig, spawnCfg, sc.allowedTools, sc.modelSpec, sc.apiKey, sc.baseURL, instanceID, newSessionID, sessDir, channelKey)
 	if err != nil {
-		return m.failNewSession(shutdownDone, instanceID, newSessionID, sessDir, inst, err)
+		os.RemoveAll(sessDir)
+		if m.pdb != nil {
+			_ = m.pdb.DeleteSession(context.Background(), newSessionID)
+		}
+		return "", fmt.Errorf("spawning new session: %w", err)
 	}
-	<-shutdownDone
 
 	inst.addSlot(&sessionSlot{
 		sessionID: newSessionID,
@@ -503,21 +507,6 @@ func (m *Manager) registerSessionInDBWithChannel(instanceID, sessionID, agentNam
 	})
 }
 
-// failNewSession marks an instance as stopped after a failed session spawn.
-// inst.mu must be held by the caller.
-func (m *Manager) failNewSession(shutdownDone <-chan struct{}, instanceID, sessionID, sessDir string, inst *instance, err error) (string, error) {
-	<-shutdownDone
-	inst.info.Status = InstanceStatusStopped
-	m.setInstanceStatus(instanceID, string(InstanceStatusStopped))
-	os.RemoveAll(sessDir)
-	if m.pdb != nil {
-		if err := m.pdb.DeleteSession(context.Background(), sessionID); err != nil {
-			m.logger.Warn("failed to delete session from DB", "session", sessionID, "error", err)
-		}
-	}
-	return "", err
-}
-
 // markSessionStopped updates the old session status in the DB. Best-effort.
 func (m *Manager) markSessionStopped(sessionID string) {
 	if m.pdb != nil && sessionID != "" {
@@ -570,12 +559,9 @@ func (m *Manager) resolveSessionConfig(inst *instance) (sessionConfig, error) {
 	}, nil
 }
 
-// shutdownOldWorkerAsync shuts down the old worker handle in a goroutine.
-// Returns a channel that is closed when shutdown completes.
-func (m *Manager) shutdownOldWorkerAsync(oldHandle *WorkerHandle) <-chan struct{} {
-	shutdownDone := make(chan struct{})
+// shutdownOldWorkerAsync shuts down the old worker handle in a background goroutine.
+func (m *Manager) shutdownOldWorkerAsync(oldHandle *WorkerHandle) {
 	go func() {
-		defer close(shutdownDone)
 		m.shutdownHandle(oldHandle)
 		if oldHandle != nil {
 			// Close directly (not cleanupWorker) — the UID is retained
@@ -583,7 +569,6 @@ func (m *Manager) shutdownOldWorkerAsync(oldHandle *WorkerHandle) <-chan struct{
 			oldHandle.Close()
 		}
 	}()
-	return shutdownDone
 }
 
 // spawnSessionWorkerAndLoop creates a new worker and inference loop for a session.

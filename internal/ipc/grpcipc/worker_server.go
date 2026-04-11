@@ -2,6 +2,7 @@ package grpcipc
 
 import (
 	"context"
+	"sync"
 
 	"github.com/nchapman/hiro/internal/ipc"
 	pb "github.com/nchapman/hiro/internal/ipc/proto"
@@ -16,11 +17,18 @@ type WorkerServer struct {
 	worker      ipc.AgentWorker
 	onSecretEnv func([]string)           // called when secret env vars arrive with a tool call
 	completions <-chan *pb.JobCompletion // background job completion events
+	done        chan struct{}            // closed by Stop() to unblock WatchJobs
+	stopOnce    sync.Once
 }
 
 // NewWorkerServer creates a gRPC server that delegates to the given AgentWorker.
 func NewWorkerServer(worker ipc.AgentWorker) *WorkerServer {
-	return &WorkerServer{worker: worker}
+	return &WorkerServer{worker: worker, done: make(chan struct{})}
+}
+
+// Stop signals streaming RPCs (WatchJobs) to return so GracefulStop can drain.
+func (s *WorkerServer) Stop() {
+	s.stopOnce.Do(func() { close(s.done) })
 }
 
 // SetSecretEnvCallback sets a callback invoked when secret env vars arrive
@@ -67,9 +75,12 @@ func (s *WorkerServer) Shutdown(ctx context.Context, req *pb.ShutdownRequest) (*
 // WatchJobs streams background job completion events to the control plane.
 func (s *WorkerServer) WatchJobs(_ *pb.WatchJobsRequest, stream pb.AgentWorker_WatchJobsServer) error {
 	if s.completions == nil {
-		// Block until context is cancelled — no completions channel configured.
-		<-stream.Context().Done()
-		return nil
+		select {
+		case <-s.done:
+			return nil
+		case <-stream.Context().Done():
+			return nil
+		}
 	}
 	for {
 		select {
@@ -80,6 +91,8 @@ func (s *WorkerServer) WatchJobs(_ *pb.WatchJobsRequest, stream pb.AgentWorker_W
 			if err := stream.Send(c); err != nil {
 				return err
 			}
+		case <-s.done:
+			return nil
 		case <-stream.Context().Done():
 			return stream.Context().Err()
 		}

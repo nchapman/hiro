@@ -266,41 +266,41 @@ func (r *Router) handleClearCommand(_ context.Context, msg InboundMessage) error
 		channelKey = channelKeyWeb // fallback for legacy callers
 	}
 
-	// Emit clear event first (web channel uses this to reset the UI).
+	// Emit clear event immediately so the UI resets while we create the
+	// new session (worker spawn can take several seconds).
 	_ = msg.OnEvent(ipc.ChatEvent{Type: "clear"})
-	_ = msg.OnDone(TurnResult{})
 
-	// NewSessionForChannel runs in the background with a detached context so it
-	// completes even if the caller disconnects. After creating the new session,
-	// update the binding and notify web clients of the new session ID.
-	go func() {
-		newSessionID, err := r.manager.NewSessionForChannel(msg.InstanceID, channelKey)
-		if err != nil {
-			r.logger.Warn("failed to create new session after /clear",
-				"instance_id", msg.InstanceID,
-				"channel_key", channelKey,
-				"error", err,
-			)
-			return
-		}
+	// Create the new session synchronously so the binding is updated before
+	// the next message can be dispatched (avoids a race where the user sends
+	// a message before the binding reflects the new session ID).
+	newSessionID, err := r.manager.NewSessionForChannel(msg.InstanceID, channelKey)
+	if err != nil {
+		r.logger.Warn("failed to create new session after /clear",
+			"instance_id", msg.InstanceID,
+			"channel_key", channelKey,
+			"error", err,
+		)
+		_ = msg.OnEvent(ipc.ChatEvent{Type: "error", Content: err.Error()})
+		return msg.OnDone(TurnResult{})
+	}
 
-		// Update the binding with the new session ID.
-		r.bindMu.Lock()
-		for _, b := range r.bindings {
-			if b.Target == msg.InstanceID && b.ConversationKey == msg.ConversationKey {
-				b.SessionID = newSessionID
-			}
+	// Update the binding with the new session ID.
+	r.bindMu.Lock()
+	for _, b := range r.bindings {
+		if b.Target == msg.InstanceID && b.ConversationKey == msg.ConversationKey {
+			b.SessionID = newSessionID
 		}
-		r.bindMu.Unlock()
+	}
+	r.bindMu.Unlock()
 
-		// Send session event to web clients so the browser can fetch
-		// session-specific history. Non-web channels (Telegram, Slack)
-		// re-resolve via EnsureSession on the next inbound message.
-		if msg.ChannelName == channelKeyWeb {
-			_ = msg.OnEvent(ipc.ChatEvent{Type: "session", Content: newSessionID})
-		}
-	}()
-	return nil
+	// Send session event to web clients so the browser can fetch
+	// session-specific history. Non-web channels (Telegram, Slack)
+	// re-resolve via EnsureSession on the next inbound message.
+	if msg.ChannelName == channelKeyWeb {
+		_ = msg.OnEvent(ipc.ChatEvent{Type: "session", Content: newSessionID})
+	}
+
+	return msg.OnDone(TurnResult{})
 }
 
 // dispatchCommand runs a slash command through the command handler.
