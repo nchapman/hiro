@@ -376,7 +376,7 @@ func (l *Loop) chat(ctx context.Context, prompt string, files []fantasy.FilePart
 	result, err := agent.Stream(ctx, call)
 	if err != nil {
 		l.logger.Error("inference turn failed", "error", err)
-		return "", fmt.Errorf("agent stream: %w", err)
+		return "", formatInferenceError(err)
 	}
 
 	l.logger.Info("inference turn completed", "steps", len(result.Steps))
@@ -453,6 +453,18 @@ func (l *Loop) syncCompactIfNeeded(ctx context.Context, cfg CompactionConfig, lm
 	}
 }
 
+// makeOnRetry returns a callback that logs and emits a system event when
+// the fantasy agent retries a failed inference request.
+func (l *Loop) makeOnRetry(emit func(ipc.ChatEvent) error) fantasy.OnRetryCallback {
+	return func(err *fantasy.ProviderError, delay time.Duration) {
+		msg := fmt.Sprintf("Request failed (%s), retrying in %s...",
+			inferenceErrorTitle(err), delay.Round(time.Millisecond))
+		l.logger.Warn("retrying inference request",
+			"status", err.StatusCode, "delay", delay, "error", err.Message)
+		_ = emit(ipc.ChatEvent{Type: "system", Content: msg}) // best-effort; client may have disconnected
+	}
+}
+
 // buildStreamCall constructs the AgentStreamCall with all callbacks.
 func (l *Loop) buildStreamCall(prompt string, files []fantasy.FilePart, messages []fantasy.Message, providerOpts fantasy.ProviderOptions, emit func(ipc.ChatEvent) error) fantasy.AgentStreamCall {
 	return fantasy.AgentStreamCall{
@@ -460,6 +472,7 @@ func (l *Loop) buildStreamCall(prompt string, files []fantasy.FilePart, messages
 		Files:           files,
 		Messages:        messages,
 		ProviderOptions: providerOpts,
+		OnRetry:         l.makeOnRetry(emit),
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
 			var result fantasy.PrepareStepResult
 			if opts.StepNumber == 0 {
