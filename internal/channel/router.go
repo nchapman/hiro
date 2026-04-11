@@ -445,6 +445,15 @@ func (r *Router) processNotification(ctx context.Context, instanceID string, n i
 		)
 	}
 
+	// Prepend a notification event so clients can render the trigger content
+	// (e.g. agent completion details) before the assistant's response.
+	// Must be prepended (not appended) so the web UI renders the notification
+	// block before any streamed text — matching the history-loaded order.
+	if n.Content != "" {
+		notifEvent := ipc.ChatEvent{Type: "notification", Content: n.Content}
+		events = append([]ipc.ChatEvent{notifEvent}, events...)
+	}
+
 	result := TurnResult{
 		Response: response,
 		Usage:    r.usage.BuildUsageInfo(ctx, instanceID, n.SessionID),

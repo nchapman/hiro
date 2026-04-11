@@ -26,7 +26,7 @@ export interface ChatAttachment {
 }
 
 export interface ChatWireMessage {
-  type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result" | "config" | "reasoning_start" | "reasoning_delta" | "reasoning_end" | "clear" | "session"
+  type: "message" | "delta" | "done" | "error" | "system" | "tool_call" | "tool_result" | "config" | "reasoning_start" | "reasoning_delta" | "reasoning_end" | "clear" | "session" | "notification"
   role?: "user" | "assistant"
   content?: string
   tool_call_id?: string

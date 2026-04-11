@@ -33,7 +33,7 @@ import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { Loader } from "@/components/prompt-kit/loader"
 import type { ModelInfo, ToolCall, Message, MessageAttachment } from "@/lib/chat-types"
 import type { ChatAttachment } from "@/hooks/use-websocket"
-import { mergeHistoryMessages } from "@/lib/chat-parser"
+import { mergeHistoryMessages, parseAgentNotification } from "@/lib/chat-parser"
 import { statusDotColor } from "@/lib/session-utils"
 import { parseModelSpec, formatModelSpec } from "@/lib/model-utils"
 import ModelSelector from "@/pages/chat/ModelSelector"
@@ -267,6 +267,28 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
             fetchSessionData(msg.content, gen, ac.signal)
           }
           break
+        case "notification": {
+          const notif = parseAgentNotification(msg.content || "")
+          if (notif) {
+            if (!streamingMsgId.current) {
+              const id = crypto.randomUUID()
+              streamingMsgId.current = id
+              setStreaming(true)
+              setMessages((prev) => [
+                ...prev,
+                { id, role: "assistant", content: "", notifications: [notif] },
+              ])
+            } else {
+              const id = streamingMsgId.current
+              setMessages((prev) => {
+                const last = prev[prev.length - 1]
+                if (last?.id !== id) return prev
+                return [...prev.slice(0, -1), { ...last, notifications: [...(last.notifications ?? []), notif] }]
+              })
+            }
+          }
+          break
+        }
         case "delta": {
           if (!streamingMsgId.current) {
             const id = crypto.randomUUID()

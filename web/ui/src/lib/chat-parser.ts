@@ -78,7 +78,7 @@ export function parseToolResults(rawJSON: string): Map<string, { output: string;
   return results
 }
 
-function parseAgentNotification(content: string): AgentNotification | null {
+export function parseAgentNotification(content: string): AgentNotification | null {
   const match = content.match(/<agent-notification>([\s\S]*?)<\/agent-notification>/)
   if (!match) return null
   const xml = match[1]
