@@ -110,6 +110,27 @@ RUN mise use -g eza@latest bat@latest fd@latest fzf@latest zoxide@latest delta@l
 # Make mise installations readable by the hiro user.
 RUN chown -R hiro:hiro /opt/mise
 
+# Install Homebrew (Linuxbrew) for system package management at runtime.
+# Agents use `brew install` via Bash for packages like ffmpeg, imagemagick, etc.
+# The installer requires a non-root user with sudo access (same pattern as the
+# official homebrew/brew Docker image). Passwordless sudo is granted temporarily
+# for the install and revoked afterward.
+RUN echo 'hiro ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+USER hiro
+RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+USER root
+RUN sed -i '/^hiro /d' /etc/sudoers
+# Verify sudo was revoked — fail the build if hiro can still escalate.
+USER hiro
+RUN ! sudo -n true 2>/dev/null
+USER root
+ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+ENV HOMEBREW_CELLAR=/home/linuxbrew/.linuxbrew/Cellar
+ENV HOMEBREW_REPOSITORY=/home/linuxbrew/.linuxbrew/Homebrew
+ENV HOMEBREW_NO_ANALYTICS=1
+ENV HOMEBREW_NO_AUTO_UPDATE=1
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+
 # Shell configuration — polished terminal experience for all users.
 COPY docker/shell/bashrc /etc/hiro.bashrc
 COPY docker/shell/starship.toml /etc/starship.toml

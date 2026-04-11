@@ -487,14 +487,41 @@ func (m *Manager) buildLandlockPaths(instDir, sessDir, socketDir string, allowed
 		paths.ReadOnly = append(paths.ReadOnly, agentsDir, skillsDir)
 	}
 
-	// mise tool manager paths
+	// Package managers — agents install tools at runtime via Bash.
+	// Both mise and brew have their own lock files for concurrency.
 	if miseDir := os.Getenv("MISE_DATA_DIR"); miseDir != "" {
-		paths.ReadOnly = append(paths.ReadOnly, miseDir)
+		paths.ReadWrite = append(paths.ReadWrite, miseDir)
 	} else if _, err := os.Stat("/opt/mise"); err == nil {
-		paths.ReadOnly = append(paths.ReadOnly, "/opt/mise")
+		paths.ReadWrite = append(paths.ReadWrite, "/opt/mise")
+	}
+	if brewPrefix := brewLinuxbrewPrefix(); brewPrefix != "" {
+		paths.ReadWrite = append(paths.ReadWrite, brewPrefix)
+	}
+
+	// Bash-capable agents need full /tmp access. Package managers (brew, mise)
+	// extract tarballs to unpredictable /tmp paths during installation, and
+	// many CLI tools create temp files there. Agents with Bash already have
+	// network socket access via seccomp, so restricting /tmp is inconsistent.
+	if allowedTools["Bash"] {
+		paths.ReadWrite = append(paths.ReadWrite, os.TempDir())
 	}
 
 	return paths
+}
+
+// brewLinuxbrewPrefix returns the Linuxbrew prefix if installed, or empty string.
+// Checks HOMEBREW_PREFIX env first (matches the mise pattern), then probes the
+// standard Linuxbrew location.
+func brewLinuxbrewPrefix() string {
+	if prefix := os.Getenv("HOMEBREW_PREFIX"); prefix != "" {
+		if _, err := os.Stat(prefix); err == nil { //nolint:gosec // HOMEBREW_PREFIX is set in our Dockerfile, not user-controlled
+			return prefix
+		}
+	}
+	if _, err := os.Stat("/home/linuxbrew/.linuxbrew"); err == nil {
+		return "/home/linuxbrew/.linuxbrew"
+	}
+	return ""
 }
 
 // makeCleanup returns a function that removes directories and config on failure.

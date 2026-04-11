@@ -625,8 +625,16 @@ func TestNotificationPump_DeliverToBindings(t *testing.T) {
 
 	deliveredMu.Lock()
 	defer deliveredMu.Unlock()
-	if len(deliveredEvents) != 1 || deliveredEvents[0].Content != "notification: hello" {
-		t.Errorf("events = %v, want notification event", deliveredEvents)
+	// processNotification prepends a "notification" event (the trigger content)
+	// before the delta events from the meta inference turn.
+	if len(deliveredEvents) != 2 {
+		t.Fatalf("events = %v, want 2 events (notification + delta)", deliveredEvents)
+	}
+	if deliveredEvents[0].Type != "notification" || deliveredEvents[0].Content != "hello" {
+		t.Errorf("events[0] = %v, want {notification, hello}", deliveredEvents[0])
+	}
+	if deliveredEvents[1].Type != "delta" || deliveredEvents[1].Content != "notification: hello" {
+		t.Errorf("events[1] = %v, want {delta, notification: hello}", deliveredEvents[1])
 	}
 }
 

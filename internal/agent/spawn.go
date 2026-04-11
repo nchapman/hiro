@@ -191,6 +191,11 @@ var forwardedEnvKeys = []string{
 	"MISE_CONFIG_DIR",
 	"MISE_CACHE_DIR",
 	"MISE_GLOBAL_CONFIG_FILE",
+	"HOMEBREW_PREFIX",
+	"HOMEBREW_CELLAR",
+	"HOMEBREW_REPOSITORY",
+	"HOMEBREW_NO_ANALYTICS",
+	"HOMEBREW_NO_AUTO_UPDATE",
 }
 
 // buildIsolatedEnv constructs a minimal environment for an agent process.
