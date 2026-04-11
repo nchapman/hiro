@@ -183,8 +183,8 @@ func TestInferenceErrorTitle(t *testing.T) {
 		{&fantasy.ProviderError{Title: "Custom"}, "Custom"},
 		{&fantasy.ProviderError{StatusCode: 429}, "Rate limited"},
 		{&fantasy.ProviderError{StatusCode: 401}, "Authentication failed"},
-		{&fantasy.ProviderError{StatusCode: 503}, "Service unavailable"},
-		{&fantasy.ProviderError{StatusCode: 418}, "HTTP 418"},
+		{&fantasy.ProviderError{StatusCode: 503}, "Service unavailable"}, // falls through to http.StatusText
+		{&fantasy.ProviderError{StatusCode: 418}, "I'm a teapot"},
 		{&fantasy.ProviderError{}, "Provider error"},
 	}
 	for _, tt := range tests {

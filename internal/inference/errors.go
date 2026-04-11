@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"charm.land/fantasy"
 )
@@ -63,8 +64,8 @@ func inferenceErrorTitle(pe *fantasy.ProviderError) string {
 	return "Provider error"
 }
 
-// unwrapProviderError extracts a ProviderError from err, looking through
-// RetryError wrappers if present.
+// unwrapProviderError extracts a ProviderError from err. errors.As handles
+// traversal through RetryError.Unwrap() and fmt.Errorf wrapping.
 func unwrapProviderError(err error) *fantasy.ProviderError {
 	var pe *fantasy.ProviderError
 	if errors.As(err, &pe) {
@@ -73,9 +74,10 @@ func unwrapProviderError(err error) *fantasy.ProviderError {
 	return nil
 }
 
-// statusTitle returns a sentence-case title for common HTTP status codes.
-// Note: fantasy.ErrorTitleForStatusCode returns lowercase; we use sentence case
-// because these are displayed directly in the chat UI.
+// statusTitle returns a sentence-case title for HTTP status codes.
+// Custom labels for codes where the standard text is unhelpful (e.g.
+// "Unauthorized" → "Authentication failed"); falls back to sentence-cased
+// http.StatusText for everything else.
 func statusTitle(code int) string {
 	switch code {
 	case http.StatusTooManyRequests:
@@ -84,19 +86,12 @@ func statusTitle(code int) string {
 		return "Authentication failed"
 	case http.StatusForbidden:
 		return "Access denied"
-	case http.StatusBadRequest:
-		return "Bad request"
-	case http.StatusRequestTimeout:
-		return "Request timeout"
-	case http.StatusServiceUnavailable:
-		return "Service unavailable"
-	case http.StatusBadGateway:
-		return "Bad gateway"
-	case http.StatusGatewayTimeout:
-		return "Gateway timeout"
 	case http.StatusInternalServerError:
 		return "Server error"
 	default:
+		if text := http.StatusText(code); text != "" {
+			return strings.ToUpper(text[:1]) + strings.ToLower(text[1:])
+		}
 		return fmt.Sprintf("HTTP %d", code)
 	}
 }

@@ -457,8 +457,16 @@ func (l *Loop) syncCompactIfNeeded(ctx context.Context, cfg CompactionConfig, lm
 // the fantasy agent retries a failed inference request.
 func (l *Loop) makeOnRetry(emit func(ipc.ChatEvent) error) fantasy.OnRetryCallback {
 	return func(err *fantasy.ProviderError, delay time.Duration) {
+		// Round to whole seconds, or tenths for sub-second delays.
+		rounded := delay.Truncate(time.Second)
+		if rounded == 0 {
+			rounded = delay.Truncate(100 * time.Millisecond) //nolint:mnd // 100ms precision for sub-second display
+		}
+		if rounded == 0 {
+			rounded = delay
+		}
 		msg := fmt.Sprintf("Request failed (%s), retrying in %s...",
-			inferenceErrorTitle(err), delay.Round(time.Millisecond))
+			inferenceErrorTitle(err), rounded)
 		l.logger.Warn("retrying inference request",
 			"status", err.StatusCode, "delay", delay, "error", err.Message)
 		_ = emit(ipc.ChatEvent{Type: "system", Content: msg}) // best-effort; client may have disconnected
