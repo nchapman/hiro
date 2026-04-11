@@ -17,8 +17,8 @@ const (
 // Instance represents a row in the instances table.
 //
 // Storage rule: only non-derivable data is persisted. Derived state
-// (effective tools, supplementary groups, resolved model/provider)
-// is recomputed from agent definitions at startup. If it can be
+// (effective tools, resolved model/provider) is recomputed from
+// agent definitions at startup. If it can be
 // reconstructed from config files, it does not belong in this table.
 type Instance struct {
 	ID        string

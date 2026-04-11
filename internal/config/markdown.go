@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxNameLen          = 64   // max length for group and skill names
+	maxNameLen          = 64   // max length for skill names
 	maxDescriptionLen   = 1024 // max length for skill description
 	maxCompatibilityLen = 500  // max length for skill compatibility field
 )
@@ -232,7 +232,6 @@ type AgentConfig struct {
 	DisallowedTools []string // from frontmatter "disallowed_tools"; deny rules checked at call time
 	Model           string   // from frontmatter "model"; per-agent model override
 	MaxTurns        int      // from frontmatter "max_turns"; max agentic turns (0 = unlimited)
-	Groups          []string // from frontmatter "groups"; supplementary Unix groups for the worker process
 	Prompt          string   // the markdown body — the agent's operating instructions
 	Skills          []SkillConfig
 }
@@ -253,22 +252,6 @@ type SkillConfig struct {
 	License       string            // optional: license identifier (e.g. MIT, Apache-2.0)
 	Compatibility string            // optional: system/dependency requirements (max 500 chars)
 	Metadata      map[string]string // optional: arbitrary key-value pairs (author, version, etc.)
-}
-
-var validGroupName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-
-// validateGroupName checks that a group name looks like a valid Unix group name.
-func validateGroupName(name string) error {
-	if name == "" {
-		return fmt.Errorf("group name is empty")
-	}
-	if len(name) > maxNameLen {
-		return fmt.Errorf("group name %q exceeds %d character limit", name, maxNameLen)
-	}
-	if !validGroupName.MatchString(name) {
-		return fmt.Errorf("group name %q must be lowercase letters, numbers, and hyphens", name)
-	}
-	return nil
 }
 
 var validSkillName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -303,19 +286,11 @@ func LoadAgentDir(dir string) (AgentConfig, error) {
 		DisallowedTools: parsed.Frontmatter.StringSlice("disallowed_tools"),
 		Model:           parsed.Frontmatter.String("model"),
 		MaxTurns:        parsed.Frontmatter.Int("max_turns"),
-		Groups:          parsed.Frontmatter.StringSlice("groups"),
 		Prompt:          parsed.Body,
 	}
 
 	if agent.Name == "" {
 		return AgentConfig{}, fmt.Errorf("agent config at %s missing required 'name' field", agentPath)
-	}
-
-	// Validate group names (must be valid Unix group name format).
-	for _, g := range agent.Groups {
-		if err := validateGroupName(g); err != nil {
-			return AgentConfig{}, fmt.Errorf("agent %q: %w", agent.Name, err)
-		}
 	}
 
 	// Load skills

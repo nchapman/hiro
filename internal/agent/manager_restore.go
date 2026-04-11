@@ -35,9 +35,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		return fmt.Errorf("listing instances from db: %w", err)
 	}
 
-	// Separate stopped instances from running ones. Stopped instances are
-	// registered in two passes: first without groups (so all parents are
-	// in the registry), then groups are derived with parent intersection.
+	// Separate stopped instances from running ones.
 	var stopped, toStart []restoreEntry
 
 	var cleaned int
@@ -73,8 +71,6 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		}
 	}
 
-	// Register stopped instances in two passes: first without groups (so all
-	// parents are in the registry), then resolve groups with parent intersection.
 	restored := m.registerStoppedInstances(stopped)
 
 	// Start running instances.
@@ -90,11 +86,8 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 	return nil
 }
 
-// registerStoppedInstances registers stopped instances in the manager's registry
-// and resolves their supplementary groups. Returns the count registered.
+// registerStoppedInstances registers stopped instances in the manager's registry.
 func (m *Manager) registerStoppedInstances(stopped []restoreEntry) int {
-	// Pass 1: register all stopped instances (without groups) so
-	// parentGroupSet can find parents regardless of restore order.
 	for _, e := range stopped {
 		inst := &instance{
 			info: InstanceInfo{

@@ -1,13 +1,12 @@
-Regex search across file contents, backed by ripgrep.
+# Purpose
+Search file contents across multiple files using regular expressions.
 
-- Full regex support (e.g., `log\.Error`, `func\s+\w+`)
-- Narrow results with `glob` (e.g., `*.js`) or `type` (e.g., `go`, `py`) filters
-- Three output modes: `files_with_matches` (default — paths only), `content` (matching lines with optional context), `count` (per-file match tallies)
-- Results are paginated: `head_limit` defaults to 250 entries, `offset` skips the first N. Set `head_limit: 0` for no cap
-- Ripgrep syntax — escape literal braces with backslashes (e.g., `interface\{\}` to find `interface{}`)
-- For patterns that cross line boundaries, enable `multiline`
-- Use `literal_text` to disable regex and match the exact string
+## Usage & Constraints
+- **Search Type:** Supports full regex and `literal_text` matching.
+- **Filters:** Use `glob` patterns (e.g., `*.js`) or `type` (e.g., `go`, `py`) for faster results.
+- **Modes:** `files_with_matches` (default), `content` (lines with context), and `count`.
+- **Formatting:** Paginated results (250 entries, `offset` to skip). Set `head_limit: 0` for no cap. Use `multiline` for cross-line regex. Escape regex-special chars (e.g., `interface\{\}` for `interface{}`), or use `literal_text: true` for exact string matching.
 
-Best practices:
-- Use Grep for all content searching — don't run `grep` or `rg` through Bash
-- Prefer `type` over `glob` for standard language filters — it's faster
+## Best Practices
+- **Internal Search:** Use Grep for all content searching — avoid `grep` or `rg` via Bash.
+- **Efficiency:** Use `type` over `glob` for language filtering whenever possible.

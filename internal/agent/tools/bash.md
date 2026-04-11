@@ -1,18 +1,13 @@
-Run a shell command and return stdout/stderr.
+# Purpose
+Execute shell commands to perform system operations, manage git, or run scripts.
 
-- Commands that run longer than 60s are automatically moved to background. Use `timeout` to set a different threshold — shorter or longer (max 600000ms)
-- Output is capped at 32KB
-- Set `run_in_background` for intentionally long-running processes, then manage with `TaskOutput` and `TaskStop`
-- `description` labels what the command does — purely informational, no effect on execution
-- Quote paths that contain spaces
-- Chain dependent commands with `&&`. Avoid using newlines as command separators
+## Usage & Constraints
+- **Backgrounding:** Commands exceeding 60s automatically move to the background. Adjust with `timeout` (max 600,000ms).
+- **Control:** Use `run_in_background` for long-running processes; manage via `TaskOutput` and `TaskStop`.
+- **Output:** Capped at 32KB.
+- **Formatting:** Quote paths with spaces. Chain dependent commands with `&&`.
 
-Best practices:
-- Prefer the purpose-built tools over Bash equivalents:
-  - Glob over `find`/`ls` for file discovery
-  - Grep over `grep`/`rg` for content search
-  - Read over `cat`/`head`/`tail` for reading files
-  - Edit over `sed`/`awk` for file modifications
-  - Write over `echo >`/heredocs for creating files
-- For git: don't force-push to main, create new commits rather than amending, and don't skip hooks unless explicitly told to
-- Don't `sleep` to wait for background work — use `TaskOutput` with `block` instead
+## Best Practices
+- **Prefer specialized tools:** Use Glob, Grep, Read, Edit, and Write over Bash equivalents (`find`, `ls`, `sed`, `cat`, etc.).
+- **Git:** Create new commits rather than amending; don't force-push to main; respect hooks unless told otherwise.
+- **Efficiency:** Use `TaskOutput` with `block` instead of `sleep` to wait for background work.

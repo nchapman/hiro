@@ -1,14 +1,12 @@
-Find and replace exact text in a file.
+# Purpose
+Precisely find and replace text in existing files using exact matches.
 
-- `old_string` must be a character-perfect match against the file, including all whitespace and indentation
-- If you're working from Read output, strip the line number prefix — only use the actual file content
-- The edit fails when `old_string` appears more than once. Add surrounding context to disambiguate, or set `replace_all`
-- Setting `old_string` to empty with content in `new_string` creates a new file (errors if the file already exists)
-- An empty `new_string` deletes the matched text
-- `replace_all` is useful for variable renames and pattern replacements
+## Usage & Constraints
+- **Exact Match:** `old_string` must be a character-perfect match, including whitespace, indentation, and no line prefixes.
+- **Uniqueness:** Fails if `old_string` appears multiple times; add context to disambiguate or use `replace_all`.
+- **Creation/Deletion:** Set `old_string` to empty to create a new file; set `new_string` to empty to delete matched text.
 
-Best practices:
-- Always read the file before editing so you can match its content exactly
-- Keep `old_string` short — 2-4 lines that uniquely identify the location is usually enough
-- Reach for Edit over Write when modifying existing files
-- Don't use `sed` or `awk` through Bash for file edits
+## Best Practices
+- **Read first:** Always read the file before editing to ensure a perfect match.
+- **Precision:** Keep `old_string` short (2-4 lines) but unique.
+- **Tool preference:** Use Edit over Write for modifying existing files. Avoid `sed` or `awk` through Bash.

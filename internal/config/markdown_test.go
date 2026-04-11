@@ -224,21 +224,6 @@ Mode field should be ignored.`
 	}
 }
 
-func TestValidateGroupName(t *testing.T) {
-	valid := []string{"hiro-operators", "custom-group", "a", "group1"}
-	for _, name := range valid {
-		if err := validateGroupName(name); err != nil {
-			t.Errorf("expected %q to be valid, got: %v", name, err)
-		}
-	}
-	invalid := []string{"", "UPPER", "has space", "has_underscore", "-leading-dash", "a/b"}
-	for _, name := range invalid {
-		if err := validateGroupName(name); err == nil {
-			t.Errorf("expected %q to be invalid", name)
-		}
-	}
-}
-
 func TestAgentMode_IsPersistent(t *testing.T) {
 	tests := []struct {
 		mode AgentMode

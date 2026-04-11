@@ -1,7 +1,8 @@
-Retrieves output from a running or completed background task.
+# Purpose
+Retrieve stdout/stderr and status information from a running or completed background task.
 
-- Takes a `task_id` parameter identifying the task
-- Returns the task output along with status information
-- Use `block` (default true) to wait for task completion
-- Use `block: false` for non-blocking check of current status
-- Use `TaskStop` to terminate a background task
+## Usage & Constraints
+- **ID:** Requires a `task_id` identifying the specific task.
+- **Wait:** Set `block: true` (default) to wait for task completion.
+- **Status:** Use `block: false` for a non-blocking check of current status.
+- **Control:** Use `TaskStop` to terminate the task if needed.

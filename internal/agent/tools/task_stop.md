@@ -1,5 +1,7 @@
-Stops a running background task by its ID.
+# Purpose
+Terminate a running background task by its ID.
 
-- Takes a `task_id` parameter identifying the task to stop
-- Returns a success or failure status
-- Use this tool when you need to terminate a long-running task
+## Usage & Constraints
+- **ID:** Requires a `task_id` identifying the specific task to stop.
+- **Result:** Returns success or failure status.
+- **Workflow:** Use when a background task is no longer needed or must be stopped.

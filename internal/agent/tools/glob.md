@@ -1,10 +1,11 @@
-Find files by pattern. Results are sorted by modification time, newest first.
+# Purpose
+Find files and directories by pattern, sorted by modification time (newest first).
 
-- Accepts standard glob syntax: `**/*.js`, `src/**/*.ts`, `*.{go,mod}`
-- Returns paths relative to the search directory
-- Caps at 100 results — narrow the path or pattern if you hit the limit
-- Skips hidden files/dirs, node_modules, vendor, dist, and .git
+## Usage & Constraints
+- **Syntax:** Supports standard glob patterns like `**/*.js`, `src/**/*.ts`, `*.{go,mod}`.
+- **Output:** Returns relative paths. Capped at 100 results.
+- **Exclusions:** Automatically skips node_modules, vendor, dist, __pycache__, .git, and hidden files/dirs.
 
-Best practices:
-- Use Glob for locating files by name or extension — don't shell out to `find` or `ls`
-- When you need to search inside files rather than find them, use Grep
+## Best Practices
+- **Discovery:** Use Glob for all file discovery — avoid `find` or `ls` via Bash.
+- **Content:** If you need to search *inside* files, use Grep instead.

@@ -3,28 +3,23 @@ name: create-skill
 description: Add skills to agents or the shared workspace. Use when asked to teach an agent something new or add a capability.
 ---
 
-You can add skills to any agent by writing markdown files, or create shared skills available to all agents.
+# Purpose
+Add skills to agents or the shared workspace. Skills are markdown files loaded on demand via `Skill("<name>")`.
 
-## Agent-specific skills
+## Placement
 
-Write to `agents/<agent-name>/skills/`. Two formats are supported:
+- **Agent-specific:** `agents/<agent-name>/skills/<skill-name>.md` (or `agents/<agent-name>/skills/<skill-name>/SKILL.md` for directory skills)
+- **Shared (all agents):** `skills/<skill-name>.md` (or `skills/<skill-name>/SKILL.md`)
 
-**Flat file:** `agents/<agent-name>/skills/<skill-name>.md`
+Agent-specific skills take precedence over shared skills with the same name.
 
-**Directory:** `agents/<agent-name>/skills/<skill-name>/SKILL.md` — use this when the skill needs bundled resources like scripts, references, or assets in subdirectories alongside the SKILL.md.
-
-## Shared workspace skills
-
-Write to the workspace-level `skills/` directory. These are available to all agents. Agent-specific skills take precedence over shared skills with the same name.
-
-## Skill file format
+## Skill File Format
 
 ```markdown
 ---
 name: skill-name
-description: What this skill does and when to use it. Include trigger phrases.
+description: What this skill does and when to use it.
 license: MIT
-compatibility: Requires python 3.8+
 metadata:
   author: your-name
   version: "1.0"
@@ -33,28 +28,22 @@ metadata:
 Full instructions for the agent when using this skill.
 ```
 
-### Required fields
+### Fields
 
-| Field | Rules |
-|-------|-------|
-| `name` | Lowercase kebab-case (`a-z`, `0-9`, hyphens). Max 64 chars. Must match directory name for directory skills. |
-| `description` | What the skill does AND when to use it. Max 1024 chars. This is what agents see to decide whether to load the skill. |
+| Field | Required | Rules |
+|-------|----------|-------|
+| `name` | yes | Lowercase kebab-case (`^[a-z0-9]+(-[a-z0-9]+)*$`). Max 64 chars. Must match directory name for directory skills. |
+| `description` | yes | What the skill does AND when to use it. Max 1024 chars. This is what agents see to decide whether to load the skill. |
+| `license` | no | License identifier (e.g., `MIT`, `Apache-2.0`). |
+| `compatibility` | no | System/dependency requirements. Max 500 chars. |
+| `metadata` | no | Arbitrary key-value pairs (author, version, etc.). |
+| `user_invocable` | no | If true, users can type `/<skill-name>` to invoke the skill directly. |
+| `argument_hint` | no | Hint text shown for command arguments (e.g., `"<file-path>"`). |
+| `arguments` | no | Named parameters for substitution in the skill body. |
 
-### Optional fields
+## Directory Skills
 
-| Field | Purpose |
-|-------|---------|
-| `license` | License identifier (e.g. `MIT`, `Apache-2.0`) |
-| `compatibility` | System/dependency requirements. Max 500 chars. |
-| `metadata` | Arbitrary key-value pairs (author, version, category, etc.) |
-
-## How skills work at runtime
-
-Skills use progressive disclosure. Only the name and description appear in the agent's system prompt. The agent calls `Skill("<skill-name>")` to load the full instructions and any bundled resources. This keeps prompts lean as skills grow.
-
-## Skill directory format
-
-For skills that bundle resources:
+For skills that bundle resources alongside the definition:
 
 ```
 skills/my-skill/
@@ -68,9 +57,7 @@ The agent can access all files in the skill directory via `Read` and `Glob`.
 
 ## Guidelines
 
-- Use kebab-case for names (e.g. `summarize-code`, `write-tests`).
 - Write the description as a trigger: what the skill does + when to use it.
-- Keep the SKILL.md body focused on instructions. Move detailed docs to `references/`.
-- Don't duplicate instructions already in the agent's `agent.md` or other skills.
-- Check existing skills first with `Glob` or `Bash` to list `agents/<agent-name>/skills/`.
+- Keep the body focused on instructions. Move detailed docs to `references/`.
+- Check existing skills first to avoid duplicates.
 - Skills take effect on the agent's next message — no restart needed.
