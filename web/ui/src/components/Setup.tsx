@@ -419,13 +419,14 @@ export default function Setup({ onComplete }: SetupProps) {
             </CardHeader>
             <CardContent>
               <div className="flex flex-col gap-4">
-                <div className="flex items-center gap-2 rounded-lg border bg-muted/50 p-4">
-                  <code className="flex-1 text-center text-2xl font-bold tracking-widest">
+                <div className="relative flex items-center justify-center rounded-lg border bg-muted/50 p-4">
+                  <code className="text-center text-2xl font-bold tracking-widest">
                     {generatedSwarmCode.toUpperCase()}
                   </code>
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="absolute right-2"
                     onClick={handleCopySwarmCode}
                   >
                     <HugeiconsIcon
