@@ -585,26 +585,20 @@ func TestRenderNodeListing_IncludesIDAndStatus(t *testing.T) {
 		{ID: "def456", Name: "worker-1", Status: "online", ActiveCount: 1},
 	}
 	text := renderNodeListing(nodes)
-	if !strings.Contains(text, "leader (home)") {
-		t.Error("expected home label")
+	if !strings.Contains(text, "## Cluster Nodes") {
+		t.Error("expected heading")
 	}
-	if !strings.Contains(text, "id: abc123") {
-		t.Error("expected node ID")
+	if !strings.Contains(text, `"id":"abc123"`) {
+		t.Error("expected home node ID in JSON")
 	}
-	if !strings.Contains(text, "capacity: 4") {
-		t.Error("expected capacity for node with capacity > 0")
+	if !strings.Contains(text, `"name":"leader"`) {
+		t.Error("expected leader name in JSON")
 	}
-	// worker-1 has zero capacity — check that its line doesn't include "capacity"
-	if idx := strings.Index(text, "def456"); idx >= 0 {
-		// Extract the line containing def456.
-		end := strings.Index(text[idx:], "\n")
-		if end < 0 {
-			end = len(text) - idx
-		}
-		line := text[idx : idx+end]
-		if strings.Contains(line, "capacity") {
-			t.Error("should not show capacity for zero-capacity node")
-		}
+	if !strings.Contains(text, `"is_home":true`) {
+		t.Error("expected is_home flag in JSON")
+	}
+	if !strings.Contains(text, `"id":"def456"`) {
+		t.Error("expected worker node ID in JSON")
 	}
 }
 

@@ -131,32 +131,20 @@ func TestListNodes_WithNodes(t *testing.T) {
 	if resp.IsError {
 		t.Fatalf("unexpected error: %s", resp.Content)
 	}
-	if !strings.Contains(resp.Content, "leader (home)") {
-		t.Errorf("expected home label, got: %s", resp.Content)
+	if !strings.Contains(resp.Content, `"id":"node-1"`) {
+		t.Errorf("expected home node ID, got: %s", resp.Content)
 	}
-	if !strings.Contains(resp.Content, "worker-1") {
+	if !strings.Contains(resp.Content, `"name":"leader"`) {
+		t.Errorf("expected leader name, got: %s", resp.Content)
+	}
+	if !strings.Contains(resp.Content, `"is_home":true`) {
+		t.Errorf("expected is_home flag, got: %s", resp.Content)
+	}
+	if !strings.Contains(resp.Content, `"name":"worker-1"`) {
 		t.Errorf("expected worker name, got: %s", resp.Content)
 	}
-	if !strings.Contains(resp.Content, "capacity: 4") {
+	if !strings.Contains(resp.Content, `"capacity":4`) {
 		t.Errorf("expected capacity, got: %s", resp.Content)
-	}
-}
-
-func TestListNodes_ZeroCapacity(t *testing.T) {
-	mgr := &controllableFakeManager{
-		nodes: []ipc.NodeInfo{
-			{ID: "n1", Name: "node", Status: "online", Capacity: 0, ActiveCount: 1},
-		},
-	}
-	tool := buildListNodes(mgr, testLogger)
-
-	resp := runMgmtTool(t, tool, "caller", `{}`)
-	if resp.IsError {
-		t.Fatalf("unexpected error: %s", resp.Content)
-	}
-	// Capacity 0 should not show "capacity: 0".
-	if strings.Contains(resp.Content, "capacity:") {
-		t.Errorf("zero capacity should be omitted, got: %s", resp.Content)
 	}
 }
 

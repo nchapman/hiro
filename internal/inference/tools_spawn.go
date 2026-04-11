@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -175,22 +176,13 @@ func NodeListingProvider(mgr ipc.HostManager) ContextProvider {
 }
 
 // renderNodeListing produces the node listing text for the system reminder.
-// Format matches buildListNodes tool output for consistency.
+// Format matches buildListNodes tool output (JSON) for consistency.
 func renderNodeListing(nodes []ipc.NodeInfo) string {
-	var b strings.Builder
-	b.WriteString("## Cluster Nodes\n\n")
-	for _, n := range nodes {
-		label := n.Name
-		if n.IsHome {
-			label += " (home)"
-		}
-		fmt.Fprintf(&b, "- **%s** (id: %s, status: %s", label, n.ID, n.Status)
-		if n.Capacity > 0 {
-			fmt.Fprintf(&b, ", capacity: %d", n.Capacity)
-		}
-		fmt.Fprintf(&b, ", active: %d)\n", n.ActiveCount)
+	data, err := json.Marshal(nodes)
+	if err != nil {
+		return "## Cluster Nodes\n\nFailed to render node listing."
 	}
-	return b.String()
+	return "## Cluster Nodes\n\n```json\n" + string(data) + "\n```"
 }
 
 func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessionID string, logger *slog.Logger) Tool {
@@ -201,7 +193,7 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 				Agent      string `json:"agent"      description:"Agent definition name (directory under agents/)."`
 				Prompt     string `json:"prompt"     description:"The task for the agent to complete."`
 				Background bool   `json:"background" description:"Run in the background. Returns immediately; you'll be notified when it completes."`
-				Node       string `json:"node"       description:"Target node name. Omit for local."`
+				NodeID     string `json:"node_id"    description:"Target node ID from ListNodes. Omit to run locally."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				if input.Agent == "" {
 					return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -215,12 +207,12 @@ func buildSpawnTool(mgr ipc.HostManager, notifications *NotificationQueue, sessi
 
 				if input.Background {
 					launchBackgroundSpawn(context.WithoutCancel(ctx), mgr, notifications, sessionID, logger,
-						input.Agent, input.Prompt, callerID, input.Node)
+						input.Agent, input.Prompt, callerID, input.NodeID)
 					return fantasy.NewTextResponse(
 						fmt.Sprintf("Agent %q launched in background. You'll be notified when it completes.", input.Agent)), nil
 				}
 
-				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, input.Node, nil)
+				result, err := mgr.SpawnEphemeral(ctx, input.Agent, input.Prompt, callerID, input.NodeID, nil)
 				if err != nil {
 					logger.Warn("SpawnInstance failed", "agent", input.Agent, "error", err)
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("instance failed: %v", err)), nil
@@ -274,7 +266,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 				Name        string `json:"name"        description:"Display name for this instance. Defaults to the agent definition name."`
 				Description string `json:"description" description:"Display description for this instance. Defaults to the agent definition description."`
 				Persona     string `json:"persona"     description:"Initial persona instructions for this instance. Specializes the agent for a specific role, project, or personality. Injected into the system prompt under ## Persona."`
-				Node        string `json:"node"        description:"Target node name. Omit for local."`
+				NodeID      string `json:"node_id"     description:"Target node ID from ListNodes. Omit to run locally."`
 			}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				if input.Agent == "" {
 					return fantasy.NewTextErrorResponse("agent name is required"), nil
@@ -284,7 +276,7 @@ func buildCreatePersistentInstanceTool(mgr ipc.HostManager, logger *slog.Logger)
 				mode := modePersistent
 
 				callerID := CallerIDFromContext(ctx)
-				nodeID := input.Node
+				nodeID := input.NodeID
 
 				logger.Info("tool call", "tool", "CreatePersistentInstance", "agent", input.Agent, "mode", mode, "name", input.Name)
 
@@ -326,19 +318,11 @@ func buildListNodes(mgr ipc.HostManager, logger *slog.Logger) fantasy.AgentTool 
 			if len(nodes) == 0 {
 				return fantasy.NewTextResponse("No cluster nodes configured. All agents run locally."), nil
 			}
-			var sb strings.Builder
-			for _, n := range nodes {
-				label := n.Name
-				if n.IsHome {
-					label += " (home)"
-				}
-				fmt.Fprintf(&sb, "- **%s** (id: %s, status: %s", label, n.ID, n.Status)
-				if n.Capacity > 0 {
-					fmt.Fprintf(&sb, ", capacity: %d", n.Capacity)
-				}
-				fmt.Fprintf(&sb, ", active: %d)\n", n.ActiveCount)
+			data, err := json.Marshal(nodes)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to marshal nodes: %v", err)), nil
 			}
-			return fantasy.NewTextResponse(sb.String()), nil
+			return fantasy.NewTextResponse(string(data)), nil
 		},
 	)
 }

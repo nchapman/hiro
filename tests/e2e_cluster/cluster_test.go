@@ -257,7 +257,7 @@ You are a test agent running on a remote node. Execute commands as asked. Be con
    The prompt should be: "Run 'hostname' using bash and report the output."
 4. Tell me the hostname that was reported.
 
-Important: when calling SpawnInstance, set the "node" parameter to the worker node's ID.`
+Important: when calling SpawnInstance, set the "node_id" parameter to the worker node's ID.`
 
 	resp := cs.chat(ctx, prompt)
 	t.Logf("operator response: %s", resp)
