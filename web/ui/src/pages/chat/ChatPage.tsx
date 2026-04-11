@@ -154,7 +154,10 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
       const spec = info?.provider ? formatModelSpec(info.provider, modelId) : modelId
       send({ type: "config", model: spec })
       setUsage((u) => u ? { ...u, model: spec, context_window: info?.context_window ?? u?.context_window } : u)
-      setReasoningEffort("")
+      // Reset reasoning when switching to a model that doesn't support it, or
+      // to one with mandatory reasoning (no controllable levels, e.g. DeepSeek R1).
+      // Only preserve the current effort when the new model has selectable levels.
+      if (!info?.can_reason || !info.reasoning_levels?.length) setReasoningEffort("")
     },
     [send, models]
   )

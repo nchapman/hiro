@@ -116,7 +116,7 @@ export const NotificationBlock = memo(function NotificationBlock({ notification 
 
 export const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
   return (
-    <Collapsible defaultOpen={isStreaming} className="rounded-lg border border-dashed border-muted-foreground/30">
+    <Collapsible defaultOpen={false} className="rounded-lg border border-dashed border-muted-foreground/30">
       <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground cursor-pointer hover:bg-accent/50 rounded-lg [[data-panel-open]_&]:rounded-b-none">
         {isStreaming ? (
           <Loader variant="typing" size="sm" />

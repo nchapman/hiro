@@ -74,12 +74,13 @@ func ContextWindow(modelID string) int {
 
 // ModelInfo is a simplified model description for API consumers.
 type ModelInfo struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Provider        string   `json:"provider,omitempty"`
-	CanReason       bool     `json:"can_reason"`
-	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
-	ContextWindow   int64    `json:"context_window"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Provider               string   `json:"provider,omitempty"`
+	CanReason              bool     `json:"can_reason"`
+	ReasoningLevels        []string `json:"reasoning_levels,omitempty"`
+	DefaultReasoningEffort string   `json:"default_reasoning_effort,omitempty"`
+	ContextWindow          int64    `json:"context_window"`
 }
 
 // ModelsForProvider returns models available for the given provider type.
@@ -104,6 +105,9 @@ func ModelsForProvider(providerType string) []ModelInfo {
 			}
 			if len(m.ReasoningLevels) > 0 {
 				info.ReasoningLevels = m.ReasoningLevels
+			}
+			if m.DefaultReasoningEffort != "" {
+				info.DefaultReasoningEffort = m.DefaultReasoningEffort
 			}
 			result = append(result, info)
 		}

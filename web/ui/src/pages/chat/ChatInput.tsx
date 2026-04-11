@@ -57,6 +57,11 @@ async function processFiles(files: FileList | File[]): Promise<PendingAttachment
 
 // --- Reasoning control ---
 
+function formatEffort(effort: string): string {
+  if (effort === "xhigh") return "X-High"
+  return effort.charAt(0).toUpperCase() + effort.slice(1)
+}
+
 function ReasoningControl({
   model,
   effort,
@@ -70,20 +75,32 @@ function ReasoningControl({
 
   const levels = model.reasoning_levels
 
-  const options = [{ value: "", label: "Fast" }, ...((levels ?? []).map((l) => ({ value: l, label: `Think: ${l}` })))]
+  // Models with controllable levels: popover with options.
+  if (levels?.length) {
+    const options = [
+      { value: "", label: "Auto" },
+      ...levels.map((l) => ({ value: l, label: formatEffort(l) })),
+    ]
+    const buttonLabel = effort ? `Reason: ${formatEffort(effort)}` : "Reason"
 
-  if (options.length > 2) {
     return (
       <Popover>
         <PopoverTrigger
           render={
-            <Button variant="outline" size="sm" className="h-6 gap-1 rounded-full px-2 text-xs text-muted-foreground" />
+            <Button
+              variant={effort ? "outline" : "ghost"}
+              size="sm"
+              className={cn(
+                "h-6 gap-1 rounded-full px-2 text-xs",
+                effort ? "border-primary/50 bg-primary/10 text-primary" : "text-muted-foreground"
+              )}
+            />
           }
         >
-          {options.find((o) => o.value === effort)?.label ?? "Fast"}
+          {buttonLabel}
           <HugeiconsIcon icon={ArrowRight01Icon} className="h-3 w-3" />
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-36 p-1">
+        <PopoverContent align="end" className="w-40 p-1">
           {options.map((o) => (
             <button
               key={o.value}
@@ -101,17 +118,18 @@ function ReasoningControl({
     )
   }
 
+  // Binary toggle for models without controllable levels.
   return (
     <Button
       variant={effort ? "outline" : "ghost"}
       size="sm"
       className={cn(
         "h-6 rounded-full px-2 text-xs",
-        effort && "border-primary/50 bg-primary/10 text-primary"
+        effort ? "border-primary/50 bg-primary/10 text-primary" : "text-muted-foreground"
       )}
       onClick={(e) => { e.stopPropagation(); onChange(effort ? "" : "on") }}
     >
-      {effort ? "Thinking" : "Fast"}
+      {effort ? "Reasoning" : "Reason"}
     </Button>
   )
 }
@@ -265,8 +283,6 @@ export default function ChatInputArea({
               >
                 <HugeiconsIcon icon={Attachment01Icon} className="h-4 w-4" />
               </Button>
-            </div>
-            <div className="flex items-center gap-2">
               {currentModelInfo?.can_reason && (
                 <ReasoningControl
                   model={currentModelInfo}
@@ -274,6 +290,8 @@ export default function ChatInputArea({
                   onChange={onReasoningChange}
                 />
               )}
+            </div>
+            <div className="flex items-center gap-2">
               <Button
                 size="icon"
                 className="h-8 w-8 rounded-full"

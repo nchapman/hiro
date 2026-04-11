@@ -480,12 +480,21 @@ func (l *Loop) buildStreamCall(prompt string, files []fantasy.FilePart, messages
 			return ctx, result, nil
 		},
 		OnReasoningStart: func(id string, rc fantasy.ReasoningContent) error {
-			return emit(ipc.ChatEvent{Type: "reasoning_start"})
+			if err := emit(ipc.ChatEvent{Type: "reasoning_start"}); err != nil {
+				return err
+			}
+			// The start event may carry the first chunk of reasoning text.
+			// Forward it as a delta so the frontend doesn't lose it.
+			if rc.Text != "" {
+				return emit(ipc.ChatEvent{Type: "reasoning_delta", Content: rc.Text})
+			}
+			return nil
 		},
 		OnReasoningDelta: func(id, text string) error {
 			return emit(ipc.ChatEvent{Type: "reasoning_delta", Content: text})
 		},
-		OnReasoningEnd: func(id string, rc fantasy.ReasoningContent) error {
+		OnReasoningEnd: func(id string, _ fantasy.ReasoningContent) error {
+			// rc.Text is the accumulated full text (already delivered via deltas).
 			return emit(ipc.ChatEvent{Type: "reasoning_end"})
 		},
 		OnTextDelta: func(id, text string) error {
@@ -702,16 +711,10 @@ func (l *Loop) buildReasoningOptionsLocked() fantasy.ProviderOptions {
 
 	case "openrouter":
 		if effort == "" {
-			// OpenRouter enables thinking by default for models that support it.
-			// Explicitly disable it when reasoning effort is not set.
-			enabled := false
-			return fantasy.ProviderOptions{
-				openrouter.Name: &openrouter.ProviderOptions{
-					Reasoning: &openrouter.ReasoningOptions{
-						Enabled: &enabled,
-					},
-				},
-			}
+			// Don't send any reasoning options when effort is unset.
+			// Let the provider decide — explicitly disabling breaks models
+			// with mandatory reasoning (DeepSeek R1, StepFun, etc.).
+			return nil
 		}
 		e := openrouter.ReasoningEffort(effort)
 		enabled := true

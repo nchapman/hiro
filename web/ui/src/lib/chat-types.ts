@@ -4,6 +4,7 @@ export interface ModelInfo {
   provider?: string
   can_reason: boolean
   reasoning_levels?: string[]
+  default_reasoning_effort?: string
   context_window: number
 }
 
