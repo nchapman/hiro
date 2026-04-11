@@ -13,8 +13,8 @@ services:
       - hiro:/hiro
       # Bind mount instead of volume (replace the line above):
       # - ./hiro-data:/hiro
-    environment:
-      # - HIRO_LOG_LEVEL=debug
+    # environment:
+    #   - HIRO_LOG_LEVEL=debug
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
       interval: 30s
