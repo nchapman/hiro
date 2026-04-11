@@ -27,6 +27,7 @@ const (
 	maxAttachmentSize = 5 * 1024 * 1024 // 5 MB per attachment
 	maxAttachments    = 10
 	bytesPerMB        = 1024 * 1024
+	eventTypeSession  = "session"
 )
 
 // Chat message type constants.
@@ -189,7 +190,7 @@ func (c *Channel) HandleConn(ctx context.Context, conn *websocket.Conn, instance
 	// history and usage.
 	if sessionID != "" {
 		_ = wsjson.Write(ctx, conn, ChatMessage{
-			Type:    "session",
+			Type:    eventTypeSession,
 			Content: sessionID,
 		})
 	}
@@ -311,12 +312,12 @@ func (c *Channel) handleConfigMessage(ctx context.Context, conn *websocket.Conn,
 }
 
 // makeOnEvent builds a streaming callback that writes inference events to
-// the WebSocket as JSON. It also intercepts "session" events to update the
+// the WebSocket as JSON. It also intercepts eventTypeSession events to update the
 // wsConn's sessionID when a new session is created (e.g. after /clear).
 func (c *Channel) makeOnEvent(ctx context.Context, conn *websocket.Conn, conversationKey string) func(ipc.ChatEvent) error {
 	return func(evt ipc.ChatEvent) error {
 		// Update the wsConn's session ID when the server sends a new session event.
-		if evt.Type == "session" && evt.Content != "" {
+		if evt.Type == eventTypeSession && evt.Content != "" {
 			c.mu.Lock()
 			if wc, ok := c.conns[conversationKey]; ok {
 				wc.sessionID = evt.Content

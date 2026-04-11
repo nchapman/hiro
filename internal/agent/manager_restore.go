@@ -35,9 +35,25 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 		return fmt.Errorf("listing instances from db: %w", err)
 	}
 
-	// Separate stopped instances from running ones.
-	var stopped, toStart []restoreEntry
+	stopped, toStart, cleaned := m.classifyInstances(ctx, instances)
+	restored := m.registerStoppedInstances(stopped)
 
+	for _, e := range toStart {
+		if m.restoreRunningInstance(ctx, &e) {
+			restored++
+		}
+	}
+
+	if restored > 0 || cleaned > 0 {
+		m.logger.Info("instance restore complete", "restored", restored, "cleaned", cleaned)
+	}
+	return nil
+}
+
+// classifyInstances sorts DB instances into stopped/running buckets, cleaning
+// up ephemeral and orphaned instances along the way.
+func (m *Manager) classifyInstances(ctx context.Context, instances []platformdb.Instance) ([]restoreEntry, []restoreEntry, int) {
+	var stopped, toStart []restoreEntry
 	var cleaned int
 	for _, dbInst := range instances {
 		mode := config.AgentMode(dbInst.Mode)
@@ -58,8 +74,16 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 
 		cfg, err := config.LoadAgentDir(m.agentDefDir(dbInst.AgentName))
 		if err != nil {
-			m.logger.Warn("skipping instance with missing agent definition",
-				"agent", dbInst.AgentName, "error", err)
+			m.logger.Warn("removing orphaned instance (agent definition missing)",
+				"id", dbInst.ID, "agent", dbInst.AgentName, "error", err)
+			if delErr := m.pdb.DeleteInstance(ctx, dbInst.ID); delErr != nil {
+				m.logger.Warn("failed to delete orphaned instance from DB, will retry next startup",
+					"id", dbInst.ID, "error", delErr)
+				continue
+			}
+			os.RemoveAll(m.instanceDir(dbInst.ID))
+			os.Remove(m.instanceConfigPath(dbInst.ID))
+			cleaned++
 			continue
 		}
 
@@ -70,20 +94,7 @@ func (m *Manager) RestoreInstances(ctx context.Context) error {
 			toStart = append(toStart, entry)
 		}
 	}
-
-	restored := m.registerStoppedInstances(stopped)
-
-	// Start running instances.
-	for _, e := range toStart {
-		if m.restoreRunningInstance(ctx, &e) {
-			restored++
-		}
-	}
-
-	if restored > 0 || cleaned > 0 {
-		m.logger.Info("instance restore complete", "restored", restored, "ephemeral_cleaned", cleaned)
-	}
-	return nil
+	return stopped, toStart, cleaned
 }
 
 // registerStoppedInstances registers stopped instances in the manager's registry.

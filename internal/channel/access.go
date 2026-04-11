@@ -57,7 +57,9 @@ func (c *ConfigAccessChecker) lockFor(instanceID string) *sync.Mutex {
 	v, _ := c.locks.LoadOrStore(instanceID, &sync.Mutex{})
 	mu, ok := v.(*sync.Mutex)
 	if !ok {
-		panic("ConfigAccessChecker: unexpected type in locks map")
+		// Unreachable: only *sync.Mutex is stored. Self-heal instead of crashing.
+		mu = &sync.Mutex{}
+		c.locks.Store(instanceID, mu)
 	}
 	return mu
 }
