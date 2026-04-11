@@ -169,9 +169,10 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
 
   // Fetch history and usage when the channel session ID becomes available.
   const fetchSessionData = useCallback((sid: string, gen: number, signal: AbortSignal) => {
-    if (!session) return
+    const instanceId = session?.id
+    if (!instanceId) return
     // Fetch usage with session_id parameter.
-    fetch(`/api/instances/${encodeURIComponent(session.id)}/usage?session_id=${encodeURIComponent(sid)}`, { signal })
+    fetch(`/api/instances/${encodeURIComponent(instanceId)}/usage?session_id=${encodeURIComponent(sid)}`, { signal })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: UsageInfo | null) => {
         if (sessionGeneration.current === gen && data) setUsage(data)
@@ -199,7 +200,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
       .finally(() => {
         if (sessionGeneration.current === gen) setLoadingHistory(false)
       })
-  }, [session])
+  }, [session?.id])
 
   // Load message history when agent changes — with per-session caching.
   useEffect(() => {
