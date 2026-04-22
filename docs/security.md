@@ -187,6 +187,7 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 - **Landlock requires kernel 5.13+.** On older kernels, filesystem isolation is silently disabled. Modern Docker hosts (Ubuntu 22.04+, Debian 12+) have Landlock support.
 - **Shared workspace is collaborative.** Any agent can read or modify files in the workspace. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
 - **Agents with Bash have network access.** The seccomp filter only blocks sockets for agents without Bash. Agents with Bash can make arbitrary outbound connections. Use tool rules (`Bash(curl *)`) to restrict which commands agents can run.
+- **First-run setup is not network-gated.** Between container start and completion of the onboarding flow, `/api/setup*` endpoints accept requests from any origin. A fresh install has no data, keys, or capabilities, so the worst case is an attacker configuring their own LLM provider on your box — visible immediately on your next visit. Once setup completes, `NeedsSetup()` closes the endpoints (409 Conflict). This matches the posture of Jellyfin, Home Assistant, Sonarr, etc. Do not re-add a loopback gate here without a specific threat to defend against; it breaks Tailscale/LAN/reverse-proxy deployments.
 
 ### Known Issues
 

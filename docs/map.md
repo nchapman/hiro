@@ -569,7 +569,7 @@ Synthesized from deep-dive reviews of every package. Organized by priority.
 | ~~**SSRF protection opt-in**~~ | `agent/tools/fetch.go` | **FIXED** — Defaults to true (`atomic.Bool`). Pre-dial DNS resolution prevents rebinding. |
 | **Relay status bytes unauthenticated** | `cluster/relay.go` | Low — MITM could inject false status. Mitigated by mTLS on the data path. |
 | ~~**Rate limiter ignores reverse proxy**~~ | `api/auth.go` | **FIXED** — `clientIP()` trusts proxy headers only from loopback/private peers. Strips port. |
-| ~~**Setup CSRF vulnerable to DNS rebinding**~~ | `api/server.go` | **FIXED** — `isLoopbackOrigin()` requires loopback host when Origin header present. |
+| ~~**Setup CSRF vulnerable to DNS rebinding**~~ | `api/server.go` | **REVERTED** — loopback gate removed. A fresh install has no data, keys, or capabilities worth protecting, and the gate broke common self-hosted deployments (Tailscale, LAN, reverse proxy). `NeedsSetup()` still blocks re-setup once configured. |
 | ~~**Password change silently logs out user**~~ | `api/auth.go` | **FIXED** — New session token issued in response after secret rotation. |
 
 ### Concurrency
@@ -634,7 +634,7 @@ Completed items struck through. Next priorities:
 6. ~~**Tool correctness**~~ — **DONE** (atomic writes for Write/memory/todos, resolve.go symlink protection, job ID space widened).
 7. ~~**API test coverage**~~ — **DONE** (2 → 101 tests across 9 files: auth, instances, settings, usage, files, setup, share, origin). Remaining: chat/terminal WebSocket.
 8. ~~**Web UI polish**~~ — **DONE** (sonner toast system, theme-aware, all console.error→toast.error). Remaining: message virtualization, mobile responsiveness.
-9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests, rate limiter proxy support, setup CSRF loopback hardening, password change session reissue).
+9. ~~**Control plane cleanup**~~ — **DONE** (split into 7 files, provider validation, save error surfacing, hasContent/JoinTokens fix, maskKey hardening, TokenSigner lock optimization, 25 → 53 tests, rate limiter proxy support, password change session reissue).
 10. ~~**Architecture refactoring**~~ — **DONE** (6 changes: extract `internal/provider`, tool schema cleanup, `SecretEnvSetter` interface, `NodeID` canonicalization, API server constructor, `bootstrap.go` extraction).
 11. ~~**Error handling hardening**~~ — **DONE** (21 fixes across 18 files: infinite loop cycle detection, 2 race condition fixes with new mutexes, nil deref fix, 5 JSON marshal checks, spawn isolation errors, WalkDir errors, rand.Read check, RowsAffected checks, session query InstanceID fix, LatestSessionByInstance error surfacing, auth secret validation, config push timeout, history tool error responses, port parse check, restore config logging).
 12. ~~**Structural cleanup**~~ — **DONE** (3 changes: split filesync.go 736→5 files, consolidate 4 duplicated cleanup paths into `detachWorker`+`teardownInstance`, centralize 18 resource limit constants into `limits.go`).

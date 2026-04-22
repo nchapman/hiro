@@ -165,23 +165,3 @@ func TestSetup_AlreadyComplete(t *testing.T) {
 	}
 }
 
-func TestSetup_CrossOriginBlocked(t *testing.T) {
-	srv := newSetupServer(t)
-
-	body, _ := json.Marshal(map[string]string{
-		"password":      "testpass123",
-		"mode":          "standalone",
-		"provider_type": "anthropic",
-		"api_key":       "sk-test-key",
-	})
-	req := httptest.NewRequest("POST", "/api/setup", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "http://evil.com")
-	req.Host = "localhost:8080"
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for cross-origin, got %d", rec.Code)
-	}
-}

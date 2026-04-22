@@ -48,10 +48,6 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "setup already complete", http.StatusConflict)
 		return
 	}
-	if !isLoopbackOrigin(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req setupRequest
@@ -266,10 +262,6 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "setup already complete; use /api/settings/providers/{type}/test", http.StatusConflict)
 		return
 	}
-	if !isLoopbackOrigin(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req struct {
@@ -313,10 +305,6 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleValidateSwarm(w http.ResponseWriter, r *http.Request) {
 	if s.cp != nil && !s.cp.NeedsSetup() {
 		http.Error(w, "setup already complete", http.StatusConflict)
-		return
-	}
-	if !isLoopbackOrigin(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 

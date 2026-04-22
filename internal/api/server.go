@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -151,15 +150,14 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/setup/models", s.setupOnly(s.handleListModels))
 }
 
-// setupOnly wraps a handler so it is only accessible during setup from loopback.
+// setupOnly wraps a handler so it is only accessible during initial setup.
+// A fresh install has no data, keys, or capabilities worth protecting, so we
+// don't gate setup by network origin — that would break common self-hosted
+// deployments (Tailscale, reverse proxy, LAN access) for no real benefit.
 func (s *Server) setupOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.cp != nil && !s.cp.NeedsSetup() {
 			http.Error(w, "setup already complete", http.StatusConflict)
-			return
-		}
-		if !isLoopbackOrigin(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		next(w, r)
@@ -538,80 +536,6 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// isSameOrigin checks that the request's Origin header (if present) matches
-// the server's Host. This provides CSRF protection for unauthenticated
-// mutation endpoints (like setup).
-func isSameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		// No Origin header means this is not a cross-origin request (or is
-		// a same-origin request from a non-browser client).
-		return true
-	}
-	// Origin includes scheme (e.g. "http://localhost:8120").
-	// Extract host and compare with the request's Host header.
-	host := r.Host
-	if host == "" {
-		return false
-	}
-	// Strip scheme from origin to get the host portion.
-	originHost := origin
-	for _, prefix := range []string{"https://", "http://"} {
-		if strings.HasPrefix(originHost, prefix) {
-			originHost = originHost[len(prefix):]
-			break
-		}
-	}
-	return originHost == host
-}
-
-// isLoopbackOrigin hardens setup endpoints against DNS rebinding and remote
-// access. If an Origin header is present (browser request), it must match the
-// Host header AND the host must be a loopback address. Without an Origin
-// header (non-browser clients like curl), the request's RemoteAddr must be
-// loopback to prevent remote first-run takeover.
-func isLoopbackOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		// No Origin → either a non-browser client or a same-origin GET from a
-		// browser (browsers only send Origin on POST/PUT/DELETE and cross-origin).
-		// Accept if RemoteAddr is loopback OR if Host is loopback (covers Docker
-		// port-forwarding where RemoteAddr is the bridge IP but Host is localhost).
-		return isLoopbackRemote(r) || isLoopbackHost(r.Host)
-	}
-	if !isSameOrigin(r) {
-		return false
-	}
-	// Browser request with matching Origin/Host — verify the host is loopback.
-	return isLoopbackHost(r.Host)
-}
-
-// isLoopbackHost checks whether a host (with optional port) is a loopback address.
-func isLoopbackHost(host string) bool {
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return true
-	}
-	return false
-}
-
-// isLoopbackRemote checks whether the request's remote address is loopback.
-func isLoopbackRemote(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }
 
 // InitTerminalSessions creates and starts the terminal session manager.
