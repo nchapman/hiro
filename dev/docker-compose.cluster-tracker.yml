@@ -1,0 +1,55 @@
+# Cluster tracker-discovery e2e test — run with: make test-cluster-tracker
+#
+# Leader and worker share a network and can reach each other directly, but
+# find each other via the live tracker (discover.hellohiro.ai). The leader
+# advertises a specific address via cluster.advertise_addresses, and the
+# worker must connect to that address rather than the tracker's observed
+# IP (which is the public WAN egress, unreachable from the worker container).
+#
+# This is the end-to-end test for the multi-address announce feature.
+services:
+  leader:
+    build: ..
+    init: true
+    networks:
+      cluster-net:
+        ipv4_address: 172.28.0.10
+    ports:
+      - "0:8120"  # HTTP API for test harness (host access only)
+    environment:
+      - HIRO_TRACKER_URL=https://discover.hellohiro.ai
+      - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
+    volumes:
+      - leader-hiro:/hiro
+      - ../tests/e2e_cluster/leader-config:/hiro/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+
+  worker:
+    build: ..
+    init: true
+    networks:
+      - cluster-net
+    depends_on:
+      leader:
+        condition: service_healthy
+    environment:
+      - HIRO_MODE=worker
+      - HIRO_TRACKER_URL=https://discover.hellohiro.ai
+      - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
+      # No HIRO_LEADER — must discover via tracker + advertised address.
+    volumes:
+      - worker-hiro:/hiro
+
+networks:
+  cluster-net:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  leader-hiro:
+  worker-hiro:

@@ -270,6 +270,20 @@ func DialRelay(ctx context.Context, relayAddr string, swarmCode string, identity
 		return nil, fmt.Errorf("dialing relay: %w", err)
 	}
 
+	// Propagate ctx cancellation to the handshake I/O. Without this, a
+	// canceled context (e.g. the happy-eyeballs race has a winner) would
+	// leave us blocked on Write/Read until the deadline expires, holding a
+	// stray TCP connection to the relay open for seconds after it's needed.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-stop:
+		}
+	}()
+
 	// Send worker handshake.
 	var buf [relayHandshakeSize]byte
 	buf[0] = relayVersion

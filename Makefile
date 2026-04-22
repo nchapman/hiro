@@ -1,4 +1,4 @@
-.PHONY: build test test-local test-online test-cluster test-cluster-relay check lint clean web build-dev docker docker-up docker-down proto
+.PHONY: build test test-local test-online test-cluster test-cluster-relay test-cluster-tracker check lint clean web build-dev docker docker-up docker-down proto
 
 # Auto-load .env variables. Command-line overrides (make VAR=x) take precedence.
 # Variables are NOT exported globally — only test targets pass what they need.
@@ -88,6 +88,45 @@ test-cluster-relay:
 	echo "=== WORKER LOGS ==="; \
 	docker compose -f dev/docker-compose.cluster-relay.yml logs worker --tail=50; \
 	docker compose -f dev/docker-compose.cluster-relay.yml down -v; \
+	rm -rf tests/e2e_cluster/leader-config; \
+	exit $$EXIT
+
+test-cluster-tracker:
+	@if [ -z "$(HIRO_API_KEY)" ]; then echo "HIRO_API_KEY must be set"; exit 1; fi; \
+	SWARM=$$(openssl rand -hex 16); \
+	mkdir -p tests/e2e_cluster/leader-config; \
+	chmod 775 tests/e2e_cluster/leader-config; \
+	printf "cluster:\n  mode: leader\n  advertise_addresses:\n    - tcp://172.28.0.10:8121\n" > tests/e2e_cluster/leader-config/config.yaml; \
+	export HIRO_API_KEY=$(HIRO_API_KEY) HIRO_PROVIDER=$(HIRO_PROVIDER) HIRO_MODEL=$(HIRO_MODEL); \
+	docker compose -f dev/docker-compose.cluster-tracker.yml build; \
+	export HIRO_SWARM_CODE=$$SWARM; \
+	docker compose -f dev/docker-compose.cluster-tracker.yml up -d; \
+	echo "Waiting for tracker registration..."; \
+	sleep 8; \
+	PORT=$$(docker compose -f dev/docker-compose.cluster-tracker.yml port leader 8120 | cut -d: -f2); \
+	LEADER_ID=$$(docker compose -f dev/docker-compose.cluster-tracker.yml ps -q leader); \
+	WORKER_ID=$$(docker compose -f dev/docker-compose.cluster-tracker.yml ps -q worker); \
+	HIRO_E2E_URL=http://localhost:$$PORT \
+	HIRO_LEADER_CONTAINER=$$LEADER_ID \
+	HIRO_WORKER_CONTAINER=$$WORKER_ID \
+	go test ./tests/e2e_cluster/... -tags="e2e_cluster,$(TAGS)" -v -count=1 -timeout=10m; \
+	EXIT=$$?; \
+	echo "=== LEADER LOGS ==="; \
+	docker compose -f dev/docker-compose.cluster-tracker.yml logs leader --tail=50; \
+	echo "=== WORKER LOGS ==="; \
+	docker compose -f dev/docker-compose.cluster-tracker.yml logs worker --tail=50; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "=== advertise_addresses assertion ==="; \
+		WORKER_LOGS=$$(docker compose -f dev/docker-compose.cluster-tracker.yml logs worker); \
+		if echo "$$WORKER_LOGS" | grep -q 'connected to leader.*via=direct.*172\.28\.0\.10:8121'; then \
+			echo "OK: worker connected to advertised address (direct, 172.28.0.10:8121)"; \
+		else \
+			echo "FAIL: worker logs do not show direct connection to advertised address"; \
+			echo "$$WORKER_LOGS" | grep 'connected to leader' || echo "(no 'connected to leader' line found)"; \
+			EXIT=1; \
+		fi; \
+	fi; \
+	docker compose -f dev/docker-compose.cluster-tracker.yml down -v; \
 	rm -rf tests/e2e_cluster/leader-config; \
 	exit $$EXIT
 

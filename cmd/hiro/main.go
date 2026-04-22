@@ -352,14 +352,15 @@ func (a *app) startTrackerDiscovery(identity *cluster.NodeIdentity, tlsCert tls.
 	}
 
 	dc := cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
-		TrackerURL:     trackerURL,
-		SwarmCode:      swarmCode,
-		Role:           "leader",
-		GRPCPort:       grpcPort,
-		Identity:       identity,
-		TLSFingerprint: cluster.TLSFingerprint(tlsCert),
-		NodeName:       nodeName,
-		Logger:         a.logger,
+		TrackerURL:         trackerURL,
+		SwarmCode:          swarmCode,
+		Role:               "leader",
+		GRPCPort:           grpcPort,
+		Identity:           identity,
+		TLSFingerprint:     cluster.TLSFingerprint(tlsCert),
+		NodeName:           nodeName,
+		AdvertiseAddresses: a.cp.ClusterAdvertiseAddresses(),
+		Logger:             a.logger,
 	})
 
 	go dc.Run(a.discoveryCtx)

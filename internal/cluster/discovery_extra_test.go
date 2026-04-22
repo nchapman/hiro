@@ -65,7 +65,7 @@ func TestDiscoveryClient_Announce_PublicMethod(t *testing.T) {
 		json.NewEncoder(w).Encode(announceResponse{
 			YourIP: "1.2.3.4",
 			Peers: []announceJSON{
-				{NodeID: "leader-1", Role: "leader", Endpoint: "10.0.0.1", GRPCPort: 8081},
+				{NodeID: "leader-1", Role: "leader", Addresses: []string{"tcp://10.0.0.1:8081"}, GRPCPort: 8081},
 			},
 		})
 	}))
@@ -127,11 +127,11 @@ func TestCheckSwarm_LeaderFound(t *testing.T) {
 			YourIP: "1.2.3.4",
 			Peers: []announceJSON{
 				{
-					NodeID:   "abcdef1234567890abcdef",
-					Role:     "leader",
-					Endpoint: "10.0.0.1",
-					GRPCPort: 8081,
-					LastSeen: time.Now().Format(time.RFC3339),
+					NodeID:    "abcdef1234567890abcdef",
+					Role:      "leader",
+					Addresses: []string{"tcp://10.0.0.1:8081"},
+					GRPCPort:  8081,
+					LastSeen:  time.Now().Format(time.RFC3339),
 				},
 			},
 		})

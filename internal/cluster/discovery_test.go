@@ -80,7 +80,7 @@ func TestDiscoveryClient_Announce(t *testing.T) {
 					NodeID:    "abcdef1234567890",
 					PublicKey: "AAAA",
 					Role:      "leader",
-					Endpoint:  "10.0.0.1",
+					Addresses: []string{"tcp://10.0.0.1:8081"},
 					GRPCPort:  8081,
 					LastSeen:  time.Now().Format(time.RFC3339),
 				},
@@ -164,11 +164,11 @@ func TestDiscoveryClient_WaitForLeader(t *testing.T) {
 		if n >= 2 {
 			resp.Peers = []announceJSON{
 				{
-					NodeID:   "leader-id",
-					Role:     "leader",
-					Endpoint: "10.0.0.1",
-					GRPCPort: 8081,
-					LastSeen: time.Now().Format(time.RFC3339),
+					NodeID:    "leader-id",
+					Role:      "leader",
+					Addresses: []string{"tcp://10.0.0.1:8081"},
+					GRPCPort:  8081,
+					LastSeen:  time.Now().Format(time.RFC3339),
 				},
 			}
 		}
@@ -285,9 +285,9 @@ func TestDiscoveryClient_MultiplePeers(t *testing.T) {
 		json.NewEncoder(w).Encode(announceResponse{
 			YourIP: "1.2.3.4",
 			Peers: []announceJSON{
-				{NodeID: "leader-1", Role: "leader", Endpoint: "10.0.0.1", GRPCPort: 8081},
-				{NodeID: "worker-1", Role: "worker", Endpoint: "10.0.0.2", GRPCPort: 0},
-				{NodeID: "worker-2", Role: "worker", Endpoint: "10.0.0.3", GRPCPort: 0},
+				{NodeID: "leader-1", Role: "leader", Addresses: []string{"tcp://10.0.0.1:8081"}, GRPCPort: 8081},
+				{NodeID: "worker-1", Role: "worker", Addresses: []string{"tcp://10.0.0.2:0"}, GRPCPort: 0},
+				{NodeID: "worker-2", Role: "worker", Addresses: []string{"tcp://10.0.0.3:0"}, GRPCPort: 0},
 			},
 		})
 	}))
@@ -331,7 +331,7 @@ func TestDiscoveryClient_TLSFingerprint(t *testing.T) {
 				{
 					NodeID:         "leader-1",
 					Role:           "leader",
-					Endpoint:       "10.0.0.1",
+					Addresses:      []string{"tcp://10.0.0.1:8081"},
 					GRPCPort:       8081,
 					TLSFingerprint: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
 				},
@@ -387,5 +387,112 @@ func TestSignedMessage_Deterministic(t *testing.T) {
 	expected := "abc123\n1000\nleader\n8081\n\n\n\na=1\nb=2"
 	if string(msg1) != expected {
 		t.Errorf("unexpected signed message:\ngot:  %q\nwant: %q", string(msg1), expected)
+	}
+}
+
+// TestSignedMessageCanonicalVector must produce the *exact* same bytes as the
+// tracker's identical test in hiro-tracker/main_test.go. If these diverge,
+// every real announce will fail signature verification. Keep both in sync.
+func TestSignedMessageCanonicalVector(t *testing.T) {
+	req := &announceRequest{
+		SwarmHash:      "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Timestamp:      1700000000,
+		Role:           "leader",
+		GRPCPort:       8120,
+		WGPubKey:       "",
+		WGEndpoint:     "",
+		TLSFingerprint: "cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe",
+		Addresses:      []string{"tcp://100.64.1.5:8120", "tcp://192.168.1.5:8120"},
+		Meta:           map[string]string{"node_name": "canonical-vector"},
+	}
+	want := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n" +
+		"1700000000\n" +
+		"leader\n" +
+		"8120\n" +
+		"\n" +
+		"\n" +
+		"cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe\n" +
+		"tcp://100.64.1.5:8120\n" +
+		"tcp://192.168.1.5:8120\n" +
+		"node_name=canonical-vector"
+	got := string(req.signedMessage())
+	if got != want {
+		t.Fatalf("canonical signed message mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestValidateAdvertiseAddressRejects(t *testing.T) {
+	bad := []string{
+		"",
+		"tcp://127.0.0.1:8120",     // loopback
+		"tcp://[::1]:8120",         // loopback v6
+		"tcp://0.0.0.0:8120",       // unspecified
+		"tcp://169.254.1.1:8120",   // link-local
+		"tcp://[fe80::1]:8120",     // link-local v6
+		"tcp://224.0.0.1:8120",     // multicast
+		"http://10.0.0.1:8120",     // bad scheme
+		"10.0.0.1:8120",            // no scheme
+		"tcp://example.com:8120",   // hostname
+		"tcp://10.0.0.1",           // no port
+		"tcp://10.0.0.1:0",         // zero port
+		"tcp://10.0.0.1:8120/path", // path included
+	}
+	for _, a := range bad {
+		if msg := ValidateAdvertiseAddress(a); msg == "" {
+			t.Errorf("expected rejection for %q", a)
+		}
+	}
+	good := []string{
+		"tcp://10.0.0.1:8120",
+		"tcp4://192.168.1.5:8120",
+		"tcp6://[2001:db8::1]:8120",
+		"tcp://100.64.1.5:8120",
+	}
+	for _, a := range good {
+		if msg := ValidateAdvertiseAddress(a); msg != "" {
+			t.Errorf("expected %q to validate; got %q", a, msg)
+		}
+	}
+}
+
+func TestParsePeersPreservesAddresses(t *testing.T) {
+	d := &DiscoveryClient{logger: slog.Default()}
+	peers := d.parsePeers([]announceJSON{{
+		NodeID:    "abc",
+		Role:      "leader",
+		Addresses: []string{"tcp://100.64.1.5:8120", "tcp://192.168.1.5:8120"},
+		GRPCPort:  8120,
+	}})
+	if len(peers) != 1 || len(peers[0].Addresses) != 2 {
+		t.Fatalf("expected Addresses preserved, got %+v", peers)
+	}
+}
+
+func TestLeaderAddressesStripsScheme(t *testing.T) {
+	d := &DiscoveryClient{logger: slog.Default()}
+	d.peers = []DiscoveredPeer{{
+		Role:      "leader",
+		Addresses: []string{"tcp://100.64.1.5:8120", "tcp://192.168.1.5:8120"},
+		GRPCPort:  8120,
+		LastSeen:  time.Now(),
+	}}
+	got := d.LeaderAddresses()
+	want := []string{"100.64.1.5:8120", "192.168.1.5:8120"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestFilterValidAdvertiseAddressesDropsBad(t *testing.T) {
+	in := []string{
+		"tcp://10.0.0.1:8120",
+		"tcp://127.0.0.1:8120", // loopback — dropped
+		"not-a-url",            // malformed — dropped
+		"tcp://192.168.1.5:8120",
+	}
+	got := filterValidAdvertiseAddresses(in, slog.Default())
+	want := []string{"tcp://10.0.0.1:8120", "tcp://192.168.1.5:8120"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }

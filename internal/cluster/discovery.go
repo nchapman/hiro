@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,20 +40,26 @@ type DiscoveryConfig struct {
 	Identity       *NodeIdentity
 	TLSFingerprint string // hex SHA-256 of self-signed TLS cert
 	NodeName       string
-	Logger         *slog.Logger
+	// AdvertiseAddresses is an optional list of scheme-prefixed URLs
+	// ("tcp://host:port") that peers should use to reach this node. When
+	// set, the tracker stores these verbatim and drops its observed IP —
+	// this is the knob for forcing traffic onto Tailscale or a specific LAN.
+	AdvertiseAddresses []string
+	Logger             *slog.Logger
 }
 
 // DiscoveryClient periodically announces to the tracker and caches discovered peers.
 type DiscoveryClient struct {
-	trackerURL     string
-	swarmHash      string // hex(sha256(swarm_code))
-	role           string
-	grpcPort       int
-	identity       *NodeIdentity
-	tlsFingerprint string
-	nodeName       string
-	logger         *slog.Logger
-	client         *http.Client
+	trackerURL         string
+	swarmHash          string // hex(sha256(swarm_code))
+	role               string
+	grpcPort           int
+	identity           *NodeIdentity
+	tlsFingerprint     string
+	nodeName           string
+	advertiseAddresses []string // validated at construction
+	logger             *slog.Logger
+	client             *http.Client
 
 	mu       sync.RWMutex
 	peers    []DiscoveredPeer
@@ -58,12 +67,13 @@ type DiscoveryClient struct {
 	yourIP   string // our public IP as seen by tracker
 }
 
-// DiscoveredPeer is a peer returned by the tracker.
+// DiscoveredPeer is a peer returned by the tracker. Addresses is always
+// populated with at least one scheme-prefixed URL ("tcp://host:port").
 type DiscoveredPeer struct {
 	NodeID         string
 	PublicKey      string
 	Role           string
-	Endpoint       string
+	Addresses      []string
 	GRPCPort       int
 	TLSFingerprint string
 	LastSeen       time.Time
@@ -80,6 +90,7 @@ type announceRequest struct {
 	WGPubKey       string            `json:"wg_pubkey,omitempty"`
 	WGEndpoint     string            `json:"wg_endpoint,omitempty"`
 	TLSFingerprint string            `json:"tls_fingerprint,omitempty"`
+	Addresses      []string          `json:"addresses,omitempty"`
 	Meta           map[string]string `json:"meta,omitempty"`
 }
 
@@ -102,6 +113,10 @@ func (req *announceRequest) signedMessage() []byte {
 	b.WriteString(sanitizeField(req.WGEndpoint))
 	b.WriteByte('\n')
 	b.WriteString(sanitizeField(req.TLSFingerprint))
+	for _, a := range req.Addresses {
+		b.WriteByte('\n')
+		b.WriteString(sanitizeField(a))
+	}
 	if len(req.Meta) > 0 {
 		keys := make([]string, 0, len(req.Meta))
 		for k := range req.Meta {
@@ -118,10 +133,12 @@ func (req *announceRequest) signedMessage() []byte {
 	return []byte(b.String())
 }
 
-// sanitizeField strips newlines from a field to prevent injection in the
-// newline-delimited signed message format.
+// sanitizeField strips control chars (\n, \r, \x00) from a field so they
+// can't create ambiguity or splicing in the newline-delimited canonical form.
+var fieldSanitizer = strings.NewReplacer("\n", "", "\r", "", "\x00", "")
+
 func sanitizeField(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", "")
+	return fieldSanitizer.Replace(s)
 }
 
 type announceResponse struct {
@@ -132,27 +149,34 @@ type announceResponse struct {
 }
 
 type announceJSON struct {
-	NodeID         string `json:"node_id"`
-	PublicKey      string `json:"public_key"`
-	Role           string `json:"role"`
-	Endpoint       string `json:"endpoint"`
-	GRPCPort       int    `json:"grpc_port"`
-	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
-	LastSeen       string `json:"last_seen"`
+	NodeID         string   `json:"node_id"`
+	PublicKey      string   `json:"public_key"`
+	Role           string   `json:"role"`
+	Addresses      []string `json:"addresses"`
+	GRPCPort       int      `json:"grpc_port"`
+	TLSFingerprint string   `json:"tls_fingerprint,omitempty"`
+	LastSeen       string   `json:"last_seen"`
 }
 
 // NewDiscoveryClient creates a discovery client. Call Run() to start announcing.
+// Malformed advertise addresses are dropped with a warning log rather than
+// propagated as errors — discovery still works, just without the bad entries.
 func NewDiscoveryClient(cfg DiscoveryConfig) *DiscoveryClient {
 	hash := sha256.Sum256([]byte(cfg.SwarmCode))
+	advertise := filterValidAdvertiseAddresses(cfg.AdvertiseAddresses, cfg.Logger)
+	if len(advertise) > 0 {
+		warnIfNoAddressMatchesLocal(advertise, cfg.Logger)
+	}
 	return &DiscoveryClient{
-		trackerURL:     cfg.TrackerURL,
-		swarmHash:      hex.EncodeToString(hash[:]),
-		role:           cfg.Role,
-		grpcPort:       cfg.GRPCPort,
-		identity:       cfg.Identity,
-		tlsFingerprint: cfg.TLSFingerprint,
-		nodeName:       cfg.NodeName,
-		logger:         cfg.Logger,
+		trackerURL:         cfg.TrackerURL,
+		swarmHash:          hex.EncodeToString(hash[:]),
+		role:               cfg.Role,
+		grpcPort:           cfg.GRPCPort,
+		identity:           cfg.Identity,
+		tlsFingerprint:     cfg.TLSFingerprint,
+		nodeName:           cfg.NodeName,
+		advertiseAddresses: advertise,
+		logger:             cfg.Logger,
 		client: &http.Client{
 			Timeout: discoveryHTTPTimeout,
 		},
@@ -213,14 +237,40 @@ func (d *DiscoveryClient) Leader() *DiscoveredPeer {
 	return best
 }
 
-// LeaderAddr returns the gRPC address of the most recently seen leader,
-// or empty string if none found.
+// LeaderAddr returns the first gRPC dial address of the most recently seen
+// leader, or empty string if none found. Use LeaderAddresses for the full list.
 func (d *DiscoveryClient) LeaderAddr() string {
-	leader := d.Leader()
-	if leader == nil {
+	addrs := d.LeaderAddresses()
+	if len(addrs) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s:%d", leader.Endpoint, leader.GRPCPort)
+	return addrs[0]
+}
+
+// LeaderAddresses returns every dial target (bare "host:port") for the most
+// recently seen leader, with the "tcp://" scheme stripped.
+func (d *DiscoveryClient) LeaderAddresses() []string {
+	leader := d.Leader()
+	if leader == nil {
+		return nil
+	}
+	out := make([]string, 0, len(leader.Addresses))
+	for _, a := range leader.Addresses {
+		if hp := addressHostPort(a); hp != "" {
+			out = append(out, hp)
+		}
+	}
+	return out
+}
+
+// addressHostPort parses a "tcp://host:port" URL and returns the bare host:port
+// suitable for net.Dial. Returns "" if the input isn't a valid scheme URL.
+func addressHostPort(a string) string {
+	u, err := url.Parse(a)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Host
 }
 
 // RelayURL returns the relay server address from the last tracker response.
@@ -298,6 +348,7 @@ func (d *DiscoveryClient) postAnnounce(ctx context.Context) (*announceResponse, 
 		Role:           d.role,
 		GRPCPort:       d.grpcPort,
 		TLSFingerprint: d.tlsFingerprint,
+		Addresses:      d.advertiseAddresses,
 		Meta: map[string]string{
 			"node_name": d.nodeName,
 		},
@@ -347,7 +398,7 @@ func (d *DiscoveryClient) parsePeers(raw []announceJSON) []DiscoveredPeer {
 			NodeID:         p.NodeID,
 			PublicKey:      p.PublicKey,
 			Role:           p.Role,
-			Endpoint:       p.Endpoint,
+			Addresses:      p.Addresses,
 			GRPCPort:       p.GRPCPort,
 			TLSFingerprint: p.TLSFingerprint,
 			LastSeen:       lastSeen,
@@ -391,4 +442,125 @@ func CheckSwarm(ctx context.Context, trackerURL, swarmCode string, identity *Nod
 		LeaderFound: true,
 		LeaderName:  name,
 	}, nil
+}
+
+// Advertise-address constants shared with the tracker's validation.
+const (
+	maxAdvertiseAddresses    = 8
+	maxAdvertiseAddressBytes = 128
+)
+
+var advertiseAddressSchemes = map[string]bool{
+	"tcp":  true,
+	"tcp4": true,
+	"tcp6": true,
+}
+
+// ValidateAdvertiseAddress returns an error message if the scheme-prefixed URL
+// is malformed or obviously undialable. Host must be an IP literal — hostnames
+// are rejected to prevent DNS-based redirect tricks. Kept byte-compatible with
+// the tracker's validation so a valid entry here is valid there too.
+func ValidateAdvertiseAddress(a string) string {
+	if a == "" {
+		return "addresses entries must be non-empty"
+	}
+	if len(a) > maxAdvertiseAddressBytes {
+		return fmt.Sprintf("addresses entries must be at most %d characters", maxAdvertiseAddressBytes)
+	}
+	u, err := url.Parse(a)
+	if err != nil || u.Host == "" {
+		return "addresses entries must parse as scheme://host:port"
+	}
+	if !advertiseAddressSchemes[u.Scheme] {
+		return "addresses scheme must be tcp, tcp4, or tcp6"
+	}
+	if u.Path != "" || u.RawQuery != "" || u.User != nil {
+		return "addresses must not include path, query, or user info"
+	}
+	ap, err := netip.ParseAddrPort(u.Host)
+	if err != nil {
+		return "addresses host must be ip:port (IP literal, not a hostname)"
+	}
+	if ap.Port() == 0 {
+		return "addresses port must be non-zero"
+	}
+	ip := ap.Addr()
+	switch {
+	case ip.IsUnspecified():
+		return "addresses must not be unspecified (0.0.0.0, ::)"
+	case ip.IsLoopback():
+		return "addresses must not be loopback"
+	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
+		return "addresses must not be link-local"
+	case ip.IsMulticast():
+		return "addresses must not be multicast"
+	}
+	return ""
+}
+
+// filterValidAdvertiseAddresses returns the subset of addrs that pass
+// ValidateAdvertiseAddress, logging a warning for each rejected entry. An
+// invalid entry is never sent — discovery still works, it just drops bad rows.
+func filterValidAdvertiseAddresses(addrs []string, logger *slog.Logger) []string {
+	if len(addrs) == 0 {
+		return nil
+	}
+	if len(addrs) > maxAdvertiseAddresses {
+		if logger != nil {
+			logger.Warn("cluster.advertise_addresses exceeds max, truncating",
+				"count", len(addrs), "max", maxAdvertiseAddresses)
+		}
+		addrs = addrs[:maxAdvertiseAddresses]
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		if msg := ValidateAdvertiseAddress(a); msg != "" {
+			if logger != nil {
+				logger.Warn("dropping invalid advertise address", "address", a, "reason", msg)
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// warnIfNoAddressMatchesLocal logs a warning when none of the configured
+// advertise addresses match a locally-bound interface. This catches typos
+// without overriding the user's intent — the addresses are still sent.
+// Inside a Docker container, "local" means the container's interfaces, which
+// won't include the host's Tailscale IP — so a "no match" warning is normal
+// in Docker. The warning exists for bare-metal misconfigurations.
+func warnIfNoAddressMatchesLocal(addrs []string, logger *slog.Logger) {
+	if logger == nil {
+		return
+	}
+	ifaceAddrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return
+	}
+	local := make(map[string]bool, len(ifaceAddrs))
+	for _, a := range ifaceAddrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			if na, ok := netip.AddrFromSlice(ipnet.IP); ok {
+				local[na.Unmap().String()] = true
+			}
+		}
+	}
+	for _, a := range addrs {
+		if u, err := url.Parse(a); err == nil {
+			if ap, err := netip.ParseAddrPort(u.Host); err == nil {
+				if local[ap.Addr().Unmap().String()] {
+					return
+				}
+			}
+		}
+	}
+	// Logged at Debug (not Info) so we don't spray internal topology into
+	// aggregated log sinks by default. Inside Docker the "no match" case is
+	// normal — host interfaces aren't visible to the container — so the
+	// warning is mostly useful for bare-metal misconfigurations, where the
+	// operator can flip log level to investigate.
+	logger.Debug("cluster.advertise_addresses: none match a local interface",
+		"count", len(addrs))
 }

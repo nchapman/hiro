@@ -30,19 +30,6 @@ const (
 	// workerReconnectDelay is how long to wait before reconnecting to the leader.
 	workerReconnectDelay = 5 * time.Second
 
-	// happyEyeballsTimeout is the overall timeout for dual-path connection attempts.
-	happyEyeballsTimeout = 15 * time.Second
-
-	// happyEyeballsDialTimeout is the timeout for the direct TCP dial.
-	happyEyeballsDialTimeout = 10 * time.Second
-
-	// happyEyeballsAttempts is the number of connection paths (direct + relay).
-	happyEyeballsAttempts = 2
-
-	// happyEyeballsRelayDelay is how long to wait before starting the relay attempt,
-	// giving the direct connection a head start.
-	happyEyeballsRelayDelay = 500 * time.Millisecond
-
 	// workerShutdownTimeout is the grace period for the worker's HTTP server shutdown.
 	// Intentionally shorter than the main server's shutdownTimeout (10s).
 	workerShutdownTimeout = 5 * time.Second
@@ -58,9 +45,10 @@ type workerNode struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	identity  *cluster.NodeIdentity
-	tlsCert   tls.Certificate
-	discovery *cluster.DiscoveryClient
+	identity    *cluster.NodeIdentity
+	tlsCert     tls.Certificate
+	discovery   *cluster.DiscoveryClient
+	winnerCache *cluster.WinnerCache
 
 	ws      *cluster.WorkerStream
 	bridge  *cluster.NodeBridge
@@ -79,9 +67,10 @@ type workerNode struct {
 // receives file sync, and manages local agent worker processes.
 func runWorkerNode(rootDir string, cp *controlplane.ControlPlane, logger *slog.Logger) error {
 	wn := &workerNode{
-		rootDir: rootDir,
-		cp:      cp,
-		logger:  logger,
+		rootDir:     rootDir,
+		cp:          cp,
+		logger:      logger,
+		winnerCache: cluster.NewWinnerCache(),
 	}
 	wn.connStatus.Store("connecting")
 
@@ -138,14 +127,15 @@ func (wn *workerNode) init() error {
 		}
 
 		wn.discovery = cluster.NewDiscoveryClient(cluster.DiscoveryConfig{
-			TrackerURL:     trackerURL,
-			SwarmCode:      swarmCode,
-			Role:           "worker",
-			GRPCPort:       0, // workers don't serve gRPC
-			Identity:       identity,
-			TLSFingerprint: cluster.TLSFingerprint(tlsCert),
-			NodeName:       wn.nodeName,
-			Logger:         wn.logger,
+			TrackerURL:         trackerURL,
+			SwarmCode:          swarmCode,
+			Role:               "worker",
+			GRPCPort:           0, // workers don't serve gRPC
+			Identity:           identity,
+			TLSFingerprint:     cluster.TLSFingerprint(tlsCert),
+			NodeName:           wn.nodeName,
+			AdvertiseAddresses: wn.cp.ClusterAdvertiseAddresses(),
+			Logger:             wn.logger,
 		})
 		go wn.discovery.Run(wn.ctx)
 		wn.logger.Info("tracker discovery started", "tracker", trackerURL, "role", "worker")
@@ -244,13 +234,27 @@ func (wn *workerNode) initStream(leaderAddr string) *cluster.WorkerTerminalManag
 	}
 	clientTLS := cluster.ClientTLSConfig(wn.tlsCert, leaderPubKey)
 
-	// Build happy eyeballs dialer when relay is available.
-	var dialFunc func(ctx context.Context, addr string) (net.Conn, error)
+	// Build a dialer that, on each gRPC connect, pulls the current leader's
+	// advertised addresses from discovery (if available) or falls back to
+	// whatever WorkerStream last saw (reResolveLeader updates it).
+	// cluster.DialLeader runs the happy-eyeballs race: cached winner first,
+	// then all direct addresses in parallel with relay staggered by 500ms.
+	//
+	// The gRPC WithContextDialer addr parameter is ignored on purpose — we
+	// re-resolve from live state on every dial so a leader moving addresses
+	// is handled without rebuilding the grpc client.
 	swarmCode := wn.cp.ClusterSwarmCode()
-	if relayURL := wn.discoveryRelayURL(); relayURL != "" && swarmCode != "" {
-		dialFunc = func(ctx context.Context, addr string) (net.Conn, error) {
-			return happyEyeballs(ctx, addr, relayURL, swarmCode, wn.identity, wn.logger)
-		}
+	dialFunc := func(ctx context.Context, _ string) (net.Conn, error) {
+		addresses, cacheKey := wn.leaderDialTargets()
+		return cluster.DialLeader(ctx, cluster.DialLeaderConfig{
+			Addresses: addresses,
+			RelayAddr: wn.discoveryRelayURL(),
+			SwarmCode: swarmCode,
+			Identity:  wn.identity,
+			CacheKey:  cacheKey,
+			Cache:     wn.winnerCache,
+			Logger:    wn.logger,
+		})
 	}
 
 	wn.ws = cluster.NewWorkerStream(cluster.WorkerStreamConfig{
@@ -441,56 +445,20 @@ func (wn *workerNode) discoveryRelayURL() string {
 	return ""
 }
 
-// happyEyeballs tries a direct TCP connection first, then falls back to
-// the relay after a short delay. First successful connection wins.
-func happyEyeballs(ctx context.Context, directAddr, relayAddr, swarmCode string, identity *cluster.NodeIdentity, logger *slog.Logger) (net.Conn, error) {
-	type result struct {
-		conn net.Conn
-		err  error
-		via  string
-	}
-	ch := make(chan result, happyEyeballsAttempts)
-
-	dialCtx, dialCancel := context.WithTimeout(ctx, happyEyeballsTimeout)
-	defer dialCancel()
-
-	// Direct attempt — starts immediately.
-	go func() {
-		dialer := &net.Dialer{Timeout: happyEyeballsDialTimeout}
-		conn, err := dialer.DialContext(dialCtx, "tcp", directAddr)
-		ch <- result{conn, err, "direct"}
-	}()
-
-	// Relay attempt — starts after 500ms delay to prefer direct.
-	go func() {
-		select {
-		case <-time.After(happyEyeballsRelayDelay):
-		case <-dialCtx.Done():
-			ch <- result{nil, dialCtx.Err(), "relay"}
-			return
-		}
-		conn, err := cluster.DialRelay(dialCtx, relayAddr, swarmCode, identity)
-		ch <- result{conn, err, "relay"}
-	}()
-
-	// Take first success.
-	var firstErr error
-	for range happyEyeballsAttempts {
-		r := <-ch
-		if r.err == nil {
-			logger.Info("connected to leader", "via", r.via)
-			dialCancel()
-			// Drain and close any second successful connection.
-			go func() {
-				if r2 := <-ch; r2.err == nil {
-					r2.conn.Close()
-				}
-			}()
-			return r.conn, nil
-		}
-		if firstErr == nil {
-			firstErr = fmt.Errorf("%s: %w", r.via, r.err)
+// leaderDialTargets returns the current dial targets (bare host:port) plus
+// a cache key. Discovery is authoritative when present; otherwise we use the
+// address WorkerStream last saw (updated by reResolveLeader).
+//
+// The cache key is the leader's node ID, which is stable across address
+// changes. When no node ID is known yet, we return an empty key and DialLeader
+// skips the cache — avoids orphan entries that would outlive the transition.
+func (wn *workerNode) leaderDialTargets() (addrs []string, cacheKey string) {
+	if wn.discovery != nil {
+		if leader := wn.discovery.Leader(); leader != nil {
+			if targets := wn.discovery.LeaderAddresses(); len(targets) > 0 {
+				return targets, leader.NodeID
+			}
 		}
 	}
-	return nil, fmt.Errorf("all connection attempts failed: %w", firstErr)
+	return []string{wn.ws.LeaderAddr()}, ""
 }

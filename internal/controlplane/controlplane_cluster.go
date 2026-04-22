@@ -54,6 +54,20 @@ func (cp *ControlPlane) ClusterSwarmCode() string {
 	return cp.config.Cluster.SwarmCode
 }
 
+// ClusterAdvertiseAddresses returns the configured advertise addresses for
+// this node. Returns a copy so callers can mutate freely. Empty slice is
+// normal — discovery falls back to the tracker's observed source IP.
+func (cp *ControlPlane) ClusterAdvertiseAddresses() []string {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	if len(cp.config.Cluster.AdvertiseAddresses) == 0 {
+		return nil
+	}
+	out := make([]string, len(cp.config.Cluster.AdvertiseAddresses))
+	copy(out, cp.config.Cluster.AdvertiseAddresses)
+	return out
+}
+
 // NodeApprovalStatus represents the approval state of a cluster node.
 type NodeApprovalStatus int
 

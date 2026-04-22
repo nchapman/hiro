@@ -51,6 +51,11 @@ type ClusterConfig struct {
 	SwarmCode     string                  `yaml:"swarm_code,omitempty"`     // shared swarm code for tracker discovery
 	ApprovedNodes map[string]ApprovedNode `yaml:"approved_nodes,omitempty"` // keyed by NodeID (hex sha256 of pubkey)
 	RevokedNodes  map[string]RevokedNode  `yaml:"revoked_nodes,omitempty"`  // keyed by NodeID — explicitly revoked
+	// AdvertiseAddresses is an optional list of scheme-prefixed URLs
+	// ("tcp://host:port") that peers use to reach this node. When set, the
+	// tracker's observed source IP is dropped in favor of these entries —
+	// the knob for forcing cluster traffic onto Tailscale or a specific LAN.
+	AdvertiseAddresses []string `yaml:"advertise_addresses,omitempty"`
 }
 
 // Config is the on-disk representation of the control plane state.
