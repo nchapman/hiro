@@ -68,6 +68,7 @@ For content that's a text blob where diffing individual changes isn't meaningful
 | `AgentListingProvider` | `agents` | Named-set delta | SpawnInstance or CreatePersistentInstance tool active | `HostManager.ListAgentDefs()` |
 | `NodeListingProvider` | `nodes` | Content hash | ListNodes tool active | `HostManager.ListNodes()` |
 | `SkillProvider` | `skills` | Named-set delta | Skill tool active | `config.LoadSkills()` from disk |
+| `MountProvider` | `mounts` | Content hash | rootDir set | `mounts.Discover()` from `<root>/mounts/` |
 | `SubscriptionProvider` | `schedules` | Content hash | pdb non-nil | `pdb.ListSubscriptionsByInstance()` |
 
 Providers are registered in order in `buildLoopConfig()` in `manager_lifecycle.go`. Registration order determines the order of sections in merged messages.

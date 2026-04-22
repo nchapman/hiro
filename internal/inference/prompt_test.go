@@ -864,3 +864,89 @@ func TestTodoProvider_EmptyFile(t *testing.T) {
 		t.Error("should return nil for missing todos file")
 	}
 }
+
+// --- Mount provider tests ---
+
+func TestMountProvider_NilWhenNoMountsDir(t *testing.T) {
+	// Empty root (no mounts subdir) → nil.
+	p := MountProvider(t.TempDir())
+	if dr := p(nil, nil); dr != nil {
+		t.Error("should return nil when no mounts dir")
+	}
+}
+
+func TestMountProvider_EmptyRoot(t *testing.T) {
+	p := MountProvider("")
+	if dr := p(nil, nil); dr != nil {
+		t.Error("should return nil for empty rootDir")
+	}
+}
+
+func TestMountProvider_EmitsOnFirstDiscovery(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "mounts", "photos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := MountProvider(root)
+	dr := p(nil, nil)
+	if dr == nil {
+		t.Fatal("expected first-discovery emission")
+	}
+	text := textPartText(t, dr.Message.Content[0])
+	if !strings.Contains(text, "## Mounts") || !strings.Contains(text, "photos") {
+		t.Errorf("expected mount listing, got: %s", text)
+	}
+}
+
+func TestMountProvider_SuppressesOnUnchanged(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "mounts", "photos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := MountProvider(root)
+	first := p(nil, nil)
+	if first == nil {
+		t.Fatal("expected first emission")
+	}
+	history := []fantasy.Message{first.Message}
+	if second := p(nil, history); second != nil {
+		t.Error("expected nil on unchanged mount set")
+	}
+}
+
+func TestMountProvider_ReEmitsOnModeChange(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses mode checks")
+	}
+	root := t.TempDir()
+	mountPath := filepath.Join(root, "mounts", "photos")
+	if err := os.MkdirAll(mountPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mountPath, 0o755) })
+
+	p := MountProvider(root)
+	first := p(nil, nil)
+	if first == nil {
+		t.Fatal("expected first emission")
+	}
+	firstText := textPartText(t, first.Message.Content[0])
+	if !strings.Contains(firstText, "(rw)") {
+		t.Fatalf("expected rw initially, got: %s", firstText)
+	}
+
+	// Flip to read-only — mode probe (unix.Access W_OK) should now return EACCES.
+	if err := os.Chmod(mountPath, 0o555); err != nil {
+		t.Fatal(err)
+	}
+
+	history := []fantasy.Message{first.Message}
+	second := p(nil, history)
+	if second == nil {
+		t.Fatal("expected re-emission after mode flip")
+	}
+	secondText := textPartText(t, second.Message.Content[0])
+	if !strings.Contains(secondText, "(ro)") {
+		t.Errorf("expected ro after chmod, got: %s", secondText)
+	}
+}

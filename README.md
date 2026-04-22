@@ -51,6 +51,21 @@ Optional overrides — not required for normal use:
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 | `HIRO_LOG_LEVEL` | `info` | Log level |
 
+### Exposing Host Directories
+
+Agents work inside the container's `workspace/` by default. To give them access to files on the host, bind-mount directories under `/hiro/mounts/<name>` in `docker-compose.yml`:
+
+```yaml
+services:
+  hiro:
+    volumes:
+      - hiro:/hiro
+      - /Users/you/Photos:/hiro/mounts/photos:ro
+      - /Users/you/scratch:/hiro/mounts/scratch
+```
+
+Hiro auto-discovers each subdirectory under `mounts/` and tells agents about it (including whether it's read-only). No other configuration needed — the `:ro` flag is enforced by Docker and mirrored into the per-agent Landlock whitelist.
+
 ## Agents
 
 Agents are defined as markdown files in the `agents/` directory:

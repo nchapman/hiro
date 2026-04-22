@@ -374,6 +374,23 @@ channels:
 
 **Migration:** On first startup after upgrading, `RestoreInstances` automatically migrates any `instances/<uuid>/config.yaml` files to the new `config/instances/<uuid>.yaml` location.
 
+## Exposing Host Directories (Mounts)
+
+Agents see `workspace/` by default. To expose additional host directories, bind-mount them into the container under `<root>/mounts/<name>`:
+
+```yaml
+volumes:
+  - hiro:/hiro
+  - /Users/you/Photos:/hiro/mounts/photos:ro
+  - /Users/you/scratch:/hiro/mounts/scratch
+```
+
+Hiro auto-discovers each subdirectory under `mounts/`, probes its writability via `access(2)`, and announces it to the agent as `(ro)` or `(rw)` via `MountProvider` — a content-hash context provider that only emits when the mount set or mode changes, preserving the prompt cache. No config file — the filesystem is the source of truth. Each mount also gets an explicit Landlock rule at spawn time, so RO is enforced at the LSM layer in addition to the Docker bind flag.
+
+`mounts/` is a sibling of `workspace/` (not nested inside it) so host-specific bind mounts stay out of the cluster file-sync path and out of anything that treats `workspace/` as a project root.
+
+This same convention is the plumbing for future network-volume types (NFS, SMB, rclone): those will declare how to materialize the directory but still land at `mounts/<name>` and get picked up by the same discovery. See `internal/platform/mounts/`.
+
 ## Creating Agents at Runtime
 
 Agents can create new agent definitions at runtime using their file tools:

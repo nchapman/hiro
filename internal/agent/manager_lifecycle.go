@@ -19,6 +19,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/platform/mounts"
 	"github.com/nchapman/hiro/internal/provider"
 	"github.com/nchapman/hiro/internal/toolrules"
 )
@@ -498,6 +499,19 @@ func (m *Manager) buildLandlockPaths(instDir, sessDir, socketDir string, allowed
 		paths.ReadWrite = append(paths.ReadWrite, brewPrefix)
 	}
 
+	// Host-exposed mounts (sibling of workspace/). Each gets an explicit
+	// Landlock rule so RO mounts are enforced at the LSM layer, not just by
+	// Docker's bind flag. Missing dir is a no-op.
+	if ms, err := mounts.Discover(m.rootDir); err == nil {
+		for _, mt := range ms {
+			if mt.Mode == mounts.ModeRW {
+				paths.ReadWrite = append(paths.ReadWrite, mt.Path)
+			} else {
+				paths.ReadOnly = append(paths.ReadOnly, mt.Path)
+			}
+		}
+	}
+
 	// Bash-capable agents need full /tmp access. Package managers (brew, mise)
 	// extract tarballs to unpredictable /tmp paths during installation, and
 	// many CLI tools create temp files there. Agents with Bash already have
@@ -611,6 +625,7 @@ func (m *Manager) buildLoopConfig(instanceID, sessionID string, cfg config.Agent
 			inference.AgentListingProvider(m),
 			inference.NodeListingProvider(m),
 			inference.SkillProvider(m.agentDefDir(cfg.Name), m.sharedSkillsDir()),
+			inference.MountProvider(m.rootDir),
 			inference.SubscriptionProvider(m.pdb, instanceID),
 		},
 		ScheduleCallback: m.scheduler,

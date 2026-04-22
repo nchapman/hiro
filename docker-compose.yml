@@ -7,6 +7,11 @@ services:
       - "8120:8120"
     volumes:
       - hiro:/hiro
+      # Expose host directories to agents by bind-mounting them under
+      # /hiro/mounts/<name>. Add `:ro` for read-only access.
+      # Example:
+      #   - /Users/you/Photos:/hiro/mounts/photos:ro
+      #   - /Users/you/scratch:/hiro/mounts/scratch
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

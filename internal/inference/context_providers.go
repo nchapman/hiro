@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"charm.land/fantasy"
 
 	"github.com/nchapman/hiro/internal/config"
+	"github.com/nchapman/hiro/internal/platform/mounts"
 )
 
 // DeltaReplayType is the ProviderOptions key for delta replay metadata.
@@ -380,6 +382,47 @@ func renderSecretListing(allNames, added, removed []string, isInitial bool) stri
 		for _, name := range sorted {
 			fmt.Fprintf(&b, "- `%s`\n", name)
 		}
+	}
+	return b.String()
+}
+
+// --- Mount provider (content hash) ---
+
+// MountProvider returns a ContextProvider that announces host-exposed mounts
+// discovered under <rootDir>/mounts/. Uses content-hash strategy because
+// mode (ro/rw) is part of what we announce — a mode flip must re-emit.
+func MountProvider(rootDir string) ContextProvider {
+	if rootDir == "" {
+		return func(_ map[string]bool, _ []fantasy.Message) *DeltaResult { return nil }
+	}
+	return func(_ map[string]bool, history []fantasy.Message) *DeltaResult {
+		ms, err := mounts.Discover(rootDir)
+		if err != nil {
+			// A real error (e.g. permission denied on mounts/) is different
+			// from an empty/missing dir. Log so operators can diagnose why
+			// mounts silently disappeared from agent context.
+			slog.Default().Warn("mount discovery failed", "error", err, "root", rootDir)
+			return nil
+		}
+		if len(ms) == 0 {
+			return nil
+		}
+		text := renderMountListing(ms)
+		hash := contentHash(text)
+		if replayLatestHash("mounts", history) == hash {
+			return nil
+		}
+		return &DeltaResult{
+			Message: buildContentMessage(text, "mounts", hash),
+		}
+	}
+}
+
+func renderMountListing(ms []mounts.Mount) string {
+	var b strings.Builder
+	b.WriteString("## Mounts\n\nHost directories exposed at these paths:\n\n")
+	for _, m := range ms {
+		fmt.Fprintf(&b, "- `%s` (%s)\n", m.Path, m.Mode)
 	}
 	return b.String()
 }
