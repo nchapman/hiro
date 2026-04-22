@@ -7,6 +7,9 @@ services:
       - "8120:8120"
     volumes:
       - hiro:/hiro
+      # Or use a host directory instead of the named volume for easy access
+      # to agent state, config, and workspace from your host filesystem:
+      #   - /Users/you/hiro:/hiro
       # Expose host directories to agents by bind-mounting them under
       # /hiro/mounts/<name>. Add `:ro` for read-only access.
       # Example:
