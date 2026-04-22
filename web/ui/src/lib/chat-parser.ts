@@ -1,4 +1,5 @@
 import type { ToolCall, Message, MessageAttachment, AgentNotification, HistoryMessage, FantasyMessage } from "./chat-types"
+import { randomId } from "./utils"
 
 export function extractToolOutput(raw: unknown): { output: string; isError: boolean } | null {
   if (!raw || typeof raw !== "object") return null
@@ -37,7 +38,7 @@ export function parseFantasyMessage(rawJSON: string): { content: string; toolCal
           break
         case "tool-call":
           toolCalls.push({
-            id: (part.data.tool_call_id as string) || crypto.randomUUID(),
+            id: (part.data.tool_call_id as string) || randomId(),
             name: (part.data.tool_name as string) || "unknown",
             input: part.data.input as string | undefined,
             status: part.data.status as string | undefined,
@@ -108,7 +109,7 @@ export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
         if (notif) {
           // Attach to current assistant message or create one.
           if (!current) {
-            current = { id: crypto.randomUUID(), role: "assistant", content: "", toolCalls: [] }
+            current = { id: randomId(), role: "assistant", content: "", toolCalls: [] }
           }
           current.notifications = [...(current.notifications ?? []), notif]
         }
@@ -134,7 +135,7 @@ export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
       const parsed = parseFantasyMessage(m.raw_json)
       if (parsed.toolCalls.length > 0 || parsed.thinking) {
         if (!current) {
-          current = { id: crypto.randomUUID(), role: "assistant", content: "", toolCalls: [] }
+          current = { id: randomId(), role: "assistant", content: "", toolCalls: [] }
         }
         if (parsed.toolCalls.length > 0) {
           current.toolCalls = [...(current.toolCalls ?? []), ...parsed.toolCalls]
@@ -167,7 +168,7 @@ export function mergeHistoryMessages(history: HistoryMessage[]): Message[] {
       if (parsed.attachments.length > 0) userAttachments = parsed.attachments
     }
     messages.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       role: m.role as Message["role"],
       content: m.content,
       attachments: userAttachments,

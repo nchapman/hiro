@@ -19,7 +19,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
+import { cn, randomId } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWebSocket } from "@/hooks/use-websocket"
 import type { ChatWireMessage, UsageInfo } from "@/hooks/use-websocket"
@@ -195,7 +195,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         if (err.name === "AbortError") return
         if (sessionGeneration.current !== gen) return
         setMessages([{
-          id: crypto.randomUUID(),
+          id: randomId(),
           role: "assistant",
           content: "Failed to load conversation history.",
         }])
@@ -274,7 +274,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           const notif = parseAgentNotification(msg.content || "")
           if (notif) {
             if (!streamingMsgId.current) {
-              const id = crypto.randomUUID()
+              const id = randomId()
               streamingMsgId.current = id
               setStreaming(true)
               setMessages((prev) => [
@@ -294,7 +294,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         }
         case "delta": {
           if (!streamingMsgId.current) {
-            const id = crypto.randomUUID()
+            const id = randomId()
             streamingMsgId.current = id
             setMessages((prev) => [
               ...prev,
@@ -312,7 +312,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         }
         case "tool_call": {
           if (!streamingMsgId.current) {
-            const id = crypto.randomUUID()
+            const id = randomId()
             streamingMsgId.current = id
             setMessages((prev) => [
               ...prev,
@@ -321,7 +321,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           }
           const id = streamingMsgId.current
           const tc: ToolCall = {
-            id: msg.tool_call_id || crypto.randomUUID(),
+            id: msg.tool_call_id || randomId(),
             name: msg.tool_name || "unknown",
             input: msg.input,
             status: msg.status,
@@ -350,7 +350,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         }
         case "reasoning_start": {
           if (!streamingMsgId.current) {
-            const id = crypto.randomUUID()
+            const id = randomId()
             streamingMsgId.current = id
             setMessages((prev) => [
               ...prev,
@@ -395,7 +395,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           setMessages((prev) => [
             ...prev,
             {
-              id: crypto.randomUUID(),
+              id: randomId(),
               role: "system",
               content: msg.content || "",
             },
@@ -418,7 +418,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
           setMessages((prev) => [
             ...prev,
             {
-              id: crypto.randomUUID(),
+              id: randomId(),
               role: "assistant",
               content: `Error: ${msg.content}`,
             },
@@ -438,7 +438,7 @@ export default function Chat({ session, onSessionsChanged }: ChatProps) {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: randomId(),
             role: "user",
             content: text,
             attachments: displayAttachments.length > 0 ? displayAttachments : undefined,

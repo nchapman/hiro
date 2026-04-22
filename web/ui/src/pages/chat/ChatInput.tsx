@@ -9,7 +9,7 @@ import {
   Cancel01Icon,
   File02Icon,
 } from "@hugeicons/core-free-icons"
-import { cn } from "@/lib/utils"
+import { cn, randomId } from "@/lib/utils"
 import {
   PromptInput,
   PromptInputTextarea,
@@ -42,7 +42,7 @@ async function processFiles(files: FileList | File[]): Promise<PendingAttachment
     if (file.size > MAX_ATTACHMENT_SIZE) continue
     const dataBase64 = await fileToBase64(file)
     const att: PendingAttachment = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       file,
       dataBase64,
       mediaType: file.type || "application/octet-stream",
