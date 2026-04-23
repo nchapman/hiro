@@ -120,7 +120,7 @@ export default function ClusterCard() {
         return
       }
       setAdvertiseDraft(null)
-      setAdvertiseStatus("Saved. Server is restarting…")
+      setAdvertiseStatus("Saved. Reconnecting — this page will refresh when the server is back.")
     } catch (e) {
       setAdvertiseError(String(e))
     } finally {
@@ -230,8 +230,10 @@ export default function ClusterCard() {
             <div className="flex flex-col gap-1">
               <span className="text-sm font-medium">Advertise Addresses</span>
               <span className="text-xs text-muted-foreground">
-                Optional. One per line, e.g. <code className="font-mono">tcp://203.0.113.4:5000</code>. Workers will
-                dial these first. Leave empty to use the tracker-observed source IP.
+                Addresses workers should dial first (one per line). Example: <code className="font-mono">tcp://203.0.113.4:5000</code>.
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Leave empty to use the address the tracker observes.
               </span>
               <textarea
                 className="mt-1 min-h-[72px] rounded-md border bg-background p-2 font-mono text-xs"
@@ -244,8 +246,15 @@ export default function ClusterCard() {
                 onChange={(e) => setAdvertiseDraft(e.target.value)}
                 disabled={advertiseSaving}
               />
+              {advertiseDraft !== null && !advertiseSaving && !advertiseStatus && (
+                <span className="text-xs text-muted-foreground">
+                  Saving restarts the Hiro server. Active sessions will reconnect automatically.
+                </span>
+              )}
               {advertiseError && (
-                <span className="text-xs text-destructive">{advertiseError}</span>
+                <span className="text-xs text-destructive">
+                  Couldn&apos;t save advertise addresses: {advertiseError}
+                </span>
               )}
               {advertiseStatus && !advertiseError && (
                 <span className="text-xs text-muted-foreground">{advertiseStatus}</span>
@@ -258,7 +267,7 @@ export default function ClusterCard() {
                   onClick={saveAdvertise}
                   disabled={advertiseSaving || advertiseDraft === null}
                 >
-                  {advertiseSaving ? "Saving…" : "Save & Restart"}
+                  {advertiseSaving ? "Saving…" : "Save and restart server"}
                 </Button>
                 {advertiseDraft !== null && !advertiseSaving && (
                   <Button

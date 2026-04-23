@@ -199,8 +199,8 @@ export default function GitIdentityCard() {
           ) : (
             <>
               <p className="text-muted-foreground text-sm">
-                No key yet. Generate one so agents can authenticate with GitHub
-                and other git hosts.
+                No SSH key yet. Generate one to let agents authenticate with
+                GitHub and other Git hosts.
               </p>
               <Button
                 onClick={() => handleGenerate(false)}
@@ -223,9 +223,9 @@ export default function GitIdentityCard() {
           <DialogHeader>
             <DialogTitle>Regenerate SSH key?</DialogTitle>
             <DialogDescription>
-              The existing key will be overwritten and any git hosts trusting
-              the old key will stop working until you add the new one. Remove
-              the old key from GitHub after regenerating.
+              This overwrites your existing key. Any Git host trusting the old
+              key will reject pushes until you upload the new one. Remember to
+              remove the old key from GitHub afterward.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -241,7 +241,7 @@ export default function GitIdentityCard() {
               onClick={() => handleGenerate(true)}
               disabled={generating}
             >
-              {generating ? "Regenerating…" : "Regenerate"}
+              {generating ? "Regenerating…" : "Yes, regenerate"}
             </Button>
           </DialogFooter>
         </DialogContent>
