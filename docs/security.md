@@ -1,6 +1,6 @@
 # Security Model
 
-Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The security model uses defense in depth: Docker containment at the outer boundary, Landlock and seccomp-BPF isolation between agents, and a capability system that restricts what tools each agent can use. The entire stack runs unprivileged — no root, no capabilities, no namespaces.
+Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The security model uses defense in depth: Docker containment at the outer boundary, Landlock + seccomp-BPF isolation between each worker and the platform's own state (`config/`, `db/`), and a capability system that restricts what tools each agent can use. Inter-agent filesystem isolation is explicitly not a goal — agents share `$HOME` by design so they can collaborate. The entire stack runs unprivileged — no root, no capabilities, no namespaces.
 
 ## Architecture Overview
 
@@ -20,9 +20,13 @@ Hiro runs untrusted LLM-driven agents that can execute arbitrary code. The secur
 │  │ seccomp-BPF   │  │ seccomp-BPF   │               │
 │  └──────────────┘  └──────────────┘                 │
 │                                                     │
-│  /hiro                                              │
+│  /home/hiro  (HIRO_ROOT = $HOME)                    │
 │  ├── agents/, skills/ (agent definitions)           │
-│  └── workspace/ (shared collaborative space)        │
+│  ├── workspace/ (shared collaborative space)        │
+│  ├── instances/ (per-agent state)                   │
+│  ├── .ssh/, .gitconfig (user-level auth, RW)        │
+│  ├── config/ ← BLOCKED from workers (secrets)       │
+│  └── db/     ← BLOCKED from workers (platform DB)   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -48,23 +52,45 @@ Each agent runs as a separate OS process, spawned from the same `hiro` binary wi
 
 Worker processes are thin tool-execution sandboxes — they receive `ExecuteTool` RPCs and run tools. All inference (LLM calls, conversation history, system prompt assembly) happens in the control plane.
 
-**Environment scrubbing:** Agent processes receive a minimal environment (`PATH`, `HOME={session-dir}`, `LANG`, `LC_ALL`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_GLOBAL_CONFIG_FILE`) rather than inheriting the control plane's full environment. Workers explicitly do not receive `HIRO_API_KEY` — inference runs in the control plane, not in workers. Setting `HOME` to the session directory gives each agent an isolated home for dotfiles, caches, and temp data.
+**Environment scrubbing:** Agent processes receive a minimal environment (`PATH`, `HOME=$HIRO_ROOT`, `TMPDIR={session-dir}/tmp`, `LANG`, `LC_ALL`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_GLOBAL_CONFIG_FILE`) rather than inheriting the control plane's full environment. Workers explicitly do not receive `HIRO_API_KEY` — inference runs in the control plane, not in workers. `HOME` points at the hiro user's platform root so standard tools (git, ssh, gh) find `~/.ssh`, `~/.gitconfig`, `~/.config/gh` in the natural place; `TMPDIR` stays session-scoped so throwaway files don't pollute `$HOME`.
 
 ### 3. Landlock Filesystem Isolation
 
-Landlock LSM restricts each worker process to only the filesystem paths it needs. This is an unprivileged alternative to chroot/mount namespaces — no root or capabilities required.
+Landlock LSM restricts each worker process to only the filesystem paths allowed by the platform's declarative filesystem policy. This is an unprivileged alternative to chroot/mount namespaces — no root or capabilities required.
+
+**Mental model.** Hiro is one Unix user (`hiro`) whose home is the platform root. Everything inside `$HOME` that isn't the platform's own state is fair game for agents — workspace, instance dirs, dotfiles like `~/.ssh` and `~/.gitconfig`. Inter-agent filesystem isolation is **not** a goal: agents collaborate via shared files by design. The real protection boundary is the control plane's own state — `config/` (secrets and tool declarations) and `db/` (platform DB). An agent must never be able to read raw secret values, rewrite its own `allowed_tools`, or grant itself more filesystem paths.
+
+**Declarative policy.** The full allowlist lives under the `filesystem` key in `config/config.yaml` (parser and compiler in `internal/platform/fspolicy`). The policy has three sections:
+
+- `base` — paths granted to every worker (RW or RO).
+- `on_tool` — additional paths granted when an agent has a given tool (e.g. `Bash` → `/tmp`, `CreatePersistentInstance` → RW on `agents/` and `skills/`). Paths listed at a higher privilege than in `base` are promoted.
+- `per_instance` — dynamic paths resolved at spawn time (`$INSTANCE_DIR`, `$SESSION_DIR`, `$SOCKET_DIR`).
+
+Anything not listed is blocked. `config/` and `db/` are deliberately absent — the policy is stored in `config/config.yaml` inside the blocked `config/` directory, so agents cannot rewrite `config.yaml` to grant themselves more access.
 
 **How it works:**
 
-- At spawn time, the control plane computes Landlock paths based on the agent's instance directory, session directory, and tool set.
-- The worker calls `PR_SET_NO_NEW_PRIVS` (required by both Landlock and seccomp), then applies a Landlock ruleset that whitelists specific paths.
-- Read-write paths: instance directory, session directory, workspace, temp directories.
-- Read-only paths: platform root (agent definitions, skills), system paths (shared tool installations).
-- All other filesystem access is blocked by the kernel. This is irreversible for the process lifetime.
+- The control plane holds the policy in memory alongside the rest of `config.yaml`. fsnotify picks up external edits and reloads.
+- At spawn time, the policy is compiled into three derived lists that travel in `SpawnConfig`:
+  - `LandlockPaths` — RW and RO path sets applied by the kernel as a Landlock ruleset.
+  - `ReadableRoots` — paths that `Read`, `Glob`, and `Grep` may address (RW + RO under `$HOME`).
+  - `WritableRoots` — paths that `Write` and `Edit` may address (RW only).
+- The worker calls `PR_SET_NO_NEW_PRIVS`, applies the Landlock ruleset, then installs the in-process `tools.SetReadableRoots` / `SetWritableRoots` guard.
+- All other filesystem access is blocked by the kernel, irreversibly for the process lifetime. The in-process guard is defense in depth: on non-Linux platforms or kernels without Landlock, it's the only remaining restriction, so the read/write split matters there.
 
-**Detection:** The control plane probes for Landlock support at startup. If the kernel is too old (pre-5.13), Landlock is silently disabled. In Docker with a modern kernel, it is always available.
+**Detection:** The control plane probes for Landlock support at startup. If the kernel is too old (pre-5.13), Landlock is silently disabled; the in-process guard remains. In Docker with a modern kernel, both layers are active.
 
-**Implementation:** `internal/landlock/` (~110 LOC) wraps the Landlock v1 syscalls. Linux-only (`//go:build linux`); stubs return errors on other platforms.
+**Implementation:** `internal/landlock/` wraps the Landlock v1–v3 syscalls. `internal/platform/fspolicy/` parses, expands variables, and compiles. Linux-only Landlock; the policy types are cross-platform.
+
+**On `accessFsIoctlDev` (Landlock v5, kernel 6.10+):** We deliberately do not declare `LANDLOCK_ACCESS_FS_IOCTL_DEV` in the handled-access mask. Declaring it would require granting ioctl on every path agents need it (notably `/dev/tty*` for line discipline), and silently breaking interactive tools like `stty` and readline on new kernels is a worse failure mode than leaving ioctl permissions at their pre-v5 baseline. The ioctl attack surface is already reduced by seccomp and by `/dev` being Landlock-RO.
+
+### 3a. Mount RW/RO: enforced at the mount layer
+
+Host directories bind-mounted under `$HOME/mounts/<name>` inherit their read/write mode from the mount itself, not from Landlock. Docker's `:ro` bind flag sets `MS_RDONLY` on the mount and the kernel returns `EROFS` on writes; NFS mounts with `ro`, read-only FUSE exports, and any other filesystem-level read-only mount behave the same way. The fspolicy grants `$HOME/mounts` as RW unconditionally and lets the mount layer be authoritative.
+
+Why not use Landlock for this? Landlock rules are **additive** — a parent RW rule can't be narrowed by a child RO rule, so trying to enforce per-mount modes in Landlock creates footguns (the whole directory ends up RW whenever `mounts/` itself is in the allowlist). The mount layer doesn't have that problem: an RO mount is RO at the VFS regardless of anything above it.
+
+Agents are still told each mount's probed mode via `MountProvider` (which calls `access(W_OK)` for announcement purposes). That's informational only — it lets the agent distinguish intent before trying a write. The enforcement is under the mount point.
 
 ### 4. Seccomp-BPF Syscall Filtering
 
@@ -81,7 +107,7 @@ Each worker process installs a seccomp-BPF filter that blocks dangerous syscalls
 
 Additionally, `clone` with `CLONE_NEWUSER` or `CLONE_NEWNET` flags is blocked via argument inspection.
 
-**Network socket blocking:** When `NetworkAccess` is false (the agent does not have the Bash tool), the seccomp filter additionally blocks `socket(AF_INET)` and `socket(AF_INET6)`, preventing all outbound network connections. Agents with Bash need sockets for commands like `curl` and `git`. The `NetworkAccess` flag is derived from the agent's effective tool set at spawn time.
+**Network socket allowlist:** When `NetworkAccess` is false (the agent does not have the Bash tool), the seccomp filter restricts `socket(2)` to `AF_UNIX` only. AF_INET, AF_INET6, AF_NETLINK, AF_VSOCK, AF_PACKET, and any new address family added in a future kernel are denied with `EPERM`. This is an allowlist rather than a denylist — new address families fail closed without requiring filter updates. The AF_UNIX allowance is needed for the per-worker gRPC socket. Agents with Bash get unrestricted socket access for `curl`, `git`, etc.
 
 ### 5. WebFetch in Control Plane
 
@@ -186,7 +212,8 @@ gRPC uses `insecure.NewCredentials()` for transport — this is safe because Uni
 
 - **Landlock requires kernel 5.13+.** On older kernels, filesystem isolation is silently disabled. Modern Docker hosts (Ubuntu 22.04+, Debian 12+) have Landlock support.
 - **Shared workspace is collaborative.** Any agent can read or modify files in the workspace. This is by design for multi-agent collaboration, but means agents must be trusted not to tamper with shared data maliciously.
-- **Agents with Bash have network access.** The seccomp filter only blocks sockets for agents without Bash. Agents with Bash can make arbitrary outbound connections. Use tool rules (`Bash(curl *)`) to restrict which commands agents can run.
+- **Shared user-level dotfiles (Bash agents only).** `~/.ssh`, `~/.gitconfig`, `~/.config`, `~/.cache`, and `~/.local` are granted only to agents that declare the `Bash` tool. A file-only agent (Read/Write/Edit without Bash) cannot read or write any of these — the directories are invisible to it, closing the "drop a poisoned `.gitconfig` hook and wait for trigger" attack for the common case. Bash agents retain full access because the CLIs that use those files (git, ssh, gh, pip, npm) are invoked through Bash anyway. Among Bash agents, inter-agent dotfile tampering is still possible: one compromised Bash agent could poison `.gitconfig` for the next Bash agent or for the operator's `docker exec -it` shell (which inherits the same `$HOME`). Inter-agent isolation is explicitly not a goal; Docker is the outer boundary.
+- **Agents with Bash have network access.** The seccomp filter allows only `AF_UNIX` sockets for agents without Bash (allowlist, not denylist — new address families added in future kernels fail closed automatically). Agents with Bash can make arbitrary outbound connections. Use tool rules (`Bash(curl *)`) to restrict which commands agents can run.
 - **First-run setup is not network-gated.** Between container start and completion of the onboarding flow, `/api/setup*` endpoints accept requests from any origin. A fresh install has no data, keys, or capabilities, so the worst case is an attacker configuring their own LLM provider on your box — visible immediately on your next visit. Once setup completes, `NeedsSetup()` closes the endpoints (409 Conflict). This matches the posture of Jellyfin, Home Assistant, Sonarr, etc. Do not re-add a loopback gate here without a specific threat to defend against; it breaks Tailscale/LAN/reverse-proxy deployments.
 
 ### Known Issues

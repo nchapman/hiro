@@ -5,7 +5,7 @@ services:
     ports:
       - "0:8120" # random host port to avoid conflicts
     volumes:
-      - e2e-hiro:/hiro
+      - e2e-hiro:/home/hiro
     init: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]

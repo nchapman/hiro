@@ -17,6 +17,7 @@ import (
 	"github.com/nchapman/hiro/internal/inference"
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/platform/fspolicy"
 	"github.com/nchapman/hiro/internal/toolrules"
 )
 
@@ -996,7 +997,18 @@ func (m *fullMockCP) ConfiguredProviderTypes() []string { return m.providerTypes
 func (m *fullMockCP) DefaultModelSpec() models.ModelSpec {
 	return m.defaultModel
 }
-func (m *fullMockCP) ResolveSecret(value string) string { return value }
+func (m *fullMockCP) ResolveSecret(value string) string  { return value }
+func (m *fullMockCP) FilesystemPolicy() *fspolicy.Policy { return mockDefaultPolicy }
+
+// mockDefaultPolicy is the parsed embedded default, shared across test mocks.
+// The Parse error is discarded deliberately — the embedded YAML is a
+// compile-time constant tested in fspolicy_test.go, so a failure here would
+// be a build-time bug and manifests as a nil policy that test setup will
+// notice immediately.
+var mockDefaultPolicy = func() *fspolicy.Policy {
+	p, _ := fspolicy.Parse(fspolicy.Default())
+	return p
+}()
 
 func TestResolveModelSpec_NilCP(t *testing.T) {
 	mgr, _ := setupTestManager(t) // nil CP by default

@@ -317,6 +317,7 @@ Operator-level config management — auth, providers, secrets, clustering. Split
 | `platform/loghandler` | `handler.go` | 356 | Structured slog handler for platform-wide log capture |
 | `auth` | `auth.go` | 118 | Token-based auth, session management |
 | `landlock` | `landlock.go`, `landlock_other.go` | 196 | Landlock LSM filesystem restrictions (Linux-only, stubs on other platforms) |
+| `platform/fspolicy` | `fspolicy.go`, `default.yaml` | ~270 | Declarative filesystem policy: parser and compiler for the `filesystem` section of `config/config.yaml`. Source of truth for worker Landlock allowlists and in-process file-tool allowed roots. Pure parser/compiler — no file I/O. |
 
 **Tests**: All have corresponding test files.
 

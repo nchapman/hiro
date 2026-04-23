@@ -39,7 +39,7 @@ var (
 	leaderContainer string
 	workerContainer string
 	httpClient      *http.Client
-	operatorID   string
+	operatorID      string
 )
 
 func TestMain(m *testing.M) {
@@ -142,7 +142,7 @@ func TestCluster_FileSyncLeaderToWorker(t *testing.T) {
 	var workerContent string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/hiro/workspace/sync-l2w-test.txt").Output()
+		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/home/hiro/workspace/sync-l2w-test.txt").Output()
 		if err == nil && strings.TrimSpace(string(out)) == testContent {
 			workerContent = strings.TrimSpace(string(out))
 			break
@@ -170,7 +170,7 @@ You are a test agent. Write files as instructed. Be concise.`
 	apiWriteFile(t, "agents/sync-writer-agent/agent.md", agentMD)
 
 	// Wait for the agent definition to sync to the worker.
-	waitForWorkerFile(t, "/hiro/agents/sync-writer-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/home/hiro/agents/sync-writer-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -202,8 +202,8 @@ Set the node parameter to the worker node's ID. Tell me the result.`, marker)
 
 	if !strings.Contains(leaderContent, marker) {
 		// Also check via docker exec for debugging.
-		out, _ := exec.Command("docker", "exec", leaderContainer, "cat", "/hiro/workspace/sync-w2l-test.txt").CombinedOutput()
-		wout, _ := exec.Command("docker", "exec", workerContainer, "cat", "/hiro/workspace/sync-w2l-test.txt").CombinedOutput()
+		out, _ := exec.Command("docker", "exec", leaderContainer, "cat", "/home/hiro/workspace/sync-w2l-test.txt").CombinedOutput()
+		wout, _ := exec.Command("docker", "exec", workerContainer, "cat", "/home/hiro/workspace/sync-w2l-test.txt").CombinedOutput()
 		t.Errorf("worker→leader sync failed: leader has %q, want marker %q\nleader docker exec: %s\nworker docker exec: %s",
 			leaderContent, marker, out, wout)
 	}
@@ -221,7 +221,7 @@ You are a test agent. When asked, run the command given and report the output. B
 
 	apiWriteFile(t, "agents/remote-worker-agent/agent.md", agentMD)
 
-	waitForWorkerFile(t, "/hiro/agents/remote-worker-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/home/hiro/agents/remote-worker-agent/agent.md", 15*time.Second)
 }
 
 // TestCluster_SpawnAgentOnWorkerNode is the core clustering test.
@@ -240,7 +240,7 @@ You are a test agent running on a remote node. Execute commands as asked. Be con
 	apiWriteFile(t, "agents/remote-exec-agent/agent.md", agentMD)
 
 	// Wait for definition to sync to worker.
-	waitForWorkerFile(t, "/hiro/agents/remote-exec-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/home/hiro/agents/remote-exec-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -284,7 +284,7 @@ You are a test agent. Write files as instructed. Use relative paths from your wo
 	apiWriteFile(t, "agents/remote-writer-agent/agent.md", agentMD)
 
 	// Wait for sync.
-	waitForWorkerFile(t, "/hiro/agents/remote-writer-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/home/hiro/agents/remote-writer-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -309,7 +309,7 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 	var workerContent string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/hiro/workspace/remote-test.txt").Output()
+		out, err := exec.Command("docker", "exec", workerContainer, "cat", "/home/hiro/workspace/remote-test.txt").Output()
 		if err == nil && strings.Contains(string(out), marker) {
 			workerContent = strings.TrimSpace(string(out))
 			break
@@ -319,7 +319,7 @@ Set the node parameter to the worker node's ID. Tell me when done.`, marker)
 
 	if !strings.Contains(workerContent, marker) {
 		// Debug: list files on worker.
-		ls, _ := exec.Command("docker", "exec", workerContainer, "find", "/hiro/workspace", "-type", "f").CombinedOutput()
+		ls, _ := exec.Command("docker", "exec", workerContainer, "find", "/home/hiro/workspace", "-type", "f").CombinedOutput()
 		t.Errorf("file on worker should contain marker %q, got %q\nworker workspace files: %s", marker, workerContent, ls)
 	}
 
@@ -353,7 +353,7 @@ allowed_tools: [Bash]
 You are a test agent. Run the exact command given to you. Report ONLY the raw output, nothing else.`
 
 	apiWriteFile(t, "agents/remote-compute-agent/agent.md", agentMD)
-	waitForWorkerFile(t, "/hiro/agents/remote-compute-agent/agent.md", 15*time.Second)
+	waitForWorkerFile(t, "/home/hiro/agents/remote-compute-agent/agent.md", 15*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

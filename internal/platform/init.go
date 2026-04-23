@@ -22,6 +22,7 @@ var requiredDirs = []string{
 	"config",
 	"db",
 	"instances",
+	"mounts",
 	"skills",
 	"workspace",
 }

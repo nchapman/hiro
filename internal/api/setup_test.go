@@ -164,4 +164,3 @@ func TestSetup_AlreadyComplete(t *testing.T) {
 		t.Errorf("expected 409 for already-setup, got %d", rec.Code)
 	}
 }
-

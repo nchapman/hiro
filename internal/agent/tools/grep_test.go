@@ -741,8 +741,7 @@ func TestAppendPatternAndPath(t *testing.T) {
 
 func TestGrep_PathTraversal_Rejected(t *testing.T) {
 	dir := t.TempDir()
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 	SetAllowedRoots([]string{dir})
 
 	tool := NewGrepTool(dir)
@@ -757,8 +756,7 @@ func TestGrep_PathTraversal_Rejected(t *testing.T) {
 
 func TestGrep_AbsolutePathOutsideRoot_Rejected(t *testing.T) {
 	dir := t.TempDir()
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 	SetAllowedRoots([]string{dir})
 
 	tool := NewGrepTool(dir)

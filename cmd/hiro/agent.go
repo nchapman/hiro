@@ -109,8 +109,14 @@ func applySandbox(cfg ipc.SpawnConfig) error {
 		return fmt.Errorf("installing seccomp: %w", err)
 	}
 
-	// Confine file tools to the platform root.
-	tools.SetAllowedRoots([]string{cfg.WorkingDir})
+	// Confine file tools to policy-derived roots. The control plane derives
+	// these from the filesystem policy (config.yaml's `filesystem:` key), so
+	// the in-process guard mirrors the Landlock kernel allowlist. The split
+	// matters: Read/Glob/Grep get readable roots (RW + RO), Write/Edit get
+	// writable roots only. System paths (/usr, /etc, /tmp) stay reachable for
+	// exec'd commands but are not addressable via file tools.
+	tools.SetReadableRoots(cfg.ReadableRoots)
+	tools.SetWritableRoots(cfg.WritableRoots)
 	return nil
 }
 

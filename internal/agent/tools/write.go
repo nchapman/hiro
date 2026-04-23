@@ -26,7 +26,7 @@ func NewWriteTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			path, err := resolveAndConfine(workingDir, params.FilePath)
+			path, err := resolveForWrite(workingDir, params.FilePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

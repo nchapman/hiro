@@ -202,12 +202,17 @@ var forwardedEnvKeys = []string{
 // It includes only what's necessary for the agent to function — locale,
 // home directory, PATH, and tool manager config — preventing control
 // plane state from leaking.
+//
+// HOME is the platform root (HIRO_ROOT), which is also the hiro user's Unix
+// home inside Docker. Agents find ~/.ssh, ~/.gitconfig, ~/.config/gh, etc. in
+// the natural place, so standard tools (git, ssh, gh) work without special
+// wiring. TMPDIR stays session-scoped so temp files don't pollute $HOME.
 func buildIsolatedEnv(cfg ipc.SpawnConfig, getenv func(string) string) []string {
 	tmpDir := filepath.Join(cfg.SessionDir, "tmp")
 	env := []string{
 		"PATH=" + getenv("PATH"),
-		"HOME=" + cfg.SessionDir,
-		"TMPDIR=" + tmpDir, // direct temp files into the writable session dir
+		"HOME=" + cfg.WorkingDir,
+		"TMPDIR=" + tmpDir,
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
 		// Workers don't need the API key — inference runs in the control plane.

@@ -85,7 +85,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 			searchPath := workingDir
 			if params.Path != "" {
 				var err error
-				searchPath, err = resolveAndConfine(workingDir, params.Path)
+				searchPath, err = resolveForRead(workingDir, params.Path)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}

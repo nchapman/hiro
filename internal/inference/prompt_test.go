@@ -33,9 +33,9 @@ func TestBuildSystemPrompt_MinimalConfig(t *testing.T) {
 func TestBuildSystemPrompt_IdentitySections(t *testing.T) {
 	cfg := config.AgentConfig{Prompt: "Main instructions."}
 	env := EnvInfo{
-		WorkingDir:  "/hiro",
-		InstanceDir: "/hiro/instances/abc123",
-		SessionDir:  "/hiro/instances/abc123/sessions/sess1",
+		WorkingDir:  "/home/hiro",
+		InstanceDir: "/home/hiro/instances/abc123",
+		SessionDir:  "/home/hiro/instances/abc123/sessions/sess1",
 		Mode:        config.ModePersistent,
 	}
 	got := buildSystemPrompt(cfg, env, "Friendly and precise.")
@@ -61,9 +61,9 @@ func TestBuildSystemPrompt_IdentitySections(t *testing.T) {
 func TestBuildSystemPrompt_SectionOrder(t *testing.T) {
 	cfg := config.AgentConfig{Prompt: "MAIN_INSTRUCTIONS"}
 	env := EnvInfo{
-		WorkingDir:  "/hiro",
-		InstanceDir: "/hiro/instances/x",
-		SessionDir:  "/hiro/instances/x/sessions/y",
+		WorkingDir:  "/home/hiro",
+		InstanceDir: "/home/hiro/instances/x",
+		SessionDir:  "/home/hiro/instances/x/sessions/y",
 		Mode:        config.ModePersistent,
 	}
 	got := buildSystemPrompt(cfg, env, "PERSONA")
@@ -286,9 +286,9 @@ func TestWrapAndWrapAll(t *testing.T) {
 
 func TestBuildEnvironmentSection_Persistent(t *testing.T) {
 	env := EnvInfo{
-		WorkingDir:  "/hiro",
-		InstanceDir: "/hiro/instances/abc-123",
-		SessionDir:  "/hiro/instances/abc-123/sessions/sess-456",
+		WorkingDir:  "/home/hiro",
+		InstanceDir: "/home/hiro/instances/abc-123",
+		SessionDir:  "/home/hiro/instances/abc-123/sessions/sess-456",
 		Mode:        config.ModePersistent,
 	}
 	got := buildEnvironmentSection(env)
@@ -296,8 +296,8 @@ func TestBuildEnvironmentSection_Persistent(t *testing.T) {
 	for _, want := range []string{
 		"workspace/", "agents/", "memory.md", "persona.md",
 		"todos.yaml", "scratch/", "tmp/",
-		"/hiro/instances/abc-123",
-		"/hiro/instances/abc-123/sessions/sess-456",
+		"/home/hiro/instances/abc-123",
+		"/home/hiro/instances/abc-123/sessions/sess-456",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in environment section", want)
@@ -362,9 +362,9 @@ func TestReplayAnnounced_DuplicateAdd(t *testing.T) {
 
 func TestBuildEnvironmentSection_Ephemeral(t *testing.T) {
 	env := EnvInfo{
-		WorkingDir:  "/hiro",
-		InstanceDir: "/hiro/instances/eph-1",
-		SessionDir:  "/hiro/instances/eph-1/sessions/s1",
+		WorkingDir:  "/home/hiro",
+		InstanceDir: "/home/hiro/instances/eph-1",
+		SessionDir:  "/home/hiro/instances/eph-1/sessions/s1",
 		Mode:        config.ModeEphemeral,
 	}
 	got := buildEnvironmentSection(env)

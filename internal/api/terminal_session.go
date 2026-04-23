@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -330,11 +329,7 @@ func (m *TerminalSessionManager) spawnPTY(cols, rows uint16) (*exec.Cmd, *os.Fil
 	}
 
 	cmd := exec.Command(shell) //nolint:noctx // terminal sessions manage their own lifecycle via SIGHUP/Kill
-	workspaceDir := filepath.Join(m.rootDir, "workspace")
-	if info, err := os.Stat(workspaceDir); err != nil || !info.IsDir() {
-		workspaceDir = m.rootDir
-	}
-	cmd.Dir = workspaceDir
+	cmd.Dir = m.rootDir
 	cmd.Env = terminalEnvForSession(m.rootDir)
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
@@ -813,13 +808,17 @@ func (r *replayBuffer) Bytes() []byte {
 // --- Environment ---
 
 // terminalEnvForSession builds the environment for a terminal session.
-func terminalEnvForSession(_ string) []string {
+// HOME is set to rootDir explicitly so the shell finds ~/.bashrc, ~/.ssh,
+// ~/.gitconfig etc. at the platform root regardless of the control plane's
+// inherited HOME.
+func terminalEnvForSession(rootDir string) []string {
 	env := []string{
 		"TERM=xterm-256color",
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
+		"HOME=" + rootDir,
 	}
-	for _, key := range []string{"PATH", "HOME", "USER", "SHELL", "EDITOR",
+	for _, key := range []string{"PATH", "USER", "SHELL", "EDITOR",
 		"MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR",
 		"MISE_GLOBAL_CONFIG_FILE", "MISE_INSTALL_PATH",
 		"STARSHIP_CONFIG"} {

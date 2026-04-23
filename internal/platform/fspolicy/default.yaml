@@ -1,0 +1,61 @@
+version: 1
+
+# Granted to every worker, every instance. Deliberately narrow — this is the
+# blast radius of a compromised file-only agent (no Bash). Anything that could
+# serve as a persistence primitive (~/.ssh, ~/.gitconfig, ~/.config/gh) or
+# leak credential material belongs under on_tool.Bash, not here.
+#
+# $HOME/mounts is intentionally RW. Per-mount read-only enforcement is the job
+# of the underlying mount layer — Docker's `:ro` bind flag, NFS mount options,
+# FUSE read-only exports — which rejects writes at the VFS with EROFS. Agents
+# are told each mount's probed mode via MountProvider so they can distinguish
+# intent before attempting a write.
+base:
+  rw:
+    - $HOME/instances
+    - $HOME/workspace
+    - $HOME/mounts
+  ro:
+    - $HOME/agents
+    - $HOME/skills
+    - /usr
+    - /lib
+    - /lib64
+    - /etc
+    - /proc/self
+    - /dev
+
+# Additional access granted if the agent has the named tool.
+#
+# Bash is the gate for everything credential-adjacent: ~/.ssh (private keys,
+# authorized_keys, known_hosts), ~/.gitconfig (user identity and hooks),
+# ~/.config (gh OAuth tokens, npm tokens, etc.), ~/.cache and ~/.local (where
+# CLI tools stash authenticated state). A non-Bash agent has no use for these
+# — the tools that read them (git, ssh, gh, pip, npm) can only be invoked
+# through Bash — so keeping them out of base closes a large persistence
+# surface without any functional loss.
+on_tool:
+  Bash:
+    rw:
+      - /tmp
+      - /opt/mise
+      - $MISE_DATA_DIR
+      - /home/linuxbrew/.linuxbrew
+      - $HOMEBREW_PREFIX
+      - $HOME/.ssh
+      - $HOME/.gitconfig
+      - $HOME/.config
+      - $HOME/.cache
+      - $HOME/.local
+  CreatePersistentInstance:
+    rw:
+      - $HOME/agents
+      - $HOME/skills
+
+# Per-instance dynamic paths. $INSTANCE_DIR, $SESSION_DIR, $SOCKET_DIR are
+# resolved per spawn.
+per_instance:
+  rw:
+    - $INSTANCE_DIR
+    - $SESSION_DIR
+    - $SOCKET_DIR

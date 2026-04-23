@@ -79,9 +79,15 @@ func probeABI() (int, error) {
 	return int(ver), nil
 }
 
-// bestAccessMask returns the full set of filesystem access rights for the
-// given ABI version. Rights not declared in HandledAccessFs are implicitly
-// allowed everywhere, so we include all rights the kernel understands.
+// bestAccessMask returns the filesystem access rights declared in
+// HandledAccessFs. Rights not declared here are implicitly allowed everywhere,
+// so we include the rights the kernel understands — with one exception:
+// accessFsIoctlDev (ABI v5) is deliberately excluded. Declaring it would
+// require granting ioctl on every RO path that agents need ioctl on
+// (notably /dev/tty* for line discipline), and we'd rather let ioctl fall
+// through unrestricted than silently break interactive tools like stty and
+// readline on kernels 6.10+. The threat model for ioctl-based attacks is
+// already addressed by seccomp and by not granting /dev writable access.
 func bestAccessMask(abi int) uint64 {
 	mask := uint64(accessFsAllV1)
 	if abi >= 2 {
@@ -89,9 +95,6 @@ func bestAccessMask(abi int) uint64 {
 	}
 	if abi >= 3 {
 		mask |= accessFsTruncate
-	}
-	if abi >= 5 {
-		mask |= accessFsIoctlDev
 	}
 	return mask
 }

@@ -144,8 +144,7 @@ func TestGlob_NonexistentPath(t *testing.T) {
 
 func TestGlob_PathTraversal_Rejected(t *testing.T) {
 	dir := t.TempDir()
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 	SetAllowedRoots([]string{dir})
 
 	tool := NewGlobTool(dir)
@@ -160,8 +159,7 @@ func TestGlob_PathTraversal_Rejected(t *testing.T) {
 
 func TestGlob_AbsolutePathOutsideRoot_Rejected(t *testing.T) {
 	dir := t.TempDir()
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 	SetAllowedRoots([]string{dir})
 
 	tool := NewGlobTool(dir)

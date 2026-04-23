@@ -196,8 +196,7 @@ func TestEdit_RelativePath(t *testing.T) {
 }
 
 func TestEdit_ConfinedRejectsOutside(t *testing.T) {
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
 	root := t.TempDir()
 	SetAllowedRoots([]string{root})

@@ -82,7 +82,7 @@ These are optional overrides, not required for normal operation:
 | Variable | Default | Purpose |
 |---|---|---|
 | `HIRO_ADDR` | `:8120` | HTTP listen address |
-| `HIRO_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
+| `HIRO_ROOT` | `/home/hiro` | Platform root. Also the hiro user's `$HOME` — contains `agents/`, `instances/`, `skills/`, `workspace/`, `mounts/`, `config/`, `db/`, plus dotfiles (`.ssh/`, `.gitconfig`, `.config/`) |
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 | `HIRO_LOG_LEVEL` | `info` | Log level |
 
@@ -116,7 +116,7 @@ Agent Worker Process (hiro agent)
 
 **Spawn protocol**: Control plane spawns `hiro agent`, pipes `SpawnConfig` as JSON to stdin. Worker applies Landlock filesystem restrictions and seccomp-BPF filter, starts a gRPC server on a Unix socket (`/tmp/hiro-{session-prefix}/a.sock`), and writes "ready" to stdout. Control plane connects and dispatches tool calls via `ExecuteTool` RPC.
 
-**Landlock filesystem isolation**: Auto-detected at startup (probes for kernel support). Each worker receives a Landlock path whitelist in its `SpawnConfig` — read-write paths for the instance and session directories, read-only paths for the platform root and system tools. The kernel blocks all other filesystem access. No root or capabilities required.
+**Landlock filesystem isolation**: Auto-detected at startup (probes for kernel support). Each worker receives a Landlock path whitelist in its `SpawnConfig`, compiled by the control plane from the declarative policy under the `filesystem` key in `config/config.yaml` (parsed and compiled by `internal/platform/fspolicy`). The policy lists everything workers may access — `$HOME` subtrees, system paths for command execution, per-tool grants (e.g. `/tmp` for Bash), and per-instance dynamic paths. `config/` and `db/` are deliberately absent from the policy, so the kernel blocks agents from reading secrets or self-escalating their own tool declarations. No root or capabilities required.
 
 **Seccomp-BPF syscall filtering**: Each worker installs a BPF filter that blocks dangerous syscalls (ptrace, mount, io_uring, etc.). When the agent does not have the Bash tool, socket creation is also blocked, preventing all outbound network connections. Agents with Bash retain socket access for commands like `curl` and `git`.
 
@@ -205,6 +205,7 @@ See [`docs/system-reminders.md`](docs/system-reminders.md) for the full design, 
 - **`internal/ipc`** — IPC interfaces and types. `AgentWorker` (control plane→worker: `ExecuteTool` + `Shutdown`), `HostManager` (inference loop→manager), `SpawnConfig` (passed to workers at startup).
 - **`internal/ipc/grpcipc`** — gRPC adapters: `WorkerServer`/`WorkerClient` for AgentWorker.
 - **`internal/landlock`** — Landlock LSM filesystem restrictions. Restricts worker processes to whitelisted paths via kernel-enforced access control. Linux-only (`//go:build linux`); stubs on other platforms. No root or capabilities required.
+- **`internal/platform/fspolicy`** — Parser and compiler for the filesystem policy embedded in `config/config.yaml` under the `filesystem` key. Source of truth for worker filesystem access: base paths granted to every worker, `on_tool` paths granted when the agent has a given tool (with RW promotion semantics), and per-instance dynamic paths resolved at spawn. Produces three outputs per spawn: the Landlock RW/RO sets, `ReadableRoots` (for `Read`/`Glob`/`Grep`), and `WritableRoots` (for `Write`/`Edit`) — the split means RO-in-policy paths can't be written through file tools even on platforms without Landlock. Pure parser/compiler; Policy values are owned and persisted by the `controlplane` package.
 - **`internal/agent/tools/`** — Built-in tool implementations (Read, Write, Edit, Bash, TaskOutput, TaskStop, Glob, Grep). These run in worker processes. Resource limits centralized in `limits.go`.
 - **`internal/controlplane`** — Operator-level config (secrets, cluster settings). Read from `config/config.yaml` at startup, held in memory, written on shutdown. Slash command handler for `/secrets` and `/cluster` commands.
 - **`internal/config`** — Markdown+YAML parsing, agent/skill config loading, persona/memory/todos persistence.
@@ -380,12 +381,12 @@ Agents see `workspace/` by default. To expose additional host directories, bind-
 
 ```yaml
 volumes:
-  - hiro:/hiro
-  - /Users/you/Photos:/hiro/mounts/photos:ro
-  - /Users/you/scratch:/hiro/mounts/scratch
+  - hiro:/home/hiro
+  - /Users/you/Photos:/home/hiro/mounts/photos:ro
+  - /Users/you/scratch:/home/hiro/mounts/scratch
 ```
 
-Hiro auto-discovers each subdirectory under `mounts/`, probes its writability via `access(2)`, and announces it to the agent as `(ro)` or `(rw)` via `MountProvider` — a content-hash context provider that only emits when the mount set or mode changes, preserving the prompt cache. No config file — the filesystem is the source of truth. Each mount also gets an explicit Landlock rule at spawn time, so RO is enforced at the LSM layer in addition to the Docker bind flag.
+Hiro auto-discovers each subdirectory under `mounts/`, probes its writability via `access(2)`, and announces it to the agent as `(ro)` or `(rw)` via `MountProvider` — a content-hash context provider that only emits when the mount set or mode changes, preserving the prompt cache. No config file — the filesystem is the source of truth. Per-mount read-only is enforced by the mount layer itself: Docker's `:ro` bind flag sets `MS_RDONLY` and the kernel returns `EROFS` on writes, same for NFS `ro` and FUSE read-only exports. The filesystem policy grants `$HOME/mounts` RW unconditionally and defers to the mount layer — trying to enforce per-mount modes in Landlock creates footguns because Landlock rules are additive.
 
 `mounts/` is a sibling of `workspace/` (not nested inside it) so host-specific bind mounts stay out of the cluster file-sync path and out of anything that treats `workspace/` as a project root.
 

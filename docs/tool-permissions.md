@@ -215,6 +215,32 @@ allowed_tools: [Read(/src/*)]
 - `Read(/src/main.go)` — allowed
 - `Read(/src/../etc/passwd)` — denied (normalizes to `/etc/passwd`)
 
+## Filesystem Policy
+
+Tool permissions govern *what tools an agent can call*. The filesystem policy governs *what paths workers can access at all*. The two layers compose: a worker with `Bash` enabled still has to read/write files through paths the policy allows, and a worker without a path in the policy cannot reach it even if it had the perfect `Bash(cat *)` rule.
+
+The policy is declarative and lives in `config/config.yaml` under the `filesystem` key (parsed and compiled by `internal/platform/fspolicy`). If `filesystem` is absent, an embedded default is used. Three sections:
+
+- **`base`** — paths granted to every worker, as `rw` or `ro`.
+- **`on_tool`** — additional paths conditional on the agent having a named tool. Paths listed here at a higher privilege than `base` are promoted (e.g. `agents/` is RO in `base` but RW in `on_tool.CreatePersistentInstance`).
+- **`per_instance`** — dynamic paths resolved per spawn: `$INSTANCE_DIR`, `$SESSION_DIR`, `$SOCKET_DIR`.
+
+Variables are expanded with `$NAME` syntax. `$HOME` is the platform root (`/home/hiro`); other variables fall through to the worker process environment (e.g. `$MISE_DATA_DIR`). A variable that resolves to an empty string drops the whole path — useful for optional env-configured locations.
+
+**Declaring filesystem needs for a new tool.** If a tool needs access beyond the base set (e.g. a new sandbox dir, a socket path, a package manager cache), add an `on_tool.<ToolName>` entry. The tool becomes a capability gate: only agents that declare the tool get the extra paths. No Go code changes.
+
+**Self-escalation boundary.** Anything not listed in the policy is blocked by Landlock. The two load-bearing absences are `config/` and `db/` — `config/` holds the policy itself (so agents can't rewrite `config.yaml` to widen access), secrets, and per-instance tool declarations; `db/` holds the platform SQLite database. Both are blocked for every worker.
+
+**Read/write split.** The in-process file-tool guard splits paths into *readable* (RW + RO) and *writable* (RW only). An agent without `CreatePersistentInstance` can `Read` files under `agents/` (base.ro) but cannot `Write` or `Edit` them. With the tool, `agents/` is promoted to RW and appears in both lists. This split matters most on non-Linux dev machines where Landlock is unavailable — the guard is the only restriction left.
+
+**Bash gates dotfile access.** `~/.ssh`, `~/.gitconfig`, `~/.config`, `~/.cache`, and `~/.local` are not in `base` — they live only under `on_tool.Bash.rw`. A file-only agent (just `Read`/`Write`/`Edit`, no `Bash`) cannot reach any of them. This closes the "drop a poisoned `~/.gitconfig` hook" attack for restricted agents, because the only tools that actually read those files (git, ssh, gh, pip, npm) require Bash to invoke. Bash agents retain full access.
+
+**Mounts.** `$HOME/mounts` is granted RW in the policy. Per-mount RW/RO is enforced at the mount layer — Docker's `:ro` bind flag, NFS `ro`, FUSE read-only exports — which returns `EROFS` on writes regardless of Landlock's opinion. fspolicy takes no position on per-mount modes; the filesystem is the source of truth.
+
+**Reload.** The policy is held in memory by the control plane alongside the rest of `config.yaml`. Edits to the file on disk are picked up by the control plane's reload mechanism (fsnotify); the next worker spawn uses the updated policy. No restart required.
+
+**Clustering.** `config/` is not in the cluster sync allowlist — `config.yaml` holds secrets and must not replicate across nodes. The filesystem policy therefore is currently **node-local**: each node's operator edits their own `config.yaml`. For single-node deployments this is fine; for multi-node clusters, a targeted sync for the `filesystem` section is a known follow-up.
+
 ## Frontmatter Reference
 
 ### Agent (`agent.md`)

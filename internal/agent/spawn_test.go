@@ -10,7 +10,8 @@ import (
 
 func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 	cfg := ipc.SpawnConfig{
-		SessionDir: "/hiro/sessions/abc-123",
+		WorkingDir: "/home/hiro",
+		SessionDir: "/home/hiro/instances/abc/sessions/s1",
 	}
 	getenv := func(key string) string {
 		if key == "PATH" {
@@ -23,7 +24,8 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 
 	expect := map[string]string{
 		"PATH":   "/opt/mise/shims:/usr/local/bin:/usr/bin",
-		"HOME":   "/hiro/sessions/abc-123",
+		"HOME":   "/home/hiro",
+		"TMPDIR": "/home/hiro/instances/abc/sessions/s1/tmp",
 		"LANG":   "en_US.UTF-8",
 		"LC_ALL": "en_US.UTF-8",
 	}
@@ -39,13 +41,16 @@ func TestBuildIsolatedEnv_CoreVars(t *testing.T) {
 	}
 }
 
-func TestBuildIsolatedEnv_HomeIsSessionDir(t *testing.T) {
-	cfg := ipc.SpawnConfig{SessionDir: "/hiro/sessions/agent-xyz"}
+func TestBuildIsolatedEnv_HomeIsPlatformRoot(t *testing.T) {
+	cfg := ipc.SpawnConfig{
+		WorkingDir: "/home/hiro",
+		SessionDir: "/home/hiro/instances/abc/sessions/s1",
+	}
 	env := buildIsolatedEnv(cfg, func(string) string { return "" })
 	envMap := parseEnv(env)
 
-	if envMap["HOME"] != "/hiro/sessions/agent-xyz" {
-		t.Errorf("HOME = %q, want session dir", envMap["HOME"])
+	if envMap["HOME"] != "/home/hiro" {
+		t.Errorf("HOME = %q, want platform root /home/hiro", envMap["HOME"])
 	}
 }
 

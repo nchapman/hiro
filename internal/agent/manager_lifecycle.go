@@ -19,7 +19,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
-	"github.com/nchapman/hiro/internal/platform/mounts"
+	"github.com/nchapman/hiro/internal/platform/fspolicy"
 	"github.com/nchapman/hiro/internal/provider"
 	"github.com/nchapman/hiro/internal/toolrules"
 )
@@ -442,6 +442,9 @@ func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allo
 	}
 	socketDir := filepath.Join(os.TempDir(), fmt.Sprintf("hiro-%s", sessPrefix))
 
+	policyCtx := m.policyContext(instDir, sessDir, socketDir, allowedTools)
+	policy := m.filesystemPolicy()
+
 	cfg := ipc.SpawnConfig{
 		InstanceID:     instanceID,
 		SessionID:      sessionID,
@@ -449,93 +452,49 @@ func (m *Manager) buildSpawnConfig(instanceID, sessionID, agentName string, allo
 		EffectiveTools: allowedTools,
 		WorkingDir:     m.opts.WorkingDir,
 		SessionDir:     sessDir,
+		ReadableRoots:  policy.ReadableRoots(policyCtx),
+		WritableRoots:  policy.WritableRoots(policyCtx),
 		NetworkAccess:  allowedTools["Bash"], // Bash tool implies socket access needed
 	}
 
 	if m.landlockEnabled {
-		cfg.LandlockPaths = m.buildLandlockPaths(instDir, sessDir, socketDir, allowedTools)
+		cfg.LandlockPaths = policy.Compile(policyCtx)
 	}
 
 	return cfg
 }
 
-// buildLandlockPaths computes filesystem access paths for Landlock.
-func (m *Manager) buildLandlockPaths(instDir, sessDir, socketDir string, allowedTools map[string]bool) ipc.LandlockPaths {
-	agentsDir := filepath.Join(m.rootDir, "agents")
-	skillsDir := filepath.Join(m.rootDir, "skills")
-
-	paths := ipc.LandlockPaths{
-		ReadWrite: []string{
-			instDir,                               // instance dir (persona.md, memory.md, etc.)
-			sessDir,                               // session dir (scratch/, tmp/)
-			socketDir,                             // gRPC socket dir (under /tmp)
-			filepath.Join(m.rootDir, "workspace"), // shared workspace
-		},
-		ReadOnly: []string{
-			"/usr",       // system binaries/libraries
-			"/lib",       // shared libraries
-			"/etc",       // system config (resolv.conf, etc.)
-			"/proc/self", // Go runtime needs /proc/self (os.Executable, net package); /proc would expose other processes' environ
-			"/dev",       // /dev/null, /dev/urandom — required by many tools
-		},
-	}
-
-	// Operators need write access to agents/ and skills/ for creating new
-	// agent definitions. Other agents only need read access.
-	if allowedTools["CreatePersistentInstance"] {
-		paths.ReadWrite = append(paths.ReadWrite, agentsDir, skillsDir)
-	} else {
-		paths.ReadOnly = append(paths.ReadOnly, agentsDir, skillsDir)
-	}
-
-	// Package managers — agents install tools at runtime via Bash.
-	// Both mise and brew have their own lock files for concurrency.
-	if miseDir := os.Getenv("MISE_DATA_DIR"); miseDir != "" {
-		paths.ReadWrite = append(paths.ReadWrite, miseDir)
-	} else if _, err := os.Stat("/opt/mise"); err == nil {
-		paths.ReadWrite = append(paths.ReadWrite, "/opt/mise")
-	}
-	if brewPrefix := brewLinuxbrewPrefix(); brewPrefix != "" {
-		paths.ReadWrite = append(paths.ReadWrite, brewPrefix)
-	}
-
-	// Host-exposed mounts (sibling of workspace/). Each gets an explicit
-	// Landlock rule so RO mounts are enforced at the LSM layer, not just by
-	// Docker's bind flag. Missing dir is a no-op.
-	if ms, err := mounts.Discover(m.rootDir); err == nil {
-		for _, mt := range ms {
-			if mt.Mode == mounts.ModeRW {
-				paths.ReadWrite = append(paths.ReadWrite, mt.Path)
-			} else {
-				paths.ReadOnly = append(paths.ReadOnly, mt.Path)
-			}
+// filesystemPolicy returns the current policy from the control plane, falling
+// back to the embedded default if no control plane is configured (test-only
+// path) or if the control plane returns nil. A parse failure on the embedded
+// default is a build-time bug — it's test-covered, constant, and load-bearing
+// for sandbox safety — so we panic rather than return nil and let a downstream
+// Compile() call hide the breakage behind a nil-deref.
+func (m *Manager) filesystemPolicy() *fspolicy.Policy {
+	if m.cp != nil {
+		if policy := m.cp.FilesystemPolicy(); policy != nil {
+			return policy
 		}
 	}
-
-	// Bash-capable agents need full /tmp access. Package managers (brew, mise)
-	// extract tarballs to unpredictable /tmp paths during installation, and
-	// many CLI tools create temp files there. Agents with Bash already have
-	// network socket access via seccomp, so restricting /tmp is inconsistent.
-	if allowedTools["Bash"] {
-		paths.ReadWrite = append(paths.ReadWrite, os.TempDir())
+	policy, err := fspolicy.Parse(fspolicy.Default())
+	if err != nil {
+		panic(fmt.Sprintf("embedded filesystem policy default failed to parse: %v", err))
 	}
-
-	return paths
+	return policy
 }
 
-// brewLinuxbrewPrefix returns the Linuxbrew prefix if installed, or empty string.
-// Checks HOMEBREW_PREFIX env first (matches the mise pattern), then probes the
-// standard Linuxbrew location.
-func brewLinuxbrewPrefix() string {
-	if prefix := os.Getenv("HOMEBREW_PREFIX"); prefix != "" {
-		if _, err := os.Stat(prefix); err == nil { //nolint:gosec // HOMEBREW_PREFIX is set in our Dockerfile, not user-controlled
-			return prefix
-		}
+// policyContext assembles the fspolicy.Context for a spawn. Host-exposed
+// mounts aren't passed through fspolicy — they're covered by the $HOME/mounts
+// grant in the base policy and their RW/RO mode is enforced by the mount
+// layer itself (Docker :ro, NFS mount options, etc.).
+func (m *Manager) policyContext(instDir, sessDir, socketDir string, allowedTools map[string]bool) fspolicy.Context {
+	return fspolicy.Context{
+		Home:        m.rootDir,
+		InstanceDir: instDir,
+		SessionDir:  sessDir,
+		SocketDir:   socketDir,
+		Tools:       allowedTools,
 	}
-	if _, err := os.Stat("/home/linuxbrew/.linuxbrew"); err == nil {
-		return "/home/linuxbrew/.linuxbrew"
-	}
-	return ""
 }
 
 // makeCleanup returns a function that removes directories and config on failure.

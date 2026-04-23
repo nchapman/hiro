@@ -17,8 +17,8 @@ services:
       - HIRO_TRACKER_URL=https://discover.hellohiro.ai
       - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
     volumes:
-      - leader-hiro:/hiro
-      - ../tests/e2e_cluster/leader-config:/hiro/config
+      - leader-hiro:/home/hiro
+      - ../tests/e2e_cluster/leader-config:/home/hiro/config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
       interval: 5s
@@ -39,7 +39,7 @@ services:
       - HIRO_SWARM_CODE=${HIRO_SWARM_CODE}
       # No HIRO_LEADER — discovers via tracker, connects via relay
     volumes:
-      - worker-hiro:/hiro
+      - worker-hiro:/home/hiro
 
 networks:
   leader-net:

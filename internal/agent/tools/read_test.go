@@ -149,8 +149,7 @@ func TestReadFile_OutputTruncation(t *testing.T) {
 }
 
 func TestReadFile_ConfinedRejectsOutside(t *testing.T) {
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
 	root := t.TempDir()
 	SetAllowedRoots([]string{root})

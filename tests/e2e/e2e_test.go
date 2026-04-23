@@ -33,7 +33,7 @@ import (
 var (
 	baseURL       string
 	containerName string
-	operatorID string
+	operatorID    string
 	httpClient    *http.Client // shared client with cookie jar for auth
 )
 
@@ -405,7 +405,7 @@ func findInstance(t *testing.T, id string) (instanceInfo, bool) {
 func spawnPersistentAgent(t *testing.T, ctx context.Context, name string) string {
 	t.Helper()
 
-	containerWriteFile(t, fmt.Sprintf("/hiro/agents/%s/agent.md", name), fmt.Sprintf(`---
+	containerWriteFile(t, fmt.Sprintf("/home/hiro/agents/%s/agent.md", name), fmt.Sprintf(`---
 name: %s
 allowed_tools: [Read, Write, Edit, Glob, Grep, Bash]
 ---
@@ -435,17 +435,17 @@ You are a test agent. Be concise.`, name))
 
 // instanceDir returns the container path to an instance's directory.
 func instanceDir(_ *testing.T, instanceID string) string {
-	return "/hiro/instances/" + instanceID
+	return "/home/hiro/instances/" + instanceID
 }
 
 // activeSessionDir returns the container path to an instance's active session directory.
 // Session IDs are UUID v7 (time-ordered), so the last entry alphabetically is the newest.
 func activeSessionDir(t *testing.T, instanceID string) string {
 	t.Helper()
-	out := containerExec(t, "sh", "-c", fmt.Sprintf("ls -1 /hiro/instances/%s/sessions/ | tail -1", instanceID))
+	out := containerExec(t, "sh", "-c", fmt.Sprintf("ls -1 /home/hiro/instances/%s/sessions/ | tail -1", instanceID))
 	sessionID := strings.TrimSpace(out)
 	if sessionID == "" {
 		t.Fatalf("no sessions found for instance %s", instanceID)
 	}
-	return fmt.Sprintf("/hiro/instances/%s/sessions/%s", instanceID, sessionID)
+	return fmt.Sprintf("/home/hiro/instances/%s/sessions/%s", instanceID, sessionID)
 }

@@ -80,8 +80,9 @@ ENV LC_ALL=en_US.UTF-8
 RUN groupadd -g 10000 hiro \
     && useradd -u 10000 -g hiro -m -s /bin/bash hiro
 
-# Platform root — owned by hiro user.
-RUN mkdir -p /hiro && chown hiro:hiro /hiro
+# Platform root is /home/hiro (= HIRO_ROOT = $HOME). The home directory was
+# created by useradd -m above; nothing to do here beyond ensuring ownership.
+RUN chown hiro:hiro /home/hiro
 
 # Install mise (tool version manager). All mise state lives under /opt/mise —
 # binary, tool installs, config, cache, and shims — so the hiro user and
@@ -153,7 +154,7 @@ RUN git config --system init.defaultBranch main \
     && git config --system delta.line-numbers true \
     && git config --system merge.conflictstyle zdiff3
 
-WORKDIR /hiro
+WORKDIR /home/hiro
 
 COPY --from=build /hiro /usr/local/bin/hiro
 

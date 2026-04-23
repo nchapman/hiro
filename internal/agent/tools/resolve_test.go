@@ -71,12 +71,10 @@ func TestResolvePath(t *testing.T) {
 }
 
 func TestResolveAndConfine(t *testing.T) {
-	// Save and restore global state.
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
-	SetAllowedRoots([]string{"/hiro"})
-	wd := "/hiro/workspace"
+	SetAllowedRoots([]string{"/home/hiro"})
+	wd := "/home/hiro/workspace"
 
 	tests := []struct {
 		name    string
@@ -84,18 +82,18 @@ func TestResolveAndConfine(t *testing.T) {
 		wantErr bool
 	}{
 		{"relative inside root", "agents/foo.md", false},
-		{"absolute inside root", "/hiro/workspace/file.txt", false},
-		{"root itself", "/hiro", false},
+		{"absolute inside root", "/home/hiro/workspace/file.txt", false},
+		{"root itself", "/home/hiro", false},
 		{"absolute outside root", "/etc/hosts", true},
 		{"absolute outside root /opt", "/opt/mise/shims/node", true},
 		{"traversal escape", "../../etc/passwd", true},
 		{"tmp directory", "/tmp/something", true},
-		{"sibling instance dir", "/hiro/../etc/passwd", true},
+		{"sibling instance dir", "/home/hiro/../etc/passwd", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolved, err := resolveAndConfine(wd, tt.path)
+			resolved, err := resolveForRead(wd, tt.path)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error for path %q, got resolved=%q", tt.path, resolved)
@@ -112,13 +110,12 @@ func TestResolveAndConfine(t *testing.T) {
 }
 
 func TestResolveAndConfine_NoRoots(t *testing.T) {
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
 	// No roots configured = no confinement (non-isolated mode).
 	SetAllowedRoots(nil)
 
-	resolved, err := resolveAndConfine("/hiro", "/etc/hosts")
+	resolved, err := resolveForRead("/home/hiro", "/etc/hosts")
 	if err != nil {
 		t.Fatalf("unexpected error with no roots: %v", err)
 	}
@@ -128,30 +125,28 @@ func TestResolveAndConfine_NoRoots(t *testing.T) {
 }
 
 func TestResolveAndConfine_MultipleRoots(t *testing.T) {
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
-	SetAllowedRoots([]string{"/hiro", "/workspace"})
+	SetAllowedRoots([]string{"/home/hiro", "/workspace"})
 
 	// Allowed in first root.
-	if _, err := resolveAndConfine("/hiro", "/hiro/agents/foo.md"); err != nil {
+	if _, err := resolveForRead("/home/hiro", "/home/hiro/agents/foo.md"); err != nil {
 		t.Errorf("expected access to /hiro: %v", err)
 	}
 
 	// Allowed in second root.
-	if _, err := resolveAndConfine("/hiro", "/workspace/project/file.txt"); err != nil {
+	if _, err := resolveForRead("/home/hiro", "/workspace/project/file.txt"); err != nil {
 		t.Errorf("expected access to /workspace: %v", err)
 	}
 
 	// Denied outside both.
-	if _, err := resolveAndConfine("/hiro", "/etc/hosts"); err == nil {
+	if _, err := resolveForRead("/home/hiro", "/etc/hosts"); err == nil {
 		t.Error("expected error for /etc/hosts")
 	}
 }
 
 func TestResolveAndConfine_SymlinkEscape(t *testing.T) {
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
 	// Create a temp directory as the "allowed root" and a sibling as the "escape target".
 	root := t.TempDir()
@@ -166,7 +161,7 @@ func TestResolveAndConfine_SymlinkEscape(t *testing.T) {
 	}
 
 	// Accessing the symlink should be rejected — it resolves outside the root.
-	_, err := resolveAndConfine(root, "escape_link")
+	_, err := resolveForRead(root, "escape_link")
 	if err == nil {
 		t.Fatal("expected error for symlink escaping allowed root")
 	}
@@ -178,7 +173,7 @@ func TestResolveAndConfine_SymlinkEscape(t *testing.T) {
 	realFile := filepath.Join(root, "legit.txt")
 	os.WriteFile(realFile, []byte("ok"), 0o644)
 
-	resolved, err := resolveAndConfine(root, "legit.txt")
+	resolved, err := resolveForRead(root, "legit.txt")
 	if err != nil {
 		t.Fatalf("unexpected error for legit file: %v", err)
 	}
@@ -272,6 +267,67 @@ func TestMkdirFor(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "a", "b", "c")); err != nil {
 		t.Errorf("expected directory to exist: %v", err)
 	}
+}
+
+func TestResolveForWrite_RejectsReadOnlyPath(t *testing.T) {
+	// The read/write split: a path that appears only in readableRoots
+	// (RO-in-policy) must be rejected by resolveForWrite.
+	restoreRoots(t)
+
+	roRoot := t.TempDir()
+	rwRoot := t.TempDir()
+	SetReadableRoots([]string{roRoot, rwRoot})
+	SetWritableRoots([]string{rwRoot})
+
+	// Reads succeed on both roots.
+	if _, err := resolveForRead(roRoot, "file.txt"); err != nil {
+		t.Errorf("read should succeed on RO-only root: %v", err)
+	}
+	if _, err := resolveForRead(rwRoot, "file.txt"); err != nil {
+		t.Errorf("read should succeed on RW root: %v", err)
+	}
+
+	// Writes fail on the RO-only root, succeed on the RW root.
+	if _, err := resolveForWrite(roRoot, "file.txt"); err == nil {
+		t.Errorf("write should be denied on RO-only root")
+	}
+	if _, err := resolveForWrite(rwRoot, "file.txt"); err != nil {
+		t.Errorf("write should succeed on RW root: %v", err)
+	}
+}
+
+func TestConfineTo_RejectsSymlinkedAncestor(t *testing.T) {
+	// An agent could create a symlink earlier (workspace/link -> /etc) and
+	// then write through it before the leaf file exists. EvalSymlinks on the
+	// non-existent leaf returns an error; we must fall back to checking the
+	// nearest existing ancestor's real path.
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	// Create a directory symlink inside root that escapes to outside.
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	_, err := confineTo(root, "escape/newfile.txt", []string{root})
+	if err == nil {
+		t.Errorf("expected confineTo to reject write through symlinked ancestor")
+	}
+}
+
+// restoreRoots snapshots both readable and writable atomics at call time and
+// registers a t.Cleanup that restores them independently. Tests that mutate
+// the globals via SetAllowedRoots/SetReadableRoots/SetWritableRoots should
+// call this as their first line so they don't leak state into other tests.
+func restoreRoots(t *testing.T) {
+	t.Helper()
+	r := loadRoots(&readableRoots)
+	w := loadRoots(&writableRoots)
+	t.Cleanup(func() {
+		SetReadableRoots(r)
+		SetWritableRoots(w)
+	})
 }
 
 func TestExcludedDirs(t *testing.T) {

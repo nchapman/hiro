@@ -196,7 +196,7 @@ func initPlatform() (*app, error) {
 		Level: logLevel,
 	}))
 
-	rootDir := envOr("HIRO_ROOT", ".")
+	rootDir := envOr("HIRO_ROOT", "/home/hiro")
 	absRootDir, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolving root dir: %w", err)

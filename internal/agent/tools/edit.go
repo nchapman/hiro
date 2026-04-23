@@ -30,7 +30,7 @@ func NewEditTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			filePath, err := resolveAndConfine(workingDir, params.FilePath)
+			filePath, err := resolveForWrite(workingDir, params.FilePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

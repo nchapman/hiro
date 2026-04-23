@@ -9,8 +9,8 @@ services:
       - "0:8120"  # HTTP API (random host port)
       - "0:8121"  # Cluster gRPC (random host port)
     volumes:
-      - leader-hiro:/hiro
-      - ../tests/e2e_cluster/leader-config:/hiro/config
+      - leader-hiro:/home/hiro
+      - ../tests/e2e_cluster/leader-config:/home/hiro/config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8120/api/health"]
       interval: 5s
@@ -27,7 +27,7 @@ services:
       - HIRO_MODE=worker
       - HIRO_LEADER=leader:8121
     volumes:
-      - worker-hiro:/hiro
+      - worker-hiro:/home/hiro
 
 volumes:
   leader-hiro:

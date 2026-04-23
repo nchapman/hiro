@@ -12,6 +12,7 @@ import (
 	"github.com/nchapman/hiro/internal/ipc"
 	"github.com/nchapman/hiro/internal/models"
 	platformdb "github.com/nchapman/hiro/internal/platform/db"
+	"github.com/nchapman/hiro/internal/platform/fspolicy"
 	"github.com/nchapman/hiro/internal/toolrules"
 )
 
@@ -167,6 +168,7 @@ type ControlPlane interface {
 	ConfiguredProviderTypes() []string
 	DefaultModelSpec() models.ModelSpec
 	ResolveSecret(value string) string
+	FilesystemPolicy() *fspolicy.Policy
 }
 
 // NewManager creates a new agent manager. rootDir is the hiro platform root

@@ -47,24 +47,24 @@ Optional overrides — not required for normal use:
 | Variable | Default | Purpose |
 |---|---|---|
 | `HIRO_ADDR` | `:8120` | HTTP listen address |
-| `HIRO_ROOT` | `.` | Platform root containing `agents/`, `instances/`, `skills/`, `workspace/` |
+| `HIRO_ROOT` | `/home/hiro` | Platform root; also the container user's `$HOME` |
 | `HIRO_SWARM_CODE` | *(random)* | Swarm join code for worker discovery |
 | `HIRO_LOG_LEVEL` | `info` | Log level |
 
 ### Exposing Host Directories
 
-Agents work inside the container's `workspace/` by default. To give them access to files on the host, bind-mount directories under `/hiro/mounts/<name>` in `docker-compose.yml`:
+Agents work inside the container's `workspace/` by default. To give them access to files on the host, bind-mount directories under `/home/hiro/mounts/<name>` in `docker-compose.yml`:
 
 ```yaml
 services:
   hiro:
     volumes:
-      - hiro:/hiro
-      - /Users/you/Photos:/hiro/mounts/photos:ro
-      - /Users/you/scratch:/hiro/mounts/scratch
+      - hiro:/home/hiro
+      - /Users/you/Photos:/home/hiro/mounts/photos:ro
+      - /Users/you/scratch:/home/hiro/mounts/scratch
 ```
 
-Hiro auto-discovers each subdirectory under `mounts/` and tells agents about it (including whether it's read-only). No other configuration needed — the `:ro` flag is enforced by Docker and mirrored into the per-agent Landlock whitelist.
+Hiro auto-discovers each subdirectory under `mounts/` and tells agents about it (including whether it's read-only). No other configuration needed — the `:ro` flag is enforced by the kernel at the mount layer (`MS_RDONLY` returns `EROFS` on writes), same for any read-only network mount.
 
 ## Agents
 
@@ -105,7 +105,7 @@ Hiro uses defense-in-depth to run untrusted LLM-driven agents:
 - **Docker containment** — outer security boundary, runs as non-root `hiro` user (no capabilities)
 - **Process isolation** — each agent runs as a separate OS process; the control plane handles all LLM inference
 - **Landlock LSM** — kernel-enforced filesystem path whitelist per worker (instance dir, session dir, workspace)
-- **seccomp-BPF** — blocks dangerous syscalls (namespace creation, ptrace, io_uring, mount); blocks IP sockets for agents without Bash
+- **seccomp-BPF** — blocks dangerous syscalls (namespace creation, ptrace, io_uring, mount); agents without Bash are restricted to AF_UNIX sockets only (allowlist fails closed on future address families)
 - **WebFetch in control plane** — HTTP requests run in the control plane with SSRF protection, not in worker sandboxes
 - **Tool capability system** — closed-by-default whitelist with parameterized rules (`Bash(curl *)`) and parent-child inheritance
 

@@ -6,15 +6,15 @@ services:
     ports:
       - "8120:8120"
     volumes:
-      - hiro:/hiro
+      - hiro:/home/hiro
       # Or use a host directory instead of the named volume for easy access
       # to agent state, config, and workspace from your host filesystem:
-      #   - /Users/you/hiro:/hiro
+      #   - /Users/you/hiro:/home/hiro
       # Expose host directories to agents by bind-mounting them under
-      # /hiro/mounts/<name>. Add `:ro` for read-only access.
+      # /home/hiro/mounts/<name>. Add `:ro` for read-only access.
       # Example:
-      #   - /Users/you/Photos:/hiro/mounts/photos:ro
-      #   - /Users/you/scratch:/hiro/mounts/scratch
+      #   - /Users/you/Photos:/home/hiro/mounts/photos:ro
+      #   - /Users/you/scratch:/home/hiro/mounts/scratch
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

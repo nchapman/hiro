@@ -11,7 +11,7 @@ import (
 
 func TestE2E_SpawnSubagent(t *testing.T) {
 	// Pre-write a simple ephemeral agent definition.
-	containerWriteFile(t, "/hiro/agents/echo-test/agent.md", `---
+	containerWriteFile(t, "/home/hiro/agents/echo-test/agent.md", `---
 name: echo-test
 ---
 
@@ -34,7 +34,7 @@ func TestE2E_CreateAgent(t *testing.T) {
 	// Write the agent definition via docker exec (as root) since agents/
 	// is not writable by agent UIDs in Docker — this mirrors an operator
 	// pre-provisioning agent definitions.
-	containerWriteFile(t, "/hiro/agents/greeter/agent.md", `---
+	containerWriteFile(t, "/home/hiro/agents/greeter/agent.md", `---
 name: greeter
 ---
 
@@ -57,13 +57,13 @@ Always respond with exactly "HELLO WORLD" in all caps. Nothing else.`)
 func TestE2E_CreateSkill(t *testing.T) {
 	// Pre-write the agent and skill via docker exec (as root) since agents/
 	// is not writable by agent UIDs in Docker.
-	containerWriteFile(t, "/hiro/agents/responder/agent.md", `---
+	containerWriteFile(t, "/home/hiro/agents/responder/agent.md", `---
 name: responder
 ---
 
 You are a concise test agent. When you have skills, use them. Keep responses short.`)
 
-	containerWriteFile(t, "/hiro/agents/responder/skills/pirate-speak.md", `---
+	containerWriteFile(t, "/home/hiro/agents/responder/skills/pirate-speak.md", `---
 name: pirate-speak
 description: Always respond in pirate speak using words like arr, matey, and ahoy.
 ---

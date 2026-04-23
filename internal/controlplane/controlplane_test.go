@@ -1063,3 +1063,59 @@ func TestClusterTrackerURL_ConfigVsEnvPrecedence(t *testing.T) {
 		t.Errorf("expected env var to take precedence, got %q", got)
 	}
 }
+
+func TestFilesystemPolicy_DefaultWhenAbsent(t *testing.T) {
+	// No filesystem: section in config → embedded default is returned.
+	cp, err := Load(filepath.Join(t.TempDir(), "config.yaml"), testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cp.FilesystemPolicy()
+	if p == nil {
+		t.Fatal("expected policy, got nil")
+	}
+	if p.Version != 1 {
+		t.Errorf("version = %d, want 1", p.Version)
+	}
+	// The default ships with base.rw paths — a proxy for "we actually got the default".
+	if len(p.Base.RW) == 0 {
+		t.Errorf("expected embedded default to populate base.rw")
+	}
+	if _, ok := p.OnTool["Bash"]; !ok {
+		t.Errorf("expected embedded default to include on_tool.Bash")
+	}
+}
+
+func TestFilesystemPolicy_UsesOverride(t *testing.T) {
+	// Custom filesystem: section in config.yaml → FilesystemPolicy() returns
+	// the custom policy, not the embedded default. Asserts on a distinctive
+	// RW path that does not appear in the embedded default.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := `filesystem:
+  version: 1
+  base:
+    rw:
+      - /custom/override/path
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cp, err := Load(path, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cp.FilesystemPolicy()
+	if p == nil {
+		t.Fatal("expected policy, got nil")
+	}
+	if len(p.Base.RW) != 1 || p.Base.RW[0] != "/custom/override/path" {
+		t.Errorf("override not applied, got base.rw=%v", p.Base.RW)
+	}
+	// The default has on_tool.Bash; the override does not. If we're seeing
+	// the default here instead of the override, this catches it.
+	if _, hasBash := p.OnTool["Bash"]; hasBash {
+		t.Errorf("override policy unexpectedly has on_tool.Bash — likely falling through to default")
+	}
+}

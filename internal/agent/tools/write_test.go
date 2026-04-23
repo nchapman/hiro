@@ -106,8 +106,7 @@ func TestWriteFile_RelativePath(t *testing.T) {
 }
 
 func TestWriteFile_ConfinedRejectsOutside(t *testing.T) {
-	origRoots := getAllowedRoots()
-	defer SetAllowedRoots(origRoots)
+	restoreRoots(t)
 
 	root := t.TempDir()
 	SetAllowedRoots([]string{root})

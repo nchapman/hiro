@@ -64,7 +64,7 @@ func Discover(rootDir string) ([]Mount, error) {
 			continue
 		}
 		// Skip hidden entries (e.g. .DS_Store if somehow a dir, or .gitkeep).
-		if len(e.Name()) > 0 && e.Name()[0] == '.' {
+		if e.Name() != "" && e.Name()[0] == '.' {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())

@@ -30,8 +30,9 @@ func applyLandlock(paths ipc.LandlockPaths) error {
 }
 
 // installSeccomp installs a seccomp-BPF filter that blocks dangerous syscalls.
-// When networkAccess is false, socket(AF_INET) and socket(AF_INET6) are also
-// blocked, preventing all outbound network connections.
+// When networkAccess is false, socket(2) is filtered to allow only AF_UNIX —
+// new address families added in future kernels fail closed rather than
+// requiring manual denylist maintenance.
 //
 // Uses SECCOMP_FILTER_FLAG_TSYNC to synchronize the filter across all Go
 // runtime threads. The caller MUST set PR_SET_NO_NEW_PRIVS before calling.
@@ -51,7 +52,7 @@ func applyLandlock(paths ipc.LandlockPaths) error {
 //   - process_vm_readv/writev — prevents cross-process memory access
 //   - io_uring_setup — prevents io_uring (bypasses seccomp on some kernels)
 //   - shmget/shmat/shmctl — prevents SysV shared memory
-//   - socket(AF_INET/AF_INET6) — when networkAccess=false
+//   - socket(non-AF_UNIX) — when networkAccess=false
 func installSeccomp(networkAccess bool) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -175,23 +176,20 @@ func buildSeccompFilter(networkAccess bool) []unix.SockFilter {
 		uint8(cloneInspectStart-(cloneJeqIdx+1)), 0) //nolint:gosec // offset fits uint8
 
 	if !networkAccess {
-		// --- socket(2) domain inspection ---
-		// Block AF_INET (2) and AF_INET6 (10).
+		// --- socket(2) domain allowlist ---
+		// Only AF_UNIX is allowed (needed for the per-worker gRPC socket);
+		// everything else — AF_INET, AF_INET6, AF_NETLINK, AF_VSOCK, AF_PACKET,
+		// and any future address family added to newer kernels — fails closed.
+		// Denylists silently go stale as new AFs are introduced; an allowlist
+		// stays correct without maintenance.
 		socketInspectStart := len(filter)
 		filter = append(filter,
 			// Load socket domain (arg[0], low 32 bits).
 			unix.SockFilter{Code: bpfLdW, K: offsetArgs},
 
-			bpfJeq(syscall.AF_INET, 0, 1),
+			// If domain == AF_UNIX, skip past the deny and allow.
+			bpfJeq(syscall.AF_UNIX, 1, 0),
 			deny,
-
-			bpfJeq(syscall.AF_INET6, 0, 1),
-			deny,
-
-			bpfJeq(syscall.AF_NETLINK, 0, 1),
-			deny,
-
-			// Other socket domains (AF_UNIX for gRPC, etc.) → allow.
 			allow,
 		)
 

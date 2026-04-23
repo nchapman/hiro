@@ -29,7 +29,7 @@ func NewReadTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			path, err := resolveAndConfine(workingDir, params.FilePath)
+			path, err := resolveForRead(workingDir, params.FilePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

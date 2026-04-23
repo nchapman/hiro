@@ -46,5 +46,16 @@ type SpawnConfig struct {
 	SessionDir     string          `json:"session_dir"`
 	AgentSocket    string          `json:"agent_socket"`
 	LandlockPaths  LandlockPaths   `json:"landlock_paths"`
-	NetworkAccess  bool            `json:"network_access"` // true if agent has Bash tool (sockets allowed)
+	// ReadableRoots is the list of directories that Read, Glob, and Grep may
+	// address. Mirrors the policy's RW + RO paths under the platform root.
+	// System paths like /usr are excluded so exec'd commands can still find
+	// their libraries, but agents cannot browse them through the file tools.
+	ReadableRoots []string `json:"readable_roots,omitempty"`
+	// WritableRoots is the list of directories that Write and Edit may
+	// address — the policy's RW paths only. An RO-in-policy path (like
+	// agents/ for a non-operator agent) passes Read confinement but fails
+	// Write confinement. When Landlock is unavailable, this split is the
+	// only filesystem confinement the worker has.
+	WritableRoots []string `json:"writable_roots,omitempty"`
+	NetworkAccess bool     `json:"network_access"` // true if agent has Bash tool (sockets allowed)
 }

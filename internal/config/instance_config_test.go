@@ -173,8 +173,8 @@ func TestSaveInstanceConfig_CreatesDirs(t *testing.T) {
 }
 
 func TestInstanceConfigPath(t *testing.T) {
-	got := InstanceConfigPath("/hiro", "abc-123")
-	want := "/hiro/config/instances/abc-123.yaml"
+	got := InstanceConfigPath("/home/hiro", "abc-123")
+	want := "/home/hiro/config/instances/abc-123.yaml"
 	if got != want {
 		t.Errorf("InstanceConfigPath: got %q, want %q", got, want)
 	}

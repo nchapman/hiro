@@ -14,6 +14,7 @@ import (
 
 	"github.com/nchapman/hiro/internal/auth"
 	"github.com/nchapman/hiro/internal/platform/fsperm"
+	"github.com/nchapman/hiro/internal/platform/fspolicy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,6 +67,10 @@ type Config struct {
 	Timezone     string                    `yaml:"timezone,omitempty"`      // IANA timezone (e.g. "America/New_York"), defaults to UTC
 	Secrets      map[string]string         `yaml:"secrets,omitempty"`
 	Cluster      ClusterConfig             `yaml:"cluster,omitempty"`
+	// Filesystem is the declarative Landlock policy that governs worker
+	// filesystem access. Nil means "use the embedded default." The parser and
+	// compiler live in internal/platform/fspolicy.
+	Filesystem *fspolicy.Policy `yaml:"filesystem,omitempty"`
 }
 
 // initMaps ensures all map fields are non-nil. ApprovedNodes is intentionally
@@ -174,7 +179,32 @@ func (cp *ControlPlane) hasContent() bool {
 		cp.config.Cluster.Mode != "" ||
 		cp.config.Cluster.TrackerURL != "" ||
 		len(cp.config.Cluster.ApprovedNodes) > 0 ||
-		len(cp.config.Cluster.RevokedNodes) > 0
+		len(cp.config.Cluster.RevokedNodes) > 0 ||
+		cp.config.Filesystem != nil
+}
+
+// FilesystemPolicy returns the current filesystem policy. When the config
+// doesn't include a filesystem section, the embedded default is returned —
+// operators get safe defaults without having to pre-populate config.yaml.
+//
+// A parse failure on the embedded default is a build-time bug: it's a
+// compile-time constant, parse-tested in fspolicy_test.go, and load-bearing
+// for sandbox safety. Panic rather than silently returning an empty policy —
+// an empty policy would compile to empty roots, which confineTo treats as
+// "no confinement," i.e. a fully open worker. Failing loud makes that state
+// visible instead of silently degraded.
+func (cp *ControlPlane) FilesystemPolicy() *fspolicy.Policy {
+	cp.mu.RLock()
+	p := cp.config.Filesystem
+	cp.mu.RUnlock()
+	if p != nil {
+		return p
+	}
+	def, err := fspolicy.Parse(fspolicy.Default())
+	if err != nil {
+		panic(fmt.Sprintf("embedded filesystem policy default failed to parse: %v", err))
+	}
+	return def
 }
 
 // Reset wipes all in-memory state and removes the config file from disk.

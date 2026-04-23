@@ -148,7 +148,7 @@ online:
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		out, err := exec.Command("docker", "exec", workerContainer,
-			"cat", "/hiro/workspace/lifecycle-test.txt").Output()
+			"cat", "/home/hiro/workspace/lifecycle-test.txt").Output()
 		if err == nil && strings.Contains(string(out), marker) {
 			t.Log("file sync verified after reconnection")
 			return
