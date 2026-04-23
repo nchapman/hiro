@@ -51,6 +51,13 @@ const (
 	// accessFsRead grants read-only access (read files, list directories, execute).
 	accessFsRead = accessFsExecute | accessFsReadFile | accessFsReadDir
 
+	// accessFsFileOnly is the subset of rights that apply to regular files.
+	// The kernel rejects directory-only bits (READ_DIR, MAKE_*, REMOVE_*, REFER)
+	// when adding a path-beneath rule on a regular file with EINVAL, so we must
+	// mask access down to file-applicable rights. TRUNCATE (ABI v3) and
+	// IOCTL_DEV (ABI v5) are added back conditionally in fileAccessMask.
+	accessFsFileOnly = accessFsExecute | accessFsReadFile | accessFsWriteFile
+
 	// createRulesetVersion is the flag for querying the max ABI version.
 	createRulesetVersion = 1 << 0
 )
@@ -99,6 +106,17 @@ func bestAccessMask(abi int) uint64 {
 	return mask
 }
 
+// fileAccessMask returns the subset of access that applies to regular files.
+// TRUNCATE is file-applicable from ABI v3; REFER and the MAKE_*/REMOVE_*/READ_DIR
+// bits are directory-only and must be dropped or the kernel returns EINVAL.
+func fileAccessMask(access uint64, abi int) uint64 {
+	mask := access & accessFsFileOnly
+	if abi >= 3 {
+		mask |= access & accessFsTruncate
+	}
+	return mask
+}
+
 // Probe checks whether Landlock is available on the running kernel.
 // Returns nil if Landlock is supported, an error otherwise.
 func Probe() error {
@@ -135,13 +153,13 @@ func Restrict(rw, ro []string) error {
 	defer syscall.Close(fd)
 
 	for _, p := range rw {
-		if err := addPathRule(fd, p, allAccess); err != nil {
+		if err := addPathRule(fd, p, allAccess, abi); err != nil {
 			return fmt.Errorf("landlock rw rule %s: %w", p, err)
 		}
 	}
 
 	for _, p := range ro {
-		if err := addPathRule(fd, p, accessFsRead); err != nil {
+		if err := addPathRule(fd, p, accessFsRead, abi); err != nil {
 			return fmt.Errorf("landlock ro rule %s: %w", p, err)
 		}
 	}
@@ -159,12 +177,23 @@ func Restrict(rw, ro []string) error {
 	return nil
 }
 
-func addPathRule(rulesetFd int, path string, access uint64) error {
+func addPathRule(rulesetFd int, path string, access uint64, abi int) error {
 	fd, err := syscall.Open(path, unix.O_PATH|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("open(%s): %w", path, err)
 	}
 	defer syscall.Close(fd)
+
+	// Directory-only access bits (READ_DIR, MAKE_*, REMOVE_*, REFER) cause
+	// EINVAL when applied to a regular file, so narrow the mask if this path
+	// isn't a directory.
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return fmt.Errorf("fstat(%s): %w", path, err)
+	}
+	if st.Mode&syscall.S_IFMT != syscall.S_IFDIR {
+		access = fileAccessMask(access, abi)
+	}
 
 	attr := pathBeneathAttr{
 		AllowedAccess: access,
