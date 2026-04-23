@@ -168,6 +168,7 @@ func (s *Server) settingsRoutes() {
 	s.mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleGetSettings))
 	s.mux.HandleFunc("PUT /api/settings", s.requireAuth(s.handleUpdateSettings))
 	s.mux.HandleFunc("GET /api/settings/cluster", s.requireAuth(s.handleGetClusterSettings))
+	s.mux.HandleFunc("PUT /api/settings/cluster/advertise", s.requireStrictAuth(s.handleUpdateClusterAdvertise))
 	s.mux.HandleFunc("POST /api/settings/cluster/reset", s.requireStrictAuth(s.handleClusterReset))
 	s.mux.HandleFunc("GET /api/cluster/pending", s.requireStrictAuth(s.handleListPending))
 	s.mux.HandleFunc("POST /api/cluster/pending/{nodeID}/approve", s.requireStrictAuth(s.handleApproveNode))

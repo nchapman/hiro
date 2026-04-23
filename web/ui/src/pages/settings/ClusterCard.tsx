@@ -36,6 +36,7 @@ interface ClusterSettings {
   approved_nodes?: Record<string, { name: string; approved_at: string }>
   nodes?: NodeInfo[]
   leader_addr?: string
+  advertise_addresses?: string[]
 }
 
 export default function ClusterCard() {
@@ -43,6 +44,10 @@ export default function ClusterCard() {
   const [pendingNodes, setPendingNodes] = useState<PendingNode[]>([])
   const [copiedField, setCopiedField] = useState("")
   const [actionInProgress, setActionInProgress] = useState("")
+  const [advertiseDraft, setAdvertiseDraft] = useState<string | null>(null)
+  const [advertiseSaving, setAdvertiseSaving] = useState(false)
+  const [advertiseError, setAdvertiseError] = useState("")
+  const [advertiseStatus, setAdvertiseStatus] = useState("")
 
   const fetchAll = useCallback(async () => {
     try {
@@ -91,6 +96,35 @@ export default function ClusterCard() {
       /* ignore */
     } finally {
       setActionInProgress("")
+    }
+  }
+
+  const saveAdvertise = async () => {
+    if (advertiseDraft === null) return
+    const addresses = advertiseDraft
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    setAdvertiseSaving(true)
+    setAdvertiseError("")
+    setAdvertiseStatus("")
+    try {
+      const res = await fetch("/api/settings/cluster/advertise", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addresses }),
+      })
+      if (!res.ok) {
+        const msg = await res.text()
+        setAdvertiseError(msg || `Error ${res.status}`)
+        return
+      }
+      setAdvertiseDraft(null)
+      setAdvertiseStatus("Saved. Server is restarting…")
+    } catch (e) {
+      setAdvertiseError(String(e))
+    } finally {
+      setAdvertiseSaving(false)
     }
   }
 
@@ -191,6 +225,57 @@ export default function ClusterCard() {
                 </div>
               </div>
             )}
+
+            {/* Advertise Addresses */}
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">Advertise Addresses</span>
+              <span className="text-xs text-muted-foreground">
+                Optional. One per line, e.g. <code className="font-mono">tcp://203.0.113.4:5000</code>. Workers will
+                dial these first. Leave empty to use the tracker-observed source IP.
+              </span>
+              <textarea
+                className="mt-1 min-h-[72px] rounded-md border bg-background p-2 font-mono text-xs"
+                placeholder="tcp://1.2.3.4:5000"
+                value={
+                  advertiseDraft !== null
+                    ? advertiseDraft
+                    : (settings.advertise_addresses ?? []).join("\n")
+                }
+                onChange={(e) => setAdvertiseDraft(e.target.value)}
+                disabled={advertiseSaving}
+              />
+              {advertiseError && (
+                <span className="text-xs text-destructive">{advertiseError}</span>
+              )}
+              {advertiseStatus && !advertiseError && (
+                <span className="text-xs text-muted-foreground">{advertiseStatus}</span>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={saveAdvertise}
+                  disabled={advertiseSaving || advertiseDraft === null}
+                >
+                  {advertiseSaving ? "Saving…" : "Save & Restart"}
+                </Button>
+                {advertiseDraft !== null && !advertiseSaving && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => {
+                      setAdvertiseDraft(null)
+                      setAdvertiseError("")
+                      setAdvertiseStatus("")
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
 
             {/* Pending Nodes */}
             {pendingNodes.length > 0 && (

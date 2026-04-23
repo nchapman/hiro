@@ -446,7 +446,7 @@ func CheckSwarm(ctx context.Context, trackerURL, swarmCode string, identity *Nod
 
 // Advertise-address constants shared with the tracker's validation.
 const (
-	maxAdvertiseAddresses    = 8
+	MaxAdvertiseAddresses    = 8
 	maxAdvertiseAddressBytes = 128
 )
 
@@ -505,12 +505,12 @@ func filterValidAdvertiseAddresses(addrs []string, logger *slog.Logger) []string
 	if len(addrs) == 0 {
 		return nil
 	}
-	if len(addrs) > maxAdvertiseAddresses {
+	if len(addrs) > MaxAdvertiseAddresses {
 		if logger != nil {
 			logger.Warn("cluster.advertise_addresses exceeds max, truncating",
-				"count", len(addrs), "max", maxAdvertiseAddresses)
+				"count", len(addrs), "max", MaxAdvertiseAddresses)
 		}
-		addrs = addrs[:maxAdvertiseAddresses]
+		addrs = addrs[:MaxAdvertiseAddresses]
 	}
 	out := make([]string, 0, len(addrs))
 	for _, a := range addrs {

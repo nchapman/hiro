@@ -217,3 +217,17 @@ func (cp *ControlPlane) SetClusterNodeName(name string) {
 	defer cp.mu.Unlock()
 	cp.config.Cluster.NodeName = name
 }
+
+// SetClusterAdvertiseAddresses replaces the configured advertise addresses.
+// Pass nil or empty to fall back to the tracker's observed source IP.
+func (cp *ControlPlane) SetClusterAdvertiseAddresses(addrs []string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	if len(addrs) == 0 {
+		cp.config.Cluster.AdvertiseAddresses = nil
+		return
+	}
+	out := make([]string, len(addrs))
+	copy(out, addrs)
+	cp.config.Cluster.AdvertiseAddresses = out
+}

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -40,6 +42,11 @@ func (s *Server) handleGetClusterSettings(w http.ResponseWriter, _ *http.Request
 func (s *Server) populateLeaderClusterSettings(resp map[string]any) {
 	resp["swarm_code"] = s.cp.ClusterSwarmCode()
 	resp["tracker_url"] = s.cp.ClusterTrackerURL()
+	if addrs := s.cp.ClusterAdvertiseAddresses(); len(addrs) > 0 {
+		resp["advertise_addresses"] = addrs
+	} else {
+		resp["advertise_addresses"] = []string{}
+	}
 
 	// Include pending node count for dashboard badge.
 	if s.pendingRegistry != nil {
@@ -98,6 +105,70 @@ func (s *Server) populateWorkerClusterSettings(resp map[string]any) {
 	resp["swarm_code"] = s.cp.ClusterSwarmCode()
 	if s.workerStatus != nil {
 		resp["connection_status"] = s.workerStatus()
+	}
+}
+
+// handleUpdateClusterAdvertise replaces the leader's advertise addresses.
+// PUT /api/settings/cluster/advertise
+//
+// Body: {"addresses": ["tcp://1.2.3.4:5000", ...]}. Pass an empty list to
+// clear the override and fall back to tracker-observed source IP.
+//
+// Addresses are validated with cluster.ValidateAdvertiseAddress and the
+// server is restarted so the discovery client picks up the new list.
+func (s *Server) handleUpdateClusterAdvertise(w http.ResponseWriter, r *http.Request) {
+	if s.cp == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if s.cp.ClusterMode() != roleLeader {
+		http.Error(w, "advertise addresses only apply in leader mode", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Addresses []string `json:"addresses"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if len(body.Addresses) > cluster.MaxAdvertiseAddresses {
+		http.Error(w, fmt.Sprintf("too many addresses (max %d)", cluster.MaxAdvertiseAddresses), http.StatusBadRequest)
+		return
+	}
+
+	cleaned := make([]string, 0, len(body.Addresses))
+	for _, a := range body.Addresses {
+		if a == "" {
+			continue
+		}
+		if msg := cluster.ValidateAdvertiseAddress(a); msg != "" {
+			http.Error(w, "invalid address: "+msg, http.StatusBadRequest)
+			return
+		}
+		cleaned = append(cleaned, a)
+	}
+
+	s.cp.SetClusterAdvertiseAddresses(cleaned)
+	if err := s.cp.Save(); err != nil {
+		s.logger.Error("failed to save advertise addresses", "error", err)
+		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                  true,
+		"advertise_addresses": cleaned,
+	})
+
+	if s.requestRestart != nil {
+		go func() {
+			time.Sleep(restartDelay)
+			s.requestRestart()
+		}()
 	}
 }
 

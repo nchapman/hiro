@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -218,6 +220,119 @@ func TestHandleClusterReset_DisconnectsNodes(t *testing.T) {
 	// Non-home nodes should have been disconnected.
 	if len(*disconnected) < 2 {
 		t.Fatalf("expected at least 2 disconnect calls, got %d", len(*disconnected))
+	}
+}
+
+// --- handleUpdateClusterAdvertise tests ---
+
+func TestHandleUpdateClusterAdvertise_Success(t *testing.T) {
+	srv, cp, _, _, _ := newClusterTestServer(t)
+	restarted := make(chan struct{}, 1)
+	srv.SetRestartFunc(func() { restarted <- struct{}{} })
+
+	body := []byte(`{"addresses":["tcp://203.0.113.4:5000","tcp://198.51.100.2:5000"]}`)
+	req := authedRequest(t, srv, "PUT", "/api/settings/cluster/advertise", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	got := cp.ClusterAdvertiseAddresses()
+	want := []string{"tcp://203.0.113.4:5000", "tcp://198.51.100.2:5000"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("saved addresses = %v, want %v", got, want)
+	}
+
+	// Verify it appears in GET response.
+	settings := getClusterSettings(t, srv)
+	if raw, ok := settings["advertise_addresses"].([]any); !ok || len(raw) != 2 {
+		t.Fatalf("advertise_addresses not in GET response: %v", settings["advertise_addresses"])
+	}
+
+	select {
+	case <-restarted:
+	case <-time.After(time.Second):
+		t.Fatal("restart was not requested")
+	}
+}
+
+func TestHandleUpdateClusterAdvertise_ClearsWithEmptyList(t *testing.T) {
+	srv, cp, _, _, _ := newClusterTestServer(t)
+	srv.SetRestartFunc(func() {})
+	cp.SetClusterAdvertiseAddresses([]string{"tcp://203.0.113.4:5000"})
+	cp.Save()
+
+	body := []byte(`{"addresses":[]}`)
+	req := authedRequest(t, srv, "PUT", "/api/settings/cluster/advertise", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := cp.ClusterAdvertiseAddresses(); len(got) != 0 {
+		t.Fatalf("expected empty addresses, got %v", got)
+	}
+}
+
+func TestHandleUpdateClusterAdvertise_RejectsInvalid(t *testing.T) {
+	srv, cp, _, _, _ := newClusterTestServer(t)
+	srv.SetRestartFunc(func() {})
+
+	// Hostname (not IP) is invalid per ValidateAdvertiseAddress.
+	body := []byte(`{"addresses":["tcp://example.com:5000"]}`)
+	req := authedRequest(t, srv, "PUT", "/api/settings/cluster/advertise", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if got := cp.ClusterAdvertiseAddresses(); len(got) != 0 {
+		t.Fatalf("addresses should not have been saved, got %v", got)
+	}
+}
+
+func TestHandleUpdateClusterAdvertise_RejectsTooMany(t *testing.T) {
+	srv, cp, _, _, _ := newClusterTestServer(t)
+	srv.SetRestartFunc(func() {})
+
+	// Build a list one over the cap with all otherwise-valid entries.
+	addrs := make([]string, cluster.MaxAdvertiseAddresses+1)
+	for i := range addrs {
+		addrs[i] = fmt.Sprintf("tcp://203.0.113.%d:5000", i+1)
+	}
+	raw, _ := json.Marshal(map[string]any{"addresses": addrs})
+	req := authedRequest(t, srv, "PUT", "/api/settings/cluster/advertise", raw)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if got := cp.ClusterAdvertiseAddresses(); len(got) != 0 {
+		t.Fatalf("addresses should not have been saved, got %v", got)
+	}
+}
+
+func TestHandleUpdateClusterAdvertise_RequiresLeaderMode(t *testing.T) {
+	srv, cp := newAuthTestServer(t)
+	cp.SetClusterMode("worker")
+	cp.Save()
+
+	body := []byte(`{"addresses":["tcp://203.0.113.4:5000"]}`)
+	req := authedRequest(t, srv, "PUT", "/api/settings/cluster/advertise", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 
