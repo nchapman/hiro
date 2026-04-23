@@ -179,6 +179,9 @@ func (s *Server) settingsRoutes() {
 	s.mux.HandleFunc("PUT /api/settings/providers/{type}", s.requireAuth(s.handlePutProvider))
 	s.mux.HandleFunc("DELETE /api/settings/providers/{type}", s.requireAuth(s.handleDeleteProvider))
 	s.mux.HandleFunc("POST /api/settings/providers/{type}/test", s.requireAuth(s.handleTestProviderByType))
+	s.mux.HandleFunc("GET /api/git-identity", s.requireAuth(s.handleGetGitIdentity))
+	s.mux.HandleFunc("PUT /api/git-identity", s.requireAuth(s.handlePutGitIdentity))
+	s.mux.HandleFunc("POST /api/git-identity/ssh-key", s.requireAuth(s.handlePostSSHKey))
 }
 
 func (s *Server) instanceRoutes() {

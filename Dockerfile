@@ -139,6 +139,11 @@ ENV HOMEBREW_NO_ANALYTICS=1
 ENV HOMEBREW_NO_AUTO_UPDATE=1
 ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
+# GitHub CLI — agents can run `gh auth login` (device flow) out of the box.
+USER hiro
+RUN brew install gh && gh --version
+USER root
+
 # Shell configuration — polished terminal experience for all users.
 COPY docker/shell/bashrc /etc/hiro.bashrc
 COPY docker/shell/starship.toml /etc/starship.toml

@@ -21,6 +21,7 @@ import DefaultModelCard from "@/pages/settings/DefaultModelCard"
 import type { Settings } from "@/pages/settings/DefaultModelCard"
 import SecurityCard from "@/pages/settings/SecurityCard"
 import ClusterCard from "@/pages/settings/ClusterCard"
+import GitIdentityCard from "@/pages/settings/GitIdentityCard"
 
 export default function SettingsPage() {
   const { themeId, setThemeId, availableThemes } = useTheme()
@@ -138,6 +139,8 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          <GitIdentityCard />
 
           <SecurityCard />
         </div>

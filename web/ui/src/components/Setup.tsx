@@ -42,6 +42,7 @@ type Step =
   | "leader-config"
   | "worker-config"
   | "provider"
+  | "git-setup"
   | "done"
   | "restarting"
 
@@ -84,6 +85,15 @@ export default function Setup({ onComplete }: SetupProps) {
     "idle" | "testing" | "success" | "error"
   >("idle")
   const [testError, setTestError] = useState("")
+
+  // Git & SSH (optional)
+  const [gitName, setGitName] = useState("")
+  const [gitEmail, setGitEmail] = useState("")
+  const [gitHostname, setGitHostname] = useState("")
+  const [gitPubkey, setGitPubkey] = useState("")
+  const [gitSubmitting, setGitSubmitting] = useState(false)
+  const [gitError, setGitError] = useState("")
+  const [gitKeyCopied, setGitKeyCopied] = useState(false)
 
   // General
   const [error, setError] = useState("")
@@ -204,6 +214,62 @@ export default function Setup({ onComplete }: SetupProps) {
     }, 2000)
   }, [onComplete])
 
+  // handleGitSetup saves name/email and generates an SSH key. Both calls are
+  // best-effort — the user can always retry from Settings.
+  const handleGitSetup = async () => {
+    setGitError("")
+    setGitSubmitting(true)
+    try {
+      const saveRes = await fetch("/api/git-identity", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: gitName.trim(),
+          email: gitEmail.trim(),
+        }),
+      })
+      if (!saveRes.ok) {
+        const msg = await saveRes.text()
+        setGitError(msg || "Failed to save git identity")
+        setGitSubmitting(false)
+        return
+      }
+      const keyRes = await fetch("/api/git-identity/ssh-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      if (!keyRes.ok) {
+        setGitError("Failed to generate SSH key")
+        setGitSubmitting(false)
+        return
+      }
+      const data = await keyRes.json()
+      setGitPubkey(data.pubkey || "")
+      // refresh hostname from server for the GitHub link title
+      try {
+        const info = await fetch("/api/git-identity")
+        if (info.ok) {
+          const d = await info.json()
+          if (d.hostname) setGitHostname(d.hostname)
+        }
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      setGitError("Unable to connect to the server")
+    } finally {
+      setGitSubmitting(false)
+    }
+  }
+
+  const handleCopyPubkey = useCallback(() => {
+    if (!gitPubkey) return
+    navigator.clipboard.writeText(gitPubkey)
+    setGitKeyCopied(true)
+    setTimeout(() => setGitKeyCopied(false), 2000)
+  }, [gitPubkey])
+
   // handleFinish submits the setup request. The server response determines the
   // next step: leader gets a swarm code to display, worker triggers a restart,
   // standalone goes straight to done.
@@ -246,9 +312,8 @@ export default function Setup({ onComplete }: SetupProps) {
           setStep("restarting")
           setTimeout(pollUntilReady, 2000)
         } else {
-          // Standalone: done.
-          setStep("done")
-          setTimeout(onComplete, 1500)
+          // Standalone: offer optional Git & SSH setup before the dashboard.
+          setStep("git-setup")
         }
       } else {
         const text = await res.text()
@@ -439,8 +504,8 @@ export default function Setup({ onComplete }: SetupProps) {
                   Workers will enter this code during their setup to connect to
                   this leader.
                 </p>
-                <Button onClick={onComplete} className="w-full">
-                  Go to Dashboard
+                <Button onClick={() => setStep("git-setup")} className="w-full">
+                  Continue
                 </Button>
               </div>
             </CardContent>
@@ -750,6 +815,128 @@ export default function Setup({ onComplete }: SetupProps) {
                   </Button>
                 </div>
               </form>
+            </CardContent>
+          </>
+        )}
+
+        {/* Step: Git & SSH (optional, shown after setup) */}
+        {step === "git-setup" && (
+          <>
+            <CardHeader>
+              <CardTitle>Git &amp; SSH</CardTitle>
+              <CardDescription>
+                Optional. Set this up so your agents can clone, commit, and
+                push without extra configuration. You can always change this
+                later in Settings.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!gitPubkey ? (
+                <form
+                  className="flex flex-col gap-4"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleGitSetup()
+                  }}
+                >
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="git-name">Your name</Label>
+                    <Input
+                      id="git-name"
+                      value={gitName}
+                      onChange={(e) => setGitName(e.target.value)}
+                      placeholder="Ada Lovelace"
+                      disabled={gitSubmitting}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="git-email">Email</Label>
+                    <Input
+                      id="git-email"
+                      type="email"
+                      value={gitEmail}
+                      onChange={(e) => setGitEmail(e.target.value)}
+                      placeholder="ada@example.com"
+                      disabled={gitSubmitting}
+                    />
+                  </div>
+                  {gitError && (
+                    <p className="text-sm text-destructive">{gitError}</p>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="submit"
+                      disabled={
+                        gitSubmitting || !gitName.trim() || !gitEmail.trim()
+                      }
+                      className="w-full"
+                    >
+                      {gitSubmitting ? (
+                        <HugeiconsIcon
+                          icon={Loading02Icon}
+                          className="mr-2 h-4 w-4 animate-spin"
+                        />
+                      ) : null}
+                      Generate SSH key &amp; continue
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={onComplete}
+                      disabled={gitSubmitting}
+                      className="w-full"
+                    >
+                      Skip for now
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <Label>Your SSH public key</Label>
+                    <div className="relative mt-2">
+                      <pre className="rounded-md border bg-muted p-3 pr-12 text-xs break-all whitespace-pre-wrap">
+                        {gitPubkey}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-1 right-1"
+                        onClick={handleCopyPubkey}
+                        aria-label="Copy public key"
+                      >
+                        <HugeiconsIcon
+                          icon={gitKeyCopied ? Tick02Icon : Copy01Icon}
+                        />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Paste this into GitHub to let your agents push to your
+                    repos.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() =>
+                      window.open(
+                        `https://github.com/settings/ssh/new?title=${encodeURIComponent("hiro@" + (gitHostname || "hiro"))}`,
+                        "_blank",
+                        "noreferrer"
+                      )
+                    }
+                  >
+                    Add to GitHub
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    For GitHub CLI, run <code>gh auth login</code> in a
+                    terminal — <code>gh</code> is already installed.
+                  </p>
+                  <Button onClick={onComplete} className="w-full">
+                    Go to Dashboard
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </>
         )}
