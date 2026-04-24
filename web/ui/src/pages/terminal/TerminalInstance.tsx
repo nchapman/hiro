@@ -115,25 +115,33 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
       term.loadAddon(fitAddon)
       term.loadAddon(new WebLinksAddon())
       term.open(el)
-      fitAddon.fit()
 
       termRef.current = term
       fitRef.current = fitAddon
-
-      // Flush any writes that arrived before xterm was ready.
-      for (const chunk of pendingRef.current) {
-        term.write(chunk)
-      }
-      pendingRef.current = []
 
       const dataDisposable = term.onData((data) => {
         if (replayingRef.current) return
         onData(sessionId, new TextEncoder().encode(data))
       })
 
+      // Attach the resize listener BEFORE the initial fit — fit() fires
+      // term.onResize synchronously, and the server's PTY would otherwise
+      // remain stuck at the default size sent with the `create` control
+      // message until the user manually resized the window.
       const resizeDisposable = term.onResize(({ cols, rows }) => {
-        onResize(sessionId, cols, rows)
+        // Guard against a zero-dim fit (e.g. the container isn't laid out
+        // yet). The visibility effect's rAF-delayed fit will pick up the
+        // real size once layout settles.
+        if (cols > 0 && rows > 0) onResize(sessionId, cols, rows)
       })
+
+      fitAddon.fit()
+
+      // Flush any writes that arrived before xterm was ready.
+      for (const chunk of pendingRef.current) {
+        term.write(chunk)
+      }
+      pendingRef.current = []
 
       const observer = new ResizeObserver(() => {
         if (visible) fitAddon.fit()
