@@ -139,6 +139,12 @@ ENV HOMEBREW_NO_ANALYTICS=1
 ENV HOMEBREW_NO_AUTO_UPDATE=1
 ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
+# Per-user installs (curl|bash installers, pip --user, npm user prefix, cargo,
+# etc.) drop binaries in $HOME/.local/bin. Put it at the front so the user's
+# chosen tool wins over any system-installed version. $HOME/.local is already
+# in the Bash Landlock allowlist, so these binaries execute normally.
+ENV PATH="/home/hiro/.local/bin:${PATH}"
+
 # GitHub CLI — agents can run `gh auth login` (device flow) out of the box.
 USER hiro
 RUN brew install gh && gh --version
