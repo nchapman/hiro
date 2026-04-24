@@ -609,6 +609,58 @@ func TestTerminalSessionManager_ResizeNotFound(t *testing.T) {
 	}
 }
 
+func TestTerminalSessionManager_SweepExited(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewTerminalSessionManager(t.TempDir(), slog.Default())
+	t.Cleanup(func() { mgr.Shutdown() })
+
+	// Live session — must survive the sweep.
+	live, err := mgr.Create("home", 80, 24)
+	if err != nil {
+		t.Fatalf("Create live: %v", err)
+	}
+
+	// Dead session — shell exited, no subscribers.
+	dead, err := mgr.Create("home", 80, 24)
+	if err != nil {
+		t.Fatalf("Create dead: %v", err)
+	}
+	dead.mu.Lock()
+	dead.exited = true
+	dead.exitCode = 0
+	dead.mu.Unlock()
+
+	// Exited-but-attached session — subscriber hasn't drained yet; must not
+	// be swept out from under them.
+	attached, err := mgr.Create("home", 80, 24)
+	if err != nil {
+		t.Fatalf("Create attached: %v", err)
+	}
+	attached.mu.Lock()
+	attached.exited = true
+	attached.mu.Unlock()
+	_, _ = attached.subscribe()
+
+	mgr.SweepExited()
+
+	list := mgr.List()
+	ids := make(map[string]bool, len(list))
+	for _, info := range list {
+		ids[info.ID] = true
+	}
+
+	if !ids[live.ID] {
+		t.Errorf("live session %s was swept", live.ID)
+	}
+	if ids[dead.ID] {
+		t.Errorf("dead session %s was not swept", dead.ID)
+	}
+	if !ids[attached.ID] {
+		t.Errorf("exited-but-attached session %s was swept", attached.ID)
+	}
+}
+
 func TestTerminalSessionManager_Shutdown(t *testing.T) {
 	t.Parallel()
 

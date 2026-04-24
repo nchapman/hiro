@@ -63,6 +63,11 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		attached: make(map[string]attachedSub),
 	}
 
+	// Discard post-mortem sessions (shell already exited, no attached client)
+	// before syncing. Otherwise they'd be replayed to the fresh client as a
+	// "created then immediately exited" flicker, and would block auto-create.
+	s.termSessions.SweepExited()
+
 	// Sync existing sessions to the client.
 	ts.syncSessions()
 

@@ -567,6 +567,9 @@ func (s *Server) handleTerminalSessions(w http.ResponseWriter, _ *http.Request) 
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
+	// Sweep post-mortem sessions first so callers don't see stale entries
+	// that would otherwise linger until the idle cleanup runs.
+	s.termSessions.SweepExited()
 	writeJSON(w, http.StatusOK, s.termSessions.List())
 }
 

@@ -698,6 +698,28 @@ func (m *TerminalSessionManager) cleanupLoop() {
 	}
 }
 
+// SweepExited removes all sessions whose shell has exited and that have no
+// active subscribers. Exited sessions remain in the map until swept so that
+// a reattaching client can retrieve the final replay and exit status; once
+// no one is attached, the post-mortem data has no audience and the session
+// is dead weight — it would otherwise block auto-create for a fresh client.
+func (m *TerminalSessionManager) SweepExited() {
+	m.mu.Lock()
+	var toClose []string
+	for id, s := range m.sessions {
+		ex, _, _ := s.snapshot()
+		if ex && !s.hasSubscribers() {
+			toClose = append(toClose, id)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, id := range toClose {
+		// Close already logs "terminal session closed"; no separate sweep line.
+		_ = m.Close(id)
+	}
+}
+
 // cleanupIdle removes sessions that have been idle for longer than the timeout.
 func (m *TerminalSessionManager) cleanupIdle() {
 	m.mu.Lock()
