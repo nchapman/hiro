@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import TerminalTabBar, { type TerminalTab } from "./TerminalTabBar"
 import TerminalInstance, { type TerminalInstanceHandle } from "./TerminalInstance"
+import { FrameQueue, type PendingFrame } from "./pending-queue"
 import { useTheme } from "@/hooks/use-theme"
 import "@xterm/xterm/css/xterm.css"
 
@@ -50,14 +51,16 @@ export default function TerminalPage() {
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
-  const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map())
+  // Per-session queue that buffers frames arriving before the TerminalInstance
+  // has mounted and registered its imperative handle. See pending-queue.ts.
+  const frameQueue = useRef(new FrameQueue())
+
+  const queueOrDeliver = useCallback((sessionId: string, frame: PendingFrame) => {
+    frameQueue.current.deliver(sessionId, frame)
+  }, [])
 
   const setInstanceRef = useCallback((sessionId: string, handle: TerminalInstanceHandle | null) => {
-    if (handle) {
-      instanceRefs.current.set(sessionId, handle)
-    } else {
-      instanceRefs.current.delete(sessionId)
-    }
+    frameQueue.current.register(sessionId, handle)
   }, [])
 
   // Send a control message for a specific session.
@@ -119,8 +122,7 @@ export default function TerminalPage() {
 
       switch (type) {
         case MSG_OUTPUT: {
-          // TerminalInstance buffers internally if xterm isn't ready yet.
-          instanceRefs.current.get(sessionId)?.write(payload)
+          queueOrDeliver(sessionId, { kind: "output", data: payload })
           break
         }
         case MSG_CONTROL: {
@@ -162,9 +164,11 @@ export default function TerminalPage() {
         break
       }
       case "replay_start":
+        // Queue so start/output/end stay ordered with respect to ref mount.
+        queueOrDeliver(sessionId, { kind: "replay_start" })
+        break
       case "replay_end":
-        // Server sends these to bracket replay data. No special handling needed
-        // since replay output is written to xterm the same as live output.
+        queueOrDeliver(sessionId, { kind: "replay_end" })
         break
       case "exited": {
         // Shell exited naturally — remove the tab without sending a redundant
@@ -191,7 +195,7 @@ export default function TerminalPage() {
         break
       }
     }
-  }, [])
+  }, [queueOrDeliver])
 
   return (
     <div className="h-screen w-screen bg-background flex flex-col">

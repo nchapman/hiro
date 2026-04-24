@@ -139,11 +139,16 @@ func (ts *termSocket) attachSession(sessionID string) {
 		return
 	}
 
-	// Send replay.
+	// Send replay. Strip terminal query sequences (DA, DSR, OSC color queries,
+	// etc.) — xterm would otherwise auto-reply to replayed queries, and those
+	// replies would flow back into the live PTY as spurious stdin input.
 	replayStart := termControlMsg{Type: "replay_start"}
 	_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, replayStart))
 	if len(replay) > 0 {
-		_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalOutput(sessionID, replay))
+		filtered := filterReplayQueries(replay)
+		if len(filtered) > 0 {
+			_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalOutput(sessionID, filtered))
+		}
 	}
 	replayEnd := termControlMsg{Type: "replay_end"}
 	_ = ts.conn.Write(ts.ctx, websocket.MessageBinary, marshalControl(sessionID, replayEnd))

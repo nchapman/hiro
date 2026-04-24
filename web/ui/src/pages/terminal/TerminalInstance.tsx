@@ -12,6 +12,12 @@ export interface TerminalInstanceHandle {
   writeString(s: string): void
   /** Refit the terminal to its container. */
   fit(): void
+  /**
+   * Toggle replay mode. While true, user-input emissions from xterm (including
+   * xterm's auto-replies to DA1 / OSC color queries embedded in the replayed
+   * PTY stream) are dropped so they are not echoed back into the live PTY.
+   */
+  setReplaying(replaying: boolean): void
 }
 
 interface TerminalInstanceProps {
@@ -31,6 +37,16 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
     const fitRef = useRef<FitAddon | null>(null)
     // Buffer writes that arrive before xterm is initialized.
     const pendingRef = useRef<Uint8Array[]>([])
+    // True while the server is streaming the replay buffer on (re)attach.
+    // Defense-in-depth with the server-side query filter: even if a new query
+    // sequence slips through, xterm's auto-reply is dropped here.
+    const replayingRef = useRef(false)
+    // Incremented each time replay starts. Used to ignore stale write-drain
+    // callbacks and timeout firings from an earlier replay cycle, which could
+    // otherwise clear the flag while a newer replay is still streaming.
+    const replayGenRef = useRef(0)
+    // Fail-safe: force-clear the replay flag if replay_end never arrives.
+    const replayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // Expose imperative methods to parent. Writes are buffered until xterm
     // is ready — the useEffect below flushes pendingRef on init.
@@ -49,6 +65,37 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
       },
       fit() {
         fitRef.current?.fit()
+      },
+      setReplaying(replaying: boolean) {
+        if (replaying) {
+          replayGenRef.current++
+          replayingRef.current = true
+          if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current)
+          const gen = replayGenRef.current
+          // If replay_end never arrives (server crash, dropped frame), don't
+          // silently eat the user's keystrokes forever.
+          replayTimeoutRef.current = setTimeout(() => {
+            if (replayGenRef.current === gen) replayingRef.current = false
+          }, 5000)
+          return
+        }
+        if (replayTimeoutRef.current) {
+          clearTimeout(replayTimeoutRef.current)
+          replayTimeoutRef.current = null
+        }
+        const gen = replayGenRef.current
+        const term = termRef.current
+        if (!term) {
+          replayingRef.current = false
+          return
+        }
+        // xterm parses writes asynchronously and can emit onData for queries
+        // embedded in replay bytes after earlier writes drain. A zero-length
+        // write's callback fires only after all prior writes are processed,
+        // so any onData from the replay stream is still suppressed.
+        term.write("", () => {
+          if (replayGenRef.current === gen) replayingRef.current = false
+        })
       },
     }))
 
@@ -80,6 +127,7 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
       pendingRef.current = []
 
       const dataDisposable = term.onData((data) => {
+        if (replayingRef.current) return
         onData(sessionId, new TextEncoder().encode(data))
       })
 
@@ -96,6 +144,10 @@ const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInstanceProp
         observer.disconnect()
         dataDisposable.dispose()
         resizeDisposable.dispose()
+        if (replayTimeoutRef.current) {
+          clearTimeout(replayTimeoutRef.current)
+          replayTimeoutRef.current = null
+        }
         term.dispose()
         termRef.current = null
         fitRef.current = null
